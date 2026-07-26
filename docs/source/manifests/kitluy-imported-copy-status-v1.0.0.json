@@ -1,0 +1,19 @@
+{
+  "registry_version": "1.0.0",
+  "task": "KL-DOCS-001",
+  "purpose": "Resolves filename+version collisions between owner-supplied canonical copies (docs/source/canonical|inbox) and copies imported at bootstrap (docs/source/imported). A collision is acceptable only when registered here with an explicit status.",
+  "reclassified": [
+    {
+      "path": "docs/source/imported/kitluy-suite-rebuild-bible-v4.0.0.md",
+      "status": "DUPLICATE-FORMATTING-VARIANT",
+      "canonical": "docs/source/canonical/kitluy-suite-rebuild-bible-v4.0.0.md",
+      "evidence": "Zero heading diff (145 headings), identical line counts (1758), whitespace/dash-blind checksum identical; raw diff contains only markdown table-separator formatting. Verified 2026-07-26 (KL-DOCS-001)."
+    },
+    {
+      "path": "docs/source/imported/kitluy-suite-business-bible-v2.0.0.md",
+      "status": "DUPLICATE-FORMATTING-VARIANT",
+      "canonical": "docs/source/canonical/kitluy-suite-business-bible-v2.0.0.md",
+      "evidence": "Zero heading diff (143 headings), identical line counts (1729), whitespace/dash-blind checksum identical. Verified 2026-07-26 (KL-DOCS-001)."
+    }
+  ]
+}

@@ -5,13 +5,23 @@
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { csvEscape, extractDeclared, fileType, INBOX, listInboxFiles, MANIFESTS, sha256 } from "./lib.mjs";
+import {
+  csvEscape,
+  extractDeclared,
+  fileType,
+  INBOX,
+  listInboxFiles,
+  MANIFESTS,
+  sha256,
+} from "./lib.mjs";
 
 const files = listInboxFiles();
 const byHash = new Map();
 const rows = files.map((f) => {
   const hash = sha256(f.path);
-  const declared = f.name.endsWith(".md") ? extractDeclared(f.path, f.name) : extractDeclared(f.path, f.name);
+  const declared = f.name.endsWith(".md")
+    ? extractDeclared(f.path, f.name)
+    : extractDeclared(f.path, f.name);
   const row = {
     relative_path: `${INBOX}/${f.name}`,
     physical_filename: f.name,
@@ -41,33 +51,60 @@ function checkPack(source, entries) {
   for (const e of entries) {
     const match = rows.find((r) => r.physical_filename === e.file);
     if (!match) {
-      packChecks.push({ pack: source, file: e.file, issue: "listed in pack manifest but not physically present" });
+      packChecks.push({
+        pack: source,
+        file: e.file,
+        issue: "listed in pack manifest but not physically present",
+      });
       continue;
     }
     if (e.bytes !== undefined && e.bytes !== match.file_size) {
-      packChecks.push({ pack: source, file: e.file, issue: `declared ${e.bytes} bytes, physical ${match.file_size} bytes` });
+      packChecks.push({
+        pack: source,
+        file: e.file,
+        issue: `declared ${e.bytes} bytes, physical ${match.file_size} bytes`,
+      });
     }
     if (e.sha256 && e.sha256 !== match.sha256) {
-      packChecks.push({ pack: source, file: e.file, issue: "declared sha256 differs from physical file" });
+      packChecks.push({
+        pack: source,
+        file: e.file,
+        issue: "declared sha256 differs from physical file",
+      });
     }
   }
 }
 try {
   const sec = JSON.parse(readFileSync(join(INBOX, "manifest.json"), "utf8"));
-  checkPack("security pack (manifest.json)", sec.map((e) => ({ file: e.filename, bytes: e.bytes })));
-} catch { /* absent */ }
+  checkPack(
+    "security pack (manifest.json)",
+    sec.map((e) => ({ file: e.filename, bytes: e.bytes })),
+  );
+} catch {
+  /* absent */
+}
 try {
   const ui = JSON.parse(readFileSync(join(INBOX, "manifest copy.json"), "utf8"));
   checkPack("ui-ux pack (manifest copy.json)", ui.files);
-} catch { /* absent */ }
+} catch {
+  /* absent */
+}
 try {
-  const supa = readFileSync(join(INBOX, "kitluy-suite-supabase-implementation-pack-v1.0.0.sha256"), "utf8");
-  const entries = supa.split("\n").filter(Boolean).map((l) => {
-    const [hash, file] = l.trim().split(/\s+/);
-    return { file, sha256: hash };
-  });
+  const supa = readFileSync(
+    join(INBOX, "kitluy-suite-supabase-implementation-pack-v1.0.0.sha256"),
+    "utf8",
+  );
+  const entries = supa
+    .split("\n")
+    .filter(Boolean)
+    .map((l) => {
+      const [hash, file] = l.trim().split(/\s+/);
+      return { file, sha256: hash };
+    });
   checkPack("supabase pack (.sha256)", entries);
-} catch { /* absent */ }
+} catch {
+  /* absent */
+}
 
 const inventory = {
   inventory_version: "1.0.0",
@@ -79,10 +116,15 @@ const inventory = {
   pack_manifest_discrepancies: packChecks,
 };
 
-writeFileSync(join(MANIFESTS, "kitluy-inbox-inventory-v1.0.0.json"), JSON.stringify(inventory, null, 2) + "\n");
+writeFileSync(
+  join(MANIFESTS, "kitluy-inbox-inventory-v1.0.0.json"),
+  JSON.stringify(inventory, null, 2) + "\n",
+);
 
 const header = Object.keys(rows[0]);
-const csv = [header.join(","), ...rows.map((r) => header.map((h) => csvEscape(r[h])).join(","))].join("\n") + "\n";
+const csv =
+  [header.join(","), ...rows.map((r) => header.map((h) => csvEscape(r[h])).join(","))].join("\n") +
+  "\n";
 writeFileSync(join(MANIFESTS, "kitluy-inbox-inventory-v1.0.0.csv"), csv);
 
 const dupes = rows.filter((r) => r.duplicate_of);
@@ -98,7 +140,12 @@ ${dupes.length === 0 ? "None detected." : dupes.map((d) => `- ${d.physical_filen
 
 ## Declared-filename vs physical-filename differences
 
-${rows.filter((r) => r.filename_mismatch).map((r) => `- ${r.physical_filename}: declares \`${r.filename_mismatch}\``).join("\n") || "None detected."}
+${
+  rows
+    .filter((r) => r.filename_mismatch)
+    .map((r) => `- ${r.physical_filename}: declares \`${r.filename_mismatch}\``)
+    .join("\n") || "None detected."
+}
 
 ## Pack-manifest discrepancies (declared vs physical)
 
@@ -111,4 +158,6 @@ ${packChecks.length === 0 ? "None." : packChecks.map((p) => `- **${p.file}** (${
 ${rows.map((r, i) => `| ${i + 1} | ${r.physical_filename} | ${r.file_size} | \`${r.sha256.slice(0, 16)}\` | ${r.declared_title.slice(0, 60)} | ${r.declared_version} | ${r.declared_date} | ${r.declared_status.slice(0, 40)} |`).join("\n")}
 `;
 writeFileSync(join(MANIFESTS, "kitluy-inbox-inventory-v1.0.0.md"), md);
-console.log(`Inventory written: ${rows.length} files, ${dupes.length} exact duplicates, ${packChecks.length} pack discrepancies.`);
+console.log(
+  `Inventory written: ${rows.length} files, ${dupes.length} exact duplicates, ${packChecks.length} pack discrepancies.`,
+);

@@ -2,7 +2,7 @@
   "name": "het-kitluy-project",
   "version": "0.1.0",
   "private": true,
-  "description": "KitLuy Suite monorepo — digital-first commerce platform for Cambodia. Phase 1: Laundry Stores and Shops.",
+  "description": "KitLuy Suite monorepo \u2014 digital-first commerce platform for Cambodia. Phase 1: Laundry Stores and Shops.",
   "license": "SEE LICENSE IN LICENSE",
   "packageManager": "pnpm@9.15.9",
   "engines": {
@@ -30,7 +30,17 @@
     "migrations:validate": "node scripts/database/validate-migrations.mjs",
     "supabase:start": "bash scripts/database/supabase-local.sh start",
     "supabase:stop": "bash scripts/database/supabase-local.sh stop",
-    "supabase:reset:local": "bash scripts/database/supabase-local.sh reset"
+    "supabase:reset:local": "bash scripts/database/supabase-local.sh reset",
+    "docs:inventory": "node scripts/docs/inventory.mjs",
+    "docs:hash": "node scripts/docs/check-hashes.mjs",
+    "docs:duplicates": "node scripts/docs/check-duplicates.mjs",
+    "docs:classify": "node scripts/docs/classify.mjs",
+    "docs:classify:check": "node scripts/docs/check-classified.mjs",
+    "docs:authority-check": "node scripts/docs/check-authority.mjs",
+    "docs:coverage-check": "node scripts/docs/check-coverage.mjs",
+    "docs:registry-check": "node scripts/docs/check-registry.mjs",
+    "docs:links": "node scripts/verification/docs-link-check.mjs",
+    "docs:verify": "node scripts/docs/verify.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",

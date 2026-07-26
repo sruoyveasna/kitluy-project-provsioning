@@ -1,0 +1,70 @@
+event_key,category,trigger,required_fields,result_values,retention_class
+identity.authentication_succeeded,Security,Human/service/device authenticated,"subject_id, identity_type, session_id, factor, device, IP/context",Success,Standard security retention
+identity.authentication_failed,Security,Authentication denied,"claimed_subject, factor, reason_code, IP/context",Denied,Security retention
+identity.session_revoked,Security,Session/token revocation,"subject_id, session_ids, reason, actor",Success/partial,Security retention
+identity.break_glass_activated,Critical,Emergency access activated,"actor, incident, permissions, scopes, environment, expiry, approver",Success,Highest retention
+identity.break_glass_expired,Critical,Emergency access expired/revoked,"session, actor, grants, review_due",Success,Highest retention
+rbac.permission_registered,Governance,Permission added/versioned/deprecated,"permission_key, old/new version, impact, approvers",Success,Highest retention
+rbac.role_template_versioned,Governance,Role template version created,"role_key, version, grant diff, owner",Success,Highest retention
+rbac.assignment_changed,Governance,Assignment granted/changed/revoked,"subject, role_version, permissions, scopes, environment, validity",Success,Highest retention
+rbac.approval_policy_versioned,Governance,Approval policy changed,"policy, action/permission, old/new, approvers",Success,Highest retention
+rbac.authorization_allowed,Security,Privileged authorization allowed,"subject, assignments, permission, target, scope, environment, policy",Allowed,Security retention
+rbac.authorization_denied,Security,Privileged authorization denied,"subject, permission, target, reason_code, correlation",Denied,Security retention
+rbac.access_review_completed,Governance,Access review decision finalized,"campaign, reviewer, assignments, decisions, followups",Success,Highest retention
+approval.requested,Critical,Sensitive action approval requested,"requester, permission, target, payload_hash, policy, evidence",Pending,Highest retention
+approval.decided,Critical,Independent approval decision,"request, approver, decision, reason, evidence",Approved/rejected,Highest retention
+approval.execution_attempted,Critical,Approved action execution attempted,"request, token, executor, payload_hash, idempotency",Success/failure,Highest retention
+partner.verification_decided,Business,Partner verification approved/rejected,"tenant, case, reviewer, decision, evidence",Approved/rejected,Business retention
+partner.suspended,Critical,Partner restricted/suspended,"tenant, actor, approver, reason, effective_at",Success,Highest retention
+digital_store.created,Business,Digital Store created,"tenant, digital_store, vertical, actor",Success,Business retention
+digital_store.vertical_locked,Business,Primary vertical locked,"digital_store, old/new, actor, reason",Success,Business retention
+digital_store.activated,Critical,Digital Store activated,"digital_store, readiness, requester, approver",Success,Highest retention
+location.created,Business,Store Location created,"digital_store, location, timezone, actor",Success,Business retention
+location.go_live_requested,Critical,Go-live package submitted,"location, requester, evidence checksums",Pending,Highest retention
+location.go_live_approved,Critical,Physical Store go-live approved,"location, requester, approver, policy, evidence",Success,Highest retention
+device.registered,Security,HET-managed hardware registered,"device, serials, hardware_manifest_hash, manufacturing_cert",Success,Device lifetime + archive
+device.identity_issued,Security,Operational device identity issued,"device, tenant, store, location, role, cert serial",Success,Device lifetime + archive
+device.certificate_rotated,Security,Device operational certificate rotated,"device, old/new serial, reason, actor",Success,Device lifetime + archive
+device.revoked,Critical,Device identity/cert/session revoked,"device, cert serials, reason, incident, approver",Success,Highest retention
+device.clone_detected,Critical,Duplicate/cloned identity signal detected,"device, conflicting identity, attestation, network/context",Alert,Highest retention
+device.remote_action_queued,Critical,Remote device action queued,"device, action, payload_hash, expiry, requester, approval",Queued,Highest retention
+device.remote_action_completed,Critical,Remote device action completed,"device, action, result, evidence, correlation",Success/failure,Highest retention
+release.artifact_registered,Release,Signed artifact registered,"version, checksum, signature, compatibility, actor",Success,Release lifetime
+release.promoted_pilot,Critical,Release promoted to Pilot,"version, cohort_hash, requester, approver, evidence",Success,Highest retention
+release.promoted_stable,Critical,Release promoted to Stable,"version, target, requester, approver, evidence",Success,Highest retention
+release.rolled_back,Critical,Release/cohort rolled back,"version, cohort, reason, incident, approver",Success/partial,Highest retention
+configuration.published,Configuration,Immutable config published,"config_version, targets, checksum, actor, approval",Success,Configuration lifetime
+configuration.rolled_back,Critical,Prior compatible config republished,"from/to version, targets, reason, approver",Success,Highest retention
+support.consent_granted,Privacy,Partner support consent granted,"tenant, grantor, scope, purpose, expiry, ticket",Success,Privacy retention
+support.consent_revoked,Privacy,Support consent revoked/expired,"tenant, session, revoker, reason",Success,Privacy retention
+support.impersonation_started,Critical,Scoped support impersonation began,"session, support_actor, consent, scope, banner/session id",Success,Highest retention
+support.resource_viewed,Privacy,Sensitive resource viewed during support,"session, actor, resource, fields/class, purpose",Success,Privacy retention
+support.intervention_recorded,Critical,Support command/mutation executed,"session, actor, permission, target, before/after refs, outcome",Success/failure,Highest retention
+billing.invoice_adjustment_created,Financial,Compensating invoice adjustment created,"tenant, invoice, amount/currency, reason, actor, approval",Success,Financial retention
+billing.invoice_marked_paid,Financial,Manual settlement recorded,"invoice, evidence, actor, approver",Success,Financial retention
+payment.cash_recorded,Financial,Cash payment recorded,"transaction, payment, amount/currency, location, terminal, staff",Success,Financial retention
+payment.khqr_requested,Financial,KHQR request created,"transaction, request, amount/currency, provider ref",Success,Financial retention
+payment.refund_requested,Financial,Refund requested,"payment, amount/currency, reason, requester",Pending,Financial retention
+payment.refund_approved,Financial,Refund approved/rejected,"refund, approver, decision, policy",Approved/rejected,Financial retention
+inventory.adjustment_requested,Inventory,Inventory correction requested,"item, location, delta, reason, actor",Pending,Inventory retention
+inventory.adjustment_approved,Inventory,Inventory correction approved,"request, approver, result movement id",Success,Inventory retention
+laundry.booking_created,Operational,Laundry Booking created,"booking, customer ref, location, T1/staff, totals refs",Success,Operational retention
+laundry.price_overridden,Critical,Laundry price overridden,"booking, line/rule, old/new, reason, actor",Success,Financial/operational retention
+garment.ready_scanned_in,Custody,T3 Ready custody event,"booking, garment/tag, storage, T3/device/staff, exception",Success,Custody retention
+garment.pickup_scanned_out,Custody,T4 custody release,"booking, garment/tag, collector verification, T4/device/staff",Success,Custody retention
+laundry.booking_completed,Operational,Booking completed,"booking, payment/custody conditions, T4/staff",Success,Operational retention
+integration.credential_rotated,Security,Connector credential reference rotated,"connector, old/new key version metadata, actor, approver",Success,Highest retention
+integration.production_enabled,Critical,Connector enabled in production,"connector, scopes, certification, requester, approver",Success,Highest retention
+webhook.replay_requested,Integration,Webhook replay requested,"delivery, event, actor, idempotency, reason",Queued,Integration retention
+job.dead_letter_changed,Operations,Dead-letter job requeued/cancelled/quarantined,"job, action, actor, reason, approval",Success,Operations retention
+incident.declared,Operations,Platform/security incident declared,"incident, severity, impact, commander, scope",Open,Incident retention
+platform.safety_switch_changed,Critical,Safety switch changed,"switch, old/new, scope, incident/change, approver",Success,Highest retention
+backup.production_restore_started,Critical,Production restore/failover started,"system, backup, target, incident, requester, approver",Started,Highest retention
+secret.accessed,Security,Privileged secret access/use issued,"secret_id/class, workload/actor, purpose, environment, lease",Success,Security retention
+secret.rotated,Security,Secret/key version rotated,"secret_id/class, old/new version, actor/workload, reason",Success,Highest retention
+secret.compromise_declared,Critical,Suspected secret/key compromise declared,"secret class/id, incident, affected systems, containment",Open,Highest retention
+ai.policy_versioned,Governance,AI policy/version changed,"policy, old/new, evaluation evidence, approvers",Success,Governance retention
+ai.mcp_tool_enabled,Critical,MCP tool enabled/changed,"tool, mode read/write, scopes, policy, approvers",Success,Highest retention
+ai.tool_call_executed,Security,AI/MCP tool call executed,"request, service identity, tool, permission, target, approval, outcome",Success/failure,Security retention
+audit.export_requested,Audit,Audit/evidence export requested,"scope, filters, actor, purpose, approval",Queued,Audit retention
+audit.export_completed,Audit,Checksummed evidence package completed,"export, checksum, object ref, retention, requester",Success/failure,Audit retention

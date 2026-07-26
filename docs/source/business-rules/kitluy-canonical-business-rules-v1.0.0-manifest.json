@@ -1,0 +1,90 @@
+{
+  "package": "KitLuy Canonical Business Rules and State Machines",
+  "version": "v1.0.0",
+  "date": "2026-07-26",
+  "status": "Canonical target contracts; not implementation evidence",
+  "documents": [
+    {
+      "file": "kitluy-core-business-rules-v1.0.0.md",
+      "rules": 10,
+      "bytes": 23051,
+      "missing_or_count_mismatch": []
+    },
+    {
+      "file": "kitluy-laundry-state-machines-v1.0.0.md",
+      "rules": 8,
+      "bytes": 19636,
+      "missing_or_count_mismatch": []
+    },
+    {
+      "file": "kitluy-transaction-and-booking-lifecycle-v1.0.0.md",
+      "rules": 8,
+      "bytes": 18463,
+      "missing_or_count_mismatch": []
+    },
+    {
+      "file": "kitluy-payment-refund-and-void-rules-v1.0.0.md",
+      "rules": 9,
+      "bytes": 19289,
+      "missing_or_count_mismatch": []
+    },
+    {
+      "file": "kitluy-inventory-movement-and-cost-rules-v1.0.0.md",
+      "rules": 9,
+      "bytes": 19342,
+      "missing_or_count_mismatch": []
+    },
+    {
+      "file": "kitluy-finance-subledger-and-reconciliation-v1.0.0.md",
+      "rules": 9,
+      "bytes": 19096,
+      "missing_or_count_mismatch": []
+    },
+    {
+      "file": "kitluy-customer-identity-consent-and-privacy-v1.0.0.md",
+      "rules": 8,
+      "bytes": 18739,
+      "missing_or_count_mismatch": []
+    },
+    {
+      "file": "kitluy-pricing-discount-tax-and-rounding-rules-v1.0.0.md",
+      "rules": 8,
+      "bytes": 17968,
+      "missing_or_count_mismatch": []
+    },
+    {
+      "file": "kitluy-business-date-shift-and-close-rules-v1.0.0.md",
+      "rules": 8,
+      "bytes": 16818,
+      "missing_or_count_mismatch": []
+    },
+    {
+      "file": "kitluy-configuration-publication-and-rollback-v1.0.0.md",
+      "rules": 9,
+      "bytes": 19186,
+      "missing_or_count_mismatch": []
+    }
+  ],
+  "total_rules": 86,
+  "required_fields": [
+    "Rule ID",
+    "Purpose",
+    "Inputs",
+    "Preconditions",
+    "Calculation or transition",
+    "Output",
+    "Permissions",
+    "Audit event",
+    "Offline behavior",
+    "Error behavior",
+    "Compensating action",
+    "Canonical test vectors",
+    "Owning service",
+    "Consuming products"
+  ],
+  "notes": [
+    "All finalized financial, payment, inventory and audit effects are append-only.",
+    "Store Hub is the local operational authority after provisioning.",
+    "Unresolved commercial, legal and threshold values remain explicit required values."
+  ]
+}

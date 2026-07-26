@@ -43,7 +43,11 @@ export function extractDeclared(path, name) {
     return {};
   }
   const lines = text.split("\n").slice(0, 60);
-  const title = lines.find((l) => l.startsWith("# "))?.slice(2).trim() ?? "";
+  const title =
+    lines
+      .find((l) => l.startsWith("# "))
+      ?.slice(2)
+      .trim() ?? "";
   const grab = (re) => {
     for (const l of lines) {
       const m = re.exec(l);
@@ -54,7 +58,9 @@ export function extractDeclared(path, name) {
   const version =
     grab(/^\|?\s*(?:\*\*)?Version(?:\*\*)?\s*\|?\s*:?\s*\|?\s*(v?\d+\.\d+\.\d+[^|]*)/i) ||
     (/-v(\d+\.\d+\.\d+)/.exec(name)?.[1] ?? "");
-  const date = grab(/^\|?\s*(?:\*\*)?Date(?:\*\*)?\s*\|?\s*:?\s*\|?\s*([0-9]{4}-[0-9]{2}-[0-9]{2}[^|]*)/i);
+  const date = grab(
+    /^\|?\s*(?:\*\*)?Date(?:\*\*)?\s*\|?\s*:?\s*\|?\s*([0-9]{4}-[0-9]{2}-[0-9]{2}[^|]*)/i,
+  );
   const owner = grab(/^\|?\s*(?:\*\*)?Owner(?:\*\*)?\s*\|?\s*:?\s*\|?\s*([^|]+)/i);
   const status = grab(/^\|?\s*(?:\*\*)?Status(?:\*\*)?\s*\|?\s*:?\s*\|?\s*([^|]+)/i);
   const declaredFilename = grab(/^\|?\s*(?:\*\*)?Filename(?:\*\*)?\s*\|?\s*:?\s*\|?\s*([^|]+)/i);
