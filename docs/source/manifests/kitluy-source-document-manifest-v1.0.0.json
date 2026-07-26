@@ -2,8 +2,8 @@
   "manifest_version": "1.0.0",
   "task": "KL-DOCS-001",
   "ingested_at": "2026-07-26T16:00:00+07:00",
-  "last_batch_ingested_at": "2026-07-26T17:00:00+07:00",
-  "source_count": 160,
+  "last_batch_ingested_at": "2026-07-26T17:30:00+07:00",
+  "source_count": 161,
   "note": "Source IDs are stable and never reassigned. Originals live in docs/source/inbox/ and are never modified; classified copies are immutable.",
   "missing_expected_inputs": [
     {
@@ -4389,6 +4389,34 @@
       "implementation_evidence": "NONE",
       "ingested_at": "2026-07-26T17:00:00+07:00",
       "notes": "selected_versions conflict with repo toolchain pins (ADR-0001/0002) — KLREC-2026-07-26-014; upgrade is a registered engineering task, not applied during ingestion."
+    },
+    {
+      "source_id": "KLSRC-0161",
+      "batch": "2026-07-26-3",
+      "original_path": "docs/source/inbox/kitluy-phase1-laundry-master-build-plan-v1.0.0.md",
+      "classified_path": "docs/source/owner-instructions/kitluy-phase1-laundry-master-build-plan-v1.0.0.md",
+      "physical_filename": "kitluy-phase1-laundry-master-build-plan-v1.0.0.md",
+      "declared_filename": "kitluy-phase1-laundry-master-build-plan-v1.0.0.md",
+      "document_title": "KitLuy Phase 1 Laundry — Master Build Plan",
+      "version": "1.0.0",
+      "document_date": "",
+      "declared_owner": "HET / KitLuy Suite Project Owner",
+      "declared_status": "Master execution plan; direct swarm input; not implementation evidence",
+      "sha256": "268a30a0dc647780e7105dd59b9604b5fdafa8e0e69947b4d2e239600d55dacc",
+      "file_size": 101819,
+      "file_type": "text/markdown",
+      "authority_class": "OWNER-INSTRUCTION",
+      "canonical_status": "CANONICAL-CURRENT",
+      "document_role": "PHASE1-MASTER-BUILD-PLAN (WS-00..WS-26 execution program)",
+      "product_or_domain": "execution",
+      "vertical": "laundry",
+      "supersedes": "",
+      "superseded_by": "",
+      "duplicate_of": "",
+      "conflicts_with": "",
+      "implementation_evidence": "NONE",
+      "ingested_at": "2026-07-26T17:30:00+07:00",
+      "notes": ""
     }
   ]
 }

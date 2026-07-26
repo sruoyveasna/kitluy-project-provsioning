@@ -18,7 +18,7 @@ import {
 } from "./lib.mjs";
 import { classify } from "./classification-map.mjs";
 
-const INGESTED_AT = "2026-07-26T17:00:00+07:00"; // current batch (earlier batches keep their own)
+const INGESTED_AT = process.env.KITLUY_INGESTED_AT ?? "2026-07-26T17:00:00+07:00"; // current batch (earlier batches keep their own)
 const MANIFEST_BASE = join(MANIFESTS, "kitluy-source-document-manifest-v1.0.0");
 
 // Merge mode: previously ingested sources are preserved verbatim (their inbox
@@ -69,7 +69,7 @@ const newEntries = newFiles.map((f) => {
   copyFileSync(f.path, classifiedPath);
   return {
     source_id: allocId(f.name),
-    batch: "2026-07-26-2",
+    batch: process.env.KITLUY_BATCH ?? "2026-07-26-2",
     original_path: `${INBOX}/${f.name}`,
     classified_path: classifiedPath,
     physical_filename: f.name,

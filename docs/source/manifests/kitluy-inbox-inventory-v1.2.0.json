@@ -1,0 +1,28 @@
+{
+  "inventory_version": "1.2.0",
+  "generated_for_task": "KL-DOCS-001",
+  "inbox_path": "docs/source/inbox",
+  "file_count": 1,
+  "excluded_system_files": [
+    ".DS_Store",
+    ".gitkeep"
+  ],
+  "files": [
+    {
+      "relative_path": "docs/source/inbox/kitluy-phase1-laundry-master-build-plan-v1.0.0.md",
+      "physical_filename": "kitluy-phase1-laundry-master-build-plan-v1.0.0.md",
+      "sha256": "268a30a0dc647780e7105dd59b9604b5fdafa8e0e69947b4d2e239600d55dacc",
+      "file_size": 101819,
+      "file_type": "text/markdown",
+      "declared_title": "KitLuy Phase 1 Laundry — Master Build Plan",
+      "declared_filename": "kitluy-phase1-laundry-master-build-plan-v1.0.0.md",
+      "declared_version": "1.0.0",
+      "declared_date": "",
+      "declared_owner": "HET / KitLuy Suite Project Owner",
+      "declared_status": "Master execution plan; direct swarm input; not implementation evidence",
+      "duplicate_of": "",
+      "filename_mismatch": ""
+    }
+  ],
+  "pack_manifest_discrepancies": []
+}

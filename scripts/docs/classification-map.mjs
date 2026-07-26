@@ -357,6 +357,11 @@ export const RULES = [
   ],
 ];
 
+// --- Batch 3 (2026-07-26, KL-BUILD-000 ingestion) ---------------------------
+export const BATCH3_RULES = [
+  [/^kitluy-phase1-laundry-master-build-plan-v1\.0\.0\.md$/, { dir: "owner-instructions", authority_class: "OWNER-INSTRUCTION", document_role: "PHASE1-MASTER-BUILD-PLAN (WS-00..WS-26 execution program)", product_or_domain: "execution", vertical: "laundry" }],
+];
+
 // --- Batch 2 (2026-07-26, KL-DOCS-002) -------------------------------------
 export const BATCH2_RULES = [
   // AI Swarm Operating System pack -> owner-instructions/ (subpaths preserved)
@@ -457,7 +462,7 @@ export const BATCH2_RULES = [
 ];
 
 export function classify(name) {
-  for (const [re, fields] of [...BATCH2_RULES, ...RULES]) {
+  for (const [re, fields] of [...BATCH3_RULES, ...BATCH2_RULES, ...RULES]) {
     if (re.test(name)) return fields;
   }
   return {

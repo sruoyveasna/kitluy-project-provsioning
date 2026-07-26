@@ -1,7 +1,7 @@
 # KitLuy Source Document Manifest — v1.0.0
 
 Complete manifest of the owner-supplied corpus (task KL-DOCS-001, ingested
-2026-07-26T17:00:00+07:00). 160 sources. Source IDs are stable and never
+2026-07-26T17:30:00+07:00). 161 sources. Source IDs are stable and never
 reassigned. Originals: `docs/source/inbox/` (immutable). CSV/JSON forms of
 this manifest are authoritative for tooling; this file is the human view.
 
@@ -133,7 +133,7 @@ as an open item (see coverage matrix and reconciliation register).
 | KLSRC-0096 | kitluy-sync-conflict-resolution-policy-v1.0.0.md | 1.0.0 | CANONICAL-SHARED-CONTRACT | STORE-HUB-OFFLINE-PROTOCOL | CANONICAL-CURRENT |
 | KLSRC-0097 | kitluy-terminal-profile-contract-t1-t4-v1.0.0.md | 1.0.0 | CANONICAL-SHARED-CONTRACT | TERMINAL-PROFILE-CONTRACT | CANONICAL-CURRENT |
 
-## owner-instructions/ (17)
+## owner-instructions/ (18)
 
 | ID | File | Version | Authority class | Role | Status |
 | --- | --- | --- | --- | --- | --- |
@@ -154,6 +154,7 @@ as an open item (see coverage matrix and reconciliation register).
 | KLSRC-0121 | kitluy-ai-swarm-operating-system-v1.0.0/KIMI.md | 1.0.0 | OWNER-INSTRUCTION | AI-SWARM-OPERATING-SYSTEM | CANONICAL-CURRENT |
 | KLSRC-0122 | kitluy-ai-swarm-operating-system-v1.0.0/PROJECT_HOME.md | 1.0.0 | OWNER-INSTRUCTION | AI-SWARM-OPERATING-SYSTEM | CANONICAL-CURRENT |
 | KLSRC-0123 | kitluy-ai-swarm-operating-system-v1.0.0/SECURITY.md | 1.0.0 | OWNER-INSTRUCTION | AI-SWARM-OPERATING-SYSTEM | CANONICAL-CURRENT |
+| KLSRC-0161 | kitluy-phase1-laundry-master-build-plan-v1.0.0.md | 1.0.0 | OWNER-INSTRUCTION | PHASE1-MASTER-BUILD-PLAN (WS-00..WS-26 execution | CANONICAL-CURRENT |
 
 ## qa/ (12)
 
