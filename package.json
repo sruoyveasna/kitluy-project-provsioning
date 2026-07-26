@@ -20,7 +20,7 @@
     "test:contract": "turbo run test:contract",
     "test:integration": "node scripts/testing/blocked.mjs integration",
     "test:e2e": "node scripts/testing/blocked.mjs e2e",
-    "test:rls": "node scripts/testing/blocked.mjs rls",
+    "test:rls": "node scripts/database/db-exec.mjs rls",
     "test:offline": "turbo run test:offline",
     "verify": "node scripts/verification/verify.mjs",
     "clean": "turbo run clean",

@@ -519,35 +519,36 @@ rollback;
 
 -- superseded by P8/P9 additions (review RV-302):
 
--- Positive P8 (cycle 3 §10.2: authorized grant administration read; control
--- for the grant-visibility negatives): Tenant A owner reads Tenant A grants.
+-- Positive P8 (cycle 3 §10.2: authorized grant administration read; positive
+-- control for RLS-017 which proved the registry hidden WITHOUT rbac.read):
+-- the HET admin context (rbac.read) reads role_permission_grants.
+begin;
+select set_config('request.jwt.claims',
+  '{"sub": "00000000-0000-4000-8000-000000000001", "role": "authenticated"}', true);
+set local role authenticated;
+do $$
+begin
+  if (select count(*) from kitluy_auth.role_permission_grants) < 1 then
+    raise exception 'FAIL P8/RLS-017-positive: rbac.read context cannot read permission grants';
+  end if;
+  raise notice 'PASS P8: authorized grant administration read (rbac.read sees role_permission_grants)';
+end $$;
+rollback;
+
+-- Positive P9 (cycle 3 §10.2: time-limited support access; positive control
+-- for RLS-019): the consented context reads its support_access_sessions row
+-- strictly inside the consent window (starts_at <= now() < expires_at, not revoked).
 begin;
 select set_config('request.jwt.claims',
   '{"sub": "00000000-0000-4000-8000-000000000002", "role": "authenticated"}', true);
 set local role authenticated;
 do $$
 begin
-  if not exists (select 1 from kitluy_auth.permission_grants
-                 where tenant_id = '00000000-0000-4000-8000-000000000011') then
-    raise exception 'FAIL P8: authorized grant administration read broken (positive control)';
+  if not exists (select 1 from kitluy_admin.support_access_sessions
+                 where starts_at <= now() and expires_at > now() and revoked_at is null) then
+    raise exception 'FAIL P9/RLS-019-positive: in-window support access session not readable';
   end if;
-  raise notice 'PASS P8: tenant owner reads own permission grants';
-end $$;
-rollback;
-
--- Positive P9 (cycle 3 §10.2: time-limited support access; control for the
--- expired-consent negative): consented support context reads inside window.
-begin;
-select set_config('request.jwt.claims',
-  '{"sub": "00000000-0000-4000-8000-00000000000a", "role": "authenticated"}', true);
-set local role authenticated;
-do $$
-begin
-  if not exists (select 1 from kitluy_admin.support_consents
-                 where expires_at > now()) then
-    raise exception 'FAIL P9: time-limited support access positive control broken';
-  end if;
-  raise notice 'PASS P9: support access readable within consent window';
+  raise notice 'PASS P9: time-limited support access readable within consent window';
 end $$;
 rollback;
 

@@ -17,7 +17,10 @@ if ! command -v supabase >/dev/null 2>&1; then
 fi
 
 case "${1:-}" in
-  start) exec supabase start ;;
+  # Colima profile: exclude ONLY optional logging containers (vector's
+  # docker.sock mount is unsupported on Colima virtiofs). PostgreSQL, Auth,
+  # PostgREST, Realtime, Storage, Studio stay enabled.
+  start) exec supabase start -x logflare,vector ;;
   stop) exec supabase stop ;;
   reset)
     echo "Resetting LOCAL Supabase database (destructive to local dev data only)."

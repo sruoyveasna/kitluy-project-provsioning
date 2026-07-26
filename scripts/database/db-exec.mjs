@@ -80,6 +80,56 @@ function assertLocalTarget() {
   }
 }
 
+// Host psql is optional: fall back to psql inside the local Supabase db
+// container (supabase_db_kitluy-local) — LOCAL stack only, stdin-piped file.
+function runSqlFile(file, sessionPrefixSql = "") {
+  const { existsSync } = {
+    existsSync: (p) => {
+      try {
+        readFileSync(p);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+  };
+  if (!existsSync(file)) {
+    console.error(`SQL file missing: ${file}`);
+    return 2;
+  }
+  const hasHostPsql = spawnSync("command", ["-v", "psql"], { shell: true }).status === 0;
+  if (hasHostPsql) {
+    if (sessionPrefixSql === "") {
+      return run("psql", [localDbUrl(), "-v", "ON_ERROR_STOP=1", "-f", file]);
+    }
+    const hostRes = spawnSync("psql", [localDbUrl(), "-v", "ON_ERROR_STOP=1", "-f", "-"], {
+      input: sessionPrefixSql + readFileSync(file, "utf8"),
+      stdio: ["pipe", "inherit", "inherit"],
+    });
+    return hostRes.status ?? 1;
+  }
+  const sql = sessionPrefixSql + readFileSync(file, "utf8");
+  const res = spawnSync(
+    "docker",
+    [
+      "exec",
+      "-i",
+      "supabase_db_kitluy-local",
+      "psql",
+      "-U",
+      "postgres",
+      "-d",
+      "postgres",
+      "-v",
+      "ON_ERROR_STOP=1",
+      "-f",
+      "-",
+    ],
+    { input: sql, stdio: ["pipe", "inherit", "inherit"] },
+  );
+  return res.status ?? 1;
+}
+
 function localDbUrl() {
   const dbUrl = process.env.SUPABASE_DB_URL ?? "";
   return dbUrl && /localhost|127\.0\.0\.1/.test(dbUrl) ? dbUrl : LOCAL_DB_URL_DEFAULT;
@@ -114,10 +164,12 @@ switch (command) {
     break;
   }
   case "seed": {
-    requireTools(["supabase", "docker", "psql"]);
+    requireTools(["supabase", "docker"]);
     assertLocalTarget();
+    // Explicit approved-local declaration required by the fail-closed seed
+    // guard (review RV-301): the runner — not the seed — asserts the context.
     process.exit(
-      run("psql", [localDbUrl(), "-v", "ON_ERROR_STOP=1", "-f", "supabase/seed/dev-fixtures.sql"]),
+      runSqlFile("supabase/seed/dev-fixtures.sql", "set kitluy.environment = 'local';\n"),
     );
     break;
   }
@@ -144,22 +196,21 @@ switch (command) {
     break;
   }
   case "test": {
-    requireTools(["supabase", "docker", "psql"]);
+    requireTools(["supabase", "docker"]);
     assertLocalTarget();
-    const url = localDbUrl();
-    const assertions = run("psql", [
-      url,
-      "-v",
-      "ON_ERROR_STOP=1",
-      "-f",
-      "supabase/tests/assertions.sql",
-    ]);
+    const assertions = runSqlFile("supabase/tests/assertions.sql");
     if (assertions !== 0) process.exit(assertions);
-    process.exit(run("psql", [url, "-v", "ON_ERROR_STOP=1", "-f", "supabase/tests/rls-tests.sql"]));
+    process.exit(runSqlFile("supabase/tests/rls-tests.sql"));
+    break;
+  }
+  case "rls": {
+    requireTools(["supabase", "docker"]);
+    assertLocalTarget();
+    process.exit(runSqlFile("supabase/tests/rls-tests.sql"));
     break;
   }
   default: {
-    console.error("Usage: db-exec.mjs status|reset|apply|seed|types|test");
+    console.error("Usage: db-exec.mjs status|reset|apply|seed|types|test|rls");
     process.exit(2);
   }
 }
