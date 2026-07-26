@@ -1,70 +1,148 @@
-# KitLuy Source-of-Truth Index — v1.0.0
+# KitLuy Source-of-Truth Index
 
-| Field   | Value                                                                                                                                               |
-| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Version | 1.0.0 · 2026-07-26                                                                                                                                  |
-| Status  | Created at repository bootstrap. The canonical file of this name was cited by source documents but not found on this machine (recorded as missing). |
+**Filename:** `kitluy-source-of-truth-index-v1.0.0.md`  
+**Version:** v1.0.0  
+**Date:** 2026-07-26  
+**Owner:** HET / KitLuy Suite Project Owner  
+**Status:** CANONICAL DOCUMENT CONTROL INDEX
 
-All imported copies live in `docs/source/imported/`; originals remain in
-`~/Downloads`. Full inventory with classifications:
-[../source/manifest.md](../source/manifest.md).
+## 1. Purpose
 
-## Level 3 — Current bibles (canonical)
+This index classifies every current KitLuy authority, target specification, planning registry, evidence source and retained legacy source in the supplied package. It prevents an agent from treating all Markdown files as equally authoritative.
 
-| Document                              | Version · Date      | Declared status                                                                                           |
-| ------------------------------------- | ------------------- | --------------------------------------------------------------------------------------------------------- |
-| kitluy-suite-rebuild-bible-v4.0.0.md  | v4.0.0 · 2026-07-26 | OWNER-DIRECTED CANONICAL MASTER AUTHORITY — target state, not implementation evidence. Supersedes v3.0.0. |
-| kitluy-suite-business-bible-v2.0.0.md | v2.0.0 · 2026-07-26 | OWNER-DIRECTED CANONICAL BUSINESS AUTHORITY. Supersedes ecosystem-business-bible v1.0.0.                  |
+The index records document ownership and supersession. It does not by itself prove implementation.
 
-## Level 4 — Current Phase 1 specifications (canonical)
+## 2. Classification rules
 
-| Product          | Document                                              | Version · Date      | Status note                                     |
-| ---------------- | ----------------------------------------------------- | ------------------- | ----------------------------------------------- |
-| B2B Website      | kitluy-b2b-website-phase1-spec-v1.0.0.md              | v1.0.0 · 2026-07-25 | Canonical target-state                          |
-| Admin PWA Portal | kitluy-admin-pwa-portal-phase1-spec-v3.1.0.md         | v3.1.0 · 2026-07-25 | Approved; supersedes v3.0.0                     |
-| Chain Portal     | kitluy-chain-portal-phase1-spec-v3.0.0.md             | v3.0.0 · 2026-07-25 | Canonical                                       |
-| Partner Portal   | kitluy-partner-portal-phase1-spec-v2.0.0.md           | v2.0.0 · 2026-07-24 | **Proposed** canonical                          |
-| Partner App      | kitluy-partner-app-phase1-spec-v2.0.0.md              | v2.0.0 · 2026-07-24 | **Proposed** canonical                          |
-| POS Desktop      | kitluy-pos-desktop-app-phase1-spec-v4.0.0.md          | v4.0.0 · 2026-07-25 | Canonical draft; primary T1–T4 product contract |
-| POS Mobile       | kitluy-pos-mobile-app-phase1-spec-v2.2.0.md           | v2.2.0 · 2026-07-25 | Canonical target-state                          |
-| Storefront       | kitluy-storefront-phase1-spec-v1.1.0.md               | v1.1.0 · 2026-07-25 | OWNER-APPROVED                                  |
-| Store Hub        | kitluy-storehub-phase1-spec-v1.0.0.md                 | v1.0.0 · 2026-07-25 | OWNER-APPROVED                                  |
-| Infrastructure   | kitluy-ecosystem-infrastructure-phase1-spec-v1.0.0.md | v1.0.0 · 2026-07-25 | Canonical                                       |
+| Class                                 | Authority effect                                                                                      |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| OWNER AUTHORITY / OWNER DECISION LOCK | Binding product direction until superseded by a later versioned owner decision                        |
+| VERIFIED IMPLEMENTATION EVIDENCE      | Binding only for the factual state of the named environment, commit, migration or release             |
+| CONTROL                               | Governs navigation, conflict handling, naming and evidence discipline; cannot invent product behavior |
+| MASTER AUTHORITY                      | Consolidated current target architecture or business model                                            |
+| PRODUCT / DOMAIN SPEC                 | Current product- or domain-specific target behavior within its scope                                  |
+| PLANNING REGISTRY / BACKLOG           | Work planning and traceability only                                                                   |
+| COMPETITOR EVIDENCE                   | External comparison input only                                                                        |
+| CLONE REFERENCE                       | Synthesized design reference only                                                                     |
+| RETAINED LEGACY                       | Historical or unaffected reference; conflicting content is prohibited                                 |
 
-## Level 6 — Feature registry
+## 3. Document index
 
-| Artifact                                | Note                                                                                             |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| kitluy-master-feature-registry-v0.2.csv | 441 capability rows. The `.md` and `.json` forms cited by specs are **missing** on this machine. |
+| ID      | Document                                                      | Version                             | Date                      | Owner                             | Class                  | State                                       | Scope                                                                    | Superseded / governing note                                                          |
+| ------- | ------------------------------------------------------------- | ----------------------------------- | ------------------------- | --------------------------------- | ---------------------- | ------------------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| SOT-001 | Current KitLuy Project Instructions                           | Conversation/project authority      | current                   | Project Owner                     | OWNER AUTHORITY        | Active                                      | All KitLuy product, architecture, evidence and roadmap rules             | None; highest direction authority                                                    |
+| SOT-002 | PROJECT_HOME.md                                               | v1.0.0                              | 2026-07-26                | HET / KitLuy Suite Project Owner  | CONTROL                | Active                                      | Single entry point                                                       | New                                                                                  |
+| SOT-003 | kitluy-source-of-truth-index-v1.0.0.md                        | v1.0.0                              | 2026-07-26                | HET / KitLuy Suite Project Owner  | CONTROL                | Active                                      | Document classification and ownership                                    | New                                                                                  |
+| SOT-004 | kitluy-authority-and-precedence-v1.0.0.md                     | v1.0.0                              | 2026-07-26                | HET / KitLuy Suite Project Owner  | CONTROL                | Active                                      | Conflict and precedence rules                                            | New                                                                                  |
+| SOT-005 | kitluy-decision-and-reconciliation-register-v1.0.0.md         | v1.0.0                              | 2026-07-26                | HET / KitLuy Suite Project Owner  | CONTROL                | Active                                      | Owner decisions and conflict resolution                                  | New                                                                                  |
+| SOT-006 | kitluy-open-decisions-and-required-values-v1.0.0.md           | v1.0.0                              | 2026-07-26                | HET / KitLuy Suite Project Owner  | CONTROL                | Active                                      | All unresolved required values                                           | New                                                                                  |
+| SOT-007 | kitluy-implementation-status-and-evidence-register-v1.0.0.md  | v1.0.0                              | 2026-07-26                | HET / KitLuy Suite Project Owner  | CONTROL                | Active                                      | Implementation status and evidence                                       | New                                                                                  |
+| SOT-008 | kitluy-superseded-document-register-v1.0.0.md                 | v1.0.0                              | 2026-07-26                | HET / KitLuy Suite Project Owner  | CONTROL                | Active                                      | Legacy and superseded controls                                           | New                                                                                  |
+| SOT-009 | kitluy-glossary-and-naming-standard-v1.0.0.md                 | v1.0.0                              | 2026-07-26                | HET / KitLuy Suite Project Owner  | CONTROL                | Active                                      | Canonical vocabulary and names                                           | New                                                                                  |
+| SOT-010 | kitluy-suite-rebuild-bible-v4.0.0.md                          | v4.0.0                              | [REQUIRED: approval date] | HET / KitLuy Suite Project Owner  | MASTER AUTHORITY       | Missing from package                        | Consolidated Suite technical/product authority                           | Supersedes kitluy-suite-rebuild-bible-v3.0.0.md after approval                       |
+| SOT-011 | kitluy-suite-business-bible-v2.0.0.md                         | v2.0.0                              | [REQUIRED: approval date] | HET / KitLuy Suite Project Owner  | MASTER AUTHORITY       | Missing from package                        | Consolidated Suite business authority                                    | Supersedes kitluy-suite-ecosystem-business-bible-v1.0.0.md after approval            |
+| SOT-020 | KitLuy Suite Project.txt                                      | Owner decisions / current direction | 2026-07-20 to 2026-07-21  | HET / KitLuy Suite Project Owner  | OWNER DECISION SOURCE  | Active                                      | Digital Store model and extended commerce adoption                       | Overrides conflicting older Store/API/channel assumptions                            |
+| SOT-021 | kitluy-concept-design-1.txt                                   | Owner decision source               | 2026-07-21                | HET / KitLuy Suite Project Owner  | OWNER DECISION SOURCE  | Mixed: locked decisions plus older planning | T1-T4 lock and earlier evolution notes                                   | Only explicitly locked sections are authoritative; older T1-T3 tables are superseded |
+| SOT-022 | Device Management & Provisioning System.txt                   | Owner decision source               | 2026-07-21                | HET / KitLuy Suite Project Owner  | OWNER DECISION SOURCE  | Active                                      | Hub-first smartphone-simple provisioning                                 | Supersedes manual-IP/manual-role-selection normal flow                               |
+| SOT-023 | Project Instruction Writing.txt                               | Architecture direction              | 2026-07-21                | HET / KitLuy Suite Project Owner  | OWNER DECISION SOURCE  | Active direction                            | Stack, cloud split, hardware, offline, files and releases                | Must be consolidated into master bible                                               |
+| SOT-024 | Infrastructure upgrade version.txt                            | Architecture/owner direction        | 2026-07-25                | HET / KitLuy Suite Project Owner  | OWNER DECISION SOURCE  | Active direction                            | Elastic scaling and Admin RBAC direction                                 | Consolidated by current infrastructure/Admin specs                                   |
+| SOT-025 | KitLuy Storefront v1.txt                                      | Owner decision source               | 2026-07-25                | HET / KitLuy Suite Project Owner  | OWNER DECISION SOURCE  | Active                                      | QR pre-intake, Telegram and virtual queue                                | Consolidated by Storefront Phase 1 v1.1.0                                            |
+| SOT-026 | KitLuy Suite Products.txt                                     | Product inventory direction         | 2026-07-25                | HET / KitLuy Suite Project Owner  | OWNER DECISION SOURCE  | Active direction                            | Canonical product inventory including B2B website                        | Consolidate into master bible                                                        |
+| SOT-027 | kitluy-owner-decision-lock-12-capabilities-v1.0.md            | v1.0                                | 2026-07-24                | HET / KitLuy Suite Project Owner  | OWNER DECISION LOCK    | Active                                      | Twelve resolved capabilities and guardrails                              | Overrides source classifications                                                     |
+| SOT-100 | kitluy-admin-pwa-portal-phase1-spec-v3.1.0.md                 | v3.1.0                              | 2026-07-25                | HET / KitLuy Suite platform owner | PRODUCT SPEC           | Active Phase 1 target                       | Admin control plane and scoped RBAC                                      | Supersedes v3.0.0 for Phase 1; supersedes rebuild v2 where conflicting               |
+| SOT-101 | kitluy-chain-portal-phase1-spec-v3.0.0.md                     | v3.0.0                              | 2026-07-25                | HET / KitLuy Suite Project Owner  | PRODUCT SPEC           | Active Phase 1 target                       | Chain governance and cross-Location operations                           | Supersedes chain rebuild v2 where specified                                          |
+| SOT-102 | kitluy-partner-portal-phase1-spec-v2.0.0.md                   | v2.0.0                              | 2026-07-24                | HET / KitLuy Suite Project Owner  | PRODUCT SPEC           | Active Phase 1 target                       | One-Digital-Store back office                                            | Supersedes partner PWA rebuild v1.1 where conflicting                                |
+| SOT-103 | kitluy-partner-app-phase1-spec-v2.0.0.md                      | v2.0.0                              | 2026-07-24                | HET / KitLuy Suite Project Owner  | PRODUCT SPEC           | Active Phase 1 target                       | Owner/manager mobile operations cockpit                                  | Supersedes partner app rebuild v1.1 where conflicting                                |
+| SOT-104 | kitluy-pos-desktop-app-phase1-spec-v4.0.0.md                  | v4.0.0                              | 2026-07-25                | HET / KitLuy Suite Project Owner  | PRODUCT SPEC           | Active Phase 1 target                       | T1-T4 fixed terminal application                                         | Supersedes all old three-terminal mappings                                           |
+| SOT-105 | kitluy-pos-mobile-app-phase1-spec-v2.2.0.md                   | v2.2.0                              | 2026-07-25                | HET / KitLuy Suite Project Owner  | PRODUCT SPEC           | Active Phase 1 target                       | Hub-bound roaming staff app                                              | Supersedes older POS Mobile targets where conflicting                                |
+| SOT-106 | kitluy-storefront-phase1-spec-v1.1.0.md                       | v1.1.0                              | 2026-07-25                | HET / KitLuy Suite Project Owner  | PRODUCT SPEC           | Active owner-approved Phase 1 target        | QR pre-intake, Telegram and queue                                        | Supersedes older Storefront notes where conflicting                                  |
+| SOT-107 | kitluy-storehub-phase1-spec-v1.0.0.md                         | v1.0.0                              | 2026-07-25                | HET / KitLuy Suite Project Owner  | PRODUCT SPEC           | Active owner-approved Phase 1 target        | Store Hub, managed device, offline authority and recovery                | Supersedes older Hub assumptions where conflicting                                   |
+| SOT-108 | kitluy-b2b-website-phase1-spec-v1.0.0.md                      | v1.0.0                              | 2026-07-25                | HET / KitLuy Suite Project Owner  | PRODUCT SPEC           | Active Phase 1 target                       | Public acquisition, registration and portal routing                      | New canonical product specification                                                  |
+| SOT-109 | kitluy-ecosystem-infrastructure-phase1-spec-v1.0.0.md         | v1.0.0                              | 2026-07-25                | HET / KitLuy Suite Project Owner  | DOMAIN SPEC            | Active Phase 1 target                       | Cloud/edge infrastructure, operations and scaling                        | Supersedes informal infrastructure notes where conflicting                           |
+| SOT-200 | kitluy-master-feature-registry-v0.2.md / .csv / .json         | v0.2                                | 2026-07-24                | HET / KitLuy Suite Project Owner  | PLANNING REGISTRY      | Active planning baseline                    | 441 normalized capabilities and traceability                             | Not implementation evidence; owner locks override source classifications             |
+| SOT-201 | kitluy-master-feature-source-traceability-v0.2.csv            | v0.2                                | 2026-07-24                | HET / KitLuy Suite Project Owner  | TRACEABILITY           | Active planning evidence                    | Maps 687 source rows to registry                                         | Not product truth or implementation evidence                                         |
+| SOT-300 | kitluy-suite-rebuild-bible-v3.0.0.md                          | v3.0.0                              | 2026-07-10                | HET / KitLuy Suite Project Owner  | RETAINED LEGACY BIBLE  | Partially superseded                        | Shared architecture reference only where unaffected                      | T1-T3 and physical-first material superseded; replace with v4                        |
+| SOT-301 | kitluy-suite-ecosystem-business-bible-v1.0.0.md               | v1.0.0                              | 2026-07-13                | HET / KitLuy Suite Project Owner  | RETAINED LEGACY BIBLE  | Partially superseded                        | Business reference only where unaffected                                 | Old roadmap/terminal/store language superseded; replace with business v2             |
+| SOT-302 | kitluy-admin-pwa-portal-rebuild-bible-v2.0.0.md               | v2.0.0                              | 2026-07-13                | HET / KitLuy Suite platform owner | RETAINED PRODUCT BIBLE | Superseded for Phase 1 conflicts            | Admin historical baseline                                                | Use Phase 1 v3.1.0 for current target                                                |
+| SOT-303 | kitluy-chain-portal-rebuild-bible-v2.0.0.md                   | v2.0.0                              | 2026-07-13                | HET / KitLuy Suite Project Owner  | RETAINED PRODUCT BIBLE | Superseded for Phase 1 conflicts            | Chain historical baseline                                                | Use Phase 1 v3.0.0 for current target                                                |
+| SOT-304 | kitluy-partner-pwa-portal-rebuild-bible-v1.1.0.md             | v1.1.0                              | 2026-07-13                | HET / KitLuy Suite Project Owner  | RETAINED PRODUCT BIBLE | Superseded for Phase 1 conflicts            | Partner portal historical baseline                                       | Use Partner Portal Phase 1 v2.0.0                                                    |
+| SOT-305 | kitluy-partner-app-rebuild-bible-v1.1.0.md                    | v1.1.0                              | 2026-07-13                | HET / KitLuy Suite Project Owner  | RETAINED PRODUCT BIBLE | Superseded for Phase 1 conflicts            | Partner App historical baseline                                          | Use Partner App Phase 1 v2.0.0                                                       |
+| SOT-400 | Evidence-based KitLuy comparison analyses                     | 2026-07-24 set                      | 2026-07-24                | HET / KitLuy Suite Project Owner  | COMPETITOR EVIDENCE    | Reference only                              | WooCommerce, Toast, Shopify, Lightspeed and Loyverse comparison evidence | Cannot override KitLuy authority                                                     |
+| SOT-401 | KitLuy competitor classifications and implementation backlogs | v0.1/v1.0 set                       | 2026-07-24                | HET / KitLuy Suite Project Owner  | PLANNING BACKLOG       | Reference only                              | Product ownership, dependencies, acceptance criteria and gates           | Not implementation evidence or owner approval unless separately locked               |
+| SOT-500 | woocommerce-rebuild-bible-v1.0.0.md                           | v1.0.0                              | 2026-07-21                | Reference author                  | CLONE REFERENCE        | Noncanonical                                | WooCommerce clone design                                                 | Never KitLuy product truth without adoption                                          |
+| SOT-501 | toast-pos-rebuild-bible-v1.0.0.md                             | v1.0.0                              | 2026-07-20                | Reference author                  | CLONE REFERENCE        | Noncanonical                                | Toast clone design                                                       | Never KitLuy product truth without adoption                                          |
+| SOT-502 | lightspeed-pos-rebuild-bible-v1.0.0.md                        | v1.0.0                              | 2026-07-20                | Reference author                  | CLONE REFERENCE        | Noncanonical                                | Lightspeed clone design                                                  | Never KitLuy product truth without adoption                                          |
+| SOT-503 | loyverse-rebuild-bible-v1.0.md                                | v1.0                                | 2026-07-21                | Reference author                  | CLONE REFERENCE        | Noncanonical                                | Loyverse clone design                                                    | Never KitLuy product truth without adoption                                          |
+| SOT-504 | shopify-commerce-rebuild-bible-v1.0.1.md                      | v1.0.1                              | 2026-07-21                | Reference author                  | CLONE REFERENCE        | Noncanonical                                | Shopify clone design                                                     | Never KitLuy product truth without adoption                                          |
 
-## Levels 7–8 — Competitor analyses and clone documents (design references only)
+## 4. Canonicality rules
 
-KITLUY.R&D_* analyses (WooCommerce, Clover, Shopify + docx family) and the
-competitor rebuild bibles (Loyverse, Toast, Lightspeed, WooCommerce, …) —
-see the manifest. **They never establish KitLuy product truth.**
+1. A document is canonical only for the scope explicitly assigned in this index.
+2. A newer version does not automatically override a different product or a narrower approved contract.
+3. A Phase 1 product specification overrides its predecessor only in the scopes it explicitly changes or consolidates.
+4. Applied migrations and verified code describe what exists; they do not silently change intended product direction.
+5. Planning registries, backlogs, competitor analyses and clone bibles never prove implementation.
+6. A missing expected master file is an evidence/control gap, not permission to treat the older file as fully current.
+7. Every superseded or prohibited concept must be recorded in the superseded-document register.
+8. Every material conflict must be recorded in the decision and reconciliation register.
 
-## Missing canonical documents (searched machine-wide, not found)
+## 5. Required index maintenance
 
-1. PROJECT_HOME.md (KitLuy; cited by ecosystem-business-bible v1.0.0) — recreated at bootstrap in this repo
-2. kitluy-source-of-truth-index-v1.0.0.md — this file recreates it
-3. kitluy-authority-and-precedence-v1.0.0.md — recreated
-4. kitluy-decision-and-reconciliation-register-v1.0.0.md — recreated
-5. kitluy-open-decisions-and-required-values-v1.0.0.md — recreated
-6. kitluy-implementation-status-and-evidence-register-v1.0.0.md — recreated
-7. kitluy-superseded-document-register-v1.0.0.md — recreated
-8. kitluy-glossary-and-naming-standard-v1.0.0.md — recreated
-9. kitluy-master-feature-registry-v0.2.md — **still missing** (only .csv exists)
-10. kitluy-master-feature-registry-v0.2.json — **still missing**
-11. kitluy-owner-decision-lock-12-capabilities-v1.0.md — **still missing**; its
-    content is preserved inside RB v4 §11.2 (decision KLD-2026-07-24-001)
-12. kitluy-store-hub-managed-device-security-lock-and-build-spec-v1.0.0.md —
-    cited by the Store Hub spec, **still missing**
+Update this file whenever:
 
-If any original of items 1–8 is later found, the found original takes
-precedence over the bootstrap recreation and the two must be reconciled.
+- a new owner decision is approved;
+- a master or product specification changes version;
+- a document becomes canonical, retained, archived or superseded;
+- a repository, schema, API or deployment evidence artifact is registered;
+- a competitor concept is formally adopted or rejected;
+- a file name, product name or ownership boundary changes.
 
-## Prior code (not authority; evidence source only)
+No agent may delete a historical index row. Change its state and add the replacement or archive location.
 
-- `KITLUY-SUITE-REPO (MAIN)` on Synology Drive (last touched ~2026-07-01/05;
-  predates the 2026-07-24..26 canonical spec wave) — see manifest.
-- `kitluy-pos-app-laundry-phase1` (March 2026 era) and product zips — PRIOR-CODE.
+---
+
+## Repository addendum — KL-DOCS-001 (not part of the owner original)
+
+Owner original (immutable): `docs/source/canonical/kitluy-source-of-truth-index-v1.0.0.md`.
+
+### State corrections established by physical inventory (2026-07-26)
+
+- **SOT-010 / SOT-011** (kitluy-suite-rebuild-bible-v4.0.0.md,
+  kitluy-suite-business-bible-v2.0.0.md): the index says "Missing from
+  package" — both are now physically present and canonical at
+  `docs/source/canonical/` (duplicate formatting-variants in
+  `docs/source/imported/` are registered in
+  `docs/source/manifests/kitluy-imported-copy-status-v1.0.0.json`).
+  Recorded as KLREC-2026-07-26-005. Owner decision IDs preserved in RB v4:
+  KLV4-DEC-001, KLV4-DEC-002, KLV4-DEC-003, KLV4-DEC-004, KLV4-DEC-005,
+  KLV4-DEC-006, KLV4-DEC-007, KLV4-DEC-008, KLV4-DEC-009, KLV4-DEC-010,
+  KLV4-DEC-011, KLV4-DEC-012, and KLD-2026-07-24-001.
+- **SOT-027** (`kitluy-owner-decision-lock-12-capabilities-v1.0.md`): indexed
+  as an active file but **not physically found anywhere on this machine**; its
+  content survives inside RB v4 §11.2 (KLD-2026-07-24-001). Recorded as
+  KLREC-2026-07-26-006.
+- **SOT-200** (master feature registry): only the `.csv` exists physically
+  (`docs/source/imported/kitluy-master-feature-registry-v0.2.csv`, 441 rows);
+  `.md`/`.json` forms remain missing.
+- Still missing machine-wide:
+  `kitluy-store-hub-managed-device-security-lock-and-build-spec-v1.0.0.md`;
+  the owner documentation-program instruction (`Pasted text.txt`, expected to
+  become `kitluy-ai-build-readiness-document-program-v1.0.0.md`).
+
+### Newly ingested corpus (KL-DOCS-001, 2026-07-26 — not yet indexed by the owner rows)
+
+102 owner-supplied sources (governed API pack, Supabase implementation pack
+of 10, canonical business rules pack, security pack, Store Hub/offline pack,
+9 shared-service specs, UI/UX build pack, control pack) are registered with
+stable IDs in `docs/source/manifests/kitluy-source-document-manifest-v1.0.0.*`
+and classified under `docs/source/`. Missing pack members:
+`kitluy-suite-supabase-schema-v1.0.0.md`,
+`kitluy-suite-supabase-rls-and-authorization-v1.0.0.md`,
+`kitluy-suite-supabase-migration-plan-v1.0.0.md` (cited as authority levels
+above the pack by all 10 members; not shipped). Full status:
+`docs/source/processed/reconciliation/kitluy-required-document-coverage-matrix-v1.0.0.md`.
+
+### Prior code (evidence source only, never authority)
+
+`KITLUY-SUITE-REPO (MAIN)` (Synology Drive, ~2026-07-01/05) and the March
+2026 `kitluy-pos-app-laundry-phase1` repos — PRIOR-CODE per KLBOOT-DEC-007.

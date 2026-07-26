@@ -1,133 +1,234 @@
-# PROJECT_HOME — KitLuy Suite
+# KitLuy Suite Project Home
 
-**The first entry point for every human and AI agent working in this
-repository. Read this before anything else.**
+**Filename:** `PROJECT_HOME.md`  
+**Control-pack version:** v1.0.0  
+**Date:** 2026-07-26  
+**Owner:** HET / KitLuy Suite Project Owner  
+**Status:** CANONICAL ENTRY POINT  
+**Audience:** Humans, KIMI Swarm, Claude Code, ChatGPT, implementation agents, reviewers, QA, DevOps, support and operators
 
-| Field                             | Value                                                                                                     |
-| --------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| Project                           | KitLuy Suite — Cambodia-first Digital Store operating system                                              |
-| Owner                             | HET / KitLuy Suite Project Owner                                                                          |
-| Active phase                      | **Phase 1 — Laundry Stores and Shops** (Phases 2–8 registered, inactive)                                  |
-| Repository                        | `/Users/vongvichetpa/Documents/HET-KITLUY-PROJECT` (this monorepo)                                        |
-| Languages / currencies / timezone | Khmer + English · KHR + USD · Asia/Phnom_Penh                                                             |
-| Cloud                             | Supabase (data/auth/RLS) + DigitalOcean (compute/Spaces), Singapore/SGP1                                  |
-| Repository status                 | Bootstrapped 2026-07-26 (KL-BOOTSTRAP-001). Scaffolds + tested foundations; **no product is implemented** |
+> This is the first file every human or AI agent must read before interpreting, planning, changing or building KitLuy Suite.
 
-## What KitLuy is
+## 1. Start here
 
-> "KitLuy Suite is a Cambodia-first Digital Store operating system that lets a
-> Partner create digitally, operate physical Locations through offline-capable
-> edge systems, and sell through governed channels while KitLuy remains the
-> authoritative customer, transaction, payment, inventory, finance, audit and
-> reporting platform." — Rebuild Bible v4.0.0 §1.1
+Read these files in order:
 
-Operating model (locked): Partner Account → Digital Store (one primary
-vertical) → optional physical Store Location → Store Hub + T1–T4 terminals.
-The Digital Store is the control plane; the Store Hub is the local operational
-authority; external channels never own KitLuy truth.
+1. [`kitluy-authority-and-precedence-v1.0.0.md`](docs/authority/kitluy-authority-and-precedence-v1.0.0.md)
+2. [`kitluy-source-of-truth-index-v1.0.0.md`](docs/authority/kitluy-source-of-truth-index-v1.0.0.md)
+3. [`kitluy-glossary-and-naming-standard-v1.0.0.md`](docs/authority/kitluy-glossary-and-naming-standard-v1.0.0.md)
+4. [`kitluy-decision-and-reconciliation-register-v1.0.0.md`](docs/authority/kitluy-decision-and-reconciliation-register-v1.0.0.md)
+5. [`kitluy-open-decisions-and-required-values-v1.0.0.md`](docs/authority/kitluy-open-decisions-and-required-values-v1.0.0.md)
+6. [`kitluy-implementation-status-and-evidence-register-v1.0.0.md`](docs/authority/kitluy-implementation-status-and-evidence-register-v1.0.0.md)
+7. [`kitluy-superseded-document-register-v1.0.0.md`](docs/authority/kitluy-superseded-document-register-v1.0.0.md)
+8. The current master Rebuild and Business Bibles.
+9. The current specification for the product or vertical being changed.
+10. The applicable schema, API, event, migration, test, deployment and operating evidence.
 
-## Authority order (summary — full text in docs/authority/)
+An agent must not begin implementation from a competitor analysis, clone bible, old rebuild bible, backlog or feature registry alone.
 
-1. Current project-owner decisions and active KitLuy Project Instructions
-2. Applied migrations, verified repository code, executable tests, production evidence
-3. Current source-of-truth / Rebuild / Business Bibles (RB v4.0.0, BB v2.0.0)
-4. Current approved product/API/data/security/offline/service specifications
-5. Approved handoffs
-6. Master Feature Registry and traceability artifacts
-7. Evidence-based competitor analyses
-8. Competitor clone/rebuild documents — design references ONLY
-9. Superseded planning
+## 2. Current master-authority gate
 
-No conflict may be silently reconciled — record it in
-[docs/authority/kitluy-decision-and-reconciliation-register-v1.0.0.md](docs/authority/kitluy-decision-and-reconciliation-register-v1.0.0.md).
+The intended master authority files are:
 
-## Where canonical documents live
+| File                                    | Required role                                                                                                                          | Current package state                                                            |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `kitluy-suite-rebuild-bible-v4.0.0.md`  | Consolidated product and technical authority reflecting the eight phases, Digital Store model, T1-T4 and current application inventory | **NOT PRESENT in the supplied source bundle. Must be added and owner-approved.** |
+| `kitluy-suite-business-bible-v2.0.0.md` | Consolidated business, pricing, pilot, support, ownership and phase-exit authority                                                     | **NOT PRESENT in the supplied source bundle. Must be added and owner-approved.** |
 
-- **Imported source documents (read-only copies):** [docs/source/imported/](docs/source/imported/) —
-  manifest in [docs/source/manifest.md](docs/source/manifest.md). Newest canonical per family is
-  listed there; superseded versions are registered in
-  [docs/authority/kitluy-superseded-document-register-v1.0.0.md](docs/authority/kitluy-superseded-document-register-v1.0.0.md).
-- **Authority control pack:** [docs/authority/](docs/authority/) (source-of-truth index, precedence,
-  decision register, open decisions/required values, implementation status,
-  superseded register, glossary).
-- **ADRs:** [docs/decisions/](docs/decisions/).
+Until those files are present, the active KitLuy Project Instructions and explicit owner decisions remain the highest product-direction authority. `kitluy-suite-rebuild-bible-v3.0.0.md` and `kitluy-suite-ecosystem-business-bible-v1.0.0.md` are retained only for unaffected material and must not restore the obsolete T1-T3 or physical-Store-first model.
+
+## 3. Locked platform direction
+
+### 3.1 Vertical build roadmap
+
+KitLuy is built by phased vertical expansion:
+
+1. Laundry Stores and Shops
+2. Café and Restaurant Stores
+3. Online Retailers and eCommerce Businesses
+4. Convenience Stores
+5. Drugstores and Pharmacies
+6. Department Stores
+7. Grocery Stores
+8. Supermarkets
+
+A phase must remain independently deployable and commercially viable. Roadmap changes require a versioned owner decision.
+
+### 3.2 Digital-first operating model
+
+```text
+Partner Account
+  -> Digital Store
+  -> Primary Vertical
+  -> Catalog, Pricing, Staff, Payments and Rules
+  -> Digital Sales Channels
+  -> Optional Store Location
+  -> Store Hub, POS and Connected Devices
+```
+
+The **Digital Store** is the control plane. A **Store Location** is an optional physical, offline-capable edge environment. External websites, marketplaces, delivery services and connectors are governed channels and never own customer, inventory, payment, finance or audit truth.
+
+### 3.3 Vertical isolation
+
+Each Digital Store belongs to exactly one primary vertical. A Partner operating different business types creates separate Digital Stores under the same Tenant or Partner Account.
+
+### 3.4 Shared Core
+
+All verticals reuse KitLuy Core for Tenant, Digital Store, Store Location, identity, permissions, catalog, pricing, customers, transactions, payments, inventory, purchasing, finance, reporting, Store Hub, POS, offline sync, files, notifications, jobs, webhooks, audit, integrations and AI controls.
+
+A vertical adds only its terminology, schema delta, workflows, interfaces, reports, hardware profile, defaults and rules. Laundry terminology must never be hardcoded into neutral Core contracts.
+
+### 3.5 Store edge authority
+
+After provisioning, the Store Hub is the local operational authority. T1-T4 and approved local clients communicate with the Hub over LAN. Cloud synchronization is asynchronous. Internet failure must not stop approved local operations.
+
+### 3.6 Laundry terminal roles
+
+| Role | Canonical name                    | Binding responsibility                                                                                      |
+| ---- | --------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| T1   | POS Cashier / Intake Terminal     | Customer intake, authoritative Laundry Booking creation, pricing, deposit/payment, receipt and tag printing |
+| T2   | Customer Display Screen           | Customer-facing mirror of Booking, services, totals, KHQR/payment state and pickup information              |
+| T3   | Clean & Ready Scan-In Terminal    | Quality/count verification, packaging, storage assignment and Ready custody event                           |
+| T4   | Customer Pickup Scan-Out Terminal | Collector verification, balance control, custody release and Booking completion                             |
+
+T2 is not KDS and is not production Scan-In. T3 never performs customer release. T4 alone completes pickup scan-out. T3 and T4 may share hardware but remain separate roles, permissions, modes and audit events.
+
+### 3.7 Technology and provider responsibility
+
+| Layer                 | Direction                                                                          |
+| --------------------- | ---------------------------------------------------------------------------------- |
+| Web/PWA               | React                                                                              |
+| Mobile                | React Native + Expo                                                                |
+| Fixed Laundry clients | Electron + React on Linux ARM64                                                    |
+| Edge OS               | Raspberry Pi OS 64-bit                                                             |
+| Store Hub             | Raspberry Pi 5 reference platform                                                  |
+| Supabase              | Auth, PostgreSQL, RLS, Realtime, metadata, audit and authoritative cloud records   |
+| DigitalOcean          | App/service hosting, workers, Spaces, AI, MCP, RAG and signed release distribution |
+
+### 3.8 Evidence discipline
+
+Never label a capability `IMPLEMENTED` because it appears in a bible, specification, registry, backlog, mockup or clone document. Use the implementation status model in the evidence register. Every status above `SPECIFIED` requires linked evidence.
+
+## 4. Source classes
+
+| Class                            | Meaning                                                                                   | Permitted use                                         |
+| -------------------------------- | ----------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| Owner authority                  | Current Project Instructions and explicit owner decisions                                 | Product direction, guardrails and conflict resolution |
+| Verified implementation evidence | Applied migrations, verified code/tests, deployment records and production/pilot evidence | What actually exists in a named environment           |
+| Master authority                 | Current approved Rebuild and Business Bibles                                              | Consolidated target architecture and business model   |
+| Product specification            | Current approved product/phase specification                                              | Product-specific target behavior and contracts        |
+| Planning registry/backlog        | Master registry, classifications and implementation backlogs                              | Normalization, traceability and work planning only    |
+| Competitor evidence              | Evidence-based analyses                                                                   | Comparison and design input only                      |
+| Clone/rebuild reference          | Competitor clone bibles                                                                   | Hypotheses and design references only                 |
+| Superseded material              | Older or conflicting documents                                                            | Historical traceability only                          |
+
+## 5. Agent startup checklist
+
+Before changing any artifact or repository:
+
+- [ ] Identify the requested product, vertical, environment and release.
+- [ ] Read the authority and glossary files.
+- [ ] Confirm the active master and product specifications.
+- [ ] Check the decision register for owner locks and conflict resolutions.
+- [ ] Check the open-value register for unresolved `[REQUIRED: ...]` inputs.
+- [ ] Check the superseded register for prohibited legacy concepts.
+- [ ] Check the implementation register before making any status claim.
+- [ ] Identify Tenant, Digital Store, Store Location, user, role and device scope.
+- [ ] Identify offline, finance, payment, inventory, audit and migration impact.
+- [ ] Preserve append-only finalized records and human confirmation controls.
+- [ ] Create or update tests, monitoring, rollback and documentation evidence.
+
+## 6. Stop conditions
+
+Stop implementation and create a reconciliation entry when:
+
+- two authorities at the same level conflict;
+- the requested change would alter a locked roadmap, vertical rule or source-of-truth boundary;
+- an exact production value is still `[REQUIRED]`;
+- a migration, finance, payment, permission, compliance or safety action lacks authorized human confirmation;
+- implementation evidence contradicts the intended target model;
+- a competitor or clone design is being promoted without KitLuy approval;
+- a change would reintroduce T1-T3, T2-as-Scan-In, T3-as-Scan-Out, Seller naming or physical-Store-first onboarding;
+- a connector would receive direct production-database access;
+- stale, cached, estimated or demo data would be shown as authoritative truth.
+
+## 7. Change-control rule
+
+Every material change must update, as applicable:
+
+1. decision/reconciliation register;
+2. source-of-truth index;
+3. glossary/naming standard;
+4. open required-values register;
+5. implementation/evidence register;
+6. superseded-document register;
+7. master Rebuild and Business Bibles;
+8. affected product/vertical specification;
+9. schema/API/event/migration/test/deployment/runbook artifacts.
+
+## 8. Phase completion and Rebuild Test
+
+A phase is complete only when scope, schema, workflows, APIs, permissions, interfaces, offline behavior, hardware, finance rules, reports, integrations, migrations, seeds, QA, security, monitoring, recovery, pilot, go-live checklist and updated Rebuild/Business documentation are approved and evidenced.
+
+**Rebuild Test:** one qualified engineer must be able to reconstruct and operate the vertical from approved documentation, migrations, contracts and deployment instructions.
+
+---
+
+# Repository Operations Addendum — KL-DOCS-001 (not part of the owner original)
+
+Owner original (immutable): `docs/source/canonical/PROJECT_HOME.md`. This
+addendum carries the repository-specific operating knowledge from the
+bootstrap PROJECT_HOME (preserved in git at commit `4a79f66`).
+
+## State correction (KLREC-2026-07-26-005)
+
+Section 2's master-authority gate declares `kitluy-suite-rebuild-bible-v4.0.0.md`
+and `kitluy-suite-business-bible-v2.0.0.md` "NOT PRESENT in the supplied
+source bundle". **Both are now physically present and canonical** at
+`docs/source/canonical/` (ingested 2026-07-26, KL-DOCS-001). The gate is
+satisfied; the claim is retained verbatim above only because owner text is
+never silently edited.
 
 ## Repository map
 
-| Path              | Contents                                                                                                         |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `apps/`           | 8 Phase 1 product shells (B2B website, Admin/Chain/Partner portals, Partner App, POS desktop/mobile, Storefront) |
-| `future-clients/` | Registered-inactive Phase 2+ clients (KDS, guest display, kiosk)                                                 |
-| `services/`       | 19 service boundaries: 4 governed APIs, shared services, `kitluy-hub-agent` (Store Hub)                          |
-| `packages/`       | 40 shared packages (neutral Core — no vertical terminology)                                                      |
-| `verticals/`      | `phase1-laundry` (ACTIVE, tested contracts) + phases 2–8 (registered, inactive)                                  |
-| `supabase/`       | Local config, migration conventions (no DDL yet — schema pack missing)                                           |
-| `infra/`          | Terraform skeletons, DO App Platform template, disabled Kubernetes, monitoring/policies                          |
-| `docs/`           | Authority pack, architecture, per-family documentation indexes                                                   |
-| `scripts/`        | bootstrap/verification/database/contract/testing scripts                                                         |
-| `tests/`          | Cross-cutting harness locations (status documented per directory)                                                |
-| `00_AI_HANDOFF/`  | Session handoffs — read the latest before working                                                                |
+| Path                                        | Contents                                                                                             |
+| ------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `apps/`                                     | 8 Phase 1 product shells (fail-closed scaffolds)                                                     |
+| `future-clients/`                           | Registered-inactive Phase 2+ clients                                                                 |
+| `services/`                                 | 4 governed APIs, shared services, `kitluy-hub-agent` (Store Hub)                                     |
+| `packages/`                                 | 40 shared packages (neutral Core)                                                                    |
+| `verticals/`                                | `phase1-laundry` (ACTIVE) + phases 2–8 (registered, inactive)                                        |
+| `docs/authority/`                           | Working governance documents (owner originals + marked repository addenda)                           |
+| `docs/source/`                              | Owner-supplied corpus: `inbox/` originals (immutable), classified copies, `manifests/`, `processed/` |
+| `supabase/`, `infra/`, `tests/`, `scripts/` | Data conventions, IaC skeletons, harnesses, tooling                                                  |
+| `00_AI_HANDOFF/`                            | Session handoffs — read the latest before working                                                    |
 
-## How to run
+## How to run / test / validate
 
 ```bash
-corepack enable pnpm      # or: npm i -g pnpm@9.15.9
 pnpm install
-pnpm dev                  # turbo dev across apps (each app also runs standalone)
-bash scripts/bootstrap/check-toolchain.sh   # see what's missing locally
+pnpm verify        # full safe local suite (11 gates)
+pnpm docs:verify   # documentation-governance suite (inventory, hashes,
+                   # duplicates, classification, authority, coverage,
+                   # status-register evidence, links)
 ```
 
-Simulated Store Hub: `HUB_LAN_PORT=8787 KITLUY_ENV=local node services/kitluy-hub-agent/dist/main.js` (after `pnpm build`).
+Migrations: see `supabase/migrations/README.md` — never auto-applied to
+production (KL-INF-P1-037). Handoffs: template in `00_AI_HANDOFF/000_INDEX.md`.
 
-## How to test
+## Current blockers (full register: docs/authority/kitluy-open-decisions-and-required-values-v1.0.0.md)
 
-```bash
-pnpm verify        # full safe local suite (format, lint, typecheck, tests,
-                   # contract tests, offline harness, build, OpenAPI checks,
-                   # migration validation, secret scan, docs links)
-pnpm test          # unit tests only
-pnpm test:contract # governed API contract tests
-pnpm test:offline  # Store Hub offline/reconnect harness
-pnpm test:rls      # BLOCKED (Supabase CLI + RLS pack missing) — exits non-zero honestly
-pnpm test:e2e      # BLOCKED (journey spec + browsers) — exits non-zero honestly
-```
+1. Supabase pack incomplete — `kitluy-suite-supabase-schema-v1.0.0.md`,
+   `-rls-and-authorization-`, `-migration-plan-` missing (KLREQ-001).
+2. `/edge/v1` route fork between the Store Hub LAN API and Edge Operations
+   API documents (KLREC-2026-07-26-001) — Hub business routes stay blocked.
+3. Owner documentation-program instruction (`Pasted text.txt`) not physically
+   supplied (KLREQ-007).
+4. Contract/code drifts pending owner confirmation: terminal-profile
+   identifiers, error-code names, event-name format, scope taxonomy,
+   permission-key delimiters (KLREC-2026-07-26-009..013).
 
-## How to create migrations
-
-See [supabase/migrations/README.md](supabase/migrations/README.md). Naming
-`<YYYYMMDDHHMMSS>_<snake_case>.sql`, additive by default, validated by
-`pnpm migrations:validate`. **Never auto-apply production migrations**
-(OWNER-LOCKED KL-INF-P1-037) — production application is a human, four-eyes
-operation. The canonical schema pack does not exist yet; do not invent DDL.
-
-## How to create a handoff
-
-Copy the template in [00_AI_HANDOFF/000_INDEX.md](00_AI_HANDOFF/000_INDEX.md), name it
-`YYYY-MM-DD__<AREA>__<TASK-ID>__<SLUG>__AI-HANDOFF.md` under the matching
-subfolder, and add it to the index. Every significant session ends with one.
-
-## How implementation status is proven
-
-Statuses (`OWNER-LOCKED … REQUIRED VALUE`) and the evidence chain
-(specification → code → migrations → tests → integration → deployment →
-monitoring → pilot → production) are defined in
-[docs/authority/kitluy-implementation-status-and-evidence-register-v1.0.0.md](docs/authority/kitluy-implementation-status-and-evidence-register-v1.0.0.md).
-**Scaffolded code is not implemented functionality.** Never claim a status
-without its evidence.
-
-## Current blockers and required values
-
-The full register is
-[docs/authority/kitluy-open-decisions-and-required-values-v1.0.0.md](docs/authority/kitluy-open-decisions-and-required-values-v1.0.0.md).
-Highest-impact blockers right now:
-
-1. **Supabase schema / RLS / migration pack (RB v4 §13.3)** — blocks all real
-   data behavior, RLS tests, seeds.
-2. **`/edge/v1` route-shape conflict** between Hub spec §9.2 and POS spec
-   §14.2 (KLREC-2026-07-26-001) — blocks Edge Operations business routes.
-3. **Missing governance source files** (feature registry .md/.json,
-   owner-decision-lock file, store-hub security lock spec) — cited by canonical
-   docs but absent from this machine; imported CSV is the only registry form.
-4. **Production values**: legal entity, domains, Supabase/DO project names,
-   PKI/CA design, KHQR provider, notification providers, pricing (RB v4
-   Appendix E; BB v2 Appendix A).
+> Mechanical repair note (KL-DOCS-001): the owner text above linked its
+> control-pack siblings by bundle-relative filename; link _paths_ were
+> adjusted to `docs/authority/…` so they resolve in this repository. No
+> wording was changed. Pristine original: `docs/source/canonical/PROJECT_HOME.md`.
