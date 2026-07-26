@@ -2,15 +2,15 @@
 
 ## 0. Identity
 
-| Field | Value |
-|---|---|
-| Task ID | `[REQUIRED]` |
-| Evidence ID | `KLEV-<YYYY>-<NNN>` |
-| Commit SHA | `[REQUIRED]` |
-| Branch/worktree | `[REQUIRED]` |
-| Environment | `local | dev | staging | pilot | production` |
-| Executor | `[human/agent/CI identity]` |
-| Date/time | `[ISO 8601 with timezone]` |
+| Field                   | Value                                     |
+| ----------------------- | ----------------------------------------- |
+| Task ID                 | `[REQUIRED]`                              |
+| Evidence ID             | `KLEV-<YYYY>-<NNN>`                       |
+| Commit SHA              | `[REQUIRED]`                              |
+| Branch/worktree         | `[REQUIRED]`                              |
+| Environment             | `local                                    | dev | staging | pilot | production` |
+| Executor                | `[human/agent/CI identity]`               |
+| Date/time               | `[ISO 8601 with timezone]`                |
 | Evidence classification | `[choose from approved state vocabulary]` |
 
 ## 1. Environment fingerprint
@@ -34,47 +34,47 @@ Record references, never secrets.
 
 ## 3. Command evidence
 
-| # | Command/check | Started | Ended | Exit/result | Output artifact/log | Notes |
-|---:|---|---|---|---|---|---|
-| 1 | `[exact command]` | `[time]` | `[time]` | `PASS/FAIL/NOT RUN` | `[path/run ID]` | `[notes]` |
+|   # | Command/check     | Started  | Ended    | Exit/result         | Output artifact/log | Notes     |
+| --: | ----------------- | -------- | -------- | ------------------- | ------------------- | --------- |
+|   1 | `[exact command]` | `[time]` | `[time]` | `PASS/FAIL/NOT RUN` | `[path/run ID]`     | `[notes]` |
 
 Do not paste huge logs or sensitive payloads. Store or link the approved artifact and include concise relevant excerpts.
 
 ## 4. Acceptance-criterion evidence
 
-| AC ID | Evidence method | Result | Artifact/query/test | Reviewer reproducible? |
-|---|---|---|---|---|
-| `AC-01` | `[method]` | `PASS/FAIL/NOT VERIFIED` | `[reference]` | `yes/no` |
+| AC ID   | Evidence method | Result                   | Artifact/query/test | Reviewer reproducible? |
+| ------- | --------------- | ------------------------ | ------------------- | ---------------------- |
+| `AC-01` | `[method]`      | `PASS/FAIL/NOT VERIFIED` | `[reference]`       | `yes/no`               |
 
 ## 5. Migration evidence
 
 Complete when applicable.
 
-| Item | Result/evidence |
-|---|---|
-| Migration file authored | `[path]` |
-| Local lint | `[result]` |
-| Fresh local apply | `[result]` |
-| Upgrade from prior head | `[result]` |
-| RLS/constraint validation | `[result]` |
-| Seed idempotency | `[result]` |
-| Rollback/forward-fix rehearsal | `[result]` |
-| Applied to development | `[operator/run/evidence or NO]` |
-| Applied to staging | `[operator/run/evidence or NO]` |
-| Applied to production | `[authorized operator/run/evidence or NO]` |
+| Item                           | Result/evidence                            |
+| ------------------------------ | ------------------------------------------ |
+| Migration file authored        | `[path]`                                   |
+| Local lint                     | `[result]`                                 |
+| Fresh local apply              | `[result]`                                 |
+| Upgrade from prior head        | `[result]`                                 |
+| RLS/constraint validation      | `[result]`                                 |
+| Seed idempotency               | `[result]`                                 |
+| Rollback/forward-fix rehearsal | `[result]`                                 |
+| Applied to development         | `[operator/run/evidence or NO]`            |
+| Applied to staging             | `[operator/run/evidence or NO]`            |
+| Applied to production          | `[authorized operator/run/evidence or NO]` |
 
 A migration file or local apply does not prove production application.
 
 ## 6. Security and isolation evidence
 
-| Scenario | Expected | Result | Evidence |
-|---|---|---|---|
-| unauthenticated request | denied | `[result]` | `[reference]` |
-| wrong Tenant/Store/Location | denied | `[result]` | `[reference]` |
-| wrong permission/role | denied | `[result]` | `[reference]` |
-| approval/re-auth required | enforced | `[result]` | `[reference]` |
-| audit event | immutable record | `[result]` | `[reference]` |
-| replay/idempotency | one business effect | `[result]` | `[reference]` |
+| Scenario                    | Expected            | Result     | Evidence      |
+| --------------------------- | ------------------- | ---------- | ------------- |
+| unauthenticated request     | denied              | `[result]` | `[reference]` |
+| wrong Tenant/Store/Location | denied              | `[result]` | `[reference]` |
+| wrong permission/role       | denied              | `[result]` | `[reference]` |
+| approval/re-auth required   | enforced            | `[result]` | `[reference]` |
+| audit event                 | immutable record    | `[result]` | `[reference]` |
+| replay/idempotency          | one business effect | `[result]` | `[reference]` |
 
 ## 7. Offline / Store Hub evidence
 
@@ -89,19 +89,19 @@ Complete when applicable:
 
 ## 8. Build/deployment/release evidence
 
-| Stage | Commit/artifact | Environment/channel | Result | Health/smoke | Operator/approval |
-|---|---|---|---|---|---|
-| build | `[ID]` | `[env]` | `[result]` | `[result]` | `[identity]` |
-| deploy | `[ID]` | `[env]` | `[result]` | `[result]` | `[identity]` |
-| release promotion | `[ID]` | `Internal/Pilot/Stable` | `[result]` | `[result]` | `[approval]` |
+| Stage             | Commit/artifact | Environment/channel     | Result     | Health/smoke | Operator/approval |
+| ----------------- | --------------- | ----------------------- | ---------- | ------------ | ----------------- |
+| build             | `[ID]`          | `[env]`                 | `[result]` | `[result]`   | `[identity]`      |
+| deploy            | `[ID]`          | `[env]`                 | `[result]` | `[result]`   | `[identity]`      |
+| release promotion | `[ID]`          | `Internal/Pilot/Stable` | `[result]` | `[result]`   | `[approval]`      |
 
 Leave rows blank or mark `NOT PERFORMED`. Never infer deployment from a build.
 
 ## 9. Failures, flakes and deviations
 
-| Item | Classification | Impact | Disposition/task |
-|---|---|---|---|
-| `[failure]` | `real defect/flake/environment/not run` | `[impact]` | `[action]` |
+| Item        | Classification                          | Impact     | Disposition/task |
+| ----------- | --------------------------------------- | ---------- | ---------------- |
+| `[failure]` | `real defect/flake/environment/not run` | `[impact]` | `[action]`       |
 
 ## 10. Evidence conclusion
 

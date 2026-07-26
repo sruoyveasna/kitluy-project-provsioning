@@ -46,12 +46,12 @@ The phase is not complete merely when screens or services exist. Exit requires a
 
 ### Laundry terminal rules
 
-| Profile | Canonical purpose | Hard boundary |
-|---|---|---|
-| T1 | POS Cashier / Intake | intake, authoritative Booking creation, price, deposit/payment, receipt/tag |
-| T2 | Customer Display Screen | customer-facing mirror, totals, KHQR/payment state, receipt/pickup information; no production workflow |
-| T3 | Clean & Ready Scan-In | quality/count, packaging, storage assignment, ready custody event; no customer release |
-| T4 | Customer Pickup Scan-Out | collector verification, balance control, custody release, Booking completion |
+| Profile | Canonical purpose        | Hard boundary                                                                                          |
+| ------- | ------------------------ | ------------------------------------------------------------------------------------------------------ |
+| T1      | POS Cashier / Intake     | intake, authoritative Booking creation, price, deposit/payment, receipt/tag                            |
+| T2      | Customer Display Screen  | customer-facing mirror, totals, KHQR/payment state, receipt/pickup information; no production workflow |
+| T3      | Clean & Ready Scan-In    | quality/count, packaging, storage assignment, ready custody event; no customer release                 |
+| T4      | Customer Pickup Scan-Out | collector verification, balance control, custody release, Booking completion                           |
 
 ## 3. Allowed shared forward preparation
 

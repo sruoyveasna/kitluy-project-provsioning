@@ -2,15 +2,15 @@
 
 ## 0. Identity
 
-| Field | Value |
-|---|---|
-| Task ID | `[REQUIRED]` |
-| Change/release ID | `[REQUIRED]` |
-| Environment | `local | dev | staging | pilot | production` |
-| Owner/operator | `[REQUIRED]` |
-| Prepared by | `[REQUIRED]` |
-| Date | `[YYYY-MM-DD]` |
-| Strategy | `ROLLBACK | FORWARD_FIX | FEATURE_DISABLE | RESTORE | A/B_REVERT` |
+| Field             | Value          |
+| ----------------- | -------------- |
+| Task ID           | `[REQUIRED]`   |
+| Change/release ID | `[REQUIRED]`   |
+| Environment       | `local         | dev         | staging         | pilot   | production` |
+| Owner/operator    | `[REQUIRED]`   |
+| Prepared by       | `[REQUIRED]`   |
+| Date              | `[YYYY-MM-DD]` |
+| Strategy          | `ROLLBACK      | FORWARD_FIX | FEATURE_DISABLE | RESTORE | A/B_REVERT` |
 
 ## 1. Change being reversed or contained
 
@@ -66,13 +66,13 @@ Never delete or mutate finalized finance, payment, inventory, custody, or audit 
 
 ## 7. Verification after rollback
 
-| Check | Expected | Result/evidence |
-|---|---|---|
-| health/smoke | `[expected]` | `[record]` |
-| data integrity/reconciliation | `[expected]` | `[record]` |
-| authorization/tenant isolation | `[expected]` | `[record]` |
-| offline/sync queues | `[expected]` | `[record]` |
-| monitoring stability | `[expected]` | `[record]` |
+| Check                          | Expected     | Result/evidence |
+| ------------------------------ | ------------ | --------------- |
+| health/smoke                   | `[expected]` | `[record]`      |
+| data integrity/reconciliation  | `[expected]` | `[record]`      |
+| authorization/tenant isolation | `[expected]` | `[record]`      |
+| offline/sync queues            | `[expected]` | `[record]`      |
+| monitoring stability           | `[expected]` | `[record]`      |
 
 ## 8. Failure of rollback
 

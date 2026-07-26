@@ -2,19 +2,19 @@
 
 ## 0. Identity
 
-| Field | Value |
-|---|---|
-| Task ID | `[REQUIRED]` |
-| Task title | `[REQUIRED]` |
-| Product/build | `[REQUIRED]` |
-| Primary agent | `[REQUIRED]` |
-| Status | `HANDOFF_READY | PARTIAL | BLOCKED` |
-| Branch | `[REQUIRED]` |
-| Worktree | `[REQUIRED]` |
-| Base commit | `[REQUIRED]` |
-| Final commit | `[REQUIRED or UNCOMMITTED]` |
-| Handoff date | `[YYYY-MM-DD]` |
-| Requested reviewer | `[REQUIRED]` |
+| Field              | Value                       |
+| ------------------ | --------------------------- |
+| Task ID            | `[REQUIRED]`                |
+| Task title         | `[REQUIRED]`                |
+| Product/build      | `[REQUIRED]`                |
+| Primary agent      | `[REQUIRED]`                |
+| Status             | `HANDOFF_READY              | PARTIAL | BLOCKED` |
+| Branch             | `[REQUIRED]`                |
+| Worktree           | `[REQUIRED]`                |
+| Base commit        | `[REQUIRED]`                |
+| Final commit       | `[REQUIRED or UNCOMMITTED]` |
+| Handoff date       | `[YYYY-MM-DD]`              |
+| Requested reviewer | `[REQUIRED]`                |
 
 ## 1. Outcome
 
@@ -22,9 +22,9 @@
 
 ## 2. Source-of-truth checked
 
-| Source | Version/commit | Section/path | Result |
-|---|---|---|---|
-| `[source]` | `[version]` | `[section]` | `[aligned/conflict/not found]` |
+| Source     | Version/commit | Section/path | Result                         |
+| ---------- | -------------- | ------------ | ------------------------------ |
+| `[source]` | `[version]`    | `[section]`  | `[aligned/conflict/not found]` |
 
 ## 3. Files inspected
 
@@ -32,9 +32,9 @@
 
 ## 4. Files changed
 
-| Path | Change summary | Why | Generated? |
-|---|---|---|---|
-| `[path]` | `[summary]` | `[task requirement]` | `yes/no` |
+| Path     | Change summary | Why                  | Generated? |
+| -------- | -------------- | -------------------- | ---------- |
+| `[path]` | `[summary]`    | `[task requirement]` | `yes/no`   |
 
 ### Allowlist verification
 
@@ -72,15 +72,15 @@
 
 ## 6. Acceptance criteria evidence
 
-| AC ID | Result | Evidence reference | Notes |
-|---|---|---|---|
-| `AC-01` | `PASS/FAIL/NOT RUN` | `[path/link/log]` | `[notes]` |
+| AC ID   | Result              | Evidence reference | Notes     |
+| ------- | ------------------- | ------------------ | --------- |
+| `AC-01` | `PASS/FAIL/NOT RUN` | `[path/link/log]`  | `[notes]` |
 
 ## 7. Validation performed
 
-| Command/check | Environment | Result | Evidence | Notes |
-|---|---|---|---|---|
-| `[command]` | `[local/dev/staging]` | `PASS/FAIL/NOT RUN` | `[record]` | `[notes]` |
+| Command/check | Environment           | Result              | Evidence   | Notes     |
+| ------------- | --------------------- | ------------------- | ---------- | --------- |
+| `[command]`   | `[local/dev/staging]` | `PASS/FAIL/NOT RUN` | `[record]` | `[notes]` |
 
 ## 8. Not run / not verified
 
@@ -88,9 +88,9 @@
 
 ## 9. Risks and known limitations
 
-| Severity | Risk/limitation | Impact | Mitigation/follow-up |
-|---|---|---|---|
-| `[level]` | `[item]` | `[impact]` | `[action]` |
+| Severity  | Risk/limitation | Impact     | Mitigation/follow-up |
+| --------- | --------------- | ---------- | -------------------- |
+| `[level]` | `[item]`        | `[impact]` | `[action]`           |
 
 ## 10. Blockers and open decisions
 

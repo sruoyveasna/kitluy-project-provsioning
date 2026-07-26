@@ -9,14 +9,14 @@ KIMI Swarm must follow `AGENTS.md`. This file defines orchestration, worker isol
 
 Use explicit roles. Do not let a worker silently change roles mid-task.
 
-| Role | Responsibility | Write authority |
-|---|---|---|
-| Orchestrator | Decomposes approved scope, assigns tasks, maintains dependency graph and index | Handoff control files only unless assigned a separate task |
-| Primary coding agent | Implements exactly one task in one worktree | Task allowlist only |
-| Independent review agent | Reviews source, tests, security, docs, and evidence | Review record only; code branch is read-only |
-| Integration/merge agent | Verifies approved review and merges in dependency order | Merge operations and conflict resolution authorized by task |
-| Evidence verifier | Re-runs selected checks and validates evidence integrity | Evidence/review record only |
-| Human owner/operator | Approves direction and sensitive production actions | As authorized by governance |
+| Role                     | Responsibility                                                                 | Write authority                                             |
+| ------------------------ | ------------------------------------------------------------------------------ | ----------------------------------------------------------- |
+| Orchestrator             | Decomposes approved scope, assigns tasks, maintains dependency graph and index | Handoff control files only unless assigned a separate task  |
+| Primary coding agent     | Implements exactly one task in one worktree                                    | Task allowlist only                                         |
+| Independent review agent | Reviews source, tests, security, docs, and evidence                            | Review record only; code branch is read-only                |
+| Integration/merge agent  | Verifies approved review and merges in dependency order                        | Merge operations and conflict resolution authorized by task |
+| Evidence verifier        | Re-runs selected checks and validates evidence integrity                       | Evidence/review record only                                 |
+| Human owner/operator     | Approves direction and sensitive production actions                            | As authorized by governance                                 |
 
 One agent may perform multiple roles over time, but never primary writer and independent reviewer for the same task.
 

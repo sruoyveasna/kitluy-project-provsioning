@@ -595,6 +595,10 @@ importers:
         version: 2.1.9(@types/node@22.20.1)(terser@5.49.0)
 
   packages/payments:
+    dependencies:
+      '@kitluy/money':
+        specifier: workspace:*
+        version: link:../money
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -602,6 +606,9 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: 5.7.3
+      vitest:
+        specifier: 'catalog:'
+        version: 2.1.9(@types/node@22.20.1)(terser@5.49.0)
 
   packages/pos-ui:
     devDependencies:
