@@ -32,12 +32,22 @@
  * land in supabase/generated/ (see its README).
  */
 import { spawnSync } from "node:child_process";
-import { mkdirSync, openSync } from "node:fs";
+import { mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 const BLOCKER_DOC = "00_AI_HANDOFF/OPERATOR-INSTRUCTION-BLK-002.md";
 const LOCAL_DB_URL_DEFAULT = "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
 const TYPES_OUTPUT = "packages/kitluy-supabase-types/src/database.generated.ts";
+// Review RV-402 (WS-01-T004-TYPES): after `supabase gen types` writes the raw
+// body, generation MUST re-prepend the governed warning header and apply
+// repository prettier rules so regeneration never shows spurious drift.
+const TYPES_HEADER =
+  [
+    "// GENERATED FILE — DO NOT EDIT BY HAND.",
+    "// Produced by `pnpm db:types` (supabase gen types typescript) from the LOCAL",
+    "// migrated development database. Regenerate instead of editing.",
+    "",
+  ].join("\n") + "\n";
 const KITLUY_SCHEMAS = ["public", "kitluy_core", "kitluy_auth", "kitluy_admin", "kitluy_audit"];
 
 const command = process.argv[2];
@@ -122,6 +132,10 @@ switch (command) {
     }
     const status = run("supabase", args, { stdio: ["inherit", out, "inherit"] });
     if (status === 0) {
+      // RV-402: deterministic post-processing — governed header + prettier.
+      const raw = readFileSync(TYPES_OUTPUT, "utf8");
+      writeFileSync(TYPES_OUTPUT, TYPES_HEADER + raw);
+      run("pnpm", ["exec", "prettier", "--write", TYPES_OUTPUT], { stdio: "inherit" });
       console.log(
         `Generated ${TYPES_OUTPUT} (governed package per kitluy-suite-supabase-generated-types-policy-v1.0.0.md; never hand-edit).`,
       );

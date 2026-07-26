@@ -1,0 +1,24 @@
+{
+  "name": "@kitluy/supabase-types",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Governed generated Supabase database types (kitluy_core, kitluy_auth, kitluy_admin, kitluy_audit). Generated body is never hand-edited.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "@types/node": "catalog:"
+  }
+}
