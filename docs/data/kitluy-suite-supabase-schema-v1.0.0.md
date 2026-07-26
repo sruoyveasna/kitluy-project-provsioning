@@ -489,3 +489,14 @@ enforcement matrix:
 Also registered from review RV-003: KLREC-2026-07-26-012/-013 (scope taxonomy
 and permission-key seed drifts) are additional §7 open items resolved by
 KLD-2026-07-26-002 Group 3 upon owner approval.
+
+## Amendment integration (Cycle 3 §16, 2026-07-26)
+
+Data-dictionary **Amendment-001** (CONTRACT-APPROVED,
+`kitluy-suite-supabase-data-dictionary-amendment-001-finance-subledger-v1.0.0.md`)
+adds the `kitluy_finance` schema (6 relations). It extends §1 (25th schema,
+finance ownership domain), closes the I7 double-entry gap noted in §3
+(balancing → deferrable constraint TRIGGER + RPC once migrated), and joins §2
+by reference. Migration ownership: group 0070 (payments_and_finance). Finance
+migrations are NOT implemented in Cycle 3; all open accounting/tax/rounding
+values remain [REQUIRED].

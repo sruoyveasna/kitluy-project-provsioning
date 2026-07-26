@@ -363,3 +363,11 @@ are reported in output text and never converted into fake passes.
    at which point shadow-database application and RLS-001..030 execution become gate evidence.
 4. No claim of applied migrations exists anywhere without a journal row and status-registry
    entry.
+
+## Amendment integration (Cycle 3 §16, 2026-07-26)
+
+Group **0070 payments_and_finance** now additionally owns the `kitluy_finance`
+relations of DD Amendment-001 (subledger_accounts, subledger_account_translations,
+journal_entries, journal_postings, source_postings, idempotency_records).
+Balancing trigger + RPC land with group 0130. Not authored in Cycle 3;
+unresolved finance owner values unaffected.
