@@ -254,3 +254,317 @@ values
    'CONSENT-DEMO-001', '{"resources": ["support_tickets", "digital_stores"]}',
    'Demo consent-scoped support access (fixture)', '2026-07-26T12:00:00Z', '2026-12-31T00:00:00Z')
 on conflict (id) do nothing;
+
+-- ===========================================================================
+-- Cycle-5 fixtures (WS-05/WS-06, groups 0040-0070) — SYNTHETIC DATA ONLY.
+-- UUID range ..0301-..0352. All rows use bare ON CONFLICT DO NOTHING so the
+-- second run is INSERT 0 0 against every unique AND exclusion constraint.
+-- Covers: laundry per-piece + per-weight services (neutral catalog +
+-- kitluy_laundry extension), KHR + USD price book rows, store base price +
+-- location override, draft + published config snapshots + publication target
+-- + acknowledgement + platform-scope config, customers incl. a
+-- Cambodian-phone-only customer, dup-candidate pair with open merge request,
+-- completed merge with distinct reviewer + tombstone + status history,
+-- marketing consent granted AND withdrawn (grant preserved) beside an intact
+-- transactional grant, privacy export request + decision, and cross-tenant
+-- attacker rows (Tenant B catalog/price/config/customer).
+-- Open owner values PRC-OD-001..005 / CFG-OD-001..005 / CUS-OD-001..004 are
+-- NOT represented by any value below (no tax, rounding, FX, OTP or retention
+-- fixture exists by design).
+-- ===========================================================================
+
+-- Neutral catalog items (Tenant A laundry store ds01) + translations.
+insert into kitluy_core.catalog_items
+  (id, tenant_id, digital_store_id, item_type, code, name, status)
+values
+  ('00000000-0000-4000-8000-000000000301', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000015', 'SERVICE', 'SRV-SHIRT-WASH', 'Shirt wash (per piece)', 'ACTIVE'),
+  ('00000000-0000-4000-8000-000000000304', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000015', 'SERVICE', 'SRV-WASH-KG', 'Wash and dry (per kg)', 'ACTIVE'),
+  -- Tenant B attacker-side catalog item (isolation probes).
+  ('00000000-0000-4000-8000-000000000313', '00000000-0000-4000-8000-000000000012',
+   '00000000-0000-4000-8000-000000000017', 'SERVICE', 'SRV-ATK-WASH', 'Tenant B wash (isolation fixture)', 'ACTIVE')
+on conflict do nothing;
+
+insert into kitluy_core.catalog_item_translations (id, catalog_item_id, locale, name)
+values
+  ('00000000-0000-4000-8000-000000000302', '00000000-0000-4000-8000-000000000301', 'km-KH', 'បោកអាវ (តាមចំនួន)'),
+  ('00000000-0000-4000-8000-000000000303', '00000000-0000-4000-8000-000000000301', 'en-US', 'Shirt wash (per piece)'),
+  ('00000000-0000-4000-8000-000000000305', '00000000-0000-4000-8000-000000000304', 'km-KH', 'បោកសម្ងួត (តាមគីឡូ)')
+on conflict do nothing;
+
+-- Laundry service extensions (per-piece and per-weight) + add-on.
+insert into kitluy_laundry.services
+  (id, tenant_id, digital_store_id, catalog_item_id, service_code, pricing_modes, status)
+values
+  ('00000000-0000-4000-8000-000000000306', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000015', '00000000-0000-4000-8000-000000000301',
+   'SHIRT-WASH', array['PER_PIECE'], 'ACTIVE'),
+  ('00000000-0000-4000-8000-000000000307', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000015', '00000000-0000-4000-8000-000000000304',
+   'WASH-KG', array['PER_WEIGHT'], 'ACTIVE'),
+  ('00000000-0000-4000-8000-000000000314', '00000000-0000-4000-8000-000000000012',
+   '00000000-0000-4000-8000-000000000017', '00000000-0000-4000-8000-000000000313',
+   'ATK-WASH', array['PER_PIECE'], 'ACTIVE')
+on conflict do nothing;
+
+insert into kitluy_laundry.service_addons
+  (id, tenant_id, digital_store_id, service_id, addon_code, name, pricing_mode, status)
+values
+  ('00000000-0000-4000-8000-000000000308', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000015', '00000000-0000-4000-8000-000000000306',
+   'EXPRESS', 'Express turnaround', 'FIXED', 'ACTIVE')
+on conflict do nothing;
+
+-- Price book rows (integer minor units; KHR exponent 0, USD exponent 2).
+-- Store base KHR per-piece 2,000 riel (KBR-PRC-003 TV1), store base KHR
+-- per-weight 3,000 riel/kg (TV2), store base USD per-piece 50 cents, and a
+-- Location price-book override 2,500 riel at loc01 (KBR-PRC-002 TV1).
+insert into kitluy_laundry.service_prices
+  (id, tenant_id, service_id, digital_store_id, store_location_id, currency_code,
+   pricing_mode, unit_price_minor, min_charge_minor, effective_from, version, created_by)
+values
+  ('00000000-0000-4000-8000-000000000309', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000306', '00000000-0000-4000-8000-000000000015',
+   null, 'KHR', 'PER_PIECE', 2000, null, '2026-07-27T00:00:00Z', 1,
+   '00000000-0000-4000-8000-000000000002'),
+  ('00000000-0000-4000-8000-000000000310', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000307', '00000000-0000-4000-8000-000000000015',
+   null, 'KHR', 'PER_WEIGHT', 3000, null, '2026-07-27T00:00:00Z', 1,
+   '00000000-0000-4000-8000-000000000002'),
+  ('00000000-0000-4000-8000-000000000311', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000306', '00000000-0000-4000-8000-000000000015',
+   null, 'USD', 'PER_PIECE', 50, null, '2026-07-27T00:00:00Z', 1,
+   '00000000-0000-4000-8000-000000000002'),
+  ('00000000-0000-4000-8000-000000000312', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000306', '00000000-0000-4000-8000-000000000015',
+   '00000000-0000-4000-8000-000000000018', 'KHR', 'PER_PIECE', 2500, null,
+   '2026-07-27T00:00:00Z', 1, '00000000-0000-4000-8000-000000000002'),
+  ('00000000-0000-4000-8000-000000000315', '00000000-0000-4000-8000-000000000012',
+   '00000000-0000-4000-8000-000000000314', '00000000-0000-4000-8000-000000000017',
+   null, 'KHR', 'PER_PIECE', 1800, null, '2026-07-27T00:00:00Z', 1,
+   '00000000-0000-4000-8000-000000000006')
+on conflict do nothing;
+
+-- Configuration snapshots: ACTIVE v1 + DRAFT v2 (digital_store scope),
+-- ACTIVE location-scope override, ACTIVE platform-scope row, Tenant B row.
+insert into kitluy_config.configuration_versions
+  (id, config_key, scope_type, precedence, tenant_id, digital_store_id,
+   store_location_id, version, schema_version, payload, payload_hash, status, created_by)
+values
+  ('00000000-0000-4000-8000-000000000317', 'store.receipt_layout', 'digital_store', 2,
+   '00000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000015',
+   null, 1, '1.0', '{"layout": "demo-a"}',
+   'demo0000000000000000000000000000000000000000000000000000000317', 'ACTIVE',
+   '00000000-0000-4000-8000-000000000002'),
+  ('00000000-0000-4000-8000-000000000316', 'store.receipt_layout', 'digital_store', 2,
+   '00000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000015',
+   null, 2, '1.0', '{"layout": "demo-b-draft"}',
+   'demo0000000000000000000000000000000000000000000000000000000316', 'DRAFT',
+   '00000000-0000-4000-8000-000000000002'),
+  ('00000000-0000-4000-8000-000000000318', 'store.receipt_layout', 'store_location', 3,
+   '00000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000015',
+   '00000000-0000-4000-8000-000000000018', 1, '1.0', '{"layout": "demo-loc-override"}',
+   'demo0000000000000000000000000000000000000000000000000000000318', 'ACTIVE',
+   '00000000-0000-4000-8000-000000000003'),
+  ('00000000-0000-4000-8000-000000000319', 'platform.locale_defaults', 'platform', 0,
+   null, null, null, 1, '1.0', '{"locales": ["km-KH", "en-US"]}',
+   'demo0000000000000000000000000000000000000000000000000000000319', 'ACTIVE',
+   '00000000-0000-4000-8000-000000000001'),
+  ('00000000-0000-4000-8000-000000000323', 'store.receipt_layout', 'digital_store', 2,
+   '00000000-0000-4000-8000-000000000012', '00000000-0000-4000-8000-000000000017',
+   null, 1, '1.0', '{"layout": "atk"}',
+   'demo0000000000000000000000000000000000000000000000000000000323', 'ACTIVE',
+   '00000000-0000-4000-8000-000000000006')
+on conflict do nothing;
+
+insert into kitluy_config.configuration_publications
+  (id, configuration_version_id, publication_kind, idempotency_key, status, requested_by)
+values
+  ('00000000-0000-4000-8000-000000000320', '00000000-0000-4000-8000-000000000317',
+   'PUBLISH', 'PUB-DEMO-0001', 'ACTIVE', '00000000-0000-4000-8000-000000000002')
+on conflict do nothing;
+
+insert into kitluy_config.configuration_targets
+  (id, publication_id, target_type, target_id, status, applied_at)
+values
+  ('00000000-0000-4000-8000-000000000321', '00000000-0000-4000-8000-000000000320',
+   'store_location', '00000000-0000-4000-8000-000000000018', 'ACTIVE', '2026-07-27T01:00:00Z')
+on conflict do nothing;
+
+insert into kitluy_config.configuration_acknowledgements
+  (id, target_id, consumer_id, applied_version, result, acknowledged_at)
+values
+  ('00000000-0000-4000-8000-000000000322', '00000000-0000-4000-8000-000000000321',
+   '00000000-0000-4000-8000-000000000399', 1, 'ACTIVE', '2026-07-27T01:05:00Z')
+on conflict do nothing;
+
+-- Customers. C1 is Cambodian-phone-only (NO email anywhere); C2 has phone +
+-- optional email; C-dup-A/C-dup-B share a phone (duplicate candidates);
+-- C3 is a completed-merge tombstone into C1. Tenant B customer for isolation.
+insert into kitluy_core.customers
+  (id, tenant_id, display_name, status, preferred_locale, merged_into_customer_id)
+values
+  ('00000000-0000-4000-8000-000000000324', '00000000-0000-4000-8000-000000000011',
+   'Sokha Chan (fictional)', 'ACTIVE', 'km-KH', null),
+  ('00000000-0000-4000-8000-000000000326', '00000000-0000-4000-8000-000000000011',
+   'Dara Kim (fictional)', 'ACTIVE', 'en-US', null),
+  ('00000000-0000-4000-8000-000000000329', '00000000-0000-4000-8000-000000000011',
+   'Vanna Sok (fictional)', 'ACTIVE', 'km-KH', null),
+  ('00000000-0000-4000-8000-000000000331', '00000000-0000-4000-8000-000000000011',
+   'Vanna S. (fictional duplicate candidate)', 'ACTIVE', 'km-KH', null),
+  ('00000000-0000-4000-8000-000000000334', '00000000-0000-4000-8000-000000000011',
+   'Sokha C. (fictional, merged tombstone)', 'MERGED', 'km-KH',
+   '00000000-0000-4000-8000-000000000324'),
+  ('00000000-0000-4000-8000-000000000340', '00000000-0000-4000-8000-000000000012',
+   'Tenant B Customer (isolation fixture)', 'ACTIVE', 'km-KH', null)
+on conflict do nothing;
+
+insert into kitluy_core.customer_contacts
+  (id, tenant_id, customer_id, type, normalized_value, display_value, masked_value,
+   verified_at, is_primary, consent_status, status)
+values
+  ('00000000-0000-4000-8000-000000000325', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000324', 'PHONE', '+85512345678', '012 345 678',
+   '***678', '2026-07-27T00:00:00Z', true, 'GRANTED', 'ACTIVE'),
+  ('00000000-0000-4000-8000-000000000327', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000326', 'PHONE', '+85598765432', '098 765 432',
+   '***432', '2026-07-27T00:00:00Z', true, 'GRANTED', 'ACTIVE'),
+  ('00000000-0000-4000-8000-000000000328', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000326', 'EMAIL', 'dara.kim@customer.example',
+   'dara.kim@customer.example', 'd***@customer.example', null, true, 'UNKNOWN', 'ACTIVE'),
+  ('00000000-0000-4000-8000-000000000330', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000329', 'PHONE', '+85511223344', '011 223 344',
+   '***344', '2026-07-27T00:00:00Z', true, 'UNKNOWN', 'ACTIVE'),
+  -- Same phone as ..0330 but UNVERIFIED: allowed beside the ACTIVE identifier
+  -- (partial unique applies to status ACTIVE only) — duplicate-review fixture,
+  -- never auto-merged (KBR-CUS-001 TV2).
+  ('00000000-0000-4000-8000-000000000332', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000331', 'PHONE', '+85511223344', '011 22 33 44',
+   '***344', null, false, 'UNKNOWN', 'UNVERIFIED'),
+  ('00000000-0000-4000-8000-000000000341', '00000000-0000-4000-8000-000000000012',
+   '00000000-0000-4000-8000-000000000340', 'PHONE', '+85577889900', '077 889 900',
+   '***900', null, true, 'UNKNOWN', 'ACTIVE')
+on conflict do nothing;
+
+insert into kitluy_core.customer_store_relationships
+  (id, tenant_id, customer_id, digital_store_id, status, source_code, first_seen_at)
+values
+  ('00000000-0000-4000-8000-000000000339', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000324', '00000000-0000-4000-8000-000000000015',
+   'ACTIVE', 'WALK_IN', '2026-07-27T00:00:00Z')
+on conflict do nothing;
+
+-- Merge fixtures: one OPEN duplicate-review request (no reviewer yet) and one
+-- COMPLETED merge with a DISTINCT reviewer (u07 requests, u08 reviews),
+-- append-only result and tombstone preserved.
+insert into kitluy_core.customer_merge_requests
+  (id, tenant_id, surviving_customer_id, merging_customer_id, match_evidence,
+   reason, status, requested_by, reviewed_by, requested_at, decided_at)
+values
+  ('00000000-0000-4000-8000-000000000333', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000329', '00000000-0000-4000-8000-000000000331',
+   '{"signal": "same normalized phone", "verified": false}',
+   'Duplicate candidate from shared phone +85511223344 (fixture)', 'REQUESTED',
+   '00000000-0000-4000-8000-000000000007', null, '2026-07-27T02:00:00Z', null),
+  ('00000000-0000-4000-8000-000000000335', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000324', '00000000-0000-4000-8000-000000000334',
+   '{"signal": "same verified phone and profile", "verified": true}',
+   'Completed demo merge (fixture)', 'COMPLETED',
+   '00000000-0000-4000-8000-000000000007', '00000000-0000-4000-8000-000000000008',
+   '2026-07-27T02:10:00Z', '2026-07-27T02:20:00Z')
+on conflict do nothing;
+
+insert into kitluy_core.customer_merge_results
+  (id, tenant_id, merge_request_id, surviving_customer_id, merged_customer_id,
+   moved_links, completed_by, completed_at)
+values
+  ('00000000-0000-4000-8000-000000000336', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000335', '00000000-0000-4000-8000-000000000324',
+   '00000000-0000-4000-8000-000000000334',
+   '{"contacts_moved": 0, "relationships_moved": 0, "note": "demo merge"}',
+   '00000000-0000-4000-8000-000000000008', '2026-07-27T02:20:00Z')
+on conflict do nothing;
+
+insert into kitluy_core.customer_status_history
+  (id, tenant_id, customer_id, from_status, to_status, reason_code, actor_id, occurred_at)
+values
+  ('00000000-0000-4000-8000-000000000337', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000334', 'ACTIVE', 'MERGED', 'CUSTOMER_MERGE',
+   '00000000-0000-4000-8000-000000000008', '2026-07-27T02:20:00Z'),
+  ('00000000-0000-4000-8000-000000000338', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000324', null, 'ACTIVE', 'CUSTOMER_CREATED',
+   '00000000-0000-4000-8000-000000000002', '2026-07-27T00:00:00Z')
+on conflict do nothing;
+
+-- Consent: marketing purpose granted THEN withdrawn (grant row preserved);
+-- transactional purpose granted and untouched — the five communication
+-- classes stay separate.
+insert into kitluy_core.consent_purposes
+  (id, purpose_key, communication_class, description, status)
+values
+  ('00000000-0000-4000-8000-000000000342', 'MARKETING_PROMOTIONS', 'MARKETING',
+   'Optional marketing promotions (demo purpose)', 'ACTIVE'),
+  ('00000000-0000-4000-8000-000000000343', 'SERVICE_PICKUP_NOTICE', 'TRANSACTIONAL',
+   'Laundry pickup-ready notification (demo purpose)', 'ACTIVE')
+on conflict do nothing;
+
+insert into kitluy_core.consent_purpose_versions
+  (id, consent_purpose_id, version, policy_ref, notice_text, effective_from)
+values
+  ('00000000-0000-4000-8000-000000000344', '00000000-0000-4000-8000-000000000342',
+   1, 'DEMO-NOTICE-MKT-1', 'Demo marketing notice v1 (fixture)', '2026-07-27T00:00:00Z'),
+  ('00000000-0000-4000-8000-000000000345', '00000000-0000-4000-8000-000000000343',
+   1, 'DEMO-NOTICE-TXN-1', 'Demo pickup notice v1 (fixture)', '2026-07-27T00:00:00Z')
+on conflict do nothing;
+
+insert into kitluy_core.consent_grants
+  (id, tenant_id, customer_id, consent_purpose_version_id, channel, source,
+   evidence_ref, recorded_by, granted_at)
+values
+  ('00000000-0000-4000-8000-000000000346', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000324', '00000000-0000-4000-8000-000000000344',
+   'SMS', 'CUSTOMER_SELF', 'DEMO-EVIDENCE-346', '00000000-0000-4000-8000-000000000002',
+   '2026-07-27T00:10:00Z'),
+  ('00000000-0000-4000-8000-000000000348', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000324', '00000000-0000-4000-8000-000000000345',
+   'SMS', 'CUSTOMER_SELF', 'DEMO-EVIDENCE-348', '00000000-0000-4000-8000-000000000002',
+   '2026-07-27T00:10:00Z')
+on conflict do nothing;
+
+insert into kitluy_core.consent_withdrawals
+  (id, tenant_id, consent_grant_id, reason_code, source, recorded_by, withdrawn_at)
+values
+  ('00000000-0000-4000-8000-000000000347', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000346', 'CUSTOMER_REQUEST', 'CUSTOMER_SELF',
+   '00000000-0000-4000-8000-000000000002', '2026-07-27T03:00:00Z')
+on conflict do nothing;
+
+insert into kitluy_notifications.preferences
+  (id, tenant_id, customer_id, user_id, event_family, channel, state, source, source_ref)
+values
+  ('00000000-0000-4000-8000-000000000349', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000324', null, 'MARKETING', 'SMS', 'WITHDRAWN',
+   'consent_withdrawal', '00000000-0000-4000-8000-000000000347'),
+  ('00000000-0000-4000-8000-000000000350', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000324', null, 'TRANSACTIONAL', 'SMS', 'GRANTED',
+   'consent_grant', '00000000-0000-4000-8000-000000000348')
+on conflict do nothing;
+
+-- Privacy export request + verified decision (append-only pair).
+insert into kitluy_core.privacy_requests
+  (id, tenant_id, customer_id, request_type, scope, verification_ref, requested_by, requested_at)
+values
+  ('00000000-0000-4000-8000-000000000351', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000324', 'EXPORT',
+   '{"data_classes": ["profile", "contacts", "consent"]}', 'DEMO-VERIFY-351',
+   '00000000-0000-4000-8000-000000000002', '2026-07-27T04:00:00Z')
+on conflict do nothing;
+
+insert into kitluy_core.privacy_request_decisions
+  (id, privacy_request_id, decision, reason, evidence_ref, decided_by, decided_at)
+values
+  ('00000000-0000-4000-8000-000000000352', '00000000-0000-4000-8000-000000000351',
+   'VERIFIED', 'Identity verified for demo export case (fixture)', 'DEMO-EVIDENCE-352',
+   '00000000-0000-4000-8000-000000000002', '2026-07-27T04:10:00Z')
+on conflict do nothing;
