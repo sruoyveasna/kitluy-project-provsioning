@@ -1,7 +1,6 @@
 // GENERATED FILE — DO NOT EDIT BY HAND.
 // Produced by `pnpm db:types` (supabase gen types typescript) from the LOCAL
 // migrated development database. Regenerate instead of editing.
-// Current body: owner-supplied external generation (see package README).
 
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
 

@@ -1,0 +1,8 @@
+  schemaname  | policies | sel | writes 
+--------------+----------+-----+--------
+ kitluy_admin |       12 |  12 |      0
+ kitluy_audit |        5 |   5 |      0
+ kitluy_auth  |       17 |  17 |      0
+ kitluy_core  |       10 |  10 |      0
+(4 rows)
+
