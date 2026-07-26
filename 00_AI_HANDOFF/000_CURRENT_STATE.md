@@ -1,0 +1,44 @@
+# 000_CURRENT_STATE — verified repository truth
+
+| Field | Value |
+| --- | --- |
+| Refreshed | 2026-07-26 (KL-BUILD-000, live inspection — supersedes the pack's UNVERIFIED template) |
+| Repository | /Users/vongvichetpa/Documents/HET-KITLUY-PROJECT · branch `main` · tree clean at refresh |
+| Toolchain (ACTIVE-BASELINE) | Node 22.23.0 · pnpm 9.15.9 · TS ~5.7.2 · React 18.3.1 · RN 0.76.6 · Electron ^33 (passes `pnpm verify`; owner target toolchain per engineering pack is a pending coordinated upgrade — KLREQ-009/KL-ENG-001, per master-plan §4.3 rule the current toolchain remains active) |
+| Verification | `pnpm verify` 11/11 PASS · `pnpm docs:verify` 8/8 PASS (2026-07-26) |
+| Local tooling gaps | Docker, Supabase CLI, Terraform NOT installed on this machine → migrations cannot be applied/tested locally (BLK-002) |
+| Source corpus | 161 classified sources (3 batches), inbox empty |
+| Migrations applied | NONE (no environment exists; supabase/migrations/ empty by design — ADR-0005) |
+| Deployments | NONE. CI workflows exist but never executed (no remote) |
+| Pilot/production | NONE |
+
+## Workstream matrix (WS-00..WS-26)
+
+Statuses: NOT-STARTED · BLOCKED · CONTRACT-WORK · SCAFFOLDED · IMPLEMENTING · REVIEW · VERIFIED · PILOT-READY
+
+| WS | Name | Contract | Code | Migrations | Tests | Deploy | Status | Next task / blocker |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 00 | Governance & repo foundation | Owner packs ingested | Authority pack + swarm OS layer installed | n/a | docs:verify 8/8 | n/a | IMPLEMENTING | WS-00-T001 G0 closure record |
+| 01 | Dev environments & CI | Eng/ops packs SPECIFIED | verify suite + 3 CI workflows (unexecuted) | n/a | local gates pass | none | SCAFFOLDED | WS-01-T001 add blocked runners for security/load/recovery/hardware; BLK-002 local DB tooling |
+| 02 | Identity, Tenant, membership | Data dictionary SPECIFIED; schema/RLS/migration-plan trio MISSING | shared-types branded IDs | none | — | none | CONTRACT-WORK | WS-02-T001 author schema trio (core identity) — authorized by master plan §5.1 |
+| 03 | Digital Store & Location | as WS-02 | digital-store-context scaffold | none | — | none | CONTRACT-WORK | follows WS-02 schema trio |
+| 04 | RBAC, RLS, audit, approvals | RBAC registry (107 keys), A0–A4, audit registry SPECIFIED | rbac/approvals/audit packages tested (SCAFFOLDED level) | none | unit only | none | CONTRACT-WORK | RLS authoring in schema trio; BLK-002 blocks RLS execution |
+| 05 | Catalog, pricing, configuration | Pricing/config rules SPECIFIED | catalog/pricing scaffolds; laundry price lines tested | none | unit | none | CONTRACT-WORK | after WS-07 domain + schema |
+| 06 | Customer identity & consent | Rules SPECIFIED; depth open (KLMF-CUS-006) | customers scaffold | none | — | none | CONTRACT-WORK | blocked on owner depth for consent workflows |
+| 07 | Laundry Booking & custody | State machines + lifecycle SPECIFIED (canonical) | T1–T4 profiles, T2 SM, custody events tested | none | unit | none | IMPLEMENTING | **WS-07-T001 booking/production state machines (in progress)** |
+| 08 | Payments, deposits, reconciliation | Payment rules + 26 canonical vectors SPECIFIED | money package tested | none | unit | none | IMPLEMENTING | **WS-08-T001 tender/refund engine passing all 26 vectors (in progress)** |
+| 09 | Store Hub local runtime | Hub spec + local DB schema doc (naming drift KLREC-002) | sim Hub: outbox+offline harness TESTED; LAN kernel | none | offline harness | none | SCAFFOLDED | local PG adapter after schema trio; KLREC-002 |
+| 10 | Sync & config publication | Sync protocol SPECIFIED | sync-protocol pkg tested; cloud sync service kernel | none | unit | none | SCAFFOLDED | cloud apply-side after schema |
+| 11 | Device provisioning & fleet | Trust/provisioning SPECIFIED; PKI/CA [REQUIRED] | interfaces only | none | — | none | BLOCKED | BLK-005 PKI/CA + secure-element owner values |
+| 12 | T1 Intake/Cashier | POS spec v4; edge API CONFLICTED | POS shell fails closed | none | smoke | none | BLOCKED | BLK-003 /edge/v1 decision (KLREC-001) |
+| 13 | T2 Customer Display | T2 SM SPECIFIED = implemented | T2 state machine TESTED | none | unit | none | SCAFFOLDED | binds to T1 session contract (BLK-003) |
+| 14 | T3 Ready Scan-In | custody events SPECIFIED | event registry tested | none | unit | none | BLOCKED | BLK-003 |
+| 15 | T4 Pickup Scan-Out | custody events SPECIFIED | event registry tested | none | unit | none | BLOCKED | BLK-003 |
+| 16–19 | Partner/Chain/Admin portals + Partner App | Route/screen inventories SPECIFIED | fail-closed shells build+smoke | none | smoke | none | SCAFFOLDED | after WS-02..08 APIs |
+| 20 | Storefront & virtual queue | Spec v1.1.0 + inventory | Next.js shell | none | smoke | none | SCAFFOLDED | after commerce API subset |
+| 21 | B2B website | Spec v1.0.0 + inventory | Next.js shell | none | smoke | none | SCAFFOLDED | content + registration after WS-02 |
+| 22 | Files, notifications, integrations | Service specs SPECIFIED | service kernels tested | none | kernel tests | none | SCAFFOLDED | provider values [REQUIRED] |
+| 23 | Reporting & exports | Spec SPECIFIED; no-paywall locked | kernel | none | kernel tests | none | SCAFFOLDED | read models after schema |
+| 24 | Infra, monitoring, recovery | Ops pack SPECIFIED; domains/SLOs [REQUIRED] | Terraform skeletons validate-only | n/a | not run (no terraform) | none | CONTRACT-WORK | BLK-006 provider values/credentials |
+| 25 | Security & performance verification | Test plans SPECIFIED (duplication KLREC-017); 524 cases SPECIFIED_NOT_EXECUTED | — | none | — | none | CONTRACT-WORK | BLK-007 plan selection; execution follows implementation |
+| 26 | Pilot & go-live | Pilot runbook + evidence template SPECIFIED | — | — | — | — | NOT-STARTED | gated on WS-00..25 + owner authorization |

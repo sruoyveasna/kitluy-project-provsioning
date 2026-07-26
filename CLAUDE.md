@@ -82,3 +82,12 @@ In: <files/boundaries>. Out: <explicitly excluded>.
 - Strict TypeScript; `pnpm lint`/`pnpm format` before finishing.
 - Source citations in code comments for every rule taken from a spec
   (e.g. "Hub spec §11.2"), so the Rebuild Test holds.
+
+## Parent contract (KL-BUILD-000, 2026-07-26)
+
+`AGENTS.md` at the repository root is the swarm parent contract (installed
+from the owner AI Swarm Operating System pack per the Phase 1 master build
+plan execution instruction). This file adds repository-specific rules and
+grants no authority beyond it. Task records use `00_AI_HANDOFF/TASK_TEMPLATE.md`;
+reviews/evidence/conflicts use the sibling templates. State files:
+`000_CURRENT_STATE.md`, `000_ACTIVE_PHASE.md`, `000_BLOCKERS.md`.
