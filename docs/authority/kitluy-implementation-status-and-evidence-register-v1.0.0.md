@@ -201,6 +201,10 @@ Rows above SPECIFIED carry linked evidence (validated by `pnpm docs:registry-che
 | 18 service kernels (health/ready/version, config validation, graceful shutdown) | SCAFFOLDED | E-REPO+E-TEST `services/*/test/http.test.ts` |
 | 4 governed API OpenAPI governance skeletons + contract tests | SCAFFOLDED | E-REPO+E-TEST `services/kitluy-*-api/test/contract.test.ts` (pnpm test:contract) |
 | 8 Phase 1 application shells (fail-closed, km/en, error boundaries) | SCAFFOLDED | E-REPO+E-TEST `apps/*/test/` smoke tests + pnpm build (68 tasks, 2026-07-26) |
+| Canonical Supabase schema specification (235/235 dictionary parity, 18-invariant matrix) | CONTRACT-APPROVED | E-REPO `docs/data/kitluy-suite-supabase-schema-v1.0.0.md` + review 2026-07-26__WS-02-T001 (APPROVED-WITH-CONDITIONS, applied) |
+| Canonical RLS/authorization specification (24 schemas, RLS-001..030 plans) | CONTRACT-APPROVED | E-REPO `docs/data/kitluy-suite-supabase-rls-and-authorization-v1.0.0.md` + review 2026-07-26__WS-04-T001 |
+| Canonical migration plan (0000-0160) + 0000 controls migration + db harness | Plan CONTRACT-APPROVED; migration SQL SCAFFOLDED | E-REPO `docs/data/kitluy-suite-supabase-migration-plan-v1.0.0.md`, `supabase/migrations/20260726180000_*.sql`; static harness PASS 2026-07-26; DB execution BLOCKED (BLK-002) |
+| Contract vocabulary + Edge API decision package (5-group ballot) | CONTRACT-APPROVED document; ALL GROUPS OWNER-APPROVAL-REQUIRED | E-REPO `docs/decisions/kitluy-contract-vocabulary-and-edge-api-owner-decision-v1.0.0.md` + review 2026-07-26__KL-DEC-001 |
 | Laundry Booking lifecycle + production state machines (KBR-LND/TXN encoded) | SCAFFOLDED | E-REPO+E-TEST `verticals/phase1-laundry/test/` (65/65, 2026-07-26; independent review PASS-WITH-CONDITIONS, RV-001 applied) |
 | Payments engine passing all 26 canonical vectors | SCAFFOLDED | E-REPO+E-TEST `packages/payments/test/vectors.test.ts` (40/40, 2026-07-26; four-eyes review, blocking RV-001 fixed + regression) |
 | Documentation corpus governance tooling (inventory/hash/classify/coverage checks) | SCAFFOLDED | E-REPO+E-TEST `scripts/docs/` (pnpm docs:verify, pass 2026-07-26) |
@@ -211,6 +215,10 @@ Rows above SPECIFIED carry linked evidence (validated by `pnpm docs:registry-che
 
 | Item | Old | New | Source |
 | --- | --- | --- | --- |
+| Canonical Supabase schema specification (235/235 dictionary parity, 18-invariant matrix) | CONTRACT-APPROVED | E-REPO `docs/data/kitluy-suite-supabase-schema-v1.0.0.md` + review 2026-07-26__WS-02-T001 (APPROVED-WITH-CONDITIONS, applied) |
+| Canonical RLS/authorization specification (24 schemas, RLS-001..030 plans) | CONTRACT-APPROVED | E-REPO `docs/data/kitluy-suite-supabase-rls-and-authorization-v1.0.0.md` + review 2026-07-26__WS-04-T001 |
+| Canonical migration plan (0000-0160) + 0000 controls migration + db harness | Plan CONTRACT-APPROVED; migration SQL SCAFFOLDED | E-REPO `docs/data/kitluy-suite-supabase-migration-plan-v1.0.0.md`, `supabase/migrations/20260726180000_*.sql`; static harness PASS 2026-07-26; DB execution BLOCKED (BLK-002) |
+| Contract vocabulary + Edge API decision package (5-group ballot) | CONTRACT-APPROVED document; ALL GROUPS OWNER-APPROVAL-REQUIRED | E-REPO `docs/decisions/kitluy-contract-vocabulary-and-edge-api-owner-decision-v1.0.0.md` + review 2026-07-26__KL-DEC-001 |
 | Laundry Booking lifecycle + production state machines | REQUIRED VALUE | SPECIFIED | `docs/source/business-rules/kitluy-laundry-state-machines-v1.0.0.md`, `kitluy-transaction-and-booking-lifecycle-v1.0.0.md` |
 | Governed API specifications (4) + registries | PLANNED | SPECIFIED | `docs/source/api-contracts/` |
 | Event/job/webhook registries + outbox pattern + compatibility policy | PLANNED | SPECIFIED | `docs/source/api-contracts/` |

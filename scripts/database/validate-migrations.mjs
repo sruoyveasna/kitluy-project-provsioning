@@ -21,7 +21,8 @@ try {
   process.exit(0);
 }
 const namePattern = /^\d{14}_[a-z0-9_]+\.sql$/;
-const dangerous = /\b(DROP\s+TABLE|TRUNCATE|DELETE\s+FROM)\b/i;
+const dangerous =
+  /\b(DROP\s+TABLE|DROP\s+SCHEMA|DROP\s+COLUMN|TRUNCATE|DELETE\s+FROM)\b|\bALTER\s+TABLE\b[\s\S]*?\bDROP\b/i;
 let errors = 0;
 for (const f of files) {
   if (!namePattern.test(f)) {

@@ -8,7 +8,7 @@ const reasons = {
   integration:
     "BLOCKED: integration tests require the canonical Supabase schema pack and running services. See docs/authority/kitluy-open-decisions-and-required-values-v1.0.0.md.",
   e2e: "BLOCKED: end-to-end tests require built app shells plus Playwright browsers (`pnpm exec playwright install`) and a defined user journey from an approved spec. Harness location: tests/end-to-end/.",
-  rls: "BLOCKED: RLS tests require the Supabase CLI (not installed) and the canonical RLS/authorization pack (missing). Harness location: supabase/tests/.",
+  rls: "BLOCKED: RLS execution tests require the Supabase CLI + Docker (not installed; BLK-002). Spec: docs/data/kitluy-suite-supabase-rls-and-authorization-v1.0.0.md (RLS-001..030 plans, section 9). Static checks run today: pnpm db:validate, pnpm db:migrations:check, pnpm db:schema:check (scripts/database/). Execution harness location: supabase/tests/.",
   security:
     "BLOCKED: security test execution requires implemented targets plus the canonical plan selection (KLREQ-011: two co-dated security test plans conflict). Cases: docs/source/qa/ + docs/source/security/.",
   load: "BLOCKED: load tests (k6) require deployed services and owner-approved SLO targets ([REQUIRED]). Plan: docs/source/qa/kitluy-performance-and-capacity-test-plan-v1.0.0.md.",
