@@ -41,7 +41,11 @@
     "docs:registry-check": "node scripts/docs/check-registry.mjs",
     "docs:links": "node scripts/verification/docs-link-check.mjs",
     "docs:verify": "node scripts/docs/verify.mjs",
-    "docs:inbox-state": "node scripts/docs/check-inbox-state.mjs"
+    "docs:inbox-state": "node scripts/docs/check-inbox-state.mjs",
+    "test:security": "node scripts/testing/blocked.mjs security",
+    "test:load": "node scripts/testing/blocked.mjs load",
+    "test:recovery": "node scripts/testing/blocked.mjs recovery",
+    "test:hardware": "node scripts/testing/blocked.mjs hardware"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",
