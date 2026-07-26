@@ -1,0 +1,631 @@
+{
+  "schema_version": "1.0.0",
+  "document": "kitluy-payment-and-reconciliation-test-vectors-v1.0.0.json",
+  "date": "2026-07-26",
+  "status": "SPECIFIED_NOT_EXECUTED",
+  "money_contract": {
+    "KHR": {
+      "storage": "integer_minor_units",
+      "exponent": 0,
+      "rounding": "EXACT_INTEGER_RESULT_UNTIL_OWNER_POLICY_APPROVED"
+    },
+    "USD": {
+      "storage": "integer_minor_units",
+      "exponent": 2,
+      "rounding": "HALF_EVEN_WHEN_A_DECIMAL_OPERATION_REQUIRES_ROUNDING"
+    },
+    "rules": [
+      "No binary floating point for money.",
+      "No silent currency conversion.",
+      "Each tender, ledger posting and aggregate carries currency.",
+      "Finalized records are append-only; corrections use compensating records."
+    ]
+  },
+  "vectors": [
+    {
+      "id": "PAY-VEC-001",
+      "name": "KHR full cash payment",
+      "currency": "KHR",
+      "booking_total_minor": 12500,
+      "input_tenders": [
+        {
+          "type": "CASH",
+          "amount_minor": 12500,
+          "idempotency_key": "t1-a-001"
+        }
+      ],
+      "expected": {
+        "paid_minor": 12500,
+        "balance_minor": 0,
+        "payment_state": "PAID",
+        "ledger_balanced": true
+      },
+      "notes": []
+    },
+    {
+      "id": "PAY-VEC-002",
+      "name": "KHR deposit",
+      "currency": "KHR",
+      "booking_total_minor": 50000,
+      "input_tenders": [
+        {
+          "type": "CASH",
+          "amount_minor": 20000,
+          "idempotency_key": "t1-a-002"
+        }
+      ],
+      "expected": {
+        "paid_minor": 20000,
+        "deposit_minor": 20000,
+        "balance_minor": 30000,
+        "payment_state": "PARTIALLY_PAID",
+        "ledger_balanced": true
+      },
+      "notes": []
+    },
+    {
+      "id": "PAY-VEC-003",
+      "name": "USD full cash payment",
+      "currency": "USD",
+      "booking_total_minor": 1250,
+      "input_tenders": [
+        {
+          "type": "CASH",
+          "amount_minor": 1250,
+          "idempotency_key": "t1-a-003"
+        }
+      ],
+      "expected": {
+        "paid_minor": 1250,
+        "balance_minor": 0,
+        "payment_state": "PAID",
+        "ledger_balanced": true
+      },
+      "notes": []
+    },
+    {
+      "id": "PAY-VEC-004",
+      "name": "Mixed currency rejected without approved conversion contract",
+      "currency": "KHR",
+      "booking_total_minor": 40000,
+      "input_tenders": [
+        {
+          "type": "CASH",
+          "currency": "USD",
+          "amount_minor": 1000,
+          "idempotency_key": "t1-a-004"
+        }
+      ],
+      "expected": {
+        "accepted": false,
+        "error_code": "CURRENCY_MISMATCH_OR_CONVERSION_REQUIRED",
+        "no_ledger_effect": true
+      },
+      "notes": [
+        "A future approved FX contract may add explicit conversion legs; clients must not invent one."
+      ]
+    },
+    {
+      "id": "PAY-VEC-005",
+      "name": "KHR exact integer no nearest-100 visual rounding",
+      "currency": "KHR",
+      "booking_total_minor": 12345,
+      "input_tenders": [
+        {
+          "type": "CASH",
+          "amount_minor": 12345,
+          "idempotency_key": "t1-a-005"
+        }
+      ],
+      "expected": {
+        "paid_minor": 12345,
+        "balance_minor": 0,
+        "stored_total_minor": 12345,
+        "display_rounding_not_applied_to_truth": true
+      },
+      "notes": []
+    },
+    {
+      "id": "PAY-VEC-006",
+      "name": "Cash over-tender and change",
+      "currency": "KHR",
+      "booking_total_minor": 12000,
+      "input_tenders": [
+        {
+          "type": "CASH",
+          "amount_tendered_minor": 20000,
+          "applied_minor": 12000,
+          "idempotency_key": "t1-a-006"
+        }
+      ],
+      "expected": {
+        "paid_minor": 12000,
+        "change_due_minor": 8000,
+        "balance_minor": 0,
+        "cash_drawer_net_minor": 12000
+      },
+      "notes": []
+    },
+    {
+      "id": "PAY-VEC-007",
+      "name": "KHQR attempt remains pending",
+      "currency": "KHR",
+      "booking_total_minor": 30000,
+      "input_tenders": [
+        {
+          "type": "KHQR",
+          "attempt_id": "khqr-007",
+          "status": "PENDING",
+          "amount_minor": 30000,
+          "idempotency_key": "t1-a-007"
+        }
+      ],
+      "expected": {
+        "paid_minor": 0,
+        "balance_minor": 30000,
+        "payment_state": "PAYMENT_PENDING",
+        "reconciled": false
+      },
+      "notes": []
+    },
+    {
+      "id": "PAY-VEC-008",
+      "name": "KHQR signed success callback",
+      "currency": "KHR",
+      "booking_total_minor": 30000,
+      "input_tenders": [
+        {
+          "type": "KHQR",
+          "attempt_id": "khqr-008",
+          "status": "SUCCEEDED",
+          "provider_transaction_id": "p-008",
+          "amount_minor": 30000,
+          "idempotency_key": "t1-a-008"
+        }
+      ],
+      "expected": {
+        "paid_minor": 30000,
+        "balance_minor": 0,
+        "payment_state": "PAID",
+        "business_effect_count": 1,
+        "reconciled": false
+      },
+      "notes": []
+    },
+    {
+      "id": "PAY-VEC-009",
+      "name": "Duplicate KHQR callback",
+      "currency": "KHR",
+      "booking_total_minor": 30000,
+      "input_tenders": [
+        {
+          "type": "KHQR_CALLBACK",
+          "provider_transaction_id": "p-009",
+          "delivery_id": "d-1",
+          "status": "SUCCEEDED",
+          "amount_minor": 30000
+        },
+        {
+          "type": "KHQR_CALLBACK",
+          "provider_transaction_id": "p-009",
+          "delivery_id": "d-2",
+          "status": "SUCCEEDED",
+          "amount_minor": 30000
+        }
+      ],
+      "expected": {
+        "paid_minor": 30000,
+        "business_effect_count": 1,
+        "duplicate_delivery_count": 1
+      },
+      "notes": []
+    },
+    {
+      "id": "PAY-VEC-010",
+      "name": "KHQR amount mismatch",
+      "currency": "KHR",
+      "booking_total_minor": 30000,
+      "input_tenders": [
+        {
+          "type": "KHQR_CALLBACK",
+          "provider_transaction_id": "p-010",
+          "status": "SUCCEEDED",
+          "amount_minor": 29000
+        }
+      ],
+      "expected": {
+        "paid_minor": 0,
+        "balance_minor": 30000,
+        "payment_state": "RECONCILIATION_EXCEPTION",
+        "variance_minor": -1000
+      },
+      "notes": []
+    },
+    {
+      "id": "PAY-VEC-011",
+      "name": "Provider callback before client response",
+      "currency": "KHR",
+      "booking_total_minor": 25000,
+      "input_tenders": [
+        {
+          "type": "KHQR_CALLBACK",
+          "provider_transaction_id": "p-011",
+          "status": "SUCCEEDED",
+          "amount_minor": 25000
+        },
+        {
+          "type": "KHQR_CLIENT_CONFIRM",
+          "provider_transaction_id": "p-011",
+          "amount_minor": 25000
+        }
+      ],
+      "expected": {
+        "paid_minor": 25000,
+        "business_effect_count": 1,
+        "payment_state": "PAID"
+      },
+      "notes": []
+    },
+    {
+      "id": "PAY-VEC-012",
+      "name": "Client timeout after provider success",
+      "currency": "KHR",
+      "booking_total_minor": 25000,
+      "input_tenders": [
+        {
+          "type": "KHQR",
+          "attempt_id": "khqr-012",
+          "client_result": "TIMEOUT"
+        },
+        {
+          "type": "KHQR_CALLBACK",
+          "provider_transaction_id": "p-012",
+          "status": "SUCCEEDED",
+          "amount_minor": 25000
+        }
+      ],
+      "expected": {
+        "paid_minor": 25000,
+        "business_effect_count": 1,
+        "requires_status_refresh": true
+      },
+      "notes": []
+    },
+    {
+      "id": "PAY-VEC-013",
+      "name": "Deposit then balance payment",
+      "currency": "KHR",
+      "booking_total_minor": 50000,
+      "input_tenders": [
+        {
+          "type": "CASH",
+          "amount_minor": 20000,
+          "idempotency_key": "t1-a-013a"
+        },
+        {
+          "type": "KHQR",
+          "amount_minor": 30000,
+          "provider_transaction_id": "p-013",
+          "status": "SUCCEEDED",
+          "idempotency_key": "t4-a-013b"
+        }
+      ],
+      "expected": {
+        "paid_minor": 50000,
+        "deposit_minor": 20000,
+        "balance_minor": 0,
+        "payment_state": "PAID",
+        "tender_count": 2
+      },
+      "notes": []
+    },
+    {
+      "id": "PAY-VEC-014",
+      "name": "Duplicate offline cash replay",
+      "currency": "KHR",
+      "booking_total_minor": 15000,
+      "input_tenders": [
+        {
+          "type": "CASH",
+          "amount_minor": 15000,
+          "idempotency_key": "device-a-20260726-000014"
+        },
+        {
+          "type": "CASH_REPLAY",
+          "amount_minor": 15000,
+          "idempotency_key": "device-a-20260726-000014"
+        }
+      ],
+      "expected": {
+        "paid_minor": 15000,
+        "business_effect_count": 1,
+        "replay_response_consistent": true
+      },
+      "notes": []
+    },
+    {
+      "id": "PAY-VEC-015",
+      "name": "Idempotency key reused with different amount",
+      "currency": "KHR",
+      "booking_total_minor": 15000,
+      "input_tenders": [
+        {
+          "type": "CASH",
+          "amount_minor": 15000,
+          "idempotency_key": "dup-key-015"
+        },
+        {
+          "type": "CASH_REPLAY",
+          "amount_minor": 14000,
+          "idempotency_key": "dup-key-015"
+        }
+      ],
+      "expected": {
+        "first_effect_applied": true,
+        "second_accepted": false,
+        "error_code": "IDEMPOTENCY_KEY_PAYLOAD_CONFLICT"
+      },
+      "notes": []
+    },
+    {
+      "id": "PAY-VEC-016",
+      "name": "Authorized full refund",
+      "currency": "KHR",
+      "booking_total_minor": 40000,
+      "input_tenders": [
+        {
+          "type": "ORIGINAL_PAYMENT",
+          "amount_minor": 40000,
+          "status": "FINALIZED"
+        },
+        {
+          "type": "REFUND",
+          "amount_minor": 40000,
+          "approval_id": "appr-016",
+          "reason_code": "CUSTOMER_REFUND"
+        }
+      ],
+      "expected": {
+        "original_retained": true,
+        "refund_minor": 40000,
+        "net_paid_minor": 0,
+        "ledger_balanced": true,
+        "append_only": true
+      },
+      "notes": []
+    },
+    {
+      "id": "PAY-VEC-017",
+      "name": "Partial refund",
+      "currency": "KHR",
+      "booking_total_minor": 40000,
+      "input_tenders": [
+        {
+          "type": "ORIGINAL_PAYMENT",
+          "amount_minor": 40000,
+          "status": "FINALIZED"
+        },
+        {
+          "type": "REFUND",
+          "amount_minor": 10000,
+          "approval_id": "appr-017",
+          "reason_code": "SERVICE_ADJUSTMENT"
+        }
+      ],
+      "expected": {
+        "original_retained": true,
+        "refund_minor": 10000,
+        "net_paid_minor": 30000,
+        "ledger_balanced": true
+      },
+      "notes": []
+    },
+    {
+      "id": "PAY-VEC-018",
+      "name": "Refund exceeds refundable amount",
+      "currency": "KHR",
+      "booking_total_minor": 40000,
+      "input_tenders": [
+        {
+          "type": "ORIGINAL_PAYMENT",
+          "amount_minor": 40000,
+          "status": "FINALIZED"
+        },
+        {
+          "type": "REFUND",
+          "amount_minor": 50000,
+          "approval_id": "appr-018"
+        }
+      ],
+      "expected": {
+        "refund_accepted": false,
+        "error_code": "REFUND_EXCEEDS_AVAILABLE_AMOUNT",
+        "no_new_financial_effect": true
+      },
+      "notes": []
+    },
+    {
+      "id": "PAY-VEC-019",
+      "name": "Void pending attempt before settlement",
+      "currency": "KHR",
+      "booking_total_minor": 22000,
+      "input_tenders": [
+        {
+          "type": "KHQR",
+          "attempt_id": "khqr-019",
+          "status": "PENDING",
+          "amount_minor": 22000
+        },
+        {
+          "type": "VOID_ATTEMPT",
+          "attempt_id": "khqr-019",
+          "reason_code": "CUSTOMER_CANCELLED"
+        }
+      ],
+      "expected": {
+        "paid_minor": 0,
+        "attempt_state": "VOIDED",
+        "ledger_payment_effect_count": 0
+      },
+      "notes": []
+    },
+    {
+      "id": "PAY-VEC-020",
+      "name": "Do not void finalized payment destructively",
+      "currency": "KHR",
+      "booking_total_minor": 22000,
+      "input_tenders": [
+        {
+          "type": "ORIGINAL_PAYMENT",
+          "amount_minor": 22000,
+          "status": "FINALIZED"
+        },
+        {
+          "type": "VOID_FINALIZED_REQUEST",
+          "approval_id": "appr-020"
+        }
+      ],
+      "expected": {
+        "destructive_void_allowed": false,
+        "required_action": "COMPENSATING_REFUND_OR_ADJUSTMENT"
+      },
+      "notes": []
+    },
+    {
+      "id": "PAY-VEC-021",
+      "name": "Settlement exact match",
+      "currency": "KHR",
+      "booking_total_minor": 60000,
+      "input_tenders": [
+        {
+          "type": "PAYMENT",
+          "provider_transaction_id": "p-021",
+          "amount_minor": 60000
+        },
+        {
+          "type": "SETTLEMENT",
+          "provider_transaction_id": "p-021",
+          "gross_minor": 60000,
+          "fee_minor": 0,
+          "net_minor": 60000
+        }
+      ],
+      "expected": {
+        "reconciliation_state": "MATCHED",
+        "variance_minor": 0
+      },
+      "notes": []
+    },
+    {
+      "id": "PAY-VEC-022",
+      "name": "Settlement fee recorded separately",
+      "currency": "KHR",
+      "booking_total_minor": 60000,
+      "input_tenders": [
+        {
+          "type": "PAYMENT",
+          "provider_transaction_id": "p-022",
+          "amount_minor": 60000
+        },
+        {
+          "type": "SETTLEMENT",
+          "provider_transaction_id": "p-022",
+          "gross_minor": 60000,
+          "fee_minor": 600,
+          "net_minor": 59400
+        }
+      ],
+      "expected": {
+        "reconciliation_state": "MATCHED_WITH_FEE",
+        "gross_minor": 60000,
+        "fee_minor": 600,
+        "net_minor": 59400,
+        "ledger_balanced": true
+      },
+      "notes": []
+    },
+    {
+      "id": "PAY-VEC-023",
+      "name": "Unknown settlement transaction",
+      "currency": "KHR",
+      "booking_total_minor": 0,
+      "input_tenders": [
+        {
+          "type": "SETTLEMENT",
+          "provider_transaction_id": "unknown-023",
+          "gross_minor": 10000,
+          "fee_minor": 100,
+          "net_minor": 9900
+        }
+      ],
+      "expected": {
+        "reconciliation_state": "UNMATCHED_PROVIDER_ITEM",
+        "auto_close_allowed": false
+      },
+      "notes": []
+    },
+    {
+      "id": "PAY-VEC-024",
+      "name": "Payment exists but settlement missing after SLA",
+      "currency": "KHR",
+      "booking_total_minor": 18000,
+      "input_tenders": [
+        {
+          "type": "PAYMENT",
+          "provider_transaction_id": "p-024",
+          "amount_minor": 18000,
+          "age_hours": 72
+        }
+      ],
+      "expected": {
+        "reconciliation_state": "MISSING_SETTLEMENT",
+        "auto_close_allowed": false,
+        "alert_required": true
+      },
+      "notes": []
+    },
+    {
+      "id": "PAY-VEC-025",
+      "name": "Cash close exact",
+      "currency": "KHR",
+      "booking_total_minor": 100000,
+      "input_tenders": [
+        {
+          "type": "EXPECTED_CASH",
+          "amount_minor": 100000
+        },
+        {
+          "type": "COUNTED_CASH",
+          "amount_minor": 100000
+        }
+      ],
+      "expected": {
+        "variance_minor": 0,
+        "close_state": "BALANCED"
+      },
+      "notes": []
+    },
+    {
+      "id": "PAY-VEC-026",
+      "name": "Cash close variance",
+      "currency": "KHR",
+      "booking_total_minor": 100000,
+      "input_tenders": [
+        {
+          "type": "EXPECTED_CASH",
+          "amount_minor": 100000
+        },
+        {
+          "type": "COUNTED_CASH",
+          "amount_minor": 99000
+        }
+      ],
+      "expected": {
+        "variance_minor": -1000,
+        "close_state": "VARIANCE_REQUIRES_REASON",
+        "auto_close_allowed": false
+      },
+      "notes": []
+    }
+  ]
+}

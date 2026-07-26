@@ -6,7 +6,7 @@
  * reassigned (the generator preserves existing assignments on re-run).
  */
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   csvEscape,
   extractDeclared,
@@ -18,14 +18,19 @@ import {
 } from "./lib.mjs";
 import { classify } from "./classification-map.mjs";
 
-const INGESTED_AT = "2026-07-26T16:00:00+07:00";
+const INGESTED_AT = "2026-07-26T17:00:00+07:00"; // current batch (earlier batches keep their own)
 const MANIFEST_BASE = join(MANIFESTS, "kitluy-source-document-manifest-v1.0.0");
 
-// Preserve previously assigned source IDs.
+// Merge mode: previously ingested sources are preserved verbatim (their inbox
+// originals were deleted per KLOI-2026-07-26-001); source IDs are stable and
+// the sequence continues across batches.
 const existingIds = new Map();
+let previousSources = [];
+let previousManifest = null;
 if (existsSync(`${MANIFEST_BASE}.json`)) {
-  const prev = JSON.parse(readFileSync(`${MANIFEST_BASE}.json`, "utf8"));
-  for (const e of prev.sources) existingIds.set(e.physical_filename, e.source_id);
+  previousManifest = JSON.parse(readFileSync(`${MANIFEST_BASE}.json`, "utf8"));
+  previousSources = previousManifest.sources;
+  for (const e of previousSources) existingIds.set(e.physical_filename, e.source_id);
 }
 
 const files = listInboxFiles();
@@ -35,7 +40,7 @@ if (files.length === 0) {
   );
   process.exit(0);
 }
-let nextId = 1;
+let nextId = existingIds.size + 1;
 const usedIds = new Set(existingIds.values());
 function allocId(name) {
   if (existingIds.has(name)) return existingIds.get(name);
@@ -48,15 +53,23 @@ function allocId(name) {
   return id;
 }
 
-const entries = files.map((f) => {
+const newFiles = files.filter((f) => !existingIds.has(f.name));
+const skipped = files.length - newFiles.length;
+if (skipped > 0) {
+  console.error(
+    `REFUSED: ${skipped} inbox file(s) reuse already-ingested names; ingest under new names/versions.`,
+  );
+  process.exit(1);
+}
+const newEntries = newFiles.map((f) => {
   const c = classify(f.name);
   const declared = extractDeclared(f.path, f.name);
-  const classifiedDir = join("docs/source", c.dir);
-  mkdirSync(classifiedDir, { recursive: true });
-  const classifiedPath = join(classifiedDir, f.name);
+  const classifiedPath = join("docs/source", c.dir, f.name);
+  mkdirSync(dirname(classifiedPath), { recursive: true });
   copyFileSync(f.path, classifiedPath);
   return {
     source_id: allocId(f.name),
+    batch: "2026-07-26-2",
     original_path: `${INBOX}/${f.name}`,
     classified_path: classifiedPath,
     physical_filename: f.name,
@@ -84,10 +97,12 @@ const entries = files.map((f) => {
   };
 });
 
+const entries = [...previousSources, ...newEntries];
 const manifest = {
   manifest_version: "1.0.0",
   task: "KL-DOCS-001",
-  ingested_at: INGESTED_AT,
+  ingested_at: previousManifest ? previousManifest.ingested_at : INGESTED_AT,
+  last_batch_ingested_at: INGESTED_AT,
   source_count: entries.length,
   note: "Source IDs are stable and never reassigned. Originals live in docs/source/inbox/ and are never modified; classified copies are immutable.",
   missing_expected_inputs: [
@@ -102,7 +117,7 @@ const manifest = {
 };
 writeFileSync(`${MANIFEST_BASE}.json`, JSON.stringify(manifest, null, 2) + "\n");
 
-const header = Object.keys(entries[0]);
+const header = [...new Set(entries.flatMap((e) => Object.keys(e)))];
 writeFileSync(
   `${MANIFEST_BASE}.csv`,
   [header.join(","), ...entries.map((e) => header.map((h) => csvEscape(e[h])).join(","))].join(

@@ -15,7 +15,14 @@ import {
   sha256,
 } from "./lib.mjs";
 
+const batchVersion = process.argv[2];
 const files = listInboxFiles();
+if (files.length > 0 && !batchVersion) {
+  console.error(
+    "Inbox contains files: pass an explicit batch inventory version, e.g. `node scripts/docs/inventory.mjs 1.1.0` (v1.0.0 is the frozen 2026-07-26 batch record — never overwrite it).",
+  );
+  process.exit(2);
+}
 if (files.length === 0) {
   console.log(
     "Inbox is empty — nothing to inventory. The v1.0.0 inventory is a frozen record of the 2026-07-26 ingestion; a future batch gets a NEW versioned inventory (copy this script's outputs to a new version, never overwrite v1.0.0).",
@@ -113,7 +120,7 @@ try {
 }
 
 const inventory = {
-  inventory_version: "1.0.0",
+  inventory_version: batchVersion,
   generated_for_task: "KL-DOCS-001",
   inbox_path: INBOX,
   file_count: rows.length,
@@ -123,7 +130,7 @@ const inventory = {
 };
 
 writeFileSync(
-  join(MANIFESTS, "kitluy-inbox-inventory-v1.0.0.json"),
+  join(MANIFESTS, `kitluy-inbox-inventory-v${batchVersion}.json`),
   JSON.stringify(inventory, null, 2) + "\n",
 );
 
@@ -131,10 +138,10 @@ const header = Object.keys(rows[0]);
 const csv =
   [header.join(","), ...rows.map((r) => header.map((h) => csvEscape(r[h])).join(","))].join("\n") +
   "\n";
-writeFileSync(join(MANIFESTS, "kitluy-inbox-inventory-v1.0.0.csv"), csv);
+writeFileSync(join(MANIFESTS, `kitluy-inbox-inventory-v${batchVersion}.csv`), csv);
 
 const dupes = rows.filter((r) => r.duplicate_of);
-const md = `# KitLuy Inbox Inventory — v1.0.0
+const md = `# KitLuy Inbox Inventory — v${batchVersion}
 
 Immutable Phase A inventory (task KL-DOCS-001). ${rows.length} physical source
 files in \`${INBOX}/\` (system artifacts .DS_Store/.gitkeep recorded as excluded).
@@ -163,7 +170,7 @@ ${packChecks.length === 0 ? "None." : packChecks.map((p) => `- **${p.file}** (${
 | --- | --- | --- | --- | --- | --- | --- | --- |
 ${rows.map((r, i) => `| ${i + 1} | ${r.physical_filename} | ${r.file_size} | \`${r.sha256.slice(0, 16)}\` | ${r.declared_title.slice(0, 60)} | ${r.declared_version} | ${r.declared_date} | ${r.declared_status.slice(0, 40)} |`).join("\n")}
 `;
-writeFileSync(join(MANIFESTS, "kitluy-inbox-inventory-v1.0.0.md"), md);
+writeFileSync(join(MANIFESTS, `kitluy-inbox-inventory-v${batchVersion}.md`), md);
 console.log(
   `Inventory written: ${rows.length} files, ${dupes.length} exact duplicates, ${packChecks.length} pack discrepancies.`,
 );

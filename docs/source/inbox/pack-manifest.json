@@ -1,0 +1,35 @@
+{
+  "pack": "KitLuy Repository and Engineering Standards Pack",
+  "version": "v1.0.0",
+  "date": "2026-07-26",
+  "files": [
+    "CODEOWNERS",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "kitluy-branching-commit-and-pull-request-policy-v1.0.0.md",
+    "kitluy-code-review-checklist-v1.0.0.md",
+    "kitluy-coding-standards-typescript-react-v1.0.0.md",
+    "kitluy-database-coding-standard-v1.0.0.md",
+    "kitluy-definition-of-done-v1.0.0.md",
+    "kitluy-dependency-and-supply-chain-policy-v1.0.0.md",
+    "kitluy-error-handling-and-logging-standard-v1.0.0.md",
+    "kitluy-monorepo-blueprint-v1.0.0.md",
+    "kitluy-package-boundary-and-dependency-rules-v1.0.0.md",
+    "kitluy-testing-standard-v1.0.0.md"
+  ],
+  "selected_versions": {
+    "node": "24.18.0",
+    "pnpm": "11.4.0",
+    "typescript": "6.0.3",
+    "react_web": "19.2.7",
+    "react_expo": "19.2.3",
+    "react_native": "0.86.0",
+    "expo": "57.0.8",
+    "electron": "43.2.0",
+    "supabase_cli": "2.109.1",
+    "postgresql": "17.10",
+    "raspberry_pi_os": "2026-06-18 Debian 13 kernel 6.18 64-bit",
+    "docker_engine": "29.6.2",
+    "terraform": "1.15.5"
+  }
+}

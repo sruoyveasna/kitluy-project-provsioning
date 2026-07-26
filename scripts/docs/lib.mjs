@@ -10,15 +10,20 @@ export function sha256(path) {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
 
-export function listInboxFiles() {
-  return readdirSync(INBOX)
-    .filter((f) => f !== ".gitkeep" && f !== ".DS_Store")
-    .sort()
-    .map((name) => {
-      const path = join(INBOX, name);
-      const st = statSync(path);
-      return { name, path, bytes: st.size };
-    });
+export function listInboxFiles(dir = INBOX, prefix = "") {
+  const out = [];
+  for (const entry of readdirSync(dir).sort()) {
+    if (entry === ".gitkeep" || entry === ".DS_Store") continue;
+    const path = join(dir, entry);
+    const st = statSync(path);
+    if (st.isDirectory()) {
+      out.push(...listInboxFiles(path, `${prefix}${entry}/`));
+    } else {
+      // name is the inbox-relative path (subdirectories preserved).
+      out.push({ name: `${prefix}${entry}`, path, bytes: st.size });
+    }
+  }
+  return out;
 }
 
 const EXT_TYPES = {

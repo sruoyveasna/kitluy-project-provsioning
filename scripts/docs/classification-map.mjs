@@ -357,8 +357,107 @@ export const RULES = [
   ],
 ];
 
+// --- Batch 2 (2026-07-26, KL-DOCS-002) -------------------------------------
+export const BATCH2_RULES = [
+  // AI Swarm Operating System pack -> owner-instructions/ (subpaths preserved)
+  [
+    /^kitluy-ai-swarm-operating-system-v1\.0\.0\//,
+    {
+      dir: "owner-instructions",
+      authority_class: "OWNER-INSTRUCTION",
+      document_role: "AI-SWARM-OPERATING-SYSTEM",
+      product_or_domain: "agent-operations",
+      notes:
+        "Adoption for this repository (replacing repo-root CLAUDE.md / handoff templates) is a registered proposal, not applied silently — KLREC-2026-07-26-015.",
+    },
+  ],
+
+  // Engineering standards pack -> engineering/ (taxonomy extension, KLBOOT-DEC-010)
+  [
+    /^pack-manifest\.json$/,
+    {
+      dir: "engineering",
+      authority_class: "OWNER-INSTRUCTION",
+      document_role: "PACK-INDEX (Engineering Standards Pack; selected toolchain versions)",
+      product_or_domain: "engineering",
+      notes:
+        "selected_versions conflict with repo toolchain pins (ADR-0001/0002) — KLREC-2026-07-26-014; upgrade is a registered engineering task, not applied during ingestion.",
+    },
+  ],
+  [
+    /^(CODEOWNERS|CONTRIBUTING\.md|SECURITY\.md)$/,
+    {
+      dir: "engineering",
+      authority_class: "OWNER-INSTRUCTION",
+      document_role: "REPOSITORY-GOVERNANCE-FILE",
+      product_or_domain: "engineering",
+      notes:
+        "Owner-supplied replacement candidate for the repo-root file of the same name; reconciliation recorded before adoption.",
+    },
+  ],
+  [
+    /^kitluy-(branching-commit-and-pull-request-policy|code-review-checklist|coding-standards-typescript-react|database-coding-standard|definition-of-done|dependency-and-supply-chain-policy|error-handling-and-logging-standard|monorepo-blueprint|package-boundary-and-dependency-rules|testing-standard)-v1\.0\.0\.md$/,
+    {
+      dir: "engineering",
+      authority_class: "CANONICAL-SHARED-CONTRACT",
+      document_role: "ENGINEERING-STANDARD",
+      product_or_domain: "engineering",
+    },
+  ],
+
+  // QA / testing pack -> qa/ (taxonomy extension, KLBOOT-DEC-010)
+  [
+    /^kitluy-test-case-registry-phase1-v1\.0\.0\.csv$/,
+    {
+      dir: "qa",
+      authority_class: "CANONICAL-SHARED-CONTRACT",
+      document_role: "TEST-CASE-REGISTRY (525 cases, SPECIFIED_NOT_EXECUTED)",
+      product_or_domain: "qa",
+      vertical: "laundry",
+    },
+  ],
+  [
+    /^kitluy-payment-and-reconciliation-test-vectors-v1\.0\.0\.json$/,
+    {
+      dir: "qa",
+      authority_class: "CANONICAL-SHARED-CONTRACT",
+      document_role: "TEST-VECTORS (payments/reconciliation)",
+      product_or_domain: "qa",
+    },
+  ],
+  [
+    /^kitluy-(phase1-master-test-plan|contract-test-matrix|cross-product-e2e-matrix-phase1|offline-and-reconnect-test-pack|rls-and-tenant-isolation-test-pack|security-test-plan|performance-and-capacity-test-plan|hardware-certification-test-plan|rebuild-test-checklist|pilot-evidence-template)-v1\.0\.0\.md$/,
+    {
+      dir: "qa",
+      authority_class: "CANONICAL-SHARED-CONTRACT",
+      document_role: "QA-TEST-CONTRACT",
+      product_or_domain: "qa",
+    },
+  ],
+
+  // Infrastructure / operations pack -> infrastructure/
+  [
+    /^PACKAGE_MANIFEST\.txt$/,
+    {
+      dir: "infrastructure",
+      authority_class: "CURRENT-INFRASTRUCTURE-SPECIFICATION",
+      document_role: "PACK-INDEX (Infrastructure/Operations Pack)",
+      product_or_domain: "infrastructure",
+    },
+  ],
+  [
+    /^kitluy-(backup-and-disaster-recovery|ci-cd-pipeline|database-deployment-runbook|deployment-topology-phase1|domain-dns-and-tls-plan|environment-matrix|incident-response-runbook|infrastructure-as-code-plan|observability-and-alert-registry|phase1-go-live-checklist|phase1-pilot-runbook|release-channel-and-promotion-policy|rollback-and-emergency-change-runbook|secrets-inventory)-v1\.0\.0\.md$/,
+    {
+      dir: "infrastructure",
+      authority_class: "CURRENT-INFRASTRUCTURE-SPECIFICATION",
+      document_role: "INFRASTRUCTURE-OPERATIONS-CONTRACT",
+      product_or_domain: "infrastructure",
+    },
+  ],
+];
+
 export function classify(name) {
-  for (const [re, fields] of RULES) {
+  for (const [re, fields] of [...BATCH2_RULES, ...RULES]) {
     if (re.test(name)) return fields;
   }
   return {
