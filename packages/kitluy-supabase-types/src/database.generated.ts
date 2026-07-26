@@ -1554,6 +1554,677 @@ export type Database = {
   };
   kitluy_core: {
     Tables: {
+      catalog_item_translations: {
+        Row: {
+          catalog_item_id: string;
+          created_at: string;
+          description: string | null;
+          id: string;
+          locale: string;
+          name: string;
+          updated_at: string;
+        };
+        Insert: {
+          catalog_item_id: string;
+          created_at?: string;
+          description?: string | null;
+          id?: string;
+          locale: string;
+          name: string;
+          updated_at?: string;
+        };
+        Update: {
+          catalog_item_id?: string;
+          created_at?: string;
+          description?: string | null;
+          id?: string;
+          locale?: string;
+          name?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "catalog_item_translations_catalog_item_id_fkey";
+            columns: ["catalog_item_id"];
+            isOneToOne: false;
+            referencedRelation: "catalog_items";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      catalog_items: {
+        Row: {
+          code: string;
+          created_at: string;
+          digital_store_id: string;
+          id: string;
+          item_type: string;
+          metadata: Json | null;
+          name: string;
+          status: string;
+          tenant_id: string;
+          updated_at: string;
+          version: number;
+        };
+        Insert: {
+          code: string;
+          created_at?: string;
+          digital_store_id: string;
+          id?: string;
+          item_type: string;
+          metadata?: Json | null;
+          name: string;
+          status?: string;
+          tenant_id: string;
+          updated_at?: string;
+          version?: number;
+        };
+        Update: {
+          code?: string;
+          created_at?: string;
+          digital_store_id?: string;
+          id?: string;
+          item_type?: string;
+          metadata?: Json | null;
+          name?: string;
+          status?: string;
+          tenant_id?: string;
+          updated_at?: string;
+          version?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "catalog_items_digital_store_id_fkey";
+            columns: ["digital_store_id"];
+            isOneToOne: false;
+            referencedRelation: "digital_stores";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "catalog_items_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "catalog_items_tenant_store_fk";
+            columns: ["tenant_id", "digital_store_id"];
+            isOneToOne: false;
+            referencedRelation: "digital_stores";
+            referencedColumns: ["tenant_id", "id"];
+          },
+        ];
+      };
+      consent_grants: {
+        Row: {
+          channel: string;
+          consent_purpose_version_id: string;
+          customer_id: string;
+          evidence_ref: string | null;
+          granted_at: string;
+          id: string;
+          recorded_by: string | null;
+          source: string;
+          tenant_id: string;
+        };
+        Insert: {
+          channel: string;
+          consent_purpose_version_id: string;
+          customer_id: string;
+          evidence_ref?: string | null;
+          granted_at?: string;
+          id?: string;
+          recorded_by?: string | null;
+          source: string;
+          tenant_id: string;
+        };
+        Update: {
+          channel?: string;
+          consent_purpose_version_id?: string;
+          customer_id?: string;
+          evidence_ref?: string | null;
+          granted_at?: string;
+          id?: string;
+          recorded_by?: string | null;
+          source?: string;
+          tenant_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "consent_grants_consent_purpose_version_id_fkey";
+            columns: ["consent_purpose_version_id"];
+            isOneToOne: false;
+            referencedRelation: "consent_purpose_versions";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "consent_grants_customer_id_fkey";
+            columns: ["customer_id"];
+            isOneToOne: false;
+            referencedRelation: "customers";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "consent_grants_tenant_customer_fk";
+            columns: ["tenant_id", "customer_id"];
+            isOneToOne: false;
+            referencedRelation: "customers";
+            referencedColumns: ["tenant_id", "id"];
+          },
+          {
+            foreignKeyName: "consent_grants_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      consent_purpose_versions: {
+        Row: {
+          consent_purpose_id: string;
+          created_at: string;
+          effective_from: string;
+          effective_to: string | null;
+          id: string;
+          notice_text: string | null;
+          policy_ref: string | null;
+          version: number;
+        };
+        Insert: {
+          consent_purpose_id: string;
+          created_at?: string;
+          effective_from?: string;
+          effective_to?: string | null;
+          id?: string;
+          notice_text?: string | null;
+          policy_ref?: string | null;
+          version: number;
+        };
+        Update: {
+          consent_purpose_id?: string;
+          created_at?: string;
+          effective_from?: string;
+          effective_to?: string | null;
+          id?: string;
+          notice_text?: string | null;
+          policy_ref?: string | null;
+          version?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "consent_purpose_versions_consent_purpose_id_fkey";
+            columns: ["consent_purpose_id"];
+            isOneToOne: false;
+            referencedRelation: "consent_purposes";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      consent_purposes: {
+        Row: {
+          communication_class: string;
+          created_at: string;
+          description: string | null;
+          id: string;
+          purpose_key: string;
+          status: string;
+          updated_at: string;
+        };
+        Insert: {
+          communication_class: string;
+          created_at?: string;
+          description?: string | null;
+          id?: string;
+          purpose_key: string;
+          status?: string;
+          updated_at?: string;
+        };
+        Update: {
+          communication_class?: string;
+          created_at?: string;
+          description?: string | null;
+          id?: string;
+          purpose_key?: string;
+          status?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      consent_withdrawals: {
+        Row: {
+          consent_grant_id: string;
+          id: string;
+          reason_code: string | null;
+          recorded_by: string | null;
+          source: string;
+          tenant_id: string;
+          withdrawn_at: string;
+        };
+        Insert: {
+          consent_grant_id: string;
+          id?: string;
+          reason_code?: string | null;
+          recorded_by?: string | null;
+          source: string;
+          tenant_id: string;
+          withdrawn_at?: string;
+        };
+        Update: {
+          consent_grant_id?: string;
+          id?: string;
+          reason_code?: string | null;
+          recorded_by?: string | null;
+          source?: string;
+          tenant_id?: string;
+          withdrawn_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "consent_withdrawals_consent_grant_id_fkey";
+            columns: ["consent_grant_id"];
+            isOneToOne: true;
+            referencedRelation: "consent_grants";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "consent_withdrawals_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      customer_contacts: {
+        Row: {
+          consent_status: string;
+          created_at: string;
+          customer_id: string;
+          display_value: string | null;
+          id: string;
+          is_primary: boolean;
+          masked_value: string | null;
+          normalized_value: string;
+          status: string;
+          tenant_id: string;
+          type: string;
+          updated_at: string;
+          verified_at: string | null;
+        };
+        Insert: {
+          consent_status?: string;
+          created_at?: string;
+          customer_id: string;
+          display_value?: string | null;
+          id?: string;
+          is_primary?: boolean;
+          masked_value?: string | null;
+          normalized_value: string;
+          status?: string;
+          tenant_id: string;
+          type: string;
+          updated_at?: string;
+          verified_at?: string | null;
+        };
+        Update: {
+          consent_status?: string;
+          created_at?: string;
+          customer_id?: string;
+          display_value?: string | null;
+          id?: string;
+          is_primary?: boolean;
+          masked_value?: string | null;
+          normalized_value?: string;
+          status?: string;
+          tenant_id?: string;
+          type?: string;
+          updated_at?: string;
+          verified_at?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "customer_contacts_customer_id_fkey";
+            columns: ["customer_id"];
+            isOneToOne: false;
+            referencedRelation: "customers";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "customer_contacts_tenant_customer_fk";
+            columns: ["tenant_id", "customer_id"];
+            isOneToOne: false;
+            referencedRelation: "customers";
+            referencedColumns: ["tenant_id", "id"];
+          },
+          {
+            foreignKeyName: "customer_contacts_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      customer_merge_requests: {
+        Row: {
+          decided_at: string | null;
+          id: string;
+          match_evidence: Json | null;
+          merging_customer_id: string;
+          reason: string | null;
+          requested_at: string;
+          requested_by: string;
+          reviewed_by: string | null;
+          status: string;
+          surviving_customer_id: string;
+          tenant_id: string;
+        };
+        Insert: {
+          decided_at?: string | null;
+          id?: string;
+          match_evidence?: Json | null;
+          merging_customer_id: string;
+          reason?: string | null;
+          requested_at?: string;
+          requested_by: string;
+          reviewed_by?: string | null;
+          status?: string;
+          surviving_customer_id: string;
+          tenant_id: string;
+        };
+        Update: {
+          decided_at?: string | null;
+          id?: string;
+          match_evidence?: Json | null;
+          merging_customer_id?: string;
+          reason?: string | null;
+          requested_at?: string;
+          requested_by?: string;
+          reviewed_by?: string | null;
+          status?: string;
+          surviving_customer_id?: string;
+          tenant_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "customer_merge_requests_merging_customer_id_fkey";
+            columns: ["merging_customer_id"];
+            isOneToOne: false;
+            referencedRelation: "customers";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "customer_merge_requests_surviving_customer_id_fkey";
+            columns: ["surviving_customer_id"];
+            isOneToOne: false;
+            referencedRelation: "customers";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "customer_merge_requests_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "customer_merge_requests_tenant_merging_fk";
+            columns: ["tenant_id", "merging_customer_id"];
+            isOneToOne: false;
+            referencedRelation: "customers";
+            referencedColumns: ["tenant_id", "id"];
+          },
+          {
+            foreignKeyName: "customer_merge_requests_tenant_survivor_fk";
+            columns: ["tenant_id", "surviving_customer_id"];
+            isOneToOne: false;
+            referencedRelation: "customers";
+            referencedColumns: ["tenant_id", "id"];
+          },
+        ];
+      };
+      customer_merge_results: {
+        Row: {
+          completed_at: string;
+          completed_by: string | null;
+          id: string;
+          merge_request_id: string;
+          merged_customer_id: string;
+          moved_links: Json | null;
+          surviving_customer_id: string;
+          tenant_id: string;
+        };
+        Insert: {
+          completed_at?: string;
+          completed_by?: string | null;
+          id?: string;
+          merge_request_id: string;
+          merged_customer_id: string;
+          moved_links?: Json | null;
+          surviving_customer_id: string;
+          tenant_id: string;
+        };
+        Update: {
+          completed_at?: string;
+          completed_by?: string | null;
+          id?: string;
+          merge_request_id?: string;
+          merged_customer_id?: string;
+          moved_links?: Json | null;
+          surviving_customer_id?: string;
+          tenant_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "customer_merge_results_merge_request_id_fkey";
+            columns: ["merge_request_id"];
+            isOneToOne: true;
+            referencedRelation: "customer_merge_requests";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "customer_merge_results_merged_customer_id_fkey";
+            columns: ["merged_customer_id"];
+            isOneToOne: false;
+            referencedRelation: "customers";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "customer_merge_results_surviving_customer_id_fkey";
+            columns: ["surviving_customer_id"];
+            isOneToOne: false;
+            referencedRelation: "customers";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "customer_merge_results_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      customer_status_history: {
+        Row: {
+          actor_id: string | null;
+          customer_id: string;
+          from_status: string | null;
+          id: string;
+          occurred_at: string;
+          reason_code: string | null;
+          tenant_id: string;
+          to_status: string;
+        };
+        Insert: {
+          actor_id?: string | null;
+          customer_id: string;
+          from_status?: string | null;
+          id?: string;
+          occurred_at?: string;
+          reason_code?: string | null;
+          tenant_id: string;
+          to_status: string;
+        };
+        Update: {
+          actor_id?: string | null;
+          customer_id?: string;
+          from_status?: string | null;
+          id?: string;
+          occurred_at?: string;
+          reason_code?: string | null;
+          tenant_id?: string;
+          to_status?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "customer_status_history_customer_id_fkey";
+            columns: ["customer_id"];
+            isOneToOne: false;
+            referencedRelation: "customers";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "customer_status_history_tenant_customer_fk";
+            columns: ["tenant_id", "customer_id"];
+            isOneToOne: false;
+            referencedRelation: "customers";
+            referencedColumns: ["tenant_id", "id"];
+          },
+          {
+            foreignKeyName: "customer_status_history_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      customer_store_relationships: {
+        Row: {
+          created_at: string;
+          customer_id: string;
+          digital_store_id: string;
+          first_seen_at: string;
+          id: string;
+          last_activity_at: string | null;
+          source_code: string | null;
+          status: string;
+          tenant_id: string;
+          updated_at: string;
+        };
+        Insert: {
+          created_at?: string;
+          customer_id: string;
+          digital_store_id: string;
+          first_seen_at?: string;
+          id?: string;
+          last_activity_at?: string | null;
+          source_code?: string | null;
+          status?: string;
+          tenant_id: string;
+          updated_at?: string;
+        };
+        Update: {
+          created_at?: string;
+          customer_id?: string;
+          digital_store_id?: string;
+          first_seen_at?: string;
+          id?: string;
+          last_activity_at?: string | null;
+          source_code?: string | null;
+          status?: string;
+          tenant_id?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "customer_store_relationships_customer_id_fkey";
+            columns: ["customer_id"];
+            isOneToOne: false;
+            referencedRelation: "customers";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "customer_store_relationships_digital_store_id_fkey";
+            columns: ["digital_store_id"];
+            isOneToOne: false;
+            referencedRelation: "digital_stores";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "customer_store_relationships_tenant_customer_fk";
+            columns: ["tenant_id", "customer_id"];
+            isOneToOne: false;
+            referencedRelation: "customers";
+            referencedColumns: ["tenant_id", "id"];
+          },
+          {
+            foreignKeyName: "customer_store_relationships_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "customer_store_relationships_tenant_store_fk";
+            columns: ["tenant_id", "digital_store_id"];
+            isOneToOne: false;
+            referencedRelation: "digital_stores";
+            referencedColumns: ["tenant_id", "id"];
+          },
+        ];
+      };
+      customers: {
+        Row: {
+          created_at: string;
+          display_name: string | null;
+          id: string;
+          merged_into_customer_id: string | null;
+          preferred_locale: string | null;
+          status: string;
+          tenant_id: string;
+          updated_at: string;
+        };
+        Insert: {
+          created_at?: string;
+          display_name?: string | null;
+          id?: string;
+          merged_into_customer_id?: string | null;
+          preferred_locale?: string | null;
+          status?: string;
+          tenant_id: string;
+          updated_at?: string;
+        };
+        Update: {
+          created_at?: string;
+          display_name?: string | null;
+          id?: string;
+          merged_into_customer_id?: string | null;
+          preferred_locale?: string | null;
+          status?: string;
+          tenant_id?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "customers_merged_into_customer_id_fkey";
+            columns: ["merged_into_customer_id"];
+            isOneToOne: false;
+            referencedRelation: "customers";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "customers_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       digital_store_location_links: {
         Row: {
           created_at: string;
@@ -1815,6 +2486,99 @@ export type Database = {
           status?: string;
         };
         Relationships: [];
+      };
+      privacy_request_decisions: {
+        Row: {
+          decided_at: string;
+          decided_by: string | null;
+          decision: string;
+          evidence_ref: string | null;
+          id: string;
+          privacy_request_id: string;
+          reason: string | null;
+        };
+        Insert: {
+          decided_at?: string;
+          decided_by?: string | null;
+          decision: string;
+          evidence_ref?: string | null;
+          id?: string;
+          privacy_request_id: string;
+          reason?: string | null;
+        };
+        Update: {
+          decided_at?: string;
+          decided_by?: string | null;
+          decision?: string;
+          evidence_ref?: string | null;
+          id?: string;
+          privacy_request_id?: string;
+          reason?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "privacy_request_decisions_privacy_request_id_fkey";
+            columns: ["privacy_request_id"];
+            isOneToOne: false;
+            referencedRelation: "privacy_requests";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      privacy_requests: {
+        Row: {
+          customer_id: string;
+          id: string;
+          request_type: string;
+          requested_at: string;
+          requested_by: string | null;
+          scope: Json | null;
+          tenant_id: string;
+          verification_ref: string | null;
+        };
+        Insert: {
+          customer_id: string;
+          id?: string;
+          request_type: string;
+          requested_at?: string;
+          requested_by?: string | null;
+          scope?: Json | null;
+          tenant_id: string;
+          verification_ref?: string | null;
+        };
+        Update: {
+          customer_id?: string;
+          id?: string;
+          request_type?: string;
+          requested_at?: string;
+          requested_by?: string | null;
+          scope?: Json | null;
+          tenant_id?: string;
+          verification_ref?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "privacy_requests_customer_id_fkey";
+            columns: ["customer_id"];
+            isOneToOne: false;
+            referencedRelation: "customers";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "privacy_requests_tenant_customer_fk";
+            columns: ["tenant_id", "customer_id"];
+            isOneToOne: false;
+            referencedRelation: "customers";
+            referencedColumns: ["tenant_id", "id"];
+          },
+          {
+            foreignKeyName: "privacy_requests_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       reference_value_translations: {
         Row: {
