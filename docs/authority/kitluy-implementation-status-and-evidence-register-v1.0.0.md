@@ -201,6 +201,8 @@ Rows above SPECIFIED carry linked evidence (validated by `pnpm docs:registry-che
 | 18 service kernels (health/ready/version, config validation, graceful shutdown) | SCAFFOLDED | E-REPO+E-TEST `services/*/test/http.test.ts` |
 | 4 governed API OpenAPI governance skeletons + contract tests | SCAFFOLDED | E-REPO+E-TEST `services/kitluy-*-api/test/contract.test.ts` (pnpm test:contract) |
 | 8 Phase 1 application shells (fail-closed, km/en, error boundaries) | SCAFFOLDED | E-REPO+E-TEST `apps/*/test/` smoke tests + pnpm build (68 tasks, 2026-07-26) |
+| Laundry Booking lifecycle + production state machines (KBR-LND/TXN encoded) | SCAFFOLDED | E-REPO+E-TEST `verticals/phase1-laundry/test/` (65/65, 2026-07-26; independent review PASS-WITH-CONDITIONS, RV-001 applied) |
+| Payments engine passing all 26 canonical vectors | SCAFFOLDED | E-REPO+E-TEST `packages/payments/test/vectors.test.ts` (40/40, 2026-07-26; four-eyes review, blocking RV-001 fixed + regression) |
 | Documentation corpus governance tooling (inventory/hash/classify/coverage checks) | SCAFFOLDED | E-REPO+E-TEST `scripts/docs/` (pnpm docs:verify, pass 2026-07-26) |
 
 <!-- registry-check:end -->
