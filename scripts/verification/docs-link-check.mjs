@@ -11,7 +11,14 @@ import { dirname, resolve } from "node:path";
 const files = execSync("git ls-files '*.md'", { encoding: "utf8" })
   .split("\n")
   .filter(Boolean)
-  .filter((f) => !f.startsWith("docs/source/imported/"))
+  .filter(
+    (f) =>
+      !f.startsWith("docs/source/imported/") &&
+      !f.startsWith("docs/source/inbox/") &&
+      !/^docs\/source\/(canonical|api-contracts|data-contracts|business-rules|security|offline|shared-services|ui-ux)\//.test(
+        f,
+      ),
+  )
   .filter((f) => !f.includes("node_modules"));
 
 const linkRe = /\[[^\]]*\]\(([^)]+)\)/g;

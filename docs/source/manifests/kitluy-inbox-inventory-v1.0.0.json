@@ -3,7 +3,10 @@
   "generated_for_task": "KL-DOCS-001",
   "inbox_path": "docs/source/inbox",
   "file_count": 102,
-  "excluded_system_files": [".DS_Store", ".gitkeep"],
+  "excluded_system_files": [
+    ".DS_Store",
+    ".gitkeep"
+  ],
   "files": [
     {
       "relative_path": "docs/source/inbox/KITLUY-UI-UX-BUILD-PACK-INDEX-v1.0.0.md",

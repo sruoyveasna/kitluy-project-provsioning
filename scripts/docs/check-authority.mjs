@@ -32,15 +32,23 @@ for (const s of manifest.sources) {
       errors += 1;
     }
   }
-  if (
-    s.canonical_status === "CANONICAL-CURRENT" &&
-    supersededReg.includes(`| ${s.physical_filename} `) &&
-    !supersededReg.includes(`${s.physical_filename} (inbox`)
-  ) {
-    console.error(
-      `AUTHORITY: ${s.physical_filename} is registered superseded but marked CANONICAL-CURRENT.`,
-    );
-    errors += 1;
+  if (s.canonical_status === "CANONICAL-CURRENT") {
+    // A doc is "registered superseded" only when it appears in the FIRST
+    // (superseded source/pattern) column of a register row — not when it is
+    // named as the replacement authority in a later column.
+    const supersededHere = supersededReg.split("\n").some((line) => {
+      if (!line.startsWith("|")) return false;
+      const cells = line.split("|").map((c) => c.trim());
+      const first = cells[1] ?? "";
+      const source = /^SUP-\d+$/.test(first) ? (cells[2] ?? "") : first;
+      return source.includes(s.physical_filename);
+    });
+    if (supersededHere) {
+      console.error(
+        `AUTHORITY: ${s.physical_filename} is registered superseded but marked CANONICAL-CURRENT.`,
+      );
+      errors += 1;
+    }
   }
 }
 

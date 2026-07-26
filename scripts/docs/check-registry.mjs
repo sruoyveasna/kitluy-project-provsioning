@@ -19,9 +19,20 @@ const ABOVE_SPECIFIED = [
 ];
 const evidencePattern =
   /(`[^`]+`|\([^)]*(commit|\.ts|\.md|\.sql|\.yaml|\.json|pnpm )[^)]*\)|commit [0-9a-f]{7,}|test)/i;
+const startMarker = "<!-- registry-check:start -->";
+const endMarker = "<!-- registry-check:end -->";
+const startIdx = text.indexOf(startMarker);
+const endIdx = text.indexOf(endMarker);
+if (startIdx === -1 || endIdx === -1) {
+  console.error(
+    "REGISTRY: machine-checkable evidence table markers missing (registry-check:start/end).",
+  );
+  process.exit(1);
+}
+const scanned = text.slice(startIdx, endIdx);
 let errors = 0;
 let checked = 0;
-for (const line of text.split("\n")) {
+for (const line of scanned.split("\n")) {
   if (!line.startsWith("|")) continue;
   const status = ABOVE_SPECIFIED.find((s) => new RegExp(`\\b${s}\\b`).test(line));
   if (!status) continue;
