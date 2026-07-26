@@ -150,6 +150,16 @@ matrix exactly matches `KITLUY_ENVIRONMENTS`; CI/CD doc reinforces
 KL-INF-P1-037 (no auto-applied production migrations); no batch-2 document
 contradicts any owner-locked invariant.
 
+### Cycle-5 reconciliation (WS-05/06, 2026-07-27)
+
+Conflicts C1–C10 recorded in
+`docs/source/processed/reconciliation/kitluy-ws05-ws06-entity-reconciliation-v1.0.0.md`
+(none silently resolved). Highest-impact: **C2 — ten cycle-mandated entities
+absent from the data dictionary** → DD **Amendment-002 REQUIRED** (KLREQ-012,
+owner review path as Amendment-001); C4 missing customer-data RBAC key
+(PC-TENANT interim, registry amendment proposed); C8 kitluy_notifications
+partial schema (remainder group 0100).
+
 ### Engineering decisions (bootstrap + this task)
 
 KLBOOT-DEC-001..007 (see ADR-0001..0005 in `docs/decisions/`) remain in force.

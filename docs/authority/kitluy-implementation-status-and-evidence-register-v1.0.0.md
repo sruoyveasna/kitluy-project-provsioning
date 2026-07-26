@@ -201,6 +201,8 @@ Rows above SPECIFIED carry linked evidence (validated by `pnpm docs:registry-che
 | 18 service kernels (health/ready/version, config validation, graceful shutdown) | SCAFFOLDED | E-REPO+E-TEST `services/*/test/http.test.ts` |
 | 4 governed API OpenAPI governance skeletons + contract tests | SCAFFOLDED | E-REPO+E-TEST `services/kitluy-*-api/test/contract.test.ts` (pnpm test:contract) |
 | 8 Phase 1 application shells (fail-closed, km/en, error boundaries) | SCAFFOLDED | E-REPO+E-TEST `apps/*/test/` smoke tests + pnpm build (68 tasks, 2026-07-26) |
+| **WS-05 catalog, pricing and configuration persistence (0040/0045/0050)** | **IMPLEMENTED-IN-DEV** (2026-07-27) | E-TEST reset-from-zero 11 migrations + 73-case suite + live probes (overlap guard, snapshot immutability, scope escape); evidence `docs/evidence/phase1/ws-05/WS-05-T001/EXECUTION-EVIDENCE.md`; review 2026-07-27__WS-05-06-EXECUTION APPROVED |
+| **WS-06 customer identity and consent persistence (0060/0065)** | **IMPLEMENTED-IN-DEV** (2026-07-27) | E-TEST same chain (E.164/merge/consent probes; composite tenant FK fix probe-verified); same evidence + review |
 | **WS-01 local Supabase development foundation** | **IMPLEMENTED-IN-DEV** (2026-07-27) | E-TEST reset-from-zero + healthy stack (-x logflare,vector) + deterministic types; evidence `docs/evidence/phase1/ws-01/WS-01-T004/EXECUTION-EVIDENCE.md`; review 2026-07-27__WS-01-04-EXECUTION APPROVED |
 | **WS-02 identity/tenancy persistence (0010)** | **IMPLEMENTED-IN-DEV** (2026-07-27) | E-TEST migrations applied + seeds idempotent + assertions + RLS cases executed (same evidence + review) |
 | **WS-03 Digital Store/Location persistence (0020)** | **IMPLEMENTED-IN-DEV** (2026-07-27) | E-TEST same evidence chain (primary-vertical invariant asserted live) |
@@ -222,6 +224,8 @@ Rows above SPECIFIED carry linked evidence (validated by `pnpm docs:registry-che
 
 | Item | Old | New | Source |
 | --- | --- | --- | --- |
+| **WS-05 catalog, pricing and configuration persistence (0040/0045/0050)** | **IMPLEMENTED-IN-DEV** (2026-07-27) | E-TEST reset-from-zero 11 migrations + 73-case suite + live probes (overlap guard, snapshot immutability, scope escape); evidence `docs/evidence/phase1/ws-05/WS-05-T001/EXECUTION-EVIDENCE.md`; review 2026-07-27__WS-05-06-EXECUTION APPROVED |
+| **WS-06 customer identity and consent persistence (0060/0065)** | **IMPLEMENTED-IN-DEV** (2026-07-27) | E-TEST same chain (E.164/merge/consent probes; composite tenant FK fix probe-verified); same evidence + review |
 | **WS-01 local Supabase development foundation** | **IMPLEMENTED-IN-DEV** (2026-07-27) | E-TEST reset-from-zero + healthy stack (-x logflare,vector) + deterministic types; evidence `docs/evidence/phase1/ws-01/WS-01-T004/EXECUTION-EVIDENCE.md`; review 2026-07-27__WS-01-04-EXECUTION APPROVED |
 | **WS-02 identity/tenancy persistence (0010)** | **IMPLEMENTED-IN-DEV** (2026-07-27) | E-TEST migrations applied + seeds idempotent + assertions + RLS cases executed (same evidence + review) |
 | **WS-03 Digital Store/Location persistence (0020)** | **IMPLEMENTED-IN-DEV** (2026-07-27) | E-TEST same evidence chain (primary-vertical invariant asserted live) |
