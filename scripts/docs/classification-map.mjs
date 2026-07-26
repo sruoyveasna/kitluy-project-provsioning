@@ -359,7 +359,16 @@ export const RULES = [
 
 // --- Batch 3 (2026-07-26, KL-BUILD-000 ingestion) ---------------------------
 export const BATCH3_RULES = [
-  [/^kitluy-phase1-laundry-master-build-plan-v1\.0\.0\.md$/, { dir: "owner-instructions", authority_class: "OWNER-INSTRUCTION", document_role: "PHASE1-MASTER-BUILD-PLAN (WS-00..WS-26 execution program)", product_or_domain: "execution", vertical: "laundry" }],
+  [
+    /^kitluy-phase1-laundry-master-build-plan-v1\.0\.0\.md$/,
+    {
+      dir: "owner-instructions",
+      authority_class: "OWNER-INSTRUCTION",
+      document_role: "PHASE1-MASTER-BUILD-PLAN (WS-00..WS-26 execution program)",
+      product_or_domain: "execution",
+      vertical: "laundry",
+    },
+  ],
 ];
 
 // --- Batch 2 (2026-07-26, KL-DOCS-002) -------------------------------------
