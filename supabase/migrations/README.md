@@ -1,8 +1,15 @@
-# Migrations (empty at bootstrap — deliberately)
+# Migrations (authored, NOT applied — BLK-002)
 
-No production DDL exists because the authoritative Supabase schema pack
-(schema v1.0.0, RLS v1.0.0, migration plan v1.0.0 — RB v4 §13.3) has not been
-authored. **Agents must not invent table names or RLS from planning prose.**
+Authored against the CONTRACT-APPROVED Supabase pack (schema v1.0.0, RLS
+v1.0.0, migration plan v1.0.0; data dictionary v1.0.0 for exact names).
+**Agents must not invent table names or RLS from planning prose.**
+
+Authored groups: `0000` (controls), `0010` identity_and_tenant, `0020`
+store_and_location, `0030` authz_and_audit, `0035` RLS helpers + policies for
+0010–0030 (sequence per owner direction KLD-2026-07-26-003 row 5). Every file
+is statically validated only (`pnpm db:validate`); **nothing has been applied
+anywhere** — local execution is BLOCKED (BLK-002: Docker/Supabase CLI absent;
+see `00_AI_HANDOFF/OPERATOR-INSTRUCTION-BLK-002.md`).
 
 ## Conventions
 
