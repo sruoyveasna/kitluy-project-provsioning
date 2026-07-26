@@ -1,0 +1,6 @@
+{
+  "name": "@kitluy-verticals/phase8-supermarket",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Phase 8 — Supermarkets. REGISTERED, INACTIVE. Reserved module boundary only; no active production behavior (RB v4 §2.3)."
+}

@@ -1,0 +1,6 @@
+{
+  "name": "@kitluy-future/kiosk-self-checkout-client",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Optional Kiosk / Self-Checkout Client (later phase). Not a Phase 1 requirement. REGISTERED, INACTIVE — no build, no runtime, feature flag defaults OFF."
+}

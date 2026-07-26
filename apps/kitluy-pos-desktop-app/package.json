@@ -1,0 +1,32 @@
+{
+  "name": "@kitluy-apps/kitluy-pos-desktop-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "POS Desktop App — Electron/Linux ARM64 operational client implementing the owner-locked T1-T4 profiles through the Store Hub (POS spec v4.0.0).",
+  "type": "module",
+  "main": "dist-electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && tsc -p tsconfig.electron.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist dist-electron"
+  },
+  "dependencies": {
+    "@kitluy-verticals/phase1-laundry": "workspace:*",
+    "@kitluy/feature-flags": "workspace:*",
+    "@kitluy/localization": "workspace:*",
+    "@kitluy/web-ui": "workspace:*",
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  },
+  "devDependencies": {
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "catalog:",
+    "electron": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  }
+}

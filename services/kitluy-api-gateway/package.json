@@ -1,0 +1,24 @@
+{
+  "name": "@kitluy-services/kitluy-api-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Stable API boundary in front of the governed API surfaces; hides provider placement (infra spec §7.2)",
+  "type": "module",
+  "main": "./dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@kitluy/api-errors": "workspace:*",
+    "@kitluy/observability": "workspace:*",
+    "@kitluy/shared-config": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "@types/node": "catalog:",
+    "vitest": "catalog:"
+  }
+}

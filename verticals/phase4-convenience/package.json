@@ -1,0 +1,6 @@
+{
+  "name": "@kitluy-verticals/phase4-convenience",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Phase 4 — Convenience Stores. REGISTERED, INACTIVE. Reserved module boundary only; no active production behavior (RB v4 §2.3)."
+}

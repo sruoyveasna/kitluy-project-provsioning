@@ -1,0 +1,24 @@
+{
+  "name": "@kitluy-services/kitluy-configuration-projection-service",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Configuration projection — versioned cloud configuration to Store Location activation packages (RB v4 §3.4)",
+  "type": "module",
+  "main": "./dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@kitluy/api-errors": "workspace:*",
+    "@kitluy/observability": "workspace:*",
+    "@kitluy/shared-config": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "@types/node": "catalog:",
+    "vitest": "catalog:"
+  }
+}

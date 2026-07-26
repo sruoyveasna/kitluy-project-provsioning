@@ -1,0 +1,24 @@
+# KitLuy Suite workspace. Version pins live in the catalog below — reference
+# them from package.json files as "catalog:" so the whole monorepo shares one
+# version of each foundational dependency.
+packages:
+  - "apps/*"
+  - "services/*"
+  - "packages/*"
+  - "verticals/*"
+  - "future-clients/*"
+
+catalog:
+  typescript: "~5.7.2"
+  vitest: "^2.1.8"
+  react: "18.3.1"
+  react-dom: "18.3.1"
+  "@types/react": "^18.3.18"
+  "@types/react-dom": "^18.3.5"
+  "@types/node": "^22.10.2"
+  vite: "^6.0.7"
+  "@vitejs/plugin-react": "^4.3.4"
+  next: "14.2.35"
+  react-native: "0.76.6"
+  electron: "^33.3.1"
+  zod: "^3.24.1"

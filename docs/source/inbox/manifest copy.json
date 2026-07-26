@@ -1,0 +1,107 @@
+{
+  "package": "kitluy-ui-ux-build-pack",
+  "version": "1.0.0",
+  "date": "2026-07-26",
+  "files": [
+    {
+      "file": "KITLUY-UI-UX-BUILD-PACK-INDEX-v1.0.0.md",
+      "bytes": 6100,
+      "sha256": "05daa0e8d6cff9bd59405bf369a7210bd87db94d60966777a46c894b3bce62ac"
+    },
+    {
+      "file": "kitluy-accessibility-standard-v1.0.0.md",
+      "bytes": 4805,
+      "sha256": "89dfaf500887e84ef73e1ffa64ee4cff5b66228abfcae90aea002e5b8ecb905a"
+    },
+    {
+      "file": "kitluy-admin-pwa-portal-route-screen-inventory-v1.0.0.md",
+      "bytes": 97609,
+      "sha256": "d2cd51874403fc0348255097ee38720e7abde8bda14bb89d9e7c806e11d67437"
+    },
+    {
+      "file": "kitluy-b2b-website-route-screen-inventory-v1.0.0.md",
+      "bytes": 40714,
+      "sha256": "0590692eccd07165485e99d73aa0cd2a6d9f61d1f8734969b1c297592c0e6b01"
+    },
+    {
+      "file": "kitluy-chain-pwa-portal-route-screen-inventory-v1.0.0.md",
+      "bytes": 80093,
+      "sha256": "2a62544ce72b87d9720f28d9f1ab33248f8933f7a3a78e8ebb76309e8bcdc6d2"
+    },
+    {
+      "file": "kitluy-component-inventory-v1.0.0.md",
+      "bytes": 8945,
+      "sha256": "ef81ebe9cb51fa231eee56979da5e682715056485497ae5903f07a75bbc210a7"
+    },
+    {
+      "file": "kitluy-date-time-money-formatting-standard-v1.0.0.md",
+      "bytes": 5393,
+      "sha256": "a804b0fc5ca4f30463f636b795789447388c3bbbee86f211171afa32fd5cd1b7"
+    },
+    {
+      "file": "kitluy-design-system-v1.0.0.md",
+      "bytes": 9522,
+      "sha256": "a71de1f4765f366d9a52d1a5071b809ce3e82815607712ed5016a040023e9f58"
+    },
+    {
+      "file": "kitluy-design-token-registry-v1.0.0.json",
+      "bytes": 11129,
+      "sha256": "36f56f56073500a2fb3547e30f4173473d824c1127d7938fe887b3e3e1e3f087"
+    },
+    {
+      "file": "kitluy-khmer-english-content-style-guide-v1.0.0.md",
+      "bytes": 5544,
+      "sha256": "0ddb782f834e87ced38c7a65604be8816236b624c813921c6e8d426106651e5e"
+    },
+    {
+      "file": "kitluy-kiosk-self-checkout-client-route-screen-inventory-v1.0.0.md",
+      "bytes": 12686,
+      "sha256": "db535c3ad20512df14eaba868cc7b880a963c6e7c17a398610ed09c982ea2a3a"
+    },
+    {
+      "file": "kitluy-localization-key-registry-v1.0.0.md",
+      "bytes": 6404,
+      "sha256": "a0758d5a3e604ee7625a0788f49d40480ddb69cff8a002d0cbfea44d912223a9"
+    },
+    {
+      "file": "kitluy-partner-app-route-screen-inventory-v1.0.0.md",
+      "bytes": 22086,
+      "sha256": "657d73ad6f062867ea67394d228fcbe0c017704c1b788ce577b89a3ca70d1c27"
+    },
+    {
+      "file": "kitluy-partner-pwa-portal-route-screen-inventory-v1.0.0.md",
+      "bytes": 68762,
+      "sha256": "043e280955f0164edf3793915a3cc6ae60cb5e99e35827ddd5e6047474c48894"
+    },
+    {
+      "file": "kitluy-pos-desktop-app-route-screen-inventory-v1.0.0.md",
+      "bytes": 18459,
+      "sha256": "d530176a32c942afcfa8adaa2060759220d7635a91f07a31bc46d0491ec89729"
+    },
+    {
+      "file": "kitluy-pos-mobile-app-route-screen-inventory-v1.0.0.md",
+      "bytes": 32269,
+      "sha256": "0ca67708110e434923e11a424b1a9cec7b73d4a9509b04179d6cafdbb84af003"
+    },
+    {
+      "file": "kitluy-responsive-layout-standard-v1.0.0.md",
+      "bytes": 4435,
+      "sha256": "e7aa694574df23b5aac4c4f5579f2a9d34ffa36bdb48aef661bf676b5c317951"
+    },
+    {
+      "file": "kitluy-restaurant-guest-display-order-and-pay-route-screen-inventory-v1.0.0.md",
+      "bytes": 13904,
+      "sha256": "c4849c10871612af2e64fbf3f65cfde54cc2d4eacc237e2e31ba4db28dd7030c"
+    },
+    {
+      "file": "kitluy-restaurant-kds-client-route-screen-inventory-v1.0.0.md",
+      "bytes": 14381,
+      "sha256": "c95b8fbb7311e3c1d9c139b9498888dda7bb97c90bb5dba8ef824a4414a87ce7"
+    },
+    {
+      "file": "kitluy-storefront-route-screen-inventory-v1.0.0.md",
+      "bytes": 14677,
+      "sha256": "ddb2ca2da06439bedb9ebad50440805e7aa857986d420aae374e728e25875bdc"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "name": "@kitluy-apps/kitluy-storefront",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Storefront — Customer-facing Laundry pre-intake and virtual-queue surface: Scan, Prepare and Queue. Separate from the B2B website; T1 verifies and creates the authoritative Booking (storefront spec v1.1.0, OWNER-APPROVED).",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf .next"
+  },
+  "dependencies": {
+    "@kitluy/feature-flags": "workspace:*",
+    "@kitluy/localization": "workspace:*",
+    "@kitluy/web-ui": "workspace:*",
+    "next": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "typescript": "catalog:"
+  }
+}

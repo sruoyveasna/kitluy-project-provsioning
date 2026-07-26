@@ -1,0 +1,6 @@
+{
+  "name": "@kitluy-verticals/phase6-department-store",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Phase 6 — Department Stores. REGISTERED, INACTIVE. Reserved module boundary only; no active production behavior (RB v4 §2.3)."
+}

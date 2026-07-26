@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+.turbo/
+coverage/
+
+# Environment and secrets — never commit real values
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Supabase local state
+supabase/.branches/
+supabase/.temp/
+
+# Terraform state — never commit state or variable values
+*.tfstate
+*.tfstate.*
+.terraform/
+*.tfvars
+!*.example.tfvars
+
+# OS / editor
+.DS_Store
+*.log
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Test artifacts
+playwright-report/
+test-results/
+dist-electron/

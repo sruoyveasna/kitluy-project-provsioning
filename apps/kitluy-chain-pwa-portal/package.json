@@ -1,0 +1,29 @@
+{
+  "name": "@kitluy-apps/kitluy-chain-pwa-portal",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Chain PWA Portal — Multi-store governance for chain, brand, regional, franchise, finance and compliance users. Not a POS and not a second operational ledger (chain spec v3.0.0).",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@kitluy/feature-flags": "workspace:*",
+    "@kitluy/localization": "workspace:*",
+    "@kitluy/web-ui": "workspace:*",
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  },
+  "devDependencies": {
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  }
+}

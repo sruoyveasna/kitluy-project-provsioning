@@ -1,0 +1,6 @@
+{
+  "name": "@kitluy-future/restaurant-kds-client",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Restaurant KDS Client (Phase 2). Explicitly NOT Laundry T2. REGISTERED, INACTIVE — no build, no runtime, feature flag defaults OFF."
+}

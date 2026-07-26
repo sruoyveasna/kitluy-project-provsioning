@@ -1,0 +1,26 @@
+{
+  "name": "@kitluy-services/kitluy-edge-operations-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Governed Edge Operations API — Store Hub, POS Desktop, POS Mobile and approved local devices; Location-scoped offline-first contracts (RB v4 §10.1)",
+  "type": "module",
+  "main": "./dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist",
+    "test:contract": "vitest run test/contract.test.ts"
+  },
+  "dependencies": {
+    "@kitluy/api-errors": "workspace:*",
+    "@kitluy/observability": "workspace:*",
+    "@kitluy/shared-config": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "@types/node": "catalog:",
+    "vitest": "catalog:",
+    "yaml": "^2.6.1"
+  }
+}

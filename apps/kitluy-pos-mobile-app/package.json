@@ -1,0 +1,22 @@
+{
+  "name": "@kitluy-apps/kitluy-pos-mobile-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "POS Mobile App — Secure, Hub-bound, scan-first roaming staff app extending (never replacing) T1-T4. Primary contract is the Edge Operations API through the Store Hub; never authoritative T1 payment, T3 Ready Scan-In or T4 Pickup Scan-Out (pos-mobile spec v2.2.0).",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "clean": "echo 'nothing to clean (typecheck-only scaffold)'"
+  },
+  "dependencies": {
+    "@kitluy/localization": "workspace:*",
+    "react": "catalog:",
+    "react-native": "catalog:"
+  },
+  "devDependencies": {
+    "@types/react": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

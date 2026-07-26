@@ -1,0 +1,81 @@
+openapi: 3.1.0
+info:
+  title: "KitLuy Connector API"
+  version: 0.1.0
+  description: >-
+    Contract for marketplaces, delivery providers, social channels and certified external systems. Connectors never receive production-database credentials and never own KitLuy truth (RB v4 §3.5).
+    STATUS: SCAFFOLDED — governance skeleton only. Business routes are added
+    exclusively from approved contract specifications. Routes never expose
+    provider-specific infrastructure details.
+  x-kitluy-status: SCAFFOLDED
+servers:
+  - url: "https://[REQUIRED-production-domain]/connector/v1"
+    description: "[REQUIRED: production domain — owner decision pending]"
+x-kitluy-governance:
+  authentication: "Per-connector scoped credentials with signature verification; never database credentials"
+  scope-resolution: >-
+    Every request resolves Tenant, Digital Store and Store Location scope
+    server-side; grants are per-environment (RB v4 §8.5-8.6).
+  idempotency: >-
+    All mutating routes require an Idempotency-Key header; replays return the
+    original result (RB v4 §10.2).
+  pagination: "Cursor-based; limit+cursor parameters; stable ordering required."
+  filtering: "Explicit allowlisted filter parameters per route; no raw query pass-through."
+  rate-limit-policy: "Per principal and per scope; RATE_LIMITED error envelope with retry-after."
+  error-catalogue: "@kitluy/api-errors ERROR_CODES registry."
+  versioning: >-
+    URI-versioned (/connector/v1). Backwards compatible by default; breaking changes
+    require a new major version and a deprecation window.
+  deprecation-policy: "Sunset headers plus registry entry; minimum window is an owner decision [REQUIRED]."
+  audit: "Every mutation emits an audit event with correlation ID."
+  retry-behavior: "Retryable codes are marked in the error catalogue; clients use exponential backoff."
+  freshness: "Read models expose source and data_as_of; stale data is labeled, never silent (RB v4 §9.7)."
+  generated-clients: "Clients are generated from this file; generated code is never hand-edited."
+paths:
+  /health/live:
+    get:
+      operationId: healthLive
+      summary: Liveness probe
+      responses:
+        "200":
+          description: Service is alive
+  /health/ready:
+    get:
+      operationId: healthReady
+      summary: Readiness probe
+      responses:
+        "200":
+          description: Service is ready
+        "503":
+          description: Service is not ready
+  /version:
+    get:
+      operationId: version
+      summary: Service identity and version
+      responses:
+        "200":
+          description: Service name and version
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: "Per-connector scoped credentials with signature verification; never database credentials"
+  schemas:
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: Code from the @kitluy/api-errors registry
+            message:
+              type: string
+            correlationId:
+              type: string
+            details:
+              type: object

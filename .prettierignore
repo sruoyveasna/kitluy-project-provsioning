@@ -1,0 +1,14 @@
+node_modules
+dist
+build
+.next
+.turbo
+coverage
+pnpm-lock.yaml
+docs/source/imported
+docs/generated
+supabase/generated
+supabase/migrations
+*.md.gdoc
+playwright-report
+test-results

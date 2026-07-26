@@ -1,0 +1,49 @@
+{
+  "name": "het-kitluy-project",
+  "version": "0.1.0",
+  "private": true,
+  "description": "KitLuy Suite monorepo — digital-first commerce platform for Cambodia. Phase 1: Laundry Stores and Shops.",
+  "license": "SEE LICENSE IN LICENSE",
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=22.12.0 <23",
+    "pnpm": ">=9.15.0"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:contract": "turbo run test:contract",
+    "test:integration": "node scripts/testing/blocked.mjs integration",
+    "test:e2e": "node scripts/testing/blocked.mjs e2e",
+    "test:rls": "node scripts/testing/blocked.mjs rls",
+    "test:offline": "turbo run test:offline",
+    "verify": "node scripts/verification/verify.mjs",
+    "clean": "turbo run clean",
+    "docs:check": "node scripts/verification/docs-link-check.mjs",
+    "contracts:validate": "node scripts/contracts/validate-openapi.mjs",
+    "secret:scan": "node scripts/verification/secret-scan.mjs",
+    "migrations:validate": "node scripts/database/validate-migrations.mjs",
+    "supabase:start": "bash scripts/database/supabase-local.sh start",
+    "supabase:stop": "bash scripts/database/supabase-local.sh stop",
+    "supabase:reset:local": "bash scripts/database/supabase-local.sh reset"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "eslint": "^9.17.0",
+    "prettier": "^3.4.2",
+    "turbo": "^2.3.3",
+    "typescript": "~5.7.2",
+    "typescript-eslint": "^8.19.0",
+    "yaml": "^2.6.1"
+  },
+  "pnpm": {
+    "neverBuiltDependencies": [
+      "electron"
+    ]
+  }
+}

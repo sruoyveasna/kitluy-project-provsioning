@@ -1,0 +1,6 @@
+{
+  "name": "@kitluy-verticals/phase2-cafe-restaurant",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Phase 2 — Café and Restaurant Stores. REGISTERED, INACTIVE. Reserved module boundary only; no active production behavior (RB v4 §2.3)."
+}

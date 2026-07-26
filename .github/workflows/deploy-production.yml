@@ -1,0 +1,19 @@
+name: Deploy (DISABLED)
+
+# Production deployment is deliberately disabled at bootstrap:
+# - provider accounts, domains and credentials are [REQUIRED] owner values;
+# - production migrations are applied only by authorized human operators with
+#   four-eyes approval (OWNER-LOCKED KL-INF-P1-037) — never from CI;
+# - enabling this workflow requires an approval-gated environment configured
+#   in the repository settings plus a versioned owner decision.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  blocked:
+    runs-on: ubuntu-latest
+    environment: production # approval-gated; not configured at bootstrap
+    if: ${{ false }} # hard-disabled until owner authorization exists
+    steps:
+      - run: echo "unreachable"

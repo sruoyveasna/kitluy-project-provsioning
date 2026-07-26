@@ -1,0 +1,24 @@
+{
+  "name": "@kitluy-services/kitluy-device-release-and-update-service",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Device release and update — signed release manifests, Internal/Pilot/Stable channels, A/B rollback (RB v4 §6.8)",
+  "type": "module",
+  "main": "./dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@kitluy/api-errors": "workspace:*",
+    "@kitluy/observability": "workspace:*",
+    "@kitluy/shared-config": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "@types/node": "catalog:",
+    "vitest": "catalog:"
+  }
+}

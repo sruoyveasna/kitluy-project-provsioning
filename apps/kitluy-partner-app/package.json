@@ -1,0 +1,22 @@
+{
+  "name": "@kitluy-apps/kitluy-partner-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Partner App — Owner/manager mobile exception-first operations cockpit. NOT the back office, NOT staff POS, NOT T1-T4; cloud-read via Management API only; read-only finance; no direct Store Hub LAN access in Phase 1 (partner-app spec v2.0.0, Proposed).",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "clean": "echo 'nothing to clean (typecheck-only scaffold)'"
+  },
+  "dependencies": {
+    "@kitluy/localization": "workspace:*",
+    "react": "catalog:",
+    "react-native": "catalog:"
+  },
+  "devDependencies": {
+    "@types/react": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

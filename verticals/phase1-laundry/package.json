@@ -1,0 +1,30 @@
+{
+  "name": "@kitluy-verticals/phase1-laundry",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Phase 1 Laundry vertical — the only ACTIVE vertical. Owner-locked T1-T4 terminal model, custody events, pre-intake, per-piece/per-weight pricing contracts.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@kitluy/money": "workspace:*",
+    "@kitluy/shared-types": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "@types/node": "catalog:",
+    "vitest": "catalog:"
+  }
+}

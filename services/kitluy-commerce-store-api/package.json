@@ -1,0 +1,26 @@
+{
+  "name": "@kitluy-services/kitluy-commerce-store-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Governed Commerce Store API — storefronts, customer commerce and headless surfaces (RB v4 §10.1); Phase 1 exposes only the approved Laundry storefront subset",
+  "type": "module",
+  "main": "./dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist",
+    "test:contract": "vitest run test/contract.test.ts"
+  },
+  "dependencies": {
+    "@kitluy/api-errors": "workspace:*",
+    "@kitluy/observability": "workspace:*",
+    "@kitluy/shared-config": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "@types/node": "catalog:",
+    "vitest": "catalog:",
+    "yaml": "^2.6.1"
+  }
+}

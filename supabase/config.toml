@@ -1,0 +1,23 @@
+# Supabase CLI local development configuration (SCAFFOLDED).
+# Local only — production project references are [REQUIRED] owner values.
+project_id = "kitluy-local"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public"]
+
+[db]
+port = 54322
+major_version = 15
+
+[studio]
+enabled = true
+port = 54323
+
+[auth]
+enabled = true
+site_url = "http://localhost:3000"
+
+[auth.sms]
+enable_signup = false
