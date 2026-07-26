@@ -201,6 +201,8 @@ Rows above SPECIFIED carry linked evidence (validated by `pnpm docs:registry-che
 | 18 service kernels (health/ready/version, config validation, graceful shutdown) | SCAFFOLDED | E-REPO+E-TEST `services/*/test/http.test.ts` |
 | 4 governed API OpenAPI governance skeletons + contract tests | SCAFFOLDED | E-REPO+E-TEST `services/kitluy-*-api/test/contract.test.ts` (pnpm test:contract) |
 | 8 Phase 1 application shells (fail-closed, km/en, error boundaries) | SCAFFOLDED | E-REPO+E-TEST `apps/*/test/` smoke tests + pnpm build (68 tasks, 2026-07-26) |
+| Finance-subledger DD amendment 001 (6 kitluy_finance relations) | CONTRACT-APPROVED | E-REPO `docs/data/kitluy-suite-supabase-data-dictionary-amendment-001-finance-subledger-v1.0.0.md` + review 2026-07-26__FIN-DD-001 (APPROVED) |
+| Governing Phase 1 security test system (114 KLSEC; 190/190 aliases) | CONTRACT-APPROVED | E-REPO `docs/security/kitluy-phase1-security-test-system-v1.0.0.md` + review 2026-07-26__SEC-CONS-001 (APPROVED, counts reproduced) |
 | Canonical Supabase schema specification (235/235 dictionary parity, 18-invariant matrix) | CONTRACT-APPROVED | E-REPO `docs/data/kitluy-suite-supabase-schema-v1.0.0.md` + review 2026-07-26__WS-02-T001 (APPROVED-WITH-CONDITIONS, applied) |
 | Canonical RLS/authorization specification (24 schemas, RLS-001..030 plans) | CONTRACT-APPROVED | E-REPO `docs/data/kitluy-suite-supabase-rls-and-authorization-v1.0.0.md` + review 2026-07-26__WS-04-T001 |
 | Canonical migration plan (0000-0160) + 0000 controls migration + db harness | Plan CONTRACT-APPROVED; migration SQL SCAFFOLDED | E-REPO `docs/data/kitluy-suite-supabase-migration-plan-v1.0.0.md`, `supabase/migrations/20260726180000_*.sql`; static harness PASS 2026-07-26; DB execution BLOCKED (BLK-002) |
@@ -215,6 +217,8 @@ Rows above SPECIFIED carry linked evidence (validated by `pnpm docs:registry-che
 
 | Item | Old | New | Source |
 | --- | --- | --- | --- |
+| Finance-subledger DD amendment 001 (6 kitluy_finance relations) | CONTRACT-APPROVED | E-REPO `docs/data/kitluy-suite-supabase-data-dictionary-amendment-001-finance-subledger-v1.0.0.md` + review 2026-07-26__FIN-DD-001 (APPROVED) |
+| Governing Phase 1 security test system (114 KLSEC; 190/190 aliases) | CONTRACT-APPROVED | E-REPO `docs/security/kitluy-phase1-security-test-system-v1.0.0.md` + review 2026-07-26__SEC-CONS-001 (APPROVED, counts reproduced) |
 | Canonical Supabase schema specification (235/235 dictionary parity, 18-invariant matrix) | CONTRACT-APPROVED | E-REPO `docs/data/kitluy-suite-supabase-schema-v1.0.0.md` + review 2026-07-26__WS-02-T001 (APPROVED-WITH-CONDITIONS, applied) |
 | Canonical RLS/authorization specification (24 schemas, RLS-001..030 plans) | CONTRACT-APPROVED | E-REPO `docs/data/kitluy-suite-supabase-rls-and-authorization-v1.0.0.md` + review 2026-07-26__WS-04-T001 |
 | Canonical migration plan (0000-0160) + 0000 controls migration + db harness | Plan CONTRACT-APPROVED; migration SQL SCAFFOLDED | E-REPO `docs/data/kitluy-suite-supabase-migration-plan-v1.0.0.md`, `supabase/migrations/20260726180000_*.sql`; static harness PASS 2026-07-26; DB execution BLOCKED (BLK-002) |

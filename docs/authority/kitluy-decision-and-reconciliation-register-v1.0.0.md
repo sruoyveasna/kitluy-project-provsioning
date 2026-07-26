@@ -118,6 +118,20 @@ stable; several are cited by live code and must not be renamed.
 | KLREC-2026-07-26-012 | Scope taxonomy drift: RB v4 §8.5 `tenant_or_partner`/`individual_device` (implemented in `@kitluy/resource-scope`) vs resource-scope model v1.0.0 `tenant`/`device` (+ new `chain`, `file_object`, `support_session`, `release_cohort`). | OPEN |
 | KLREC-2026-07-26-013 | Permission-key drift: `releases.promote.stable` (infra spec §16.5, `@kitluy/rbac` seed) vs `releases.promote_stable` (RBAC permission registry v1.0.0, 107 keys). | OPEN |
 
+### Owner direction KLD-2026-07-26-003 — Close G1, begin executable data foundation (recorded verbatim intent, 2026-07-26)
+
+| # | Direction | Register effect |
+| --- | --- | --- |
+| 1 | Schema/RLS/migration-plan trio remain CONTRACT-APPROVED (not execution proof) | Confirms cycle-2 statuses |
+| 2 | Current repo toolchain = ACTIVE-BASELINE; engineering-pack versions = TARGET-APPROVED (inactive until a coordinated compatibility task passes all gates; no independent upgrades) | RESOLVES KLREQ-009 decision; KL-ENG-001 remains the coordinated task; BLK-004 → DIRECTION-RECORDED |
+| 3 | Consolidate the two security test plans into ONE governing Phase 1 security test system; both identifier namespaces preserved as immutable source aliases; explicit mappings; no delete/renumber/reinterpret | RESOLVES KLREQ-011 decision; work item SEC-CONS-001 |
+| 4 | Additive finance-subledger data-dictionary amendment APPROVED (relational, append-only, KHR/USD integer minor units, full context+balancing+idempotency invariants; independent schema AND finance review; no invention of accounting/tax/rounding/statutory policy) | Work item FIN-DD-001; closes the DD gap found in WS-02-T001 review |
+| 5 | Local DB execution proceeds only AFTER repository-pinned Docker+Supabase tools are available; then groups: controls → identity/tenant → store/location → authz/audit → functions/RLS helpers → policies → seeds → types → assertions → RLS tests; never production | BLK-002 remains the gate; sequence recorded |
+| 6 | IMPLEMENTED-IN-DEV requires: applied dev migrations + assertions + RLS pos/neg execution + generated types + migration-safety review + authorization review + linked evidence | Evidence-gate restated |
+| 7 | No authoritative T1-T4/Hub/Booking/payment persistence before WS-02/03/04 executable foundations pass; WS-07/08 stay SCAFFOLDED until DB-backed integration evidence | Dependency rule recorded |
+
+NOT decided by this direction: KL-DEC-001 five-group ballot (KLD-2026-07-26-002) — still OWNER-APPROVAL-REQUIRED; Hub mutations stay blocked.
+
 ### Batch-2 conflicts (KL-DOCS-002, 2026-07-26)
 
 | ID | Conflict | State |
