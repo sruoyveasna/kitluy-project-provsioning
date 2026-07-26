@@ -1,15 +1,15 @@
 # KitLuy Release Channel and Promotion Policy
 
-| Field        | Value                                                                       |
-| ------------ | --------------------------------------------------------------------------- |
-| **Filename** | `kitluy-release-channel-and-promotion-policy-v1.0.0.md`                     |
-| **Version**  | `v1.0.0`                                                                    |
-| **Date**     | `2026-07-26`                                                                |
-| **Phase**    | Phase 1 — Laundry                                                           |
-| **Owner**    | HET / KitLuy Suite Project Owner                                            |
+| Field | Value |
+|---|---|
+| **Filename** | `kitluy-release-channel-and-promotion-policy-v1.0.0.md` |
+| **Version** | `v1.0.0` |
+| **Date** | `2026-07-26` |
+| **Phase** | Phase 1 — Laundry |
+| **Owner** | HET / KitLuy Suite Project Owner |
 | **Audience** | Infrastructure, platform, security, release, database, support and QA teams |
-| **Status**   | Canonical operating target; not implementation evidence                     |
-| **Timezone** | `Asia/Phnom_Penh`                                                           |
+| **Status** | Canonical operating target; not implementation evidence |
+| **Timezone** | `Asia/Phnom_Penh` |
 
 > **Purpose:** Govern immutable release progression through Internal, Pilot and Stable, including cohorts, approvals, compatibility, rollback and revocation.
 
@@ -46,6 +46,8 @@ Nothing in this document is evidence that infrastructure is implemented. `IMPLEM
 - Monitoring and alert delivery remain available when the Admin Portal is unavailable.
 - No multi-region, recovery, readiness or availability claim is made without tested evidence.
 
+
+
 ## 1. Channel model
 
 ```text
@@ -56,11 +58,11 @@ Channels are auditable release states, not mutable folders. Promotion changes el
 
 ## 2. Channel definitions
 
-| Channel    | Audience                                                       | Data/Store scope             | Approval                                       | Purpose                                                     |
-| ---------- | -------------------------------------------------------------- | ---------------------------- | ---------------------------------------------- | ----------------------------------------------------------- |
-| `Internal` | HET engineering, QA, lab devices and non-customer environments | Non-production/lab           | Release operator                               | Functional, integration, security and hardware verification |
-| `Pilot`    | Approved real Laundry Store cohort                             | Explicit device/Store cohort | Release requester + independent pilot approver | Limited production evidence and support validation          |
-| `Stable`   | Approved production fleet/cohort                               | Commercial production        | Independent release approver; four-eyes        | General supported production release                        |
+| Channel | Audience | Data/Store scope | Approval | Purpose |
+|---|---|---|---|---|
+| `Internal` | HET engineering, QA, lab devices and non-customer environments | Non-production/lab | Release operator | Functional, integration, security and hardware verification |
+| `Pilot` | Approved real Laundry Store cohort | Explicit device/Store cohort | Release requester + independent pilot approver | Limited production evidence and support validation |
+| `Stable` | Approved production fleet/cohort | Commercial production | Independent release approver; four-eyes | General supported production release |
 
 ## 3. Release object
 
@@ -162,13 +164,13 @@ Rollout expansion is paused automatically or manually when health gates fail.
 
 ## 11. Pause, rollback and revoke
 
-| Action      | Use                                                                     |
-| ----------- | ----------------------------------------------------------------------- |
-| Pause       | Stop cohort expansion while retaining installed candidates              |
-| Rollback    | Return installed targets to verified prior compatible release           |
-| Forward-fix | Deploy new artifact when data/schema prevents safe rollback             |
-| Revoke      | Mark artifact untrusted; prevent new installs and trigger policy action |
-| Supersede   | Replace supported release without security revocation                   |
+| Action | Use |
+|---|---|
+| Pause | Stop cohort expansion while retaining installed candidates |
+| Rollback | Return installed targets to verified prior compatible release |
+| Forward-fix | Deploy new artifact when data/schema prevents safe rollback |
+| Revoke | Mark artifact untrusted; prevent new installs and trigger policy action |
+| Supersede | Replace supported release without security revocation |
 
 Revocation is mandatory for tampered or compromised artifacts.
 

@@ -7,6 +7,7 @@
 > **Applies to:** KitLuy Suite monorepo, all applications, shared services, packages, Supabase assets, infrastructure, Store Hub and AI handoff work.  
 > **Authority:** Current owner decisions and Project Instructions override this document. Applied migrations, verified code/tests and production evidence remain implementation truth.
 
+
 ## 1. Principle
 
 “Done” means reconstructable, secure, tested, deployable and evidenced—not merely coded. The applicable checklist expands with risk and phase.
@@ -85,16 +86,16 @@ Additionally:
 
 ## 10. Implementation status evidence
 
-| Status                              | Minimum evidence                                           |
-| ----------------------------------- | ---------------------------------------------------------- |
-| PROPOSED / OWNER-LOCKED / SPECIFIED | Approved document/decision                                 |
-| CONTRACT-APPROVED                   | Reviewed machine-readable contract and tests planned       |
-| SCAFFOLDED                          | Repository paths/build stubs; no capability claim          |
-| IMPLEMENTED-IN-DEV                  | Code + migrations + automated tests in development         |
-| INTEGRATION-VERIFIED                | Cross-product/environment evidence                         |
-| PILOT-READY                         | Runbooks, monitoring, support, recovery and go-live gate   |
-| PILOT-PROVEN                        | Approved real pilot evidence                               |
-| PRODUCTION                          | Production deployment, monitoring and operational evidence |
+| Status | Minimum evidence |
+|---|---|
+| PROPOSED / OWNER-LOCKED / SPECIFIED | Approved document/decision |
+| CONTRACT-APPROVED | Reviewed machine-readable contract and tests planned |
+| SCAFFOLDED | Repository paths/build stubs; no capability claim |
+| IMPLEMENTED-IN-DEV | Code + migrations + automated tests in development |
+| INTEGRATION-VERIFIED | Cross-product/environment evidence |
+| PILOT-READY | Runbooks, monitoring, support, recovery and go-live gate |
+| PILOT-PROVEN | Approved real pilot evidence |
+| PRODUCTION | Production deployment, monitoring and operational evidence |
 
 No status above SPECIFIED is valid without linked evidence.
 

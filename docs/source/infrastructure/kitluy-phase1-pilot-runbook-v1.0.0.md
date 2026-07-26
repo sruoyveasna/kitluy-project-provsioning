@@ -1,15 +1,15 @@
 # KitLuy Phase 1 Pilot Runbook
 
-| Field        | Value                                                                                                  |
-| ------------ | ------------------------------------------------------------------------------------------------------ |
-| **Filename** | `kitluy-phase1-pilot-runbook-v1.0.0.md`                                                                |
-| **Version**  | `v1.0.0`                                                                                               |
-| **Date**     | `2026-07-26`                                                                                           |
-| **Phase**    | Phase 1 — Laundry                                                                                      |
-| **Owner**    | HET / KitLuy Suite Project Owner                                                                       |
+| Field | Value |
+|---|---|
+| **Filename** | `kitluy-phase1-pilot-runbook-v1.0.0.md` |
+| **Version** | `v1.0.0` |
+| **Date** | `2026-07-26` |
+| **Phase** | Phase 1 — Laundry |
+| **Owner** | HET / KitLuy Suite Project Owner |
 | **Audience** | Pilot owner, Store operators, infrastructure, fleet, release, database, security, support and QA teams |
-| **Status**   | Canonical operating target; not implementation evidence                                                |
-| **Timezone** | `Asia/Phnom_Penh`                                                                                      |
+| **Status** | Canonical operating target; not implementation evidence |
+| **Timezone** | `Asia/Phnom_Penh` |
 
 > **Purpose:** Run one controlled real Laundry Store pilot from admission and installation through observation, recovery testing and exit approval.
 
@@ -46,6 +46,8 @@ Nothing in this document is evidence that infrastructure is implemented. `IMPLEM
 - Monitoring and alert delivery remain available when the Admin Portal is unavailable.
 - No multi-region, recovery, readiness or availability claim is made without tested evidence.
 
+
+
 ## 1. Pilot objective
 
 Prove one commercially realistic Laundry Store can be provisioned, operate online and offline, synchronize, recover, receive signed releases, and be supported using approved documentation. Pilot is production data and real operating responsibility, but limited to an explicit cohort.
@@ -64,18 +66,18 @@ Pilot may start only when:
 
 ## 3. Pilot roles
 
-| Role                | Responsibility                                        |
-| ------------------- | ----------------------------------------------------- |
-| Pilot owner         | Business decision and exit acceptance                 |
-| Pilot manager       | Plan, schedule, evidence and stakeholder coordination |
-| Store operator lead | Store readiness, staff and workflow sign-off          |
+| Role | Responsibility |
+|---|---|
+| Pilot owner | Business decision and exit acceptance |
+| Pilot manager | Plan, schedule, evidence and stakeholder coordination |
+| Store operator lead | Store readiness, staff and workflow sign-off |
 | Infrastructure lead | Cloud, observability, capacity and incident readiness |
-| Fleet lead          | Hub/terminal/peripheral provisioning and recovery     |
-| Release lead        | Candidate, cohort, promotion and rollback             |
-| Database lead       | Migrations, RLS, backup and reconciliation            |
-| Support lead        | Support channels, consent and escalation              |
-| Security reviewer   | Identity, certificates, access and incident controls  |
-| QA lead             | Test execution and evidence                           |
+| Fleet lead | Hub/terminal/peripheral provisioning and recovery |
+| Release lead | Candidate, cohort, promotion and rollback |
+| Database lead | Migrations, RLS, backup and reconciliation |
+| Support lead | Support channels, consent and escalation |
+| Security reviewer | Identity, certificates, access and incident controls |
+| QA lead | Test execution and evidence |
 
 ## 4. Pilot Store admission
 
@@ -127,26 +129,26 @@ Pilot may start only when:
 
 ## 7. Mandatory pilot scenarios
 
-| ID          | Scenario                             | Required result                                         |
-| ----------- | ------------------------------------ | ------------------------------------------------------- |
-| `PILOT-001` | Partner/Digital Store/Location setup | Correct isolated scope and configuration                |
-| `PILOT-002` | T1 intake and Booking                | Authoritative local Booking and audit                   |
-| `PILOT-003` | T2 display/privacy                   | Correct totals/payment state; no unsafe PII             |
-| `PILOT-004` | Deposit/payment/KHQR path            | Approved provider behavior and reconciliation           |
-| `PILOT-005` | Receipt and garment tags             | Durable print and reprint controls                      |
-| `PILOT-006` | T3 Ready Scan-In                     | Count/QA/storage/custody event correct                  |
-| `PILOT-007` | T4 Pickup Scan-Out                   | Identity/balance/custody completion correct             |
-| `PILOT-008` | WAN outage                           | Store continues locally                                 |
-| `PILOT-009` | Reconnect                            | Oldest-first idempotent sync; no duplicate effects      |
-| `PILOT-010` | File/print backlog                   | Queues persist and recover                              |
-| `PILOT-011` | Hub restart                          | Local state and workflows recover                       |
-| `PILOT-012` | Pilot release install                | Signature/compatibility/health pass                     |
-| `PILOT-013` | A/B rollback                         | Last-known-good restored                                |
-| `PILOT-014` | Backup/restore                       | Isolated restore evidence and Hub checkpoint validation |
-| `PILOT-015` | Replacement Hub                      | Replacement-first recovery rehearsed                    |
-| `PILOT-016` | Support session                      | Consent, scope, expiry and audit pass                   |
-| `PILOT-017` | RLS/isolation negative tests         | Cross-scope access denied                               |
-| `PILOT-018` | Incident drill                       | Detection, routing, communication and closure pass      |
+| ID | Scenario | Required result |
+|---|---|---|
+| `PILOT-001` | Partner/Digital Store/Location setup | Correct isolated scope and configuration |
+| `PILOT-002` | T1 intake and Booking | Authoritative local Booking and audit |
+| `PILOT-003` | T2 display/privacy | Correct totals/payment state; no unsafe PII |
+| `PILOT-004` | Deposit/payment/KHQR path | Approved provider behavior and reconciliation |
+| `PILOT-005` | Receipt and garment tags | Durable print and reprint controls |
+| `PILOT-006` | T3 Ready Scan-In | Count/QA/storage/custody event correct |
+| `PILOT-007` | T4 Pickup Scan-Out | Identity/balance/custody completion correct |
+| `PILOT-008` | WAN outage | Store continues locally |
+| `PILOT-009` | Reconnect | Oldest-first idempotent sync; no duplicate effects |
+| `PILOT-010` | File/print backlog | Queues persist and recover |
+| `PILOT-011` | Hub restart | Local state and workflows recover |
+| `PILOT-012` | Pilot release install | Signature/compatibility/health pass |
+| `PILOT-013` | A/B rollback | Last-known-good restored |
+| `PILOT-014` | Backup/restore | Isolated restore evidence and Hub checkpoint validation |
+| `PILOT-015` | Replacement Hub | Replacement-first recovery rehearsed |
+| `PILOT-016` | Support session | Consent, scope, expiry and audit pass |
+| `PILOT-017` | RLS/isolation negative tests | Cross-scope access denied |
+| `PILOT-018` | Incident drill | Detection, routing, communication and closure pass |
 
 ## 8. Observation period
 
@@ -191,12 +193,12 @@ The pilot owner may stop the pilot at any time for safety, security or business 
 
 ## 11. Pilot exit decision
 
-| Decision         | Meaning                                                                          |
-| ---------------- | -------------------------------------------------------------------------------- |
+| Decision | Meaning |
+|---|---|
 | `APPROVE-STABLE` | Required criteria and evidence pass; Stable promotion may proceed through policy |
-| `EXTEND`         | Evidence incomplete but risk acceptable; new end date and actions required       |
-| `ROLLBACK`       | Return Store/cohort to last-known-good release/configuration                     |
-| `STOP`           | Pilot discontinued; data/hardware/access closure plan required                   |
+| `EXTEND` | Evidence incomplete but risk acceptable; new end date and actions required |
+| `ROLLBACK` | Return Store/cohort to last-known-good release/configuration |
+| `STOP` | Pilot discontinued; data/hardware/access closure plan required |
 
 ## 12. Exit evidence
 

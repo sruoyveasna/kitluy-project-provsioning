@@ -16,6 +16,10 @@ docs/source/security
 docs/source/offline
 docs/source/shared-services
 docs/source/ui-ux
+docs/source/engineering
+docs/source/qa
+docs/source/infrastructure
+docs/source/owner-instructions
 docs/authority
 docs/generated
 supabase/generated

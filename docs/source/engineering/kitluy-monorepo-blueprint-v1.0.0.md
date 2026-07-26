@@ -7,6 +7,7 @@
 > **Applies to:** KitLuy Suite monorepo, all applications, shared services, packages, Supabase assets, infrastructure, Store Hub and AI handoff work.  
 > **Authority:** Current owner decisions and Project Instructions override this document. Applied migrations, verified code/tests and production evidence remain implementation truth.
 
+
 ## 1. Purpose
 
 This document turns the KitLuy Suite repository proposal into an executable, reviewable monorepo contract. It preserves the Digital Store control plane, Store Location edge model, T1-T4 Laundry profiles, Supabase/DigitalOcean responsibility split, offline Store Hub authority, shared Core rule and phased vertical strategy.
@@ -17,21 +18,21 @@ The repository must pass the **Rebuild Test**: one qualified engineer can clone 
 
 These are **project selections**, not claims that every existing source file already uses them. Exact dependency resolution remains recorded in `pnpm-lock.yaml`, container digests, the Supabase local configuration and the KitLuy OS image manifest.
 
-| Technology        |                                    Selected version | Scope                                                     | Pinning rule                                                             |
-| ----------------- | --------------------------------------------------: | --------------------------------------------------------- | ------------------------------------------------------------------------ |
-| Node.js           |                                       `24.18.0` LTS | Workspace scripts, web/services, Hub build tooling        | `.nvmrc`, `.node-version`, `engines.node >=24.18.0 <25`                  |
-| pnpm              |                                            `11.4.0` | Monorepo package manager                                  | root `packageManager`, Corepack; no global unpinned pnpm                 |
-| TypeScript        |                                             `6.0.3` | Shared compiler baseline                                  | exact root catalog version; TypeScript 7 requires compatibility ADR      |
-| React, web        |                                            `19.2.7` | B2B, Admin, Chain, Partner, Storefront, Electron renderer | exact app version; shared UI uses peer range `>=19.2.3 <19.3.0`          |
-| React, Expo apps  |                                            `19.2.3` | Partner App and POS Mobile                                | Expo SDK compatibility pin                                               |
-| React Native      |                                            `0.86.0` | Expo mobile applications                                  | Expo-managed native dependency; no independent upgrade                   |
-| Expo SDK / `expo` |                                            `57.0.8` | Partner App and POS Mobile                                | exact `expo` package; install native libraries with `pnpm expo install`  |
-| Electron          |                                            `43.2.0` | POS Desktop T1-T4 clients                                 | exact dev dependency and lockfile; Linux ARM64 build required            |
-| Supabase CLI      |                                           `2.109.1` | Local stack, migrations, functions, type generation       | project dev dependency; invoke through `pnpm supabase`                   |
-| PostgreSQL        |                        `17.10` compatibility target | Supabase schema contracts and Store Hub local PostgreSQL  | major 17 required; provider patch is recorded per environment            |
-| Raspberry Pi OS   | `2026-06-18`, Debian 13 Trixie, kernel 6.18, 64-bit | Hub Lite image and terminal desktop image                 | image URL and SHA-256 locked in manufacturing manifest                   |
-| Docker Engine     |                                            `29.6.2` | Local Supabase, CI builders, services and test containers | engine minor/patch fixed in CI image; production images pinned by digest |
-| Terraform         |                                            `1.15.5` | Infrastructure as code                                    | exact CI and operator version; `required_version = "= 1.15.5"`           |
+| Technology | Selected version | Scope | Pinning rule |
+|---|---:|---|---|
+| Node.js | `24.18.0` LTS | Workspace scripts, web/services, Hub build tooling | `.nvmrc`, `.node-version`, `engines.node >=24.18.0 <25` |
+| pnpm | `11.4.0` | Monorepo package manager | root `packageManager`, Corepack; no global unpinned pnpm |
+| TypeScript | `6.0.3` | Shared compiler baseline | exact root catalog version; TypeScript 7 requires compatibility ADR |
+| React, web | `19.2.7` | B2B, Admin, Chain, Partner, Storefront, Electron renderer | exact app version; shared UI uses peer range `>=19.2.3 <19.3.0` |
+| React, Expo apps | `19.2.3` | Partner App and POS Mobile | Expo SDK compatibility pin |
+| React Native | `0.86.0` | Expo mobile applications | Expo-managed native dependency; no independent upgrade |
+| Expo SDK / `expo` | `57.0.8` | Partner App and POS Mobile | exact `expo` package; install native libraries with `pnpm expo install` |
+| Electron | `43.2.0` | POS Desktop T1-T4 clients | exact dev dependency and lockfile; Linux ARM64 build required |
+| Supabase CLI | `2.109.1` | Local stack, migrations, functions, type generation | project dev dependency; invoke through `pnpm supabase` |
+| PostgreSQL | `17.10` compatibility target | Supabase schema contracts and Store Hub local PostgreSQL | major 17 required; provider patch is recorded per environment |
+| Raspberry Pi OS | `2026-06-18`, Debian 13 Trixie, kernel 6.18, 64-bit | Hub Lite image and terminal desktop image | image URL and SHA-256 locked in manufacturing manifest |
+| Docker Engine | `29.6.2` | Local Supabase, CI builders, services and test containers | engine minor/patch fixed in CI image; production images pinned by digest |
+| Terraform | `1.15.5` | Infrastructure as code | exact CI and operator version; `required_version = "= 1.15.5"` |
 
 ### 2.1 Version-management rules
 

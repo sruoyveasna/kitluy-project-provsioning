@@ -1,5 +1,4 @@
 \
-
 # KitLuy AI Handoff Index
 
 **Version:** v1.0.0  
@@ -22,9 +21,9 @@
 
 ## Active worktree registry
 
-| Task ID | Title                                                       | Status | Product/build | Primary writer | Independent reviewer | Branch | Worktree | Base commit | Exclusive paths/files | Dependencies | Latest handoff | Review | Evidence | Updated    |
-| ------- | ----------------------------------------------------------- | ------ | ------------- | -------------- | -------------------- | ------ | -------- | ----------- | --------------------- | ------------ | -------------- | ------ | -------- | ---------- |
-| _none_  | No repository task has been claimed in this generated pack. | DRAFT  | —             | —              | —                    | —      | —        | —           | —                     | —            | —              | —      | —        | 2026-07-26 |
+| Task ID | Title | Status | Product/build | Primary writer | Independent reviewer | Branch | Worktree | Base commit | Exclusive paths/files | Dependencies | Latest handoff | Review | Evidence | Updated |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| _none_ | No repository task has been claimed in this generated pack. | DRAFT | — | — | — | — | — | — | — | — | — | — | — | 2026-07-26 |
 
 ## File ownership collision check
 
@@ -43,21 +42,21 @@ High-contention paths that should normally be serialized:
 
 ## Completed task register
 
-| Task ID                      | Title                                                        | Product/build | Merge commit | Verification state | Handoff | Review | Evidence | Release/deployment | Closed date |
-| ---------------------------- | ------------------------------------------------------------ | ------------- | ------------ | ------------------ | ------- | ------ | -------- | ------------------ | ----------- |
-| _none recorded by this pack_ | Repository history was not inspected during pack generation. | —             | —            | UNVERIFIED         | —       | —      | —        | —                  | —           |
+| Task ID | Title | Product/build | Merge commit | Verification state | Handoff | Review | Evidence | Release/deployment | Closed date |
+|---|---|---|---|---|---|---|---|---|---|
+| _none recorded by this pack_ | Repository history was not inspected during pack generation. | — | — | UNVERIFIED | — | — | — | — | — |
 
 ## Seed work-package candidates
 
 These are examples and planning seeds, not assigned or approved implementation tasks. Create a full task file and resolve dependencies before activating one.
 
-| Candidate task ID | Bounded outcome                                                                            | Likely dependencies                                          | Prohibited expansion                               |
-| ----------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------ | -------------------------------------------------- |
-| `KL-P1-CORE-001`  | Establish Tenant, Digital Store, Store Location, and vertical-isolation schema/contracts.  | source-of-truth, data dictionary, migration rules, RLS model | no Laundry workflow tables; no production apply    |
-| `KL-P1-AUTH-001`  | Implement identity bootstrap, memberships, scoped session context, and denial tests.       | Core identity schema, permission registry                    | no full Admin RBAC UI; no service-role bypass      |
-| `KL-P1-HUB-001`   | Implement Store Hub identity, certificate binding, provisioning state, and audit contract. | device trust policy, Edge API, local schema                  | no terminal UI; no production certificate issuance |
-| `KL-P1-LND-001`   | Implement Laundry Booking lifecycle and append-only status/custody events.                 | Core transactions, business rules, event registry            | no T1 UI; no payment-provider activation           |
-| `KL-P1-POS-001`   | Implement T1 intake foundation against approved Hub/Laundry contracts.                     | HUB-001, LND-001, pricing/payment contracts                  | no T2/T3/T4 expansion; no cloud-direct writes      |
+| Candidate task ID | Bounded outcome | Likely dependencies | Prohibited expansion |
+|---|---|---|---|
+| `KL-P1-CORE-001` | Establish Tenant, Digital Store, Store Location, and vertical-isolation schema/contracts. | source-of-truth, data dictionary, migration rules, RLS model | no Laundry workflow tables; no production apply |
+| `KL-P1-AUTH-001` | Implement identity bootstrap, memberships, scoped session context, and denial tests. | Core identity schema, permission registry | no full Admin RBAC UI; no service-role bypass |
+| `KL-P1-HUB-001` | Implement Store Hub identity, certificate binding, provisioning state, and audit contract. | device trust policy, Edge API, local schema | no terminal UI; no production certificate issuance |
+| `KL-P1-LND-001` | Implement Laundry Booking lifecycle and append-only status/custody events. | Core transactions, business rules, event registry | no T1 UI; no payment-provider activation |
+| `KL-P1-POS-001` | Implement T1 intake foundation against approved Hub/Laundry contracts. | HUB-001, LND-001, pricing/payment contracts | no T2/T3/T4 expansion; no cloud-direct writes |
 
 ## Record locations
 

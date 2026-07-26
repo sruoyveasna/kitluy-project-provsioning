@@ -1,15 +1,15 @@
 # KitLuy Phase 1 Go-Live Checklist
 
-| Field        | Value                                                                                                                         |
-| ------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| **Filename** | `kitluy-phase1-go-live-checklist-v1.0.0.md`                                                                                   |
-| **Version**  | `v1.0.0`                                                                                                                      |
-| **Date**     | `2026-07-26`                                                                                                                  |
-| **Phase**    | Phase 1 — Laundry                                                                                                             |
-| **Owner**    | HET / KitLuy Suite Project Owner                                                                                              |
+| Field | Value |
+|---|---|
+| **Filename** | `kitluy-phase1-go-live-checklist-v1.0.0.md` |
+| **Version** | `v1.0.0` |
+| **Date** | `2026-07-26` |
+| **Phase** | Phase 1 — Laundry |
+| **Owner** | HET / KitLuy Suite Project Owner |
 | **Audience** | Project owner, go-live board, infrastructure, database, security, release, fleet, support, QA and pilot Store representatives |
-| **Status**   | Canonical operating target; not implementation evidence                                                                       |
-| **Timezone** | `Asia/Phnom_Penh`                                                                                                             |
+| **Status** | Canonical operating target; not implementation evidence |
+| **Timezone** | `Asia/Phnom_Penh` |
 
 > **Purpose:** Provide the final evidence-gated production decision covering migrations, RLS isolation, Hub/terminal operation, monitoring, restore, rollback and pilot approval.
 
@@ -46,23 +46,25 @@ Nothing in this document is evidence that infrastructure is implemented. `IMPLEM
 - Monitoring and alert delivery remain available when the Admin Portal is unavailable.
 - No multi-region, recovery, readiness or availability claim is made without tested evidence.
 
+
+
 ## 1. Use of this checklist
 
 A box may be checked only when the named evidence exists and is linked in the go-live evidence index. A verbal assurance, design document or passing UI demo is not sufficient. Any exception requires owner, risk, expiry, compensating control and approval.
 
 ## 2. Go-live decision record
 
-| Field                  | Value        |
-| ---------------------- | ------------ |
-| Release/candidate      | `[REQUIRED]` |
+| Field | Value |
+|---|---|
+| Release/candidate | `[REQUIRED]` |
 | Production environment | `[REQUIRED]` |
-| Pilot Store/cohort     | `[REQUIRED]` |
-| Planned go-live        | `[REQUIRED]` |
-| Change/approval ID     | `[REQUIRED]` |
-| Go-live owner          | `[REQUIRED]` |
-| Technical commander    | `[REQUIRED]` |
-| Rollback target        | `[REQUIRED]` |
-| Evidence index         | `[REQUIRED]` |
+| Pilot Store/cohort | `[REQUIRED]` |
+| Planned go-live | `[REQUIRED]` |
+| Change/approval ID | `[REQUIRED]` |
+| Go-live owner | `[REQUIRED]` |
+| Technical commander | `[REQUIRED]` |
+| Rollback target | `[REQUIRED]` |
+| Evidence index | `[REQUIRED]` |
 
 ## 3. Authority and source of truth
 
@@ -248,26 +250,26 @@ A box may be checked only when the named evidence exists and is linked in the go
 
 ## 20. Final decision
 
-| Decision         | Meaning                                                                                                            |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `GO`             | All mandatory gates pass; residual risks are approved and time-bound                                               |
-| `CONDITIONAL GO` | Only explicitly approved non-safety exceptions; owner and expiry recorded                                          |
-| `NO-GO`          | Any isolation, payment/data-integrity, Store continuity, restore, rollback, security or monitoring blocker remains |
-| `ROLLBACK`       | Revert to last-known-good environment/release/configuration                                                        |
+| Decision | Meaning |
+|---|---|
+| `GO` | All mandatory gates pass; residual risks are approved and time-bound |
+| `CONDITIONAL GO` | Only explicitly approved non-safety exceptions; owner and expiry recorded |
+| `NO-GO` | Any isolation, payment/data-integrity, Store continuity, restore, rollback, security or monitoring blocker remains |
+| `ROLLBACK` | Revert to last-known-good environment/release/configuration |
 
 ### Sign-off
 
-| Role                       | Name/reference | Decision | Timestamp |
-| -------------------------- | -------------- | -------- | --------- |
-| Project owner              | `[REQUIRED]`   |          |           |
-| Go-live owner              | `[REQUIRED]`   |          |           |
-| Infrastructure lead        | `[REQUIRED]`   |          |           |
-| Database lead              | `[REQUIRED]`   |          |           |
-| Security approver          | `[REQUIRED]`   |          |           |
-| Release approver           | `[REQUIRED]`   |          |           |
-| Fleet/Store Hub lead       | `[REQUIRED]`   |          |           |
-| Pilot Store representative | `[REQUIRED]`   |          |           |
-| QA lead                    | `[REQUIRED]`   |          |           |
+| Role | Name/reference | Decision | Timestamp |
+|---|---|---|---|
+| Project owner | `[REQUIRED]` |  |  |
+| Go-live owner | `[REQUIRED]` |  |  |
+| Infrastructure lead | `[REQUIRED]` |  |  |
+| Database lead | `[REQUIRED]` |  |  |
+| Security approver | `[REQUIRED]` |  |  |
+| Release approver | `[REQUIRED]` |  |  |
+| Fleet/Store Hub lead | `[REQUIRED]` |  |  |
+| Pilot Store representative | `[REQUIRED]` |  |  |
+| QA lead | `[REQUIRED]` |  |  |
 
 ## 21. Evidence index template
 

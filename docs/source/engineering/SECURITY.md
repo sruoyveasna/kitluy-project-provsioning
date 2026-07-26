@@ -7,6 +7,7 @@
 > **Applies to:** KitLuy Suite monorepo, all applications, shared services, packages, Supabase assets, infrastructure, Store Hub and AI handoff work.  
 > **Authority:** Current owner decisions and Project Instructions override this document. Applied migrations, verified code/tests and production evidence remain implementation truth.
 
+
 ## Reporting a vulnerability
 
 Do **not** open a public issue for a suspected vulnerability. Report privately to:

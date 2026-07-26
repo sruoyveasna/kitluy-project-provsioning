@@ -1,5 +1,4 @@
 \
-
 # Contributing to KitLuy Suite
 
 All contributors, including AI agents, follow `AGENTS.md` and the active task package.

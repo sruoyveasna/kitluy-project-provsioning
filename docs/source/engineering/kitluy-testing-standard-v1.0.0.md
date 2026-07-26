@@ -7,25 +7,26 @@
 > **Applies to:** KitLuy Suite monorepo, all applications, shared services, packages, Supabase assets, infrastructure, Store Hub and AI handoff work.  
 > **Authority:** Current owner decisions and Project Instructions override this document. Applied migrations, verified code/tests and production evidence remain implementation truth.
 
+
 ## 1. Testing principle
 
 A feature is not complete because its happy-path UI works. Tests prove contracts, tenant isolation, offline continuity, append-only truth, retries, recovery and documentation claims.
 
 ## 2. Test layers
 
-| Layer           | Purpose                                       | Typical tools                              |
-| --------------- | --------------------------------------------- | ------------------------------------------ |
-| Static          | Types, lint, boundaries, generated drift      | TypeScript, ESLint, custom validators      |
-| Unit            | Pure rules, calculations, transitions         | Vitest                                     |
-| Component       | UI behavior/accessibility                     | React Testing Library / RN Testing Library |
-| Database        | DDL, RLS, functions, constraints              | Supabase local, pgTAP/SQL assertions       |
-| Contract        | API/event/job/webhook/schema compatibility    | JSON Schema/OpenAPI validators             |
-| Integration     | Real adapters and service boundaries          | Testcontainers, Supabase local, Docker     |
-| E2E             | User and system workflows                     | Playwright, mobile/Electron harnesses      |
-| Offline/edge    | WAN loss, reconnect, duplicates, Hub failover | Hub simulator and certified hardware       |
-| Security        | Authz, tenancy, secrets, abuse                | automated probes and manual review         |
-| Load/resilience | capacity, saturation, retry and failure       | k6 and fault injection                     |
-| Recovery        | backup restore, Hub replacement, rollback     | scripted runbooks                          |
+| Layer | Purpose | Typical tools |
+|---|---|---|
+| Static | Types, lint, boundaries, generated drift | TypeScript, ESLint, custom validators |
+| Unit | Pure rules, calculations, transitions | Vitest |
+| Component | UI behavior/accessibility | React Testing Library / RN Testing Library |
+| Database | DDL, RLS, functions, constraints | Supabase local, pgTAP/SQL assertions |
+| Contract | API/event/job/webhook/schema compatibility | JSON Schema/OpenAPI validators |
+| Integration | Real adapters and service boundaries | Testcontainers, Supabase local, Docker |
+| E2E | User and system workflows | Playwright, mobile/Electron harnesses |
+| Offline/edge | WAN loss, reconnect, duplicates, Hub failover | Hub simulator and certified hardware |
+| Security | Authz, tenancy, secrets, abuse | automated probes and manual review |
+| Load/resilience | capacity, saturation, retry and failure | k6 and fault injection |
+| Recovery | backup restore, Hub replacement, rollback | scripted runbooks |
 
 ## 3. Required coverage
 

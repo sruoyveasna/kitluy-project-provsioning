@@ -217,4 +217,8 @@ Rows above SPECIFIED carry linked evidence (validated by `pnpm docs:registry-che
 | Store Hub/offline pack (11 documents) | PLANNED | SPECIFIED (LAN API + terminal-profile contract NEED RECONCILIATION) | `docs/source/offline/` |
 | Shared-service specifications (9) | PLANNED | SPECIFIED | `docs/source/shared-services/` |
 | UI/UX build pack (21 documents incl. provisional design tokens) | PLANNED | SPECIFIED | `docs/source/ui-ux/` |
+| Engineering standards pack (13 standards + pack manifest) | — | SPECIFIED (toolchain adoption pending KLREQ-009) | `docs/source/engineering/` |
+| QA/testing pack: master test plan, matrices, 524-case registry, payment vectors | — | SPECIFIED (all cases SPECIFIED_NOT_EXECUTED; zero execution evidence) | `docs/source/qa/` |
+| Infrastructure/operations pack (14 runbooks/plans) | — | SPECIFIED (SLOs/domains/providers remain [REQUIRED]) | `docs/source/infrastructure/` |
+| AI Swarm Operating System pack | — | SPECIFIED (adoption pending KLREQ-010) | `docs/source/owner-instructions/kitluy-ai-swarm-operating-system-v1.0.0/` |
 | Supabase implementation pack | REQUIRED VALUE | SPECIFIED-PARTIAL (10 of 13; schema/RLS/migration-plan missing) | `docs/source/data-contracts/` |

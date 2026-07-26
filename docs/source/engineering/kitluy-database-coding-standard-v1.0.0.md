@@ -7,6 +7,7 @@
 > **Applies to:** KitLuy Suite monorepo, all applications, shared services, packages, Supabase assets, infrastructure, Store Hub and AI handoff work.  
 > **Authority:** Current owner decisions and Project Instructions override this document. Applied migrations, verified code/tests and production evidence remain implementation truth.
 
+
 ## 1. Scope and database baseline
 
 This standard applies to Supabase PostgreSQL and Store Hub local PostgreSQL. The compatibility target is PostgreSQL `17.10`. Supabase-managed patch versions are recorded per environment; the repository owns schema, migrations, RLS, functions, tests and evidence—not the provider's patch schedule.

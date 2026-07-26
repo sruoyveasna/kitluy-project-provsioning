@@ -1,15 +1,15 @@
 # KitLuy Rollback and Emergency Change Runbook
 
-| Field        | Value                                                                       |
-| ------------ | --------------------------------------------------------------------------- |
-| **Filename** | `kitluy-rollback-and-emergency-change-runbook-v1.0.0.md`                    |
-| **Version**  | `v1.0.0`                                                                    |
-| **Date**     | `2026-07-26`                                                                |
-| **Phase**    | Phase 1 — Laundry                                                           |
-| **Owner**    | HET / KitLuy Suite Project Owner                                            |
+| Field | Value |
+|---|---|
+| **Filename** | `kitluy-rollback-and-emergency-change-runbook-v1.0.0.md` |
+| **Version** | `v1.0.0` |
+| **Date** | `2026-07-26` |
+| **Phase** | Phase 1 — Laundry |
+| **Owner** | HET / KitLuy Suite Project Owner |
 | **Audience** | Infrastructure, platform, security, release, database, support and QA teams |
-| **Status**   | Canonical operating target; not implementation evidence                     |
-| **Timezone** | `Asia/Phnom_Penh`                                                           |
+| **Status** | Canonical operating target; not implementation evidence |
+| **Timezone** | `Asia/Phnom_Penh` |
 
 > **Purpose:** Define safe rollback, forward-fix, safety-switch and break-glass procedures across applications, database, infrastructure, DNS and Store edge.
 
@@ -46,19 +46,21 @@ Nothing in this document is evidence that infrastructure is implemented. `IMPLEM
 - Monitoring and alert delivery remain available when the Admin Portal is unavailable.
 - No multi-region, recovery, readiness or availability claim is made without tested evidence.
 
+
+
 ## 1. Purpose
 
 Restore safe service quickly while preserving authoritative data, audit and the ability to understand what occurred. Rollback is not always a reverse SQL change; it may be application rollback, configuration rollback, feature disablement, cohort pause, edge A/B reversion or corrective forward-fix.
 
 ## 2. Change classes
 
-| Class              | Example                                                  | Approval                                                     |
-| ------------------ | -------------------------------------------------------- | ------------------------------------------------------------ |
-| Standard rollback  | Revert compatible application release                    | Release operator; independent approval if broad production   |
-| High-risk rollback | Database-connected release, wide fleet, DNS, certificate | Four-eyes                                                    |
-| Emergency change   | Active incident containment/recovery                     | Emergency requester + approver per severity policy           |
-| Forward-fix        | Schema/data prevents safe rollback                       | Database/service owner + approval                            |
-| Safety switch      | Disable connector/payment/feature path                   | Permission, reason, scope, audit; four-eyes if platform-wide |
+| Class | Example | Approval |
+|---|---|---|
+| Standard rollback | Revert compatible application release | Release operator; independent approval if broad production |
+| High-risk rollback | Database-connected release, wide fleet, DNS, certificate | Four-eyes |
+| Emergency change | Active incident containment/recovery | Emergency requester + approver per severity policy |
+| Forward-fix | Schema/data prevents safe rollback | Database/service owner + approval |
+| Safety switch | Disable connector/payment/feature path | Permission, reason, scope, audit; four-eyes if platform-wide |
 
 ## 3. Rollback decision test
 
@@ -177,16 +179,16 @@ post-change review owner
 
 ## 14. Validation matrix
 
-| Area                | Required validation                                   |
-| ------------------- | ----------------------------------------------------- |
-| API/web             | Health, critical journeys, latency/errors             |
-| Database            | Schema history, RLS, locks, counts/reconciliation     |
-| Jobs                | Queue age, leases, retries, dead letters, idempotency |
-| Store edge          | Hub/T1–T4, peripherals, offline, sync backlog         |
-| Payments/finance    | No duplicate/lost effects; reconciliation             |
-| Files/notifications | Pending work retained; no false success/duplicates    |
-| Security            | Credential/certificate/release integrity              |
-| Monitoring          | Candidate issue cleared; no blind spot                |
+| Area | Required validation |
+|---|---|
+| API/web | Health, critical journeys, latency/errors |
+| Database | Schema history, RLS, locks, counts/reconciliation |
+| Jobs | Queue age, leases, retries, dead letters, idempotency |
+| Store edge | Hub/T1–T4, peripherals, offline, sync backlog |
+| Payments/finance | No duplicate/lost effects; reconciliation |
+| Files/notifications | Pending work retained; no false success/duplicates |
+| Security | Credential/certificate/release integrity |
+| Monitoring | Candidate issue cleared; no blind spot |
 
 ## 15. After-action reconciliation
 

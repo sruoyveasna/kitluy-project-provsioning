@@ -112,3 +112,47 @@ T2 non-production, Store Hub local authority / no direct POS→Supabase writes,
 DO Spaces as primary heavy-file store, eight-phase vertical order, Digital-
 Store-first, append-only finance/custody/audit, no floating-point money,
 KHQR provider evidence, no reporting paywall).
+
+---
+
+# Batch 2 addendum (KL-DOCS-002, 2026-07-26)
+
+## High severity
+
+**12. Wholesale toolchain divergence (KLREC-2026-07-26-014, -019).** The
+engineering-standards pack pins a toolchain (Node 24 / pnpm 11 / TS 6 /
+React 19 / RN 0.86 / Expo 57 / Electron 43 / Terraform =1.15.5 + required
+`tool-versions.json`, `skipLibCheck:false`, `moduleResolution:Bundler`) that
+conflicts with every current repo pin (ADR-0001/0002). The repo's ADRs
+pre-declare that recorded higher-authority choices win — a coordinated
+upgrade task (proposed KL-ENG-001) is required; nothing was changed during
+ingestion.
+
+**13. AI Swarm OS adoption undecided (KLREC-2026-07-26-015).** The pack would
+replace repo-root governance (AGENTS/CLAUDE/PROJECT_HOME/handoff system) with
+a heavier, structurally incompatible system; its own state files are honestly
+UNVERIFIED against this repository. Adoption requires an owner decision plus
+a migration task for the existing handoff records and evidence vocabulary
+(swarm PLANNED..PRODUCTION_VERIFIED vs adopted 11-status model,
+KLREC-2026-07-26-020).
+
+## Medium severity
+
+**14. Monorepo blueprint vs reality (KLREC-2026-07-26-016)** — four
+load-bearing structural divergences (tooling/ vs scripts/, vertical placement,
+future-clients rule, package vocabulary) plus dead CODEOWNERS paths.
+
+**15. Duplicate canonical security test plans (KLREC-2026-07-26-017)** and
+**missing `kitluy-testing-and-evidence-system-v1.0.0`
+(KLREC-2026-07-26-018 / KLREQ-008)** — 41 of 524 registry cases trace to a
+document that does not exist.
+
+## Verified non-findings
+
+Secrets inventory: references only, zero values. Domain/DNS plan: all
+`[REQUIRED]` placeholders, no real domains. Environment matrix == repo
+`KITLUY_ENVIRONMENTS` exactly. CI/CD + database runbook + swarm pack all
+REINFORCE KL-INF-P1-037 (no auto-applied production migrations, "never by an
+AI agent"). QA offline pack extends (never contradicts) the repo's tested
+hub-agent harness. **No batch-2 document contradicts any owner-locked
+invariant.**

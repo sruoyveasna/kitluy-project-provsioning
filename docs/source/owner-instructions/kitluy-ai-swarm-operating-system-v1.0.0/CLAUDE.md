@@ -1,5 +1,4 @@
 \
-
 # Claude Code Instructions — KitLuy Suite
 
 **Version:** v1.0.0  

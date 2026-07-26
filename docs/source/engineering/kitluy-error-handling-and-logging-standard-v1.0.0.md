@@ -7,24 +7,25 @@
 > **Applies to:** KitLuy Suite monorepo, all applications, shared services, packages, Supabase assets, infrastructure, Store Hub and AI handoff work.  
 > **Authority:** Current owner decisions and Project Instructions override this document. Applied migrations, verified code/tests and production evidence remain implementation truth.
 
+
 ## 1. Objectives
 
 Errors must be actionable, safe, localized and traceable across cloud, Store Hub, terminals, mobile apps, portals, jobs and connectors. Logs support operations and audit without becoming a second business ledger or a privacy leak.
 
 ## 2. Error taxonomy
 
-| Class                  | Meaning                                               | Retry                     |
-| ---------------------- | ----------------------------------------------------- | ------------------------- |
-| Validation             | Input fails schema or business precondition           | No until corrected        |
-| Authentication         | Identity/session invalid                              | Re-authenticate           |
-| Authorization          | Actor lacks permission/scope/approval                 | No automatic retry        |
-| Conflict               | Version, state, idempotency or reservation conflict   | Re-read and follow policy |
-| Not found              | Resource absent or invisible in scope                 | Usually no                |
-| Rate limited           | Capacity/policy limit                                 | Yes after server delay    |
-| Dependency unavailable | Provider/service/network failure                      | Policy-based retry        |
-| Offline/deferred       | Operation accepted locally but not cloud-acknowledged | Queue and reconcile       |
-| Internal               | Unexpected defect                                     | Limited retry; alert      |
-| Data integrity         | Invariant, reconciliation or append-only violation    | Stop, alert, human repair |
+| Class | Meaning | Retry |
+|---|---|---|
+| Validation | Input fails schema or business precondition | No until corrected |
+| Authentication | Identity/session invalid | Re-authenticate |
+| Authorization | Actor lacks permission/scope/approval | No automatic retry |
+| Conflict | Version, state, idempotency or reservation conflict | Re-read and follow policy |
+| Not found | Resource absent or invisible in scope | Usually no |
+| Rate limited | Capacity/policy limit | Yes after server delay |
+| Dependency unavailable | Provider/service/network failure | Policy-based retry |
+| Offline/deferred | Operation accepted locally but not cloud-acknowledged | Queue and reconcile |
+| Internal | Unexpected defect | Limited retry; alert |
+| Data integrity | Invariant, reconciliation or append-only violation | Stop, alert, human repair |
 
 ## 3. Canonical error envelope
 

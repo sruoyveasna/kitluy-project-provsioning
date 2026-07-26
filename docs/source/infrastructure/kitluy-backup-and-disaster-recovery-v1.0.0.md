@@ -1,15 +1,15 @@
 # KitLuy Backup and Disaster Recovery
 
-| Field        | Value                                                                       |
-| ------------ | --------------------------------------------------------------------------- |
-| **Filename** | `kitluy-backup-and-disaster-recovery-v1.0.0.md`                             |
-| **Version**  | `v1.0.0`                                                                    |
-| **Date**     | `2026-07-26`                                                                |
-| **Phase**    | Phase 1 — Laundry                                                           |
-| **Owner**    | HET / KitLuy Suite Project Owner                                            |
+| Field | Value |
+|---|---|
+| **Filename** | `kitluy-backup-and-disaster-recovery-v1.0.0.md` |
+| **Version** | `v1.0.0` |
+| **Date** | `2026-07-26` |
+| **Phase** | Phase 1 — Laundry |
+| **Owner** | HET / KitLuy Suite Project Owner |
 | **Audience** | Infrastructure, platform, security, release, database, support and QA teams |
-| **Status**   | Canonical operating target; not implementation evidence                     |
-| **Timezone** | `Asia/Phnom_Penh`                                                           |
+| **Status** | Canonical operating target; not implementation evidence |
+| **Timezone** | `Asia/Phnom_Penh` |
 
 > **Purpose:** Define data protection, RPO/RTO governance, restore drills, Hub replacement recovery and disaster invocation.
 
@@ -46,6 +46,8 @@ Nothing in this document is evidence that infrastructure is implemented. `IMPLEM
 - Monitoring and alert delivery remain available when the Admin Portal is unavailable.
 - No multi-region, recovery, readiness or availability claim is made without tested evidence.
 
+
+
 ## 1. Recovery principles
 
 - Backups are useful only when restoration is tested.
@@ -56,30 +58,30 @@ Nothing in this document is evidence that infrastructure is implemented. `IMPLEM
 
 ## 2. Data protection matrix
 
-| Data/service class          | Primary                                   | Protection                                                 | Restore target                                   | Owner             |
-| --------------------------- | ----------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------ | ----------------- |
-| Supabase PostgreSQL         | Authoritative cloud DB                    | Provider backup/PITR + approved logical backup policy      | Isolated Supabase/PostgreSQL restore environment | Database Ops      |
-| Auth/RLS/config metadata    | Supabase                                  | Included DB protection + configuration code                | Isolated project/environment                     | Platform/Security |
-| Spaces objects              | DigitalOcean Spaces                       | Versioning/lifecycle/replication or backup policy by class | Isolated bucket/prefix                           | File/Infra        |
-| Infrastructure code/state   | Git + protected state backend             | Repository redundancy + encrypted state backup             | Clean IaC environment                            | Infra             |
-| Container/release artifacts | Registry/Spaces                           | Immutable retention + signatures                           | Recreated runtime                                | Release Ops       |
-| Secrets/PKI                 | Approved secret/key systems               | Restricted escrow/recovery, dual control                   | Replacement secret/key systems                   | Security          |
-| Audit/security records      | Supabase/protected archive                | Append-only retention/export                               | Isolated analysis/recovery store                 | Audit/Security    |
-| Store Hub PostgreSQL        | Local Hub                                 | Encrypted checkpoint + synchronized event recovery         | Pre-enrolled replacement Hub                     | Fleet Ops         |
-| Store Hub files             | Local repository + upload acknowledgement | Local queue/checkpoint + cloud object protection           | Replacement Hub/local cache                      | Fleet/File        |
+| Data/service class | Primary | Protection | Restore target | Owner |
+|---|---|---|---|---|
+| Supabase PostgreSQL | Authoritative cloud DB | Provider backup/PITR + approved logical backup policy | Isolated Supabase/PostgreSQL restore environment | Database Ops |
+| Auth/RLS/config metadata | Supabase | Included DB protection + configuration code | Isolated project/environment | Platform/Security |
+| Spaces objects | DigitalOcean Spaces | Versioning/lifecycle/replication or backup policy by class | Isolated bucket/prefix | File/Infra |
+| Infrastructure code/state | Git + protected state backend | Repository redundancy + encrypted state backup | Clean IaC environment | Infra |
+| Container/release artifacts | Registry/Spaces | Immutable retention + signatures | Recreated runtime | Release Ops |
+| Secrets/PKI | Approved secret/key systems | Restricted escrow/recovery, dual control | Replacement secret/key systems | Security |
+| Audit/security records | Supabase/protected archive | Append-only retention/export | Isolated analysis/recovery store | Audit/Security |
+| Store Hub PostgreSQL | Local Hub | Encrypted checkpoint + synchronized event recovery | Pre-enrolled replacement Hub | Fleet Ops |
+| Store Hub files | Local repository + upload acknowledgement | Local queue/checkpoint + cloud object protection | Replacement Hub/local cache | Fleet/File |
 
 ## 3. RPO/RTO registry
 
 Exact targets are owner-approved values.
 
-| Class                               | RPO                | RTO          | Maximum test age | Authority                  |
-| ----------------------------------- | ------------------ | ------------ | ---------------- | -------------------------- |
-| Payment/finance/audit cloud records | `[REQUIRED]`       | `[REQUIRED]` | `[REQUIRED]`     | Owner + Finance + Security |
-| Core operational cloud data         | `[REQUIRED]`       | `[REQUIRED]` | `[REQUIRED]`     | Platform/Data              |
-| Store Hub local operations          | `[REQUIRED]`       | `[REQUIRED]` | `[REQUIRED]`     | Fleet/Operations           |
-| Files/evidence                      | `[REQUIRED]`       | `[REQUIRED]` | `[REQUIRED]`     | File/Data owner            |
-| Public web/API compute              | near-zero data RPO | `[REQUIRED]` | `[REQUIRED]`     | Platform                   |
-| Secrets/PKI                         | `[REQUIRED]`       | `[REQUIRED]` | `[REQUIRED]`     | Security                   |
+| Class | RPO | RTO | Maximum test age | Authority |
+|---|---|---|---|---|
+| Payment/finance/audit cloud records | `[REQUIRED]` | `[REQUIRED]` | `[REQUIRED]` | Owner + Finance + Security |
+| Core operational cloud data | `[REQUIRED]` | `[REQUIRED]` | `[REQUIRED]` | Platform/Data |
+| Store Hub local operations | `[REQUIRED]` | `[REQUIRED]` | `[REQUIRED]` | Fleet/Operations |
+| Files/evidence | `[REQUIRED]` | `[REQUIRED]` | `[REQUIRED]` | File/Data owner |
+| Public web/API compute | near-zero data RPO | `[REQUIRED]` | `[REQUIRED]` | Platform |
+| Secrets/PKI | `[REQUIRED]` | `[REQUIRED]` | `[REQUIRED]` | Security |
 
 ## 4. Required recovery scenarios
 
@@ -178,16 +180,16 @@ Phase 1 may maintain a documented region-outage plan without claiming active mul
 
 ## 11. DR invocation
 
-| Step        | Action                                                                |
-| ----------- | --------------------------------------------------------------------- |
-| Declare     | Incident commander classifies disaster and obtains required authority |
-| Contain     | Stop unsafe writes/deployments and secure credentials                 |
-| Assess      | Determine affected data, services, Stores and restore point           |
-| Decide      | Select repair, failover, restore or edge-continuity path              |
-| Recover     | Execute runbook with timeline and dual control where required         |
-| Validate    | Data, RLS, applications, Hub sync, files and business checks          |
-| Communicate | Operators, Partners/Stores and stakeholders according to policy       |
-| Exit        | Return to normal control, preserve evidence, post-incident review     |
+| Step | Action |
+|---|---|
+| Declare | Incident commander classifies disaster and obtains required authority |
+| Contain | Stop unsafe writes/deployments and secure credentials |
+| Assess | Determine affected data, services, Stores and restore point |
+| Decide | Select repair, failover, restore or edge-continuity path |
+| Recover | Execute runbook with timeline and dual control where required |
+| Validate | Data, RLS, applications, Hub sync, files and business checks |
+| Communicate | Operators, Partners/Stores and stakeholders according to policy |
+| Exit | Return to normal control, preserve evidence, post-incident review |
 
 ## 12. Required values
 

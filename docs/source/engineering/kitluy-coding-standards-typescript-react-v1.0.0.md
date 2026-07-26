@@ -7,6 +7,7 @@
 > **Applies to:** KitLuy Suite monorepo, all applications, shared services, packages, Supabase assets, infrastructure, Store Hub and AI handoff work.  
 > **Authority:** Current owner decisions and Project Instructions override this document. Applied migrations, verified code/tests and production evidence remain implementation truth.
 
+
 ## 1. Language baseline
 
 TypeScript is mandatory for production JavaScript work. The root compiler is TypeScript `6.0.3`. New JavaScript files require an explicit exception for configuration/tool compatibility.
@@ -46,16 +47,16 @@ Minimum base options:
 
 ## 3. Naming and files
 
-| Item                | Convention                                               | Example                               |
-| ------------------- | -------------------------------------------------------- | ------------------------------------- |
-| Components          | PascalCase                                               | `BookingSummaryCard.tsx`              |
-| Hooks               | `use` + camelCase                                        | `useBookingFreshness.ts`              |
-| Functions/variables | camelCase                                                | `calculateBalanceDue`                 |
-| Types/interfaces    | PascalCase                                               | `PaymentAttempt`                      |
-| Constants           | camelCase; uppercase only for true environment constants | `defaultPageSize`, `MAX_UPLOAD_BYTES` |
-| Packages            | kebab-case under `@kitluy/`                              | `@kitluy/sync-protocol`               |
-| Tests               | adjacent or `tests/`, `.test.ts(x)`                      | `money.test.ts`                       |
-| Schemas             | `.schema.ts`                                             | `booking.schema.ts`                   |
+| Item | Convention | Example |
+|---|---|---|
+| Components | PascalCase | `BookingSummaryCard.tsx` |
+| Hooks | `use` + camelCase | `useBookingFreshness.ts` |
+| Functions/variables | camelCase | `calculateBalanceDue` |
+| Types/interfaces | PascalCase | `PaymentAttempt` |
+| Constants | camelCase; uppercase only for true environment constants | `defaultPageSize`, `MAX_UPLOAD_BYTES` |
+| Packages | kebab-case under `@kitluy/` | `@kitluy/sync-protocol` |
+| Tests | adjacent or `tests/`, `.test.ts(x)` | `money.test.ts` |
+| Schemas | `.schema.ts` | `booking.schema.ts` |
 
 One file should have one primary responsibility. Avoid generic `utils.ts`; use domain-specific modules.
 
@@ -74,7 +75,9 @@ One file should have one primary responsibility. Avoid generic `utils.ts`; use d
 Do not throw raw strings. Expected business failures return typed results; unexpected programmer/infrastructure failures throw typed errors and are mapped at the boundary.
 
 ```ts
-type Result<T, E> = { ok: true; value: T } | { ok: false; error: E };
+type Result<T, E> =
+  | { ok: true; value: T }
+  | { ok: false; error: E };
 ```
 
 Errors include a stable code, safe message key, retry classification and correlation ID. Never expose stack traces, SQL, secrets or provider credentials to clients.

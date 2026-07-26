@@ -1,5 +1,4 @@
 \
-
 # KitLuy Current Repository State
 
 **Record version:** v1.0.0  
@@ -16,25 +15,25 @@ The first authorized repository task must refresh this record with exact command
 
 ## Repository evidence snapshot
 
-| Area                             | Current recorded state                                      | Evidence required to update                               | Authority consequence                          |
-| -------------------------------- | ----------------------------------------------------------- | --------------------------------------------------------- | ---------------------------------------------- |
-| Repository root                  | `[REQUIRED: resolve with git rev-parse --show-toplevel]`    | command output and path                                   | no path assumptions allowed                    |
-| Default/integration branch       | `[REQUIRED]`                                                | `git remote -v`, branch policy, protected branch settings | do not create task branch from an assumed base |
-| HEAD commit                      | `[REQUIRED]`                                                | `git rev-parse HEAD`                                      | all evidence must identify commit              |
-| Working tree                     | `[REQUIRED]`                                                | `git status --short --branch`                             | do not overwrite unknown local work            |
-| Package manager and lockfile     | `[REQUIRED]`                                                | live files and versions                                   | example commands are non-authoritative         |
-| Node/pnpm/TypeScript versions    | `[REQUIRED: read repository standards and toolchain files]` | version files, package metadata, CI                       | do not install guessed versions                |
-| Monorepo applications/services   | `[REQUIRED: inventory live paths]`                          | directory and workspace inventory                         | planning layout does not prove actual layout   |
-| Applied migrations — development | `UNKNOWN`                                                   | environment ID, migration history, validation output      | migration files alone are not applied evidence |
-| Applied migrations — staging     | `UNKNOWN`                                                   | environment ID and migration history                      | no staging readiness claim                     |
-| Applied migrations — production  | `UNKNOWN`                                                   | authorized operator record and migration history          | agents must not apply production migrations    |
-| Test status                      | `UNKNOWN`                                                   | CI run IDs and/or local command logs                      | no test pass claim                             |
-| Build status                     | `UNKNOWN`                                                   | build logs and artifact identifiers                       | no deployability claim                         |
-| Deployment status                | `UNKNOWN`                                                   | environment, release ID, commit, health checks            | no deployment claim                            |
-| Pilot stores/devices             | `UNKNOWN`                                                   | approved pilot records and monitoring                     | no pilot-proven claim                          |
-| Production traffic/telemetry     | `UNKNOWN`                                                   | authorized dashboards and dated evidence                  | no operational claim                           |
-| Open incidents                   | `UNKNOWN`                                                   | incident register                                         | safety status unverified                       |
-| Secrets/config readiness         | `UNKNOWN`                                                   | references-only inventory and operator verification       | never request secret values in this file       |
+| Area | Current recorded state | Evidence required to update | Authority consequence |
+|---|---|---|---|
+| Repository root | `[REQUIRED: resolve with git rev-parse --show-toplevel]` | command output and path | no path assumptions allowed |
+| Default/integration branch | `[REQUIRED]` | `git remote -v`, branch policy, protected branch settings | do not create task branch from an assumed base |
+| HEAD commit | `[REQUIRED]` | `git rev-parse HEAD` | all evidence must identify commit |
+| Working tree | `[REQUIRED]` | `git status --short --branch` | do not overwrite unknown local work |
+| Package manager and lockfile | `[REQUIRED]` | live files and versions | example commands are non-authoritative |
+| Node/pnpm/TypeScript versions | `[REQUIRED: read repository standards and toolchain files]` | version files, package metadata, CI | do not install guessed versions |
+| Monorepo applications/services | `[REQUIRED: inventory live paths]` | directory and workspace inventory | planning layout does not prove actual layout |
+| Applied migrations — development | `UNKNOWN` | environment ID, migration history, validation output | migration files alone are not applied evidence |
+| Applied migrations — staging | `UNKNOWN` | environment ID and migration history | no staging readiness claim |
+| Applied migrations — production | `UNKNOWN` | authorized operator record and migration history | agents must not apply production migrations |
+| Test status | `UNKNOWN` | CI run IDs and/or local command logs | no test pass claim |
+| Build status | `UNKNOWN` | build logs and artifact identifiers | no deployability claim |
+| Deployment status | `UNKNOWN` | environment, release ID, commit, health checks | no deployment claim |
+| Pilot stores/devices | `UNKNOWN` | approved pilot records and monitoring | no pilot-proven claim |
+| Production traffic/telemetry | `UNKNOWN` | authorized dashboards and dated evidence | no operational claim |
+| Open incidents | `UNKNOWN` | incident register | safety status unverified |
+| Secrets/config readiness | `UNKNOWN` | references-only inventory and operator verification | never request secret values in this file |
 
 ## Documentation state
 

@@ -1,27 +1,26 @@
 \
-
 # KitLuy Work Package
 
 > Copy this file. Do not execute a task from the template itself.
 
 ## 0. Task identity
 
-| Field                    | Value                             |
-| ------------------------ | --------------------------------- |
-| Task ID                  | `KL-<PHASE>-<DOMAIN>-<NNN>`       |
-| Title                    | `[REQUIRED: one bounded outcome]` |
-| Status                   | `DRAFT`                           |
-| Active phase             | `Phase 1 — Laundry`               |
-| Product/build            | `[REQUIRED]`                      |
-| Primary coding agent     | `[REQUIRED]`                      |
-| Independent review agent | `[REQUIRED or REQUESTED]`         |
-| Task owner/approver      | `[REQUIRED]`                      |
-| Created date             | `[YYYY-MM-DD]`                    |
-| Target base branch       | `[REQUIRED]`                      |
-| Base commit              | `[REQUIRED SHA]`                  |
-| Task branch              | `task/<lowercase-task-id>-<slug>` |
-| Worktree path            | `[REQUIRED resolved path]`        |
-| Risk level               | `LOW                              | MEDIUM | HIGH | CRITICAL` |
+| Field | Value |
+|---|---|
+| Task ID | `KL-<PHASE>-<DOMAIN>-<NNN>` |
+| Title | `[REQUIRED: one bounded outcome]` |
+| Status | `DRAFT` |
+| Active phase | `Phase 1 — Laundry` |
+| Product/build | `[REQUIRED]` |
+| Primary coding agent | `[REQUIRED]` |
+| Independent review agent | `[REQUIRED or REQUESTED]` |
+| Task owner/approver | `[REQUIRED]` |
+| Created date | `[YYYY-MM-DD]` |
+| Target base branch | `[REQUIRED]` |
+| Base commit | `[REQUIRED SHA]` |
+| Task branch | `task/<lowercase-task-id>-<slug>` |
+| Worktree path | `[REQUIRED resolved path]` |
+| Risk level | `LOW | MEDIUM | HIGH | CRITICAL` |
 
 ## 1. Goal
 
@@ -40,12 +39,12 @@
 
 List exact documents, versions, sections, code, migrations, tests, and handoffs that govern this task.
 
-| Source                      | Version/commit         | Exact section/path     | Authority role          | Checked by/date |
-| --------------------------- | ---------------------- | ---------------------- | ----------------------- | --------------- |
-| Current project instruction | current                | applicable locked rule | owner authority         | `[REQUIRED]`    |
-| `[canonical document]`      | `[version]`            | `[section]`            | target contract         | `[REQUIRED]`    |
-| `[migration/code/test]`     | `[commit/environment]` | `[path]`               | implementation evidence | `[REQUIRED]`    |
-| `[latest handoff/review]`   | `[date]`               | `[path]`               | continuity evidence     | `[REQUIRED]`    |
+| Source | Version/commit | Exact section/path | Authority role | Checked by/date |
+|---|---|---|---|---|
+| Current project instruction | current | applicable locked rule | owner authority | `[REQUIRED]` |
+| `[canonical document]` | `[version]` | `[section]` | target contract | `[REQUIRED]` |
+| `[migration/code/test]` | `[commit/environment]` | `[path]` | implementation evidence | `[REQUIRED]` |
+| `[latest handoff/review]` | `[date]` | `[path]` | continuity evidence | `[REQUIRED]` |
 
 ### Conflicts found
 
@@ -53,11 +52,11 @@ List exact documents, versions, sections, code, migrations, tests, and handoffs 
 
 ## 5. Dependencies and blockers
 
-| Type            | ID/reference      | Required state    | Current state | Resolution   |
-| --------------- | ----------------- | ----------------- | ------------- | ------------ |
-| Task dependency | `[task ID]`       | `MERGED/VERIFIED` | `[state]`     | `[evidence]` |
-| Blocker         | `[KLB-*]`         | `CLOSED`          | `[state]`     | `[evidence]` |
-| Contract        | `[document/path]` | `APPROVED`        | `[state]`     | `[evidence]` |
+| Type | ID/reference | Required state | Current state | Resolution |
+|---|---|---|---|---|
+| Task dependency | `[task ID]` | `MERGED/VERIFIED` | `[state]` | `[evidence]` |
+| Blocker | `[KLB-*]` | `CLOSED` | `[state]` | `[evidence]` |
+| Contract | `[document/path]` | `APPROVED` | `[state]` | `[evidence]` |
 
 ## 6. Locked rules applicable to this task
 
@@ -142,10 +141,10 @@ No other files may change without task-owner approval and index update.
 
 Use objective, independently verifiable conditions.
 
-| AC ID   | Acceptance criterion | Verification method         | Required evidence |
-| ------- | -------------------- | --------------------------- | ----------------- |
-| `AC-01` | `[REQUIRED]`         | `[test/query/manual check]` | `[record]`        |
-| `AC-02` | `[REQUIRED]`         | `[test/query/manual check]` | `[record]`        |
+| AC ID | Acceptance criterion | Verification method | Required evidence |
+|---|---|---|---|
+| `AC-01` | `[REQUIRED]` | `[test/query/manual check]` | `[record]` |
+| `AC-02` | `[REQUIRED]` | `[test/query/manual check]` | `[record]` |
 
 ## 12. Validation commands
 

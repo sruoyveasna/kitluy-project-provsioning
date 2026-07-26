@@ -1,15 +1,15 @@
 # KitLuy Database Deployment Runbook
 
-| Field        | Value                                                                       |
-| ------------ | --------------------------------------------------------------------------- |
-| **Filename** | `kitluy-database-deployment-runbook-v1.0.0.md`                              |
-| **Version**  | `v1.0.0`                                                                    |
-| **Date**     | `2026-07-26`                                                                |
-| **Phase**    | Phase 1 — Laundry                                                           |
-| **Owner**    | HET / KitLuy Suite Project Owner                                            |
+| Field | Value |
+|---|---|
+| **Filename** | `kitluy-database-deployment-runbook-v1.0.0.md` |
+| **Version** | `v1.0.0` |
+| **Date** | `2026-07-26` |
+| **Phase** | Phase 1 — Laundry |
+| **Owner** | HET / KitLuy Suite Project Owner |
 | **Audience** | Infrastructure, platform, security, release, database, support and QA teams |
-| **Status**   | Canonical operating target; not implementation evidence                     |
-| **Timezone** | `Asia/Phnom_Penh`                                                           |
+| **Status** | Canonical operating target; not implementation evidence |
+| **Timezone** | `Asia/Phnom_Penh` |
 
 > **Purpose:** Provide a controlled, testable and auditable procedure for applying and verifying Supabase PostgreSQL migrations.
 
@@ -46,21 +46,23 @@ Nothing in this document is evidence that infrastructure is implemented. `IMPLEM
 - Monitoring and alert delivery remain available when the Admin Portal is unavailable.
 - No multi-region, recovery, readiness or availability claim is made without tested evidence.
 
+
+
 ## 1. Scope
 
 This runbook applies to Supabase PostgreSQL schema, functions, RLS policies, indexes, reference data and controlled data migrations. It does not authorize an AI agent, application startup process or general CI runner to apply production migrations.
 
 ## 2. Roles
 
-| Role                          | Responsibility                                                               |
-| ----------------------------- | ---------------------------------------------------------------------------- |
-| Migration author              | Writes migration, tests and validation; cannot self-approve production apply |
-| Database reviewer             | Reviews SQL, locks, data impact, RLS, rollback/forward-fix                   |
-| Security/RLS reviewer         | Reviews tenant isolation and privileged functions                            |
-| Release coordinator           | Confirms application compatibility and change window                         |
-| Production migration operator | Applies approved migration using scoped identity                             |
-| Independent approver          | Approves high-risk/production migration                                      |
-| Observer/auditor              | Records evidence and timeline                                                |
+| Role | Responsibility |
+|---|---|
+| Migration author | Writes migration, tests and validation; cannot self-approve production apply |
+| Database reviewer | Reviews SQL, locks, data impact, RLS, rollback/forward-fix |
+| Security/RLS reviewer | Reviews tenant isolation and privileged functions |
+| Release coordinator | Confirms application compatibility and change window |
+| Production migration operator | Applies approved migration using scoped identity |
+| Independent approver | Approves high-risk/production migration |
+| Observer/auditor | Records evidence and timeline |
 
 ## 3. Migration package requirements
 
@@ -109,12 +111,12 @@ Destructive same-release changes are rejected unless an explicitly approved emer
 
 ## 6. Change risk classes
 
-| Class            | Examples                                                                 | Minimum control                                               |
-| ---------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------- |
-| `DB-R1` Low      | Add nullable column, safe reference data                                 | Review + staging evidence                                     |
-| `DB-R2` Moderate | Concurrent index, function/RPC change, bounded backfill                  | Database + app review; production approval                    |
-| `DB-R3` High     | RLS policy, large backfill, constraint validation, payment/finance table | Four-eyes, rehearsal, rollback/forward-fix, active monitoring |
-| `DB-R4` Critical | Destructive change, identity boundary, restore over active data          | Owner/security/database approval and dedicated change window  |
+| Class | Examples | Minimum control |
+|---|---|---|
+| `DB-R1` Low | Add nullable column, safe reference data | Review + staging evidence |
+| `DB-R2` Moderate | Concurrent index, function/RPC change, bounded backfill | Database + app review; production approval |
+| `DB-R3` High | RLS policy, large backfill, constraint validation, payment/finance table | Four-eyes, rehearsal, rollback/forward-fix, active monitoring |
+| `DB-R4` Critical | Destructive change, identity boundary, restore over active data | Owner/security/database approval and dedicated change window |
 
 ## 7. Deployment procedure
 
@@ -154,15 +156,15 @@ Destructive same-release changes are rejected unless an explicitly approved emer
 
 ## 10. Failure handling
 
-| Failure point                                 | Action                                                                        |
-| --------------------------------------------- | ----------------------------------------------------------------------------- |
-| Before any migration committed                | Stop and investigate; no rollback needed                                      |
-| Transactional migration failure               | Confirm transaction rollback; validate state                                  |
-| Partially applied non-transactional operation | Pause; use documented repair/forward-fix                                      |
-| Severe lock/latency impact                    | Cancel safely if possible; restore service; reassess method                   |
-| RLS regression                                | Block application rollout, restore/forward-fix policy immediately             |
-| Data corruption/loss risk                     | Declare incident; stop writes if required; PITR/restore decision              |
-| App incompatibility                           | Roll back app if schema permits, otherwise forward-fix per compatibility plan |
+| Failure point | Action |
+|---|---|
+| Before any migration committed | Stop and investigate; no rollback needed |
+| Transactional migration failure | Confirm transaction rollback; validate state |
+| Partially applied non-transactional operation | Pause; use documented repair/forward-fix |
+| Severe lock/latency impact | Cancel safely if possible; restore service; reassess method |
+| RLS regression | Block application rollout, restore/forward-fix policy immediately |
+| Data corruption/loss risk | Declare incident; stop writes if required; PITR/restore decision |
+| App incompatibility | Roll back app if schema permits, otherwise forward-fix per compatibility plan |
 
 ## 11. Rollback and restore rule
 

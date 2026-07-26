@@ -1,18 +1,19 @@
 # KitLuy Rebuild Test Checklist
 
-| Field      | Value                                                |
-| ---------- | ---------------------------------------------------- |
-| Filename   | `kitluy-rebuild-test-checklist-v1.0.0.md`            |
-| Version    | `v1.0.0`                                             |
-| Date       | `2026-07-26`                                         |
-| Owner      | HET / KitLuy Suite Project Owner                     |
-| Phase      | Phase 1 - Laundry                                    |
-| Status     | Canonical G5 checklist; not a completed Rebuild Test |
-| Timezone   | `Asia/Phnom_Penh`                                    |
-| Languages  | Khmer and English                                    |
-| Currencies | KHR and USD                                          |
+| Field | Value |
+|---|---|
+| Filename | `kitluy-rebuild-test-checklist-v1.0.0.md` |
+| Version | `v1.0.0` |
+| Date | `2026-07-26` |
+| Owner | HET / KitLuy Suite Project Owner |
+| Phase | Phase 1 - Laundry |
+| Status | Canonical G5 checklist; not a completed Rebuild Test |
+| Timezone | `Asia/Phnom_Penh` |
+| Languages | Khmer and English |
+| Currencies | KHR and USD |
 
 > Evidence discipline: this document defines required verification. It is not proof that any capability is implemented, tested, deployed, pilot-proven, or production-ready.
+
 
 ## 1. Test objective
 
@@ -101,25 +102,25 @@ One qualified engineer with no prior KitLuy build context must reconstruct and o
 
 ## 9. Scoring
 
-| Result               | Meaning                                                                                                                     |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| PASS                 | All mandatory items pass; no undocumented blocker or Critical/High gap; pilot and operation proven.                         |
-| PASS WITH CONDITIONS | Only non-blocking documented gaps remain with owner, due date and no truth/security/recovery risk.                          |
-| FAIL                 | Any mandatory reconstruction, migration, authorization, offline, finance, recovery, hardware, pilot or evidence item fails. |
+| Result | Meaning |
+|---|---|
+| PASS | All mandatory items pass; no undocumented blocker or Critical/High gap; pilot and operation proven. |
+| PASS WITH CONDITIONS | Only non-blocking documented gaps remain with owner, due date and no truth/security/recovery risk. |
+| FAIL | Any mandatory reconstruction, migration, authorization, offline, finance, recovery, hardware, pilot or evidence item fails. |
 
 Time-to-rebuild is recorded for planning but does not excuse missing documentation. A workaround discovered during the test must be documented and retested before final PASS.
 
 ## 10. Final record
 
-| Field                      | Value        |
-| -------------------------- | ------------ |
-| Rebuild Test ID            | `[REQUIRED]` |
-| Tester and qualification   | `[REQUIRED]` |
-| Start/end                  | `[REQUIRED]` |
-| Repository/tag/build       | `[REQUIRED]` |
+| Field | Value |
+|---|---|
+| Rebuild Test ID | `[REQUIRED]` |
+| Tester and qualification | `[REQUIRED]` |
+| Start/end | `[REQUIRED]` |
+| Repository/tag/build | `[REQUIRED]` |
 | Infrastructure environment | `[REQUIRED]` |
-| Result                     | `[REQUIRED]` |
-| Blockers/deviations        | `[REQUIRED]` |
-| Evidence index/checksum    | `[REQUIRED]` |
-| Corrective actions         | `[REQUIRED]` |
-| Approvers/date             | `[REQUIRED]` |
+| Result | `[REQUIRED]` |
+| Blockers/deviations | `[REQUIRED]` |
+| Evidence index/checksum | `[REQUIRED]` |
+| Corrective actions | `[REQUIRED]` |
+| Approvers/date | `[REQUIRED]` |

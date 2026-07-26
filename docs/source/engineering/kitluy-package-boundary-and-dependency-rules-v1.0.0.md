@@ -7,6 +7,7 @@
 > **Applies to:** KitLuy Suite monorepo, all applications, shared services, packages, Supabase assets, infrastructure, Store Hub and AI handoff work.  
 > **Authority:** Current owner decisions and Project Instructions override this document. Applied migrations, verified code/tests and production evidence remain implementation truth.
 
+
 ## 1. Governing rule
 
 KitLuy is one platform with shared Core and additive vertical modules. Dependency direction must prevent applications, providers and Laundry terminology from contaminating neutral Core.
@@ -26,16 +27,16 @@ they are not imported by the domain.
 
 ## 2. Workspace classes
 
-| Class             | Examples                                                             | May depend on                        | Must not depend on                                    |
-| ----------------- | -------------------------------------------------------------------- | ------------------------------------ | ----------------------------------------------------- |
-| Shared primitives | `validation`, `errors`, `money`, `i18n`                              | other primitives with no cycles      | apps, services, verticals, provider SDKs              |
-| Core domain       | `core-domain`, `permissions`, `events`, `jobs`                       | primitives and stable contracts      | Laundry module, UI, Supabase client, DigitalOcean SDK |
-| Vertical domain   | `vertical-laundry`                                                   | Core domain and primitives           | application UI, provider SDKs, future verticals       |
-| Contract packages | `api-contracts`, `edge-contracts`, `file-contracts`, `sync-protocol` | primitives, schemas, error catalogue | concrete server/client implementations                |
-| Platform adapters | auth, logging, observability, database adapter libraries             | contracts and vendor SDKs            | importing an app or owning business policy            |
-| Applications      | portals, mobile, Electron, Storefront                                | packages and app-local features      | another app's internals or privileged server packages |
-| Services          | sync, file, notification, AI, provisioning                           | packages and service-local modules   | another service's private source tree                 |
-| Tests/tooling     | factories, validators, test runners                                  | public exports                       | production imports from test packages                 |
+| Class | Examples | May depend on | Must not depend on |
+|---|---|---|---|
+| Shared primitives | `validation`, `errors`, `money`, `i18n` | other primitives with no cycles | apps, services, verticals, provider SDKs |
+| Core domain | `core-domain`, `permissions`, `events`, `jobs` | primitives and stable contracts | Laundry module, UI, Supabase client, DigitalOcean SDK |
+| Vertical domain | `vertical-laundry` | Core domain and primitives | application UI, provider SDKs, future verticals |
+| Contract packages | `api-contracts`, `edge-contracts`, `file-contracts`, `sync-protocol` | primitives, schemas, error catalogue | concrete server/client implementations |
+| Platform adapters | auth, logging, observability, database adapter libraries | contracts and vendor SDKs | importing an app or owning business policy |
+| Applications | portals, mobile, Electron, Storefront | packages and app-local features | another app's internals or privileged server packages |
+| Services | sync, file, notification, AI, provisioning | packages and service-local modules | another service's private source tree |
+| Tests/tooling | factories, validators, test runners | public exports | production imports from test packages |
 
 ## 3. Non-negotiable boundaries
 

@@ -1,5 +1,4 @@
 \
-
 # KitLuy Suite Security Policy for Repository Work
 
 **Version:** v1.0.0  

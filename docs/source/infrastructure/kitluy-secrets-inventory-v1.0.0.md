@@ -1,15 +1,15 @@
 # KitLuy Secrets Inventory — References Only
 
-| Field        | Value                                                                    |
-| ------------ | ------------------------------------------------------------------------ |
-| **Filename** | `kitluy-secrets-inventory-v1.0.0.md`                                     |
-| **Version**  | `v1.0.0`                                                                 |
-| **Date**     | `2026-07-26`                                                             |
-| **Phase**    | Phase 1 — Laundry                                                        |
-| **Owner**    | HET / KitLuy Suite Project Owner                                         |
+| Field | Value |
+|---|---|
+| **Filename** | `kitluy-secrets-inventory-v1.0.0.md` |
+| **Version** | `v1.0.0` |
+| **Date** | `2026-07-26` |
+| **Phase** | Phase 1 — Laundry |
+| **Owner** | HET / KitLuy Suite Project Owner |
 | **Audience** | Security, infrastructure, release, database, service owners and auditors |
-| **Status**   | Canonical operating target; not implementation evidence                  |
-| **Timezone** | `Asia/Phnom_Penh`                                                        |
+| **Status** | Canonical operating target; not implementation evidence |
+| **Timezone** | `Asia/Phnom_Penh` |
 
 > **Purpose:** Create a complete non-secret registry of credentials, keys and tokens, with ownership, scope, rotation and incident controls.
 
@@ -46,74 +46,76 @@ Nothing in this document is evidence that infrastructure is implemented. `IMPLEM
 - Monitoring and alert delivery remain available when the Admin Portal is unavailable.
 - No multi-region, recovery, readiness or availability claim is made without tested evidence.
 
+
+
 ## 1. Non-negotiable rule
 
 This inventory contains references, ownership and lifecycle metadata only. It must never contain a secret value, private key, recovery code, token, password, connection string or certificate private material.
 
 ## 2. Required inventory fields
 
-| Field           | Meaning                                                                                       |
-| --------------- | --------------------------------------------------------------------------------------------- |
-| Secret ID       | Stable non-secret identifier                                                                  |
-| Class           | Public config, backend, provider, payment, notification, AI, PKI, device, CI/CD or monitoring |
-| Environment     | Exact environment scope                                                                       |
-| Owner           | Accountable team/role                                                                         |
-| Custodian       | System or operator maintaining the value                                                      |
-| Store reference | Provider secret name/path/ID, never value                                                     |
-| Consumers       | Named services/jobs/devices                                                                   |
-| Privilege       | Read/use/rotate/revoke boundaries                                                             |
-| Rotation        | Approved interval or event trigger                                                            |
-| Expiry          | Expiry/renewal date if applicable                                                             |
-| Recovery        | Escrow/recovery reference if allowed                                                          |
-| Audit           | Source for access/change logs                                                                 |
-| Incident action | Revoke/rotate/isolate steps                                                                   |
+| Field | Meaning |
+|---|---|
+| Secret ID | Stable non-secret identifier |
+| Class | Public config, backend, provider, payment, notification, AI, PKI, device, CI/CD or monitoring |
+| Environment | Exact environment scope |
+| Owner | Accountable team/role |
+| Custodian | System or operator maintaining the value |
+| Store reference | Provider secret name/path/ID, never value |
+| Consumers | Named services/jobs/devices |
+| Privilege | Read/use/rotate/revoke boundaries |
+| Rotation | Approved interval or event trigger |
+| Expiry | Expiry/renewal date if applicable |
+| Recovery | Escrow/recovery reference if allowed |
+| Audit | Source for access/change logs |
+| Incident action | Revoke/rotate/isolate steps |
 
 ## 3. Canonical secret-reference registry
 
-| Secret ID                   | Class                | Purpose                                               | Consumers                         | Store reference                   | Rotation trigger                        | Approval                      |
-| --------------------------- | -------------------- | ----------------------------------------------------- | --------------------------------- | --------------------------------- | --------------------------------------- | ----------------------------- |
-| `SEC-SUPA-PUBLIC-001`       | Public client config | Supabase public URL/anon configuration where approved | Web/mobile clients                | `[REQUIRED: reference]`           | Project/config change                   | Standard release              |
-| `SEC-SUPA-SERVICE-001`      | Backend service      | Supabase service-role access                          | Approved server services only     | `[REQUIRED: reference]`           | Scheduled and exposure event            | Security + service owner      |
-| `SEC-DB-POOL-001`           | Backend database     | Pooled database connection identity                   | API/worker class                  | `[REQUIRED: reference]`           | Scheduled, privilege or incident change | Database + security           |
-| `SEC-DO-DEPLOY-001`         | DigitalOcean         | Deployment/API token                                  | CI/CD deployment identity         | `[REQUIRED: reference]`           | Short-lived/preferred; incident         | Release + infra               |
-| `SEC-DO-SPACES-FILE-001`    | DigitalOcean         | File Service object access                            | File Service                      | `[REQUIRED: reference]`           | Scheduled/incident                      | File + security               |
-| `SEC-DO-SPACES-RELEASE-001` | DigitalOcean         | Release artifact access                               | Release Service                   | `[REQUIRED: reference]`           | Scheduled/incident                      | Release + security            |
-| `SEC-REGISTRY-PUSH-001`     | CI/CD                | Container registry push                               | Build pipeline                    | `[REQUIRED: reference]`           | Short-lived/preferred                   | Release operator              |
-| `SEC-REGISTRY-PULL-001`     | Runtime              | Container registry pull                               | App Platform/DOKS                 | `[REQUIRED: reference]`           | Scheduled/incident                      | Infra                         |
-| `SEC-ARTIFACT-SIGN-001`     | PKI/signing          | Sign cloud and edge artifacts                         | Release signing service           | `[REQUIRED: key reference]`       | Key ceremony/incident                   | Four-eyes security + release  |
-| `SEC-CONFIG-SIGN-001`       | PKI/signing          | Sign configuration projections                        | Configuration service             | `[REQUIRED: key reference]`       | Key ceremony/incident                   | Four-eyes security + platform |
-| `SEC-PKI-ROOT-001`          | PKI                  | Root CA reference                                     | Offline/key ceremony only         | `[REQUIRED: protected reference]` | Exceptional ceremony                    | Owner + security dual control |
-| `SEC-PKI-INT-001`           | PKI                  | Operational intermediate CA                           | Issuance service                  | `[REQUIRED: protected reference]` | Policy/incident/expiry                  | Security dual control         |
-| `SEC-HUB-MFG-001`           | Device               | Manufacturing station identity                        | HET manufacturing station         | `[REQUIRED: reference]`           | Station change/incident                 | Fleet + security              |
-| `SEC-WEBHOOK-MASTER-001`    | Integration          | First-party webhook signing/derivation                | Webhook dispatcher                | `[REQUIRED: reference]`           | Scheduled/incident                      | Integration + security        |
-| `SEC-KHQR-001`              | Payment              | KHQR provider credential reference                    | Payment adapter only              | `[REQUIRED: reference]`           | Provider policy/incident                | Finance/payment + security    |
-| `SEC-PAYMENT-PROVIDER-001`  | Payment              | Other approved payment provider                       | Payment adapter only              | `[REQUIRED: reference]`           | Provider policy/incident                | Finance/payment + security    |
-| `SEC-EMAIL-001`             | Notification         | Transactional email provider                          | Notification Service              | `[REQUIRED: reference]`           | Scheduled/incident                      | Notification owner            |
-| `SEC-SMS-001`               | Notification         | SMS provider                                          | Notification Service              | `[REQUIRED: reference]`           | Scheduled/incident                      | Notification owner            |
-| `SEC-TELEGRAM-001`          | Notification/channel | Telegram Bot/Mini App credential                      | Notification/Storefront connector | `[REQUIRED: reference]`           | Scheduled/incident                      | Integration owner             |
-| `SEC-PUSH-001`              | Notification         | Mobile push provider credentials                      | Notification Service              | `[REQUIRED: reference]`           | Provider/incident                       | Mobile + notification         |
-| `SEC-AI-PROVIDER-001`       | AI                   | Inference provider access                             | AI Gateway only                   | `[REQUIRED: reference]`           | Scheduled/cost/incident                 | AI + security                 |
-| `SEC-RAG-EMBED-001`         | AI                   | Embedding provider access if separate                 | RAG Indexer                       | `[REQUIRED: reference]`           | Scheduled/cost/incident                 | AI + security                 |
-| `SEC-MONITOR-INGEST-001`    | Monitoring           | Log/error ingest token                                | Services/agents                   | `[REQUIRED: reference]`           | Scheduled/incident                      | Observability                 |
-| `SEC-UPTIME-001`            | Monitoring           | Uptime probe credential                               | Probe service                     | `[REQUIRED: reference]`           | Scheduled/incident                      | Observability                 |
-| `SEC-STATUS-PUBLISH-001`    | Operations           | Status page publishing identity                       | Incident communication service    | `[REQUIRED: reference]`           | Scheduled/incident                      | Incident commander/ops        |
-| `SEC-TERRAFORM-STATE-001`   | IaC                  | State backend access                                  | Terraform apply identity          | `[REQUIRED: reference]`           | Short-lived/preferred                   | Infra + security              |
-| `SEC-BACKUP-RESTORE-001`    | Recovery             | Restricted restore identity                           | DR operators                      | `[REQUIRED: reference]`           | Per drill/incident                      | Four-eyes database + security |
+| Secret ID | Class | Purpose | Consumers | Store reference | Rotation trigger | Approval |
+|---|---|---|---|---|---|---|
+| `SEC-SUPA-PUBLIC-001` | Public client config | Supabase public URL/anon configuration where approved | Web/mobile clients | `[REQUIRED: reference]` | Project/config change | Standard release |
+| `SEC-SUPA-SERVICE-001` | Backend service | Supabase service-role access | Approved server services only | `[REQUIRED: reference]` | Scheduled and exposure event | Security + service owner |
+| `SEC-DB-POOL-001` | Backend database | Pooled database connection identity | API/worker class | `[REQUIRED: reference]` | Scheduled, privilege or incident change | Database + security |
+| `SEC-DO-DEPLOY-001` | DigitalOcean | Deployment/API token | CI/CD deployment identity | `[REQUIRED: reference]` | Short-lived/preferred; incident | Release + infra |
+| `SEC-DO-SPACES-FILE-001` | DigitalOcean | File Service object access | File Service | `[REQUIRED: reference]` | Scheduled/incident | File + security |
+| `SEC-DO-SPACES-RELEASE-001` | DigitalOcean | Release artifact access | Release Service | `[REQUIRED: reference]` | Scheduled/incident | Release + security |
+| `SEC-REGISTRY-PUSH-001` | CI/CD | Container registry push | Build pipeline | `[REQUIRED: reference]` | Short-lived/preferred | Release operator |
+| `SEC-REGISTRY-PULL-001` | Runtime | Container registry pull | App Platform/DOKS | `[REQUIRED: reference]` | Scheduled/incident | Infra |
+| `SEC-ARTIFACT-SIGN-001` | PKI/signing | Sign cloud and edge artifacts | Release signing service | `[REQUIRED: key reference]` | Key ceremony/incident | Four-eyes security + release |
+| `SEC-CONFIG-SIGN-001` | PKI/signing | Sign configuration projections | Configuration service | `[REQUIRED: key reference]` | Key ceremony/incident | Four-eyes security + platform |
+| `SEC-PKI-ROOT-001` | PKI | Root CA reference | Offline/key ceremony only | `[REQUIRED: protected reference]` | Exceptional ceremony | Owner + security dual control |
+| `SEC-PKI-INT-001` | PKI | Operational intermediate CA | Issuance service | `[REQUIRED: protected reference]` | Policy/incident/expiry | Security dual control |
+| `SEC-HUB-MFG-001` | Device | Manufacturing station identity | HET manufacturing station | `[REQUIRED: reference]` | Station change/incident | Fleet + security |
+| `SEC-WEBHOOK-MASTER-001` | Integration | First-party webhook signing/derivation | Webhook dispatcher | `[REQUIRED: reference]` | Scheduled/incident | Integration + security |
+| `SEC-KHQR-001` | Payment | KHQR provider credential reference | Payment adapter only | `[REQUIRED: reference]` | Provider policy/incident | Finance/payment + security |
+| `SEC-PAYMENT-PROVIDER-001` | Payment | Other approved payment provider | Payment adapter only | `[REQUIRED: reference]` | Provider policy/incident | Finance/payment + security |
+| `SEC-EMAIL-001` | Notification | Transactional email provider | Notification Service | `[REQUIRED: reference]` | Scheduled/incident | Notification owner |
+| `SEC-SMS-001` | Notification | SMS provider | Notification Service | `[REQUIRED: reference]` | Scheduled/incident | Notification owner |
+| `SEC-TELEGRAM-001` | Notification/channel | Telegram Bot/Mini App credential | Notification/Storefront connector | `[REQUIRED: reference]` | Scheduled/incident | Integration owner |
+| `SEC-PUSH-001` | Notification | Mobile push provider credentials | Notification Service | `[REQUIRED: reference]` | Provider/incident | Mobile + notification |
+| `SEC-AI-PROVIDER-001` | AI | Inference provider access | AI Gateway only | `[REQUIRED: reference]` | Scheduled/cost/incident | AI + security |
+| `SEC-RAG-EMBED-001` | AI | Embedding provider access if separate | RAG Indexer | `[REQUIRED: reference]` | Scheduled/cost/incident | AI + security |
+| `SEC-MONITOR-INGEST-001` | Monitoring | Log/error ingest token | Services/agents | `[REQUIRED: reference]` | Scheduled/incident | Observability |
+| `SEC-UPTIME-001` | Monitoring | Uptime probe credential | Probe service | `[REQUIRED: reference]` | Scheduled/incident | Observability |
+| `SEC-STATUS-PUBLISH-001` | Operations | Status page publishing identity | Incident communication service | `[REQUIRED: reference]` | Scheduled/incident | Incident commander/ops |
+| `SEC-TERRAFORM-STATE-001` | IaC | State backend access | Terraform apply identity | `[REQUIRED: reference]` | Short-lived/preferred | Infra + security |
+| `SEC-BACKUP-RESTORE-001` | Recovery | Restricted restore identity | DR operators | `[REQUIRED: reference]` | Per drill/incident | Four-eyes database + security |
 
 Add one row for every real secret before deployment. Reuse of a secret across environments or unrelated services is prohibited unless explicitly approved and justified.
 
 ## 4. Secret classes and storage policy
 
-| Class                       | Storage rule                                                      | Client exposure                           |
-| --------------------------- | ----------------------------------------------------------------- | ----------------------------------------- |
-| Public client configuration | Environment-scoped config store                                   | Only values explicitly designed as public |
-| Backend/database            | Server secret store; least privilege                              | Never                                     |
-| Provider deployment         | CI/infra secret system; short-lived preferred                     | Never                                     |
-| Payment/notification/AI     | Owning service only                                               | Never                                     |
-| PKI/signing                 | Strongest protected key system; non-exportable/HSM where approved | Never                                     |
-| Store device private key    | Generated and retained on device secure storage                   | Never exported                            |
-| Monitoring ingest           | Environment scoped; cannot mutate business data                   | Agent/server only                         |
-| Recovery/escrow             | Restricted dual control                                           | Never routine use                         |
+| Class | Storage rule | Client exposure |
+|---|---|---|
+| Public client configuration | Environment-scoped config store | Only values explicitly designed as public |
+| Backend/database | Server secret store; least privilege | Never |
+| Provider deployment | CI/infra secret system; short-lived preferred | Never |
+| Payment/notification/AI | Owning service only | Never |
+| PKI/signing | Strongest protected key system; non-exportable/HSM where approved | Never |
+| Store device private key | Generated and retained on device secure storage | Never exported |
+| Monitoring ingest | Environment scoped; cannot mutate business data | Agent/server only |
+| Recovery/escrow | Restricted dual control | Never routine use |
 
 ## 5. Lifecycle
 

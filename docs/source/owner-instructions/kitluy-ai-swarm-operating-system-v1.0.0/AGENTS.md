@@ -1,5 +1,4 @@
 \
-
 # KitLuy Suite Agent Operating Contract
 
 **Version:** v1.0.0  

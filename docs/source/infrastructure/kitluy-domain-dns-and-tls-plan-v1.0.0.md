@@ -1,15 +1,15 @@
 # KitLuy Domain, DNS and TLS Plan
 
-| Field        | Value                                                                       |
-| ------------ | --------------------------------------------------------------------------- |
-| **Filename** | `kitluy-domain-dns-and-tls-plan-v1.0.0.md`                                  |
-| **Version**  | `v1.0.0`                                                                    |
-| **Date**     | `2026-07-26`                                                                |
-| **Phase**    | Phase 1 — Laundry                                                           |
-| **Owner**    | HET / KitLuy Suite Project Owner                                            |
+| Field | Value |
+|---|---|
+| **Filename** | `kitluy-domain-dns-and-tls-plan-v1.0.0.md` |
+| **Version** | `v1.0.0` |
+| **Date** | `2026-07-26` |
+| **Phase** | Phase 1 — Laundry |
+| **Owner** | HET / KitLuy Suite Project Owner |
 | **Audience** | Infrastructure, platform, security, release, database, support and QA teams |
-| **Status**   | Canonical operating target; not implementation evidence                     |
-| **Timezone** | `Asia/Phnom_Penh`                                                           |
+| **Status** | Canonical operating target; not implementation evidence |
+| **Timezone** | `Asia/Phnom_Penh` |
 
 > **Purpose:** Define stable public boundaries and safe DNS, TLS, certificate, mTLS, cutover and rollback operations.
 
@@ -46,6 +46,8 @@ Nothing in this document is evidence that infrastructure is implemented. `IMPLEM
 - Monitoring and alert delivery remain available when the Admin Portal is unavailable.
 - No multi-region, recovery, readiness or availability claim is made without tested evidence.
 
+
+
 ## 1. Objectives
 
 - Give clients stable provider-independent public boundaries.
@@ -57,18 +59,18 @@ Nothing in this document is evidence that infrastructure is implemented. `IMPLEM
 
 Exact registered domains are owner-supplied.
 
-| Logical hostname             | Purpose                                | Exposure                        | Environment pattern                                   |
-| ---------------------------- | -------------------------------------- | ------------------------------- | ----------------------------------------------------- |
-| `www.[REQUIRED: domain]`     | B2B website                            | Public                          | production; separate staging hostname                 |
-| `app.[REQUIRED: domain]`     | Authentication/portal entry            | Public authenticated            | per environment                                       |
-| `admin.[REQUIRED: domain]`   | HET Admin Portal                       | Restricted public authenticated | per environment                                       |
-| `chain.[REQUIRED: domain]`   | Chain Portal                           | Public authenticated            | per environment                                       |
-| `partner.[REQUIRED: domain]` | Partner Portal                         | Public authenticated            | per environment                                       |
-| `store.[REQUIRED: domain]`   | Storefront base                        | Public                          | per environment; custom-domain support later/approved |
-| `api.[REQUIRED: domain]`     | Stable governed APIs                   | Public/service authenticated    | per environment                                       |
-| `assets.[REQUIRED: domain]`  | Public CDN assets                      | Public                          | per environment/class                                 |
-| `status.[REQUIRED: domain]`  | Public/service-status surface          | Public read-only                | production                                            |
-| `hooks.[REQUIRED: domain]`   | Provider webhook ingress, if separated | Public signed callbacks         | per environment                                       |
+| Logical hostname | Purpose | Exposure | Environment pattern |
+|---|---|---|---|
+| `www.[REQUIRED: domain]` | B2B website | Public | production; separate staging hostname |
+| `app.[REQUIRED: domain]` | Authentication/portal entry | Public authenticated | per environment |
+| `admin.[REQUIRED: domain]` | HET Admin Portal | Restricted public authenticated | per environment |
+| `chain.[REQUIRED: domain]` | Chain Portal | Public authenticated | per environment |
+| `partner.[REQUIRED: domain]` | Partner Portal | Public authenticated | per environment |
+| `store.[REQUIRED: domain]` | Storefront base | Public | per environment; custom-domain support later/approved |
+| `api.[REQUIRED: domain]` | Stable governed APIs | Public/service authenticated | per environment |
+| `assets.[REQUIRED: domain]` | Public CDN assets | Public | per environment/class |
+| `status.[REQUIRED: domain]` | Public/service-status surface | Public read-only | production |
+| `hooks.[REQUIRED: domain]` | Provider webhook ingress, if separated | Public signed callbacks | per environment |
 
 ## 3. DNS record registry schema
 
@@ -104,13 +106,13 @@ rollback_value_reference
 
 ## 5. TLS policy
 
-| Traffic                                         | Requirement                                                                       |
-| ----------------------------------------------- | --------------------------------------------------------------------------------- |
-| Browser/mobile to public endpoints              | TLS only; approved modern policy                                                  |
-| Service to service over public/provider network | TLS; stronger authenticated channel where supported                               |
-| Store Hub to cloud                              | Mutual TLS using operational device certificate                                   |
-| Webhooks                                        | TLS plus provider/KitLuy signature and replay protection                          |
-| LAN terminal to Hub                             | Approved local encrypted/authenticated transport where specified by Edge protocol |
+| Traffic | Requirement |
+|---|---|
+| Browser/mobile to public endpoints | TLS only; approved modern policy |
+| Service to service over public/provider network | TLS; stronger authenticated channel where supported |
+| Store Hub to cloud | Mutual TLS using operational device certificate |
+| Webhooks | TLS plus provider/KitLuy signature and replay protection |
+| LAN terminal to Hub | Approved local encrypted/authenticated transport where specified by Edge protocol |
 
 Certificate private keys remain in approved provider/key systems. They never appear in source, documents, logs or client bundles.
 
@@ -184,14 +186,14 @@ High-risk production cutovers require independent approval.
 
 ## 10. Incident and rollback
 
-| Incident                           | Immediate action                                                                |
-| ---------------------------------- | ------------------------------------------------------------------------------- |
-| Wrong DNS target                   | Stop change, restore prior record, validate caches/TTL                          |
-| Certificate expiry/renewal failure | Route to valid certificate/endpoint; invoke emergency change                    |
-| Private-key compromise             | Revoke/rotate, isolate affected origins, investigate access                     |
-| Dangling record                    | Remove or claim target immediately, review exposure                             |
-| Hub certificate compromise         | Revoke device certificate, quarantine device, replacement/re-enrollment runbook |
-| DNS provider outage                | Use provider recovery/escalation; no unsupported ad-hoc nameserver change       |
+| Incident | Immediate action |
+|---|---|
+| Wrong DNS target | Stop change, restore prior record, validate caches/TTL |
+| Certificate expiry/renewal failure | Route to valid certificate/endpoint; invoke emergency change |
+| Private-key compromise | Revoke/rotate, isolate affected origins, investigate access |
+| Dangling record | Remove or claim target immediately, review exposure |
+| Hub certificate compromise | Revoke device certificate, quarantine device, replacement/re-enrollment runbook |
+| DNS provider outage | Use provider recovery/escalation; no unsupported ad-hoc nameserver change |
 
 ## 11. Monitoring
 

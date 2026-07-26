@@ -1,15 +1,15 @@
 # KitLuy CI/CD Pipeline
 
-| Field        | Value                                                                       |
-| ------------ | --------------------------------------------------------------------------- |
-| **Filename** | `kitluy-ci-cd-pipeline-v1.0.0.md`                                           |
-| **Version**  | `v1.0.0`                                                                    |
-| **Date**     | `2026-07-26`                                                                |
-| **Phase**    | Phase 1 — Laundry                                                           |
-| **Owner**    | HET / KitLuy Suite Project Owner                                            |
+| Field | Value |
+|---|---|
+| **Filename** | `kitluy-ci-cd-pipeline-v1.0.0.md` |
+| **Version** | `v1.0.0` |
+| **Date** | `2026-07-26` |
+| **Phase** | Phase 1 — Laundry |
+| **Owner** | HET / KitLuy Suite Project Owner |
 | **Audience** | Infrastructure, platform, security, release, database, support and QA teams |
-| **Status**   | Canonical operating target; not implementation evidence                     |
-| **Timezone** | `Asia/Phnom_Penh`                                                           |
+| **Status** | Canonical operating target; not implementation evidence |
+| **Timezone** | `Asia/Phnom_Penh` |
 
 > **Purpose:** Define the build, verification, signing, deployment, approval and evidence pipeline for cloud, database, infrastructure and edge artifacts.
 
@@ -46,6 +46,8 @@ Nothing in this document is evidence that infrastructure is implemented. `IMPLEM
 - Monitoring and alert delivery remain available when the Admin Portal is unavailable.
 - No multi-region, recovery, readiness or availability claim is made without tested evidence.
 
+
+
 ## 1. Pipeline objective
 
 Build once, verify deeply, sign, then promote the same immutable artifact through development, staging, Internal, Pilot and Stable. CI/CD must never turn a passing build into an unreviewed production change.
@@ -73,19 +75,19 @@ source change
 
 ## 3. Workflow catalog
 
-| Workflow                | Trigger                        | Artifact/output                    | Production mutation allowed       |
-| ----------------------- | ------------------------------ | ---------------------------------- | --------------------------------- |
-| Pull-request validation | PR opened/updated              | Test and scan evidence             | No                                |
-| Main-branch build       | Approved merge                 | Immutable image/package digest     | No                                |
-| Development deploy      | Successful build               | Development deployment             | Yes, development only             |
-| Staging candidate       | Release candidate tag/approval | Staging deployment + evidence      | Yes, staging only                 |
-| Database validation     | Migration change               | Ephemeral/staging migration report | No production apply               |
-| Infrastructure plan     | IaC change                     | Plan and policy report             | No apply by default               |
-| Infrastructure apply    | Approved environment change    | Applied resources + evidence       | Scoped, authorized                |
-| Edge artifact build     | Hub/terminal/OS change         | Signed ARM64 artifact/manifests    | No rollout without channel action |
-| Pilot promotion         | Approved release               | Cohort rollout                     | Pilot only                        |
-| Stable promotion        | Independent approval           | Production rollout                 | Yes, approved cohort              |
-| Emergency release       | Incident-linked approval       | Targeted hotfix                    | Yes, emergency policy             |
+| Workflow | Trigger | Artifact/output | Production mutation allowed |
+|---|---|---|---|
+| Pull-request validation | PR opened/updated | Test and scan evidence | No |
+| Main-branch build | Approved merge | Immutable image/package digest | No |
+| Development deploy | Successful build | Development deployment | Yes, development only |
+| Staging candidate | Release candidate tag/approval | Staging deployment + evidence | Yes, staging only |
+| Database validation | Migration change | Ephemeral/staging migration report | No production apply |
+| Infrastructure plan | IaC change | Plan and policy report | No apply by default |
+| Infrastructure apply | Approved environment change | Applied resources + evidence | Scoped, authorized |
+| Edge artifact build | Hub/terminal/OS change | Signed ARM64 artifact/manifests | No rollout without channel action |
+| Pilot promotion | Approved release | Cohort rollout | Pilot only |
+| Stable promotion | Independent approval | Production rollout | Yes, approved cohort |
+| Emergency release | Incident-linked approval | Targeted hotfix | Yes, emergency policy |
 
 ## 4. Required checks
 
@@ -200,15 +202,15 @@ operator identities
 
 ## 13. Failure and rollback
 
-| Failure                            | Action                                                        |
-| ---------------------------------- | ------------------------------------------------------------- |
-| Build/test/scan failure            | Stop; no artifact promotion                                   |
-| Signature/provenance failure       | Quarantine artifact                                           |
-| Development/staging deploy failure | Fix or rollback; no promotion                                 |
-| Production health regression       | Pause, rollback or forward-fix per runbook                    |
-| Database migration failure         | Stop release; database runbook                                |
-| Edge health failure                | Automatic A/B rollback; fleet alert                           |
-| Monitoring unavailable             | Production promotion blocked unless approved emergency policy |
+| Failure | Action |
+|---|---|
+| Build/test/scan failure | Stop; no artifact promotion |
+| Signature/provenance failure | Quarantine artifact |
+| Development/staging deploy failure | Fix or rollback; no promotion |
+| Production health regression | Pause, rollback or forward-fix per runbook |
+| Database migration failure | Stop release; database runbook |
+| Edge health failure | Automatic A/B rollback; fleet alert |
+| Monitoring unavailable | Production promotion blocked unless approved emergency policy |
 
 ## 14. Required values
 

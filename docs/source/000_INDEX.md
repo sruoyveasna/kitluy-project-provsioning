@@ -20,10 +20,14 @@
   stable KLSRC-#### IDs, plus the imported-copy collision registry.
 - Classified immutable copies by taxonomy:
   `canonical/ api-contracts/ data-contracts/ business-rules/ security/
-offline/ shared-services/ ui-ux/` (populated) and
-  `owner-instructions/ owner-decisions/ product-specs/ architecture/
-infrastructure/ feature-registry/ approved-handoffs/ research/
-competitor-rebuilds/ superseded/ unclassified/` (reserved, empty).
+offline/ shared-services/ ui-ux/` (batch 1, 102 sources) plus
+  `engineering/ qa/` (taxonomy extension for batch 2 — KLBOOT-DEC-010),
+  `infrastructure/` (batch-2 ops pack) and `owner-instructions/` (batch-2
+  AI Swarm Operating System pack, subdirectory preserved) — 58 batch-2
+  sources, KLSRC-0103..0160, batch inventory v1.1.0.
+  Still reserved/empty: `owner-decisions/ product-specs/ architecture/
+feature-registry/ approved-handoffs/ research/ competitor-rebuilds/
+superseded/ unclassified/`.
 - `processed/reconciliation/` — coverage matrix, authority map, conflict
   report, supersession map, governance comparison.
 - `processed/summaries/` — generated summaries (never classified as sources).

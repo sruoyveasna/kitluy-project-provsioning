@@ -1,15 +1,15 @@
 # KitLuy Observability and Alert Registry
 
-| Field        | Value                                                                       |
-| ------------ | --------------------------------------------------------------------------- |
-| **Filename** | `kitluy-observability-and-alert-registry-v1.0.0.md`                         |
-| **Version**  | `v1.0.0`                                                                    |
-| **Date**     | `2026-07-26`                                                                |
-| **Phase**    | Phase 1 — Laundry                                                           |
-| **Owner**    | HET / KitLuy Suite Project Owner                                            |
+| Field | Value |
+|---|---|
+| **Filename** | `kitluy-observability-and-alert-registry-v1.0.0.md` |
+| **Version** | `v1.0.0` |
+| **Date** | `2026-07-26` |
+| **Phase** | Phase 1 — Laundry |
+| **Owner** | HET / KitLuy Suite Project Owner |
 | **Audience** | Infrastructure, platform, security, release, database, support and QA teams |
-| **Status**   | Canonical operating target; not implementation evidence                     |
-| **Timezone** | `Asia/Phnom_Penh`                                                           |
+| **Status** | Canonical operating target; not implementation evidence |
+| **Timezone** | `Asia/Phnom_Penh` |
 
 > **Purpose:** Define measurable signals, SLO records, alerts, severity, ownership, routing and truth/freshness rules.
 
@@ -46,6 +46,8 @@ Nothing in this document is evidence that infrastructure is implemented. `IMPLEM
 - Monitoring and alert delivery remain available when the Admin Portal is unavailable.
 - No multi-region, recovery, readiness or availability claim is made without tested evidence.
 
+
+
 ## 1. Independent observability rule
 
 Monitoring, alert delivery and provider access must remain usable when `kitluy-admin-pwa-portal` is unavailable. The Admin Portal is a control and visualization client, not the sole monitoring engine.
@@ -66,62 +68,62 @@ Logs are structured, redact secrets and avoid full sensitive payloads.
 
 ## 3. SLO registry schema
 
-| Field           | Requirement                                                |
-| --------------- | ---------------------------------------------------------- |
-| SLO ID          | Stable identifier                                          |
-| Service/journey | Exact measured boundary                                    |
-| Indicator       | Availability, latency, error, freshness or recovery metric |
-| Target          | `[REQUIRED: approved numeric target]`                      |
-| Window          | Measurement period                                         |
-| Data source     | Authoritative telemetry source                             |
-| Exclusions      | Approved maintenance/exclusion policy                      |
-| Error budget    | Derived and reviewed                                       |
-| Owner           | Accountable team                                           |
-| Runbook         | Linked remediation                                         |
+| Field | Requirement |
+|---|---|
+| SLO ID | Stable identifier |
+| Service/journey | Exact measured boundary |
+| Indicator | Availability, latency, error, freshness or recovery metric |
+| Target | `[REQUIRED: approved numeric target]` |
+| Window | Measurement period |
+| Data source | Authoritative telemetry source |
+| Exclusions | Approved maintenance/exclusion policy |
+| Error budget | Derived and reviewed |
+| Owner | Accountable team |
+| Runbook | Linked remediation |
 
 ## 4. Required signal domains
 
-| Domain                 | Signals                                                                                                    |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------- |
-| Traffic                | Request rate, active connections, P50/P95/P99, status/error rate, rate-limit events                        |
-| Compute                | Instance count, CPU, memory, restarts, crash loops, saturation, scaling events                             |
-| Database               | Connections, query latency, slow queries, locks/deadlocks, storage/WAL, backup/PITR, replica lag           |
-| Jobs/queues            | Pending, oldest age, processing rate, retries, dead letters, worker health                                 |
-| Store edge             | Hub/terminal heartbeat, sync depth/age, disk, temperature, certificate, peripheral, release/config version |
-| Files                  | Upload backlog, failures, checksum, malware/quarantine, storage growth, signed-access errors               |
-| Notifications/webhooks | Delivery rate, retries, provider latency, suppression, dead letters                                        |
-| Security               | Failed privileged action, cross-scope denial/anomaly, secret/certificate/release integrity events          |
-| AI/RAG                 | Request rate, latency, provider errors, cost/tokens, indexing backlog, policy denials                      |
-| Business continuity    | Backup success, restore test age, rollback readiness, spare Hub readiness                                  |
+| Domain | Signals |
+|---|---|
+| Traffic | Request rate, active connections, P50/P95/P99, status/error rate, rate-limit events |
+| Compute | Instance count, CPU, memory, restarts, crash loops, saturation, scaling events |
+| Database | Connections, query latency, slow queries, locks/deadlocks, storage/WAL, backup/PITR, replica lag |
+| Jobs/queues | Pending, oldest age, processing rate, retries, dead letters, worker health |
+| Store edge | Hub/terminal heartbeat, sync depth/age, disk, temperature, certificate, peripheral, release/config version |
+| Files | Upload backlog, failures, checksum, malware/quarantine, storage growth, signed-access errors |
+| Notifications/webhooks | Delivery rate, retries, provider latency, suppression, dead letters |
+| Security | Failed privileged action, cross-scope denial/anomaly, secret/certificate/release integrity events |
+| AI/RAG | Request rate, latency, provider errors, cost/tokens, indexing backlog, policy denials |
+| Business continuity | Backup success, restore test age, rollback readiness, spare Hub readiness |
 
 ## 5. Alert registry
 
 Thresholds are placeholders until approved.
 
-| Alert ID         | Condition                                           | Default severity | Route               | Runbook                |
-| ---------------- | --------------------------------------------------- | ---------------- | ------------------- | ---------------------- |
-| `ALT-API-001`    | Critical API availability below SLO                 | SEV-1/2          | Platform Ops        | API outage             |
-| `ALT-API-002`    | P95/P99 latency above threshold                     | SEV-2/3          | Service owner       | Latency saturation     |
-| `ALT-AUTH-001`   | Auth/token failure spike                            | SEV-2            | Platform + Security | Auth degradation       |
-| `ALT-DB-001`     | Connection utilization above threshold              | SEV-2/3          | Database Ops        | Connection pressure    |
-| `ALT-DB-002`     | Lock wait/deadlock spike                            | SEV-2            | Database Ops        | Lock incident          |
-| `ALT-DB-003`     | Backup/PITR unhealthy                               | SEV-2            | Database + Security | Backup failure         |
-| `ALT-DB-004`     | Replica/read-model lag above freshness policy       | SEV-3            | Data/Platform       | Stale read model       |
-| `ALT-JOB-001`    | Critical queue oldest age above threshold           | SEV-2            | Platform Ops        | Queue backlog          |
-| `ALT-JOB-002`    | Dead-letter growth                                  | SEV-2/3          | Owning service      | DLQ handling           |
-| `ALT-SYNC-001`   | Store sync backlog/age exceeds threshold            | SEV-2            | Fleet + Platform    | Store sync degradation |
-| `ALT-HUB-001`    | Hub heartbeat missing                               | SEV-2/3          | Fleet Ops           | Hub offline            |
-| `ALT-HUB-002`    | Hub disk/temperature unsafe                         | SEV-2            | Fleet Ops           | Hardware health        |
-| `ALT-CERT-001`   | Certificate expires within threshold                | SEV-2/3          | Security            | Certificate rotation   |
-| `ALT-CERT-002`   | Revoked/mismatched device attempt                   | SEV-1/2          | Security + Fleet    | Device trust incident  |
-| `ALT-REL-001`    | Pilot/Stable rollout failure rate exceeds threshold | SEV-2            | Release Ops         | Rollout rollback       |
-| `ALT-REL-002`    | Tampered/revoked artifact attempt                   | SEV-1            | Security + Release  | Supply-chain incident  |
-| `ALT-FILE-001`   | Upload/quarantine failure backlog                   | SEV-3            | File Service        | File pipeline          |
-| `ALT-NOTIFY-001` | Provider/delivery failure spike                     | SEV-3            | Notification        | Provider degradation   |
-| `ALT-SEC-001`    | Break-glass access used                             | SEV-2            | Security + Audit    | Break-glass review     |
-| `ALT-SEC-002`    | Secret scan finding in main/release                 | SEV-1/2          | Security + Release  | Secret exposure        |
-| `ALT-COST-001`   | Spend/anomaly exceeds budget guardrail              | SEV-3            | Infra + Finance     | Cost anomaly           |
-| `ALT-OBS-001`    | Telemetry pipeline/probe unavailable                | SEV-2            | Observability       | Monitoring blind spot  |
+| Alert ID | Condition | Default severity | Route | Runbook |
+|---|---|---|---|---|
+| `ALT-API-001` | Critical API availability below SLO | SEV-1/2 | Platform Ops | API outage |
+| `ALT-API-002` | P95/P99 latency above threshold | SEV-2/3 | Service owner | Latency saturation |
+| `ALT-AUTH-001` | Auth/token failure spike | SEV-2 | Platform + Security | Auth degradation |
+| `ALT-DB-001` | Connection utilization above threshold | SEV-2/3 | Database Ops | Connection pressure |
+| `ALT-DB-002` | Lock wait/deadlock spike | SEV-2 | Database Ops | Lock incident |
+| `ALT-DB-003` | Backup/PITR unhealthy | SEV-2 | Database + Security | Backup failure |
+| `ALT-DB-004` | Replica/read-model lag above freshness policy | SEV-3 | Data/Platform | Stale read model |
+| `ALT-JOB-001` | Critical queue oldest age above threshold | SEV-2 | Platform Ops | Queue backlog |
+| `ALT-JOB-002` | Dead-letter growth | SEV-2/3 | Owning service | DLQ handling |
+| `ALT-SYNC-001` | Store sync backlog/age exceeds threshold | SEV-2 | Fleet + Platform | Store sync degradation |
+| `ALT-HUB-001` | Hub heartbeat missing | SEV-2/3 | Fleet Ops | Hub offline |
+| `ALT-HUB-002` | Hub disk/temperature unsafe | SEV-2 | Fleet Ops | Hardware health |
+| `ALT-CERT-001` | Certificate expires within threshold | SEV-2/3 | Security | Certificate rotation |
+| `ALT-CERT-002` | Revoked/mismatched device attempt | SEV-1/2 | Security + Fleet | Device trust incident |
+| `ALT-REL-001` | Pilot/Stable rollout failure rate exceeds threshold | SEV-2 | Release Ops | Rollout rollback |
+| `ALT-REL-002` | Tampered/revoked artifact attempt | SEV-1 | Security + Release | Supply-chain incident |
+| `ALT-FILE-001` | Upload/quarantine failure backlog | SEV-3 | File Service | File pipeline |
+| `ALT-NOTIFY-001` | Provider/delivery failure spike | SEV-3 | Notification | Provider degradation |
+| `ALT-SEC-001` | Break-glass access used | SEV-2 | Security + Audit | Break-glass review |
+| `ALT-SEC-002` | Secret scan finding in main/release | SEV-1/2 | Security + Release | Secret exposure |
+| `ALT-COST-001` | Spend/anomaly exceeds budget guardrail | SEV-3 | Infra + Finance | Cost anomaly |
+| `ALT-OBS-001` | Telemetry pipeline/probe unavailable | SEV-2 | Observability | Monitoring blind spot |
 
 ## 6. Store Hub metrics
 
@@ -161,12 +163,12 @@ Alerts are deduplicated, grouped and inhibited during known parent failures. Non
 
 ## 8. Severity model
 
-| Severity | Impact                                                         | Operating mode                                                 |
-| -------- | -------------------------------------------------------------- | -------------------------------------------------------------- |
-| `SEV-1`  | Broad outage, security compromise, payment/data-integrity risk | Immediate incident command and executive/security notification |
-| `SEV-2`  | Major degradation, large Store cohort impact                   | Urgent on-call response and active mitigation                  |
-| `SEV-3`  | Limited impact/workaround available                            | On-call or business-hours response per policy                  |
-| `SEV-4`  | Warning, trend or non-urgent defect                            | Planned remediation                                            |
+| Severity | Impact | Operating mode |
+|---|---|---|
+| `SEV-1` | Broad outage, security compromise, payment/data-integrity risk | Immediate incident command and executive/security notification |
+| `SEV-2` | Major degradation, large Store cohort impact | Urgent on-call response and active mitigation |
+| `SEV-3` | Limited impact/workaround available | On-call or business-hours response per policy |
+| `SEV-4` | Warning, trend or non-urgent defect | Planned remediation |
 
 Exact response/notification times remain `[REQUIRED]`.
 

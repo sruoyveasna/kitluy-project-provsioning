@@ -1,15 +1,15 @@
 # KitLuy Infrastructure-as-Code Plan
 
-| Field        | Value                                                                       |
-| ------------ | --------------------------------------------------------------------------- |
-| **Filename** | `kitluy-infrastructure-as-code-plan-v1.0.0.md`                              |
-| **Version**  | `v1.0.0`                                                                    |
-| **Date**     | `2026-07-26`                                                                |
-| **Phase**    | Phase 1 — Laundry                                                           |
-| **Owner**    | HET / KitLuy Suite Project Owner                                            |
+| Field | Value |
+|---|---|
+| **Filename** | `kitluy-infrastructure-as-code-plan-v1.0.0.md` |
+| **Version** | `v1.0.0` |
+| **Date** | `2026-07-26` |
+| **Phase** | Phase 1 — Laundry |
+| **Owner** | HET / KitLuy Suite Project Owner |
 | **Audience** | Infrastructure, platform, security, release, database, support and QA teams |
-| **Status**   | Canonical operating target; not implementation evidence                     |
-| **Timezone** | `Asia/Phnom_Penh`                                                           |
+| **Status** | Canonical operating target; not implementation evidence |
+| **Timezone** | `Asia/Phnom_Penh` |
 
 > **Purpose:** Turn the Phase 1 infrastructure architecture into reviewable, repeatable and recoverable code and evidence.
 
@@ -45,6 +45,8 @@ Nothing in this document is evidence that infrastructure is implemented. `IMPLEM
 - Production secrets are never committed, embedded in images, copied into client bundles or recorded in this document.
 - Monitoring and alert delivery remain available when the Admin Portal is unavailable.
 - No multi-region, recovery, readiness or availability claim is made without tested evidence.
+
+
 
 ## 1. IaC objective
 
@@ -91,16 +93,16 @@ infra/
 
 ## 3. IaC ownership boundaries
 
-| Domain                                                 | Managed through IaC                           | Separate controlled process                                |
-| ------------------------------------------------------ | --------------------------------------------- | ---------------------------------------------------------- |
-| DigitalOcean project, apps, workers, buckets, registry | Yes                                           | Initial provider organization/legal setup                  |
-| DNS records and certificate references                 | Yes where provider supports it                | Registrar ownership and recovery credentials               |
-| Supabase project configuration                         | Versioned configuration where supported       | Initial project creation, plan selection and owner billing |
-| Database schema                                        | Supabase migration repository                 | Applied through database deployment runbook                |
-| Secrets                                                | References, names, policies and bindings only | Secret values entered through approved secret system       |
-| PKI                                                    | Policies, profiles and service integration    | Root/intermediate key ceremonies and protected key custody |
-| Store Hub images                                       | Image build definitions and manifests         | Hardware enrollment/manufacturing station ceremony         |
-| DOKS                                                   | Prepared module, disabled by default          | Owner-approved migration gate                              |
+| Domain | Managed through IaC | Separate controlled process |
+|---|---|---|
+| DigitalOcean project, apps, workers, buckets, registry | Yes | Initial provider organization/legal setup |
+| DNS records and certificate references | Yes where provider supports it | Registrar ownership and recovery credentials |
+| Supabase project configuration | Versioned configuration where supported | Initial project creation, plan selection and owner billing |
+| Database schema | Supabase migration repository | Applied through database deployment runbook |
+| Secrets | References, names, policies and bindings only | Secret values entered through approved secret system |
+| PKI | Policies, profiles and service integration | Root/intermediate key ceremonies and protected key custody |
+| Store Hub images | Image build definitions and manifests | Hardware enrollment/manufacturing station ceremony |
+| DOKS | Prepared module, disabled by default | Owner-approved migration gate |
 
 ## 4. State and locking
 
@@ -182,13 +184,13 @@ No production resource is recreated merely to make adoption convenient.
 
 ## 9. Drift management
 
-| Drift class                | Example                               | Required action                                      |
-| -------------------------- | ------------------------------------- | ---------------------------------------------------- |
-| Benign metadata            | Provider-added timestamp              | Ignore explicitly if safe                            |
-| Authorized emergency       | Manual scale increase during incident | Record incident, import/reconcile, review            |
-| Unauthorized configuration | Public access or changed firewall     | Contain immediately and investigate                  |
-| Secret/value drift         | Credential rotated out of band        | Update reference/version metadata, never store value |
-| Destructive drift          | Resource missing or replaced          | Incident and recovery runbook                        |
+| Drift class | Example | Required action |
+|---|---|---|
+| Benign metadata | Provider-added timestamp | Ignore explicitly if safe |
+| Authorized emergency | Manual scale increase during incident | Record incident, import/reconcile, review |
+| Unauthorized configuration | Public access or changed firewall | Contain immediately and investigate |
+| Secret/value drift | Credential rotated out of band | Update reference/version metadata, never store value |
+| Destructive drift | Resource missing or replaced | Incident and recovery runbook |
 
 ## 10. App Platform to DOKS readiness
 

@@ -7,6 +7,7 @@
 > **Applies to:** KitLuy Suite monorepo, all applications, shared services, packages, Supabase assets, infrastructure, Store Hub and AI handoff work.  
 > **Authority:** Current owner decisions and Project Instructions override this document. Applied migrations, verified code/tests and production evidence remain implementation truth.
 
+
 ## Before you begin
 
 Read `PROJECT_HOME.md`, the authority/precedence standard, the relevant product/service specification, this repository engineering pack and the latest handoff. Current owner decisions and verified repository/migration/test evidence take precedence over older planning.

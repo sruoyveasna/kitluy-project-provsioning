@@ -30,6 +30,15 @@ against the current corpus is a registered follow-up owner task.
 | KLREQ-006 | store-hub managed-device-security lock spec | STILL OPEN (not found) |
 | KLREQ-007 (new) | Owner documentation-program instruction (`Pasted text.txt` → kitluy-ai-build-readiness-document-program-v1.0.0.md) | OPEN — file not physically present in the inbox at ingestion |
 
+### Batch-2 additions (KL-DOCS-002)
+
+| ID | Required value / decision | State |
+| --- | --- | --- |
+| KLREQ-008 | `kitluy-testing-and-evidence-system-v1.0.0` — cited as source_document by 41 of 524 test-registry cases; not physically present anywhere | OPEN — supply or re-source (KLREC-2026-07-26-018) |
+| KLREQ-009 | Owner confirmation of the engineering-pack toolchain (`selected_versions`) as the target, and approval of the coordinated upgrade task KL-ENG-001 (Node 24 / pnpm 11 / TS 6 / React 19 / RN 0.86+Expo 57 / Electron 43 / tool-versions.json / tsconfig flags) | OPEN (KLREC-2026-07-26-014/-019) |
+| KLREQ-010 | AI Swarm Operating System adoption decision: replace repo-root governance + handoff system with the pack, map handoff/evidence vocabularies onto the 11-status model, migrate existing handoff records | OPEN (KLREC-2026-07-26-015/-020) |
+| KLREQ-011 | Canonical security test plan selection/merge (batch-1 phase1 plan vs batch-2 plan, incompatible ID namespaces) | OPEN (KLREC-2026-07-26-017) |
+
 ### Repository-level required values (bootstrap section F, unchanged)
 
 Legal entity for LICENSE · security contact (SECURITY.md) · conduct contact ·

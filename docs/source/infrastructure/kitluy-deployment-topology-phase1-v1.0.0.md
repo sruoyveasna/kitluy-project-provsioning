@@ -1,15 +1,15 @@
 # KitLuy Deployment Topology — Phase 1
 
-| Field        | Value                                                                       |
-| ------------ | --------------------------------------------------------------------------- |
-| **Filename** | `kitluy-deployment-topology-phase1-v1.0.0.md`                               |
-| **Version**  | `v1.0.0`                                                                    |
-| **Date**     | `2026-07-26`                                                                |
-| **Phase**    | Phase 1 — Laundry                                                           |
-| **Owner**    | HET / KitLuy Suite Project Owner                                            |
+| Field | Value |
+|---|---|
+| **Filename** | `kitluy-deployment-topology-phase1-v1.0.0.md` |
+| **Version** | `v1.0.0` |
+| **Date** | `2026-07-26` |
+| **Phase** | Phase 1 — Laundry |
+| **Owner** | HET / KitLuy Suite Project Owner |
 | **Audience** | Infrastructure, platform, security, release, database, support and QA teams |
-| **Status**   | Canonical operating target; not implementation evidence                     |
-| **Timezone** | `Asia/Phnom_Penh`                                                           |
+| **Status** | Canonical operating target; not implementation evidence |
+| **Timezone** | `Asia/Phnom_Penh` |
 
 > **Purpose:** Define the deployable cloud-and-edge topology, trust boundaries, workload placement, failure behavior and scale path for Phase 1.
 
@@ -45,6 +45,8 @@ Nothing in this document is evidence that infrastructure is implemented. `IMPLEM
 - Production secrets are never committed, embedded in images, copied into client bundles or recorded in this document.
 - Monitoring and alert delivery remain available when the Admin Portal is unavailable.
 - No multi-region, recovery, readiness or availability claim is made without tested evidence.
+
+
 
 ## 1. Phase 1 deployment decision
 
@@ -98,25 +100,25 @@ flowchart TB
 
 ## 3. Workload placement
 
-| Workload                     | Phase 1 placement                           | Authority / persistence rule                          |
-| ---------------------------- | ------------------------------------------- | ----------------------------------------------------- |
-| B2B Website                  | Static/web component + CDN                  | Public content only                                   |
-| Admin, Chain, Partner PWAs   | Static/web components                       | No privileged secrets in client bundles               |
-| Storefront                   | App Platform web service                    | Uses governed APIs; no direct production DB authority |
-| Public/API gateway           | App Platform service                        | Stable versioned boundary                             |
-| Management API               | App Platform service/approved Edge Function | Scoped server authorization                           |
-| Commerce Store API           | App Platform service/approved Edge Function | Session, rate-limit and transaction controls          |
-| Edge Operations cloud API    | App Platform service                        | Hub identity/mTLS and idempotent ingest               |
-| Connector API                | App Platform service                        | No direct connector database access                   |
-| File Service                 | App Platform                                | Bytes in Spaces; metadata/permissions in Supabase     |
-| Device Registry/Provisioning | App Platform                                | HET registry and PKI-backed trust                     |
-| Sync workers                 | Dedicated worker component                  | Durable relational job/event truth                    |
-| Webhook/notification workers | Dedicated worker components                 | At-least-once, idempotent consumers                   |
-| Reporting/export workers     | Bounded asynchronous workers                | Lower priority than transactions/sync                 |
-| AI Gateway/MCP/RAG           | Separate services/workers                   | Degradable and resource-isolated                      |
-| Authoritative cloud data     | Supabase                                    | RLS and controlled service identities                 |
-| Local Store operations       | Store Hub                                   | Local PostgreSQL and LAN authority                    |
-| Media/releases/backups       | Spaces logical classes                      | Signed/private/lifecycle controls by class            |
+| Workload | Phase 1 placement | Authority / persistence rule |
+|---|---|---|
+| B2B Website | Static/web component + CDN | Public content only |
+| Admin, Chain, Partner PWAs | Static/web components | No privileged secrets in client bundles |
+| Storefront | App Platform web service | Uses governed APIs; no direct production DB authority |
+| Public/API gateway | App Platform service | Stable versioned boundary |
+| Management API | App Platform service/approved Edge Function | Scoped server authorization |
+| Commerce Store API | App Platform service/approved Edge Function | Session, rate-limit and transaction controls |
+| Edge Operations cloud API | App Platform service | Hub identity/mTLS and idempotent ingest |
+| Connector API | App Platform service | No direct connector database access |
+| File Service | App Platform | Bytes in Spaces; metadata/permissions in Supabase |
+| Device Registry/Provisioning | App Platform | HET registry and PKI-backed trust |
+| Sync workers | Dedicated worker component | Durable relational job/event truth |
+| Webhook/notification workers | Dedicated worker components | At-least-once, idempotent consumers |
+| Reporting/export workers | Bounded asynchronous workers | Lower priority than transactions/sync |
+| AI Gateway/MCP/RAG | Separate services/workers | Degradable and resource-isolated |
+| Authoritative cloud data | Supabase | RLS and controlled service identities |
+| Local Store operations | Store Hub | Local PostgreSQL and LAN authority |
+| Media/releases/backups | Spaces logical classes | Signed/private/lifecycle controls by class |
 
 ## 4. Traffic classes and protection order
 
@@ -133,17 +135,17 @@ Lower classes must not starve higher classes. Workers and budgets are isolated a
 
 ## 5. Trust boundaries
 
-| Boundary                           | Required control                                                             |
-| ---------------------------------- | ---------------------------------------------------------------------------- |
-| Public user to edge                | TLS, rate limits, input limits, abuse controls                               |
-| Edge to API                        | Origin protection and authenticated internal paths where applicable          |
-| API to Supabase                    | Environment-scoped service identity, connection budget, RLS where applicable |
-| API to Spaces                      | Short-lived scoped credentials or signed access                              |
-| Hub to cloud                       | Outbound mTLS, device/Store scope, revocation                                |
-| Terminal to Hub                    | LAN authorization, assigned T-profile, session and user permission           |
-| Worker to queue/job tables         | Lease, idempotency, least privilege                                          |
-| Admin operator to sensitive action | MFA, explicit permission, reason, re-auth and approval policy                |
-| Connector to KitLuy                | Versioned API/scopes; never database credentials                             |
+| Boundary | Required control |
+|---|---|
+| Public user to edge | TLS, rate limits, input limits, abuse controls |
+| Edge to API | Origin protection and authenticated internal paths where applicable |
+| API to Supabase | Environment-scoped service identity, connection budget, RLS where applicable |
+| API to Spaces | Short-lived scoped credentials or signed access |
+| Hub to cloud | Outbound mTLS, device/Store scope, revocation |
+| Terminal to Hub | LAN authorization, assigned T-profile, session and user permission |
+| Worker to queue/job tables | Lease, idempotency, least privilege |
+| Admin operator to sensitive action | MFA, explicit permission, reason, re-auth and approval policy |
+| Connector to KitLuy | Versioned API/scopes; never database credentials |
 
 ## 6. Network rules
 
@@ -156,16 +158,16 @@ Lower classes must not starve higher classes. Workers and budgets are isolated a
 
 ## 7. Failure behavior
 
-| Failure                      | Expected behavior                                                           |
-| ---------------------------- | --------------------------------------------------------------------------- |
-| WAN outage at Store          | T1–T4 continue through Hub; outbox/files queue locally                      |
-| Admin Portal outage          | Store operations continue; independent alerts remain available              |
-| Notification provider outage | Transactions continue; delivery queues retry and show delayed truth         |
-| Spaces outage                | Local/worker queues retain pending uploads; no false success                |
-| AI/RAG outage                | Core transaction and Store operations continue                              |
-| App Platform service failure | Health routing/restart; rollback if release-related                         |
-| Supabase incident            | Stores continue locally; cloud mutations fail safely; recovery plan invoked |
-| Hub failure                  | Replacement-first Hub recovery                                              |
+| Failure | Expected behavior |
+|---|---|
+| WAN outage at Store | T1–T4 continue through Hub; outbox/files queue locally |
+| Admin Portal outage | Store operations continue; independent alerts remain available |
+| Notification provider outage | Transactions continue; delivery queues retry and show delayed truth |
+| Spaces outage | Local/worker queues retain pending uploads; no false success |
+| AI/RAG outage | Core transaction and Store operations continue |
+| App Platform service failure | Health routing/restart; rollback if release-related |
+| Supabase incident | Stores continue locally; cloud mutations fail safely; recovery plan invoked |
+| Hub failure | Replacement-first Hub recovery |
 
 ## 8. Scaling path
 

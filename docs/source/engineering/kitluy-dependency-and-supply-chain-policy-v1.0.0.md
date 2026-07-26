@@ -7,6 +7,7 @@
 > **Applies to:** KitLuy Suite monorepo, all applications, shared services, packages, Supabase assets, infrastructure, Store Hub and AI handoff work.  
 > **Authority:** Current owner decisions and Project Instructions override this document. Applied migrations, verified code/tests and production evidence remain implementation truth.
 
+
 ## 1. Goals
 
 Protect KitLuy from malicious, abandoned, vulnerable, unverifiable or incompatible dependencies and build artifacts while keeping security updates practical.

@@ -1,15 +1,15 @@
 # KitLuy Incident Response Runbook
 
-| Field        | Value                                                                       |
-| ------------ | --------------------------------------------------------------------------- |
-| **Filename** | `kitluy-incident-response-runbook-v1.0.0.md`                                |
-| **Version**  | `v1.0.0`                                                                    |
-| **Date**     | `2026-07-26`                                                                |
-| **Phase**    | Phase 1 — Laundry                                                           |
-| **Owner**    | HET / KitLuy Suite Project Owner                                            |
+| Field | Value |
+|---|---|
+| **Filename** | `kitluy-incident-response-runbook-v1.0.0.md` |
+| **Version** | `v1.0.0` |
+| **Date** | `2026-07-26` |
+| **Phase** | Phase 1 — Laundry |
+| **Owner** | HET / KitLuy Suite Project Owner |
 | **Audience** | Infrastructure, platform, security, release, database, support and QA teams |
-| **Status**   | Canonical operating target; not implementation evidence                     |
-| **Timezone** | `Asia/Phnom_Penh`                                                           |
+| **Status** | Canonical operating target; not implementation evidence |
+| **Timezone** | `Asia/Phnom_Penh` |
 
 > **Purpose:** Provide a consistent severity, command, containment, communication, recovery and post-incident process across cloud and Store edge incidents.
 
@@ -46,6 +46,8 @@ Nothing in this document is evidence that infrastructure is implemented. `IMPLEM
 - Monitoring and alert delivery remain available when the Admin Portal is unavailable.
 - No multi-region, recovery, readiness or availability claim is made without tested evidence.
 
+
+
 ## 1. Incident principles
 
 - Protect people, Store continuity, payment/data integrity and security first.
@@ -57,26 +59,26 @@ Nothing in this document is evidence that infrastructure is implemented. `IMPLEM
 
 ## 2. Severity model
 
-| Severity | Definition                                                                                              | Examples                                                                                                    |
-| -------- | ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `SEV-1`  | Broad outage, confirmed security compromise, payment/data-integrity risk, many Stores unable to operate | Cross-tenant exposure, widespread payment duplication, production DB unavailable with material cloud impact |
-| `SEV-2`  | Major degradation or large Store cohort impact                                                          | Sync outage, release regression, auth failure, critical queue backlog                                       |
-| `SEV-3`  | Limited service/Store impact with workaround                                                            | One provider degraded, small fleet cohort, non-critical feature unavailable                                 |
-| `SEV-4`  | Warning, capacity trend or low-impact defect                                                            | Certificate approaching expiry, cost anomaly, isolated transient errors                                     |
+| Severity | Definition | Examples |
+|---|---|---|
+| `SEV-1` | Broad outage, confirmed security compromise, payment/data-integrity risk, many Stores unable to operate | Cross-tenant exposure, widespread payment duplication, production DB unavailable with material cloud impact |
+| `SEV-2` | Major degradation or large Store cohort impact | Sync outage, release regression, auth failure, critical queue backlog |
+| `SEV-3` | Limited service/Store impact with workaround | One provider degraded, small fleet cohort, non-critical feature unavailable |
+| `SEV-4` | Warning, capacity trend or low-impact defect | Certificate approaching expiry, cost anomaly, isolated transient errors |
 
 Exact acknowledgement, update and escalation times are `[REQUIRED: approved incident response times]`.
 
 ## 3. Incident roles
 
-| Role                  | Responsibility                                                    |
-| --------------------- | ----------------------------------------------------------------- |
-| Incident commander    | Owns severity, priorities, decisions and closure                  |
-| Technical lead        | Coordinates diagnosis and recovery work                           |
-| Operations liaison    | Tracks Store/Partner operational impact and workarounds           |
-| Security lead         | Leads containment/evidence for security incidents                 |
-| Communications lead   | Publishes internal/external updates                               |
-| Scribe                | Maintains timestamped timeline, actions and evidence              |
-| Executive liaison     | Receives/authorizes material business decisions                   |
+| Role | Responsibility |
+|---|---|
+| Incident commander | Owns severity, priorities, decisions and closure |
+| Technical lead | Coordinates diagnosis and recovery work |
+| Operations liaison | Tracks Store/Partner operational impact and workarounds |
+| Security lead | Leads containment/evidence for security incidents |
+| Communications lead | Publishes internal/external updates |
+| Scribe | Maintains timestamped timeline, actions and evidence |
+| Executive liaison | Receives/authorizes material business decisions |
 | Subject-matter owners | Database, Fleet, Release, File, Payments, Notifications, AI, etc. |
 
 One person may fill multiple roles for lower severity, but incident command remains explicit.
