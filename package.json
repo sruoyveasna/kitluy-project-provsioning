@@ -40,7 +40,8 @@
     "docs:coverage-check": "node scripts/docs/check-coverage.mjs",
     "docs:registry-check": "node scripts/docs/check-registry.mjs",
     "docs:links": "node scripts/verification/docs-link-check.mjs",
-    "docs:verify": "node scripts/docs/verify.mjs"
+    "docs:verify": "node scripts/docs/verify.mjs",
+    "docs:inbox-state": "node scripts/docs/check-inbox-state.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",

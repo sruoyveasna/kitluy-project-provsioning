@@ -128,6 +128,12 @@ pointer file (this avoids a third full copy while preserving hash integrity).
 **KLBOOT-DEC-009** — imported bible copies registered as
 DUPLICATE-FORMATTING-VARIANT after content-identity verification.
 
+### Owner instructions received in-session
+
+| ID | Instruction | Date |
+| --- | --- | --- |
+| KLOI-2026-07-26-001 | The `docs/source/inbox/` directory is a transient drop zone: after a batch is ingested (inventoried, hashed, classified with hash-verified copies), the originals are deleted from the inbox so future drops contain only new files. Provenance is preserved via the source manifest (SHA-256 + original_path), git history, and the immutable classified copies, which become the surviving originals. Enforced by `pnpm docs:inbox-state`. | 2026-07-26 |
+
 ### Owner-locked decision traceability (preserved from bootstrap)
 
 KLV4-DEC-001..012 and KLD-2026-07-24-001 (12 KLMF capability decisions) are

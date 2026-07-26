@@ -18,13 +18,15 @@ for (const f of listInboxFiles()) {
   }
 }
 for (const s of manifest.sources) {
-  if (!s.original_path || !existsSync(s.original_path)) {
-    console.error(
-      `CLASSIFY: ${s.source_id} has no valid original-source link (${s.original_path}).`,
-    );
+  if (!s.original_path) {
+    console.error(`CLASSIFY: ${s.source_id} has no original-source link.`);
     errors += 1;
     continue;
   }
+  // Inbox originals are deleted after hash-verified ingestion (owner
+  // instruction KLOI-2026-07-26-001): the manifest link + recorded sha256 +
+  // git history remain the provenance; the classified copy is the surviving
+  // original and must still match the recorded hash (checked below).
   if (!s.classified_path || !existsSync(s.classified_path)) {
     console.error(`CLASSIFY: ${s.source_id} classified copy missing (${s.classified_path}).`);
     errors += 1;

@@ -2,8 +2,20 @@
 
 ## Owner-supplied corpus (KL-DOCS-001, 2026-07-26)
 
-- `inbox/` — original owner-supplied files, **immutable** (102 sources; never
-  edit, never move).
+- `inbox/` — **transient drop zone** (owner instruction KLOI-2026-07-26-001).
+  Owner drops new source files here; after ingestion the originals are
+  deleted so the next drop contains only new files. `pnpm docs:inbox-state`
+  fails while un-ingested files are present. The 102 sources of the
+  2026-07-26 batch live on as hash-identical classified copies (below) and in
+  git history (commit `758e6e5`).
+
+  **Ingestion workflow for a new batch:** (1) drop files into `inbox/`;
+  (2) create a NEW versioned inventory + extend the source manifest (never
+  overwrite the frozen v1.0.0 records — new stable KLSRC IDs continue the
+  sequence); (3) classify copies into the taxonomy; (4) reconcile conflicts
+  in the decision register; (5) update the coverage matrix; (6) delete the
+  ingested originals from `inbox/`; (7) `pnpm docs:verify`.
+
 - `manifests/` — inventory + complete source manifest (csv/json/md) with
   stable KLSRC-#### IDs, plus the imported-copy collision registry.
 - Classified immutable copies by taxonomy:

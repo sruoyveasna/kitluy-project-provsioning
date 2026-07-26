@@ -151,3 +151,12 @@ as an open item (see coverage matrix and reconciliation register).
 | KLSRC-0068 | kitluy-restaurant-kds-client-route-screen-inventory-v1.0.0.md                  | 1.0.0   | CURRENT-PRODUCT-SPECIFICATION | ROUTE-SCREEN-INVENTORY (future client — register | CANONICAL-CURRENT |
 | KLSRC-0074 | kitluy-storefront-route-screen-inventory-v1.0.0.md                             | 1.0.0   | CURRENT-PRODUCT-SPECIFICATION | ROUTE-SCREEN-INVENTORY                           | CANONICAL-CURRENT |
 | KLSRC-0101 | manifest copy.json                                                             |         | CANONICAL-SHARED-CONTRACT     | PACK-CHECKSUMS (UI/UX build pack)                | CANONICAL-CURRENT |
+
+## Inbox lifecycle note (KLOI-2026-07-26-001)
+
+After this ingestion the inbox originals were **deleted on owner instruction**
+so the inbox works as a transient drop zone (new drops contain only new
+files). Provenance is preserved three ways per source: the recorded SHA-256
+above, git history (originals committed at `758e6e5`), and the hash-identical
+classified copy — which is now the surviving original and stays immutable.
+`original_path` values are historical inbox locations.

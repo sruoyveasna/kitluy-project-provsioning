@@ -3,10 +3,7 @@
 import { execSync } from "node:child_process";
 
 const steps = [
-  [
-    "Inventory regeneration is clean",
-    "pnpm docs:inventory && git diff --exit-code -- docs/source/manifests/kitluy-inbox-inventory-v1.0.0.json",
-  ],
+  ["Inbox state (no un-ingested sources)", "pnpm docs:inbox-state"],
   ["Hashes", "pnpm docs:hash"],
   ["Duplicates & canonical collisions", "pnpm docs:duplicates"],
   ["Classification & original links", "pnpm docs:classify:check"],

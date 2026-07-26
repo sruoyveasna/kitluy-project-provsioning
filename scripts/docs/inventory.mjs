@@ -16,6 +16,12 @@ import {
 } from "./lib.mjs";
 
 const files = listInboxFiles();
+if (files.length === 0) {
+  console.log(
+    "Inbox is empty — nothing to inventory. The v1.0.0 inventory is a frozen record of the 2026-07-26 ingestion; a future batch gets a NEW versioned inventory (copy this script's outputs to a new version, never overwrite v1.0.0).",
+  );
+  process.exit(0);
+}
 const byHash = new Map();
 const rows = files.map((f) => {
   const hash = sha256(f.path);

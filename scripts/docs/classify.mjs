@@ -29,6 +29,12 @@ if (existsSync(`${MANIFEST_BASE}.json`)) {
 }
 
 const files = listInboxFiles();
+if (files.length === 0) {
+  console.log(
+    "Inbox is empty — nothing to classify. The existing source manifest is preserved (ingested originals were deleted per KLOI-2026-07-26-001; classified copies are the surviving originals).",
+  );
+  process.exit(0);
+}
 let nextId = 1;
 const usedIds = new Set(existingIds.values());
 function allocId(name) {
