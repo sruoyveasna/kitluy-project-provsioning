@@ -27,7 +27,7 @@ export function handleKernelRequest(method: string, path: string, ready: boolean
       return {
         status: 404,
         body: errorEnvelope(
-          "NOT_FOUND",
+          "RESOURCE_NOT_FOUND",
           "No such route. Business contracts are not implemented in this scaffold.",
         ),
       };

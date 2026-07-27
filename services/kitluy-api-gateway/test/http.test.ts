@@ -18,7 +18,7 @@ describe(`${SERVICE_NAME} kernel`, () => {
   it("unknown routes return the canonical error envelope", () => {
     const res = handleKernelRequest("GET", "/anything", true);
     expect(res.status).toBe(404);
-    expect((res.body as { error: { code: string } }).error.code).toBe("NOT_FOUND");
+    expect((res.body as { error: { code: string } }).error.code).toBe("RESOURCE_NOT_FOUND");
   });
   it("non-GET is rejected — no business mutations exist in this scaffold", () => {
     expect(handleKernelRequest("POST", "/health/live", true).status).toBe(405);
