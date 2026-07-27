@@ -14,17 +14,25 @@
   },
   "dependencies": {
     "@kitluy/api-errors": "workspace:*",
+    "@kitluy/approvals": "workspace:*",
     "@kitluy/audit": "workspace:*",
     "@kitluy/edge-contracts": "workspace:*",
+    "@kitluy/event-contracts": "workspace:*",
+    "@kitluy/money": "workspace:*",
     "@kitluy/observability": "workspace:*",
+    "@kitluy/payments": "workspace:*",
+    "@kitluy/rbac": "workspace:*",
+    "@kitluy/resource-scope": "workspace:*",
     "@kitluy/shared-config": "workspace:*",
     "@kitluy/shared-types": "workspace:*",
     "@kitluy/sync-protocol": "workspace:*",
-    "@kitluy-verticals/phase1-laundry": "workspace:*"
+    "@kitluy-verticals/phase1-laundry": "workspace:*",
+    "pg": "catalog:"
   },
   "devDependencies": {
     "typescript": "catalog:",
     "@types/node": "catalog:",
+    "@types/pg": "catalog:",
     "vitest": "catalog:"
   }
 }

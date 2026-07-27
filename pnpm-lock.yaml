@@ -1071,15 +1071,33 @@ importers:
       '@kitluy/api-errors':
         specifier: workspace:*
         version: link:../../packages/api-errors
+      '@kitluy/approvals':
+        specifier: workspace:*
+        version: link:../../packages/approvals
       '@kitluy/audit':
         specifier: workspace:*
         version: link:../../packages/audit
       '@kitluy/edge-contracts':
         specifier: workspace:*
         version: link:../../packages/edge-contracts
+      '@kitluy/event-contracts':
+        specifier: workspace:*
+        version: link:../../packages/event-contracts
+      '@kitluy/money':
+        specifier: workspace:*
+        version: link:../../packages/money
       '@kitluy/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@kitluy/payments':
+        specifier: workspace:*
+        version: link:../../packages/payments
+      '@kitluy/rbac':
+        specifier: workspace:*
+        version: link:../../packages/rbac
+      '@kitluy/resource-scope':
+        specifier: workspace:*
+        version: link:../../packages/resource-scope
       '@kitluy/shared-config':
         specifier: workspace:*
         version: link:../../packages/shared-config
@@ -1089,10 +1107,16 @@ importers:
       '@kitluy/sync-protocol':
         specifier: workspace:*
         version: link:../../packages/sync-protocol
+      pg:
+        specifier: 'catalog:'
+        version: 8.22.0
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
         version: 22.20.1
+      '@types/pg':
+        specifier: 'catalog:'
+        version: 8.20.0
       typescript:
         specifier: 'catalog:'
         version: 5.7.3
