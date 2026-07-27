@@ -2,7 +2,7 @@
   "name": "@kitluy/resource-scope",
   "version": "0.1.0",
   "private": true,
-  "description": "Resource scope model: platform, region, tenant, digital store, store location, device group, device, connector, service",
+  "description": "Resource scope model: platform, region, tenant, chain, digital store, store location, device group, device, connector, service, release cohort, support session, file object",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -15,11 +15,13 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "test": "vitest run"
   },
   "devDependencies": {
     "typescript": "catalog:",
-    "@types/node": "catalog:"
+    "@types/node": "catalog:",
+    "vitest": "catalog:"
   },
   "dependencies": {
     "@kitluy/shared-types": "workspace:*"
