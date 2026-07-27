@@ -104,19 +104,19 @@ stable; several are cited by live code and must not be renamed.
 
 | ID | Conflict | State |
 | --- | --- | --- |
-| KLREC-2026-07-26-001 | `/edge/v1` route-shape fork. UPDATED by KL-DOCS-001: now between `docs/source/offline/kitluy-storehub-lan-api-v1.0.0.md` (`/sessions/open`, `/bookings/{id}/confirm-intake`, `/ready-scan/sessions`, `/pickup-scan/...`) and `docs/source/api-contracts/kitluy-edge-operations-api-v1.0.0.md` (`/sessions/login`, `/laundry/bookings/{id}/finalize`, `/laundry/ready-sessions`, `/laundry/pickup-sessions/{id}/release`). Same namespace, incompatible paths/verbs; neither supersedes the other. Cited by `services/kitluy-hub-agent/src/lan-api.ts` (mutating routes blocked). | OPEN — owner decision required |
-| KLREC-2026-07-26-002 | Custody-concept naming drift, UPDATED: four styles across layers — cloud `kitluy_laundry.garments`/`garment_scan_events`/`ready_storage_positions` (data dictionary), Hub-local `edge_laundry.garment`/`custody_event`/`storage_position` (storehub local DB schema), plus the two API vocabularies. | OPEN — naming standard extension required |
+| KLREC-2026-07-26-001 | `/edge/v1` route-shape fork. UPDATED by KL-DOCS-001: now between `docs/source/offline/kitluy-storehub-lan-api-v1.0.0.md` (`/sessions/open`, `/bookings/{id}/confirm-intake`, `/ready-scan/sessions`, `/pickup-scan/...`) and `docs/source/api-contracts/kitluy-edge-operations-api-v1.0.0.md` (`/sessions/login`, `/laundry/bookings/{id}/finalize`, `/laundry/ready-sessions`, `/laundry/pickup-sessions/{id}/release`). Same namespace, incompatible paths/verbs; neither supersedes the other. Cited by `services/kitluy-hub-agent/src/lan-api.ts` (mutating routes blocked). | **RESOLVED 2026-07-27** by owner decision KLD-2026-07-26-002 (KL-DEC-001, all five groups OWNER-APPROVED). Implementation tracked by KL-DEC-001-T002..T006; approval alone is not implementation evidence (KLD-EVIDENCE-001) |
+| KLREC-2026-07-26-002 | Custody-concept naming drift, UPDATED: four styles across layers — cloud `kitluy_laundry.garments`/`garment_scan_events`/`ready_storage_positions` (data dictionary), Hub-local `edge_laundry.garment`/`custody_event`/`storage_position` (storehub local DB schema), plus the two API vocabularies. | **PARTIALLY RESOLVED 2026-07-27** — the API-vocabulary portion is settled by KLD-2026-07-26-002 (Group 1). The cloud `kitluy_laundry.garments` vs Hub-local `edge_laundry.garment` SCHEMA-NAMING portion remains **OPEN** and is owned by the WS-09 schema reconciliation task (WS-09-T001) |
 | KLREC-2026-07-26-003 | BB v1 register inconsistency (bootstrap) | OPEN (low) |
 | KLREC-2026-07-26-004 | Master feature registry exists only as CSV | OPEN |
 | KLREC-2026-07-26-005 | Owner control pack claims RB v4.0.0 / BB v2.0.0 are "Missing from package" (PROJECT_HOME §2, SOT-010/011, SUP-001/002, OD-001/002) — both are physically present and canonical since KL-DOCS-001 ingestion. | RESOLVED-BY-EVIDENCE; owner index row update proposed |
 | KLREC-2026-07-26-006 | SOT-027 indexes `kitluy-owner-decision-lock-12-capabilities-v1.0.md` as an active file; file not found machine-wide (content preserved in RB v4 §11.2). | OPEN — owner to supply file or amend index |
 | KLREC-2026-07-26-007 | Pack-flattening collision: the security pack's declared `README.md` (890 B) was overwritten by the API pack index (707 B) when packs were merged into one inbox; 61 declared-vs-physical size/hash mismatches show the in-corpus pack manifests predate a regeneration of their members. | RECORDED — originals preserved; manifests marked non-authoritative for hashes |
 | KLREC-2026-07-26-008 | Status-model migration: bootstrap statuses BUILT/TESTED have no slot in the owner 11-status model; repo evidence rows are re-registered as SCAFFOLDED with linked E-REPO/E-TEST evidence (unit-tested foundations exceed bare scaffolding but do not meet IMPLEMENTED-IN-DEV gates: no applied dev migrations, no reproducible dev deployment). No feature was advanced. | RESOLVED — mapping recorded in the implementation-status register addendum |
-| KLREC-2026-07-26-009 | Terminal-profile identifiers: POS Desktop spec v4.0.0 §13.5 specifies `t1_intake_cashier`/`t2_customer_display`/`t3_ready_scan_in`/`t4_pickup_scan_out` (implemented in `verticals/phase1-laundry`); `kitluy-terminal-profile-contract-t1-t4-v1.0.0.md` uses device-profile codes `laundry_front_counter`/`laundry_ready_pickup`/`laundry_t1..t4` and does not restate the logical identifiers. | OPEN — code unchanged pending owner reconciliation |
-| KLREC-2026-07-26-010 | Error-code naming: POS spec §14.3 codes `BOOKING_VERSION_CONFLICT`/`DUPLICATE_IDEMPOTENCY_KEY` (implemented in `@kitluy/api-errors`) vs API error registry v1.0.0 `RESOURCE_VERSION_CONFLICT`/`IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST` (~51 codes). | OPEN — code alignment task once owner confirms registry precedence |
-| KLREC-2026-07-26-011 | Event-name format: repo `@kitluy/event-contracts` enforces `<domain>.<event>.v<major>` (POS spec §15.2); domain-event registry v1.0.0 canonicalizes unversioned `<context>.<fact>` with envelope schema_version and demotes `.v1` names to compatibility aliases. | OPEN — code alignment task |
-| KLREC-2026-07-26-012 | Scope taxonomy drift: RB v4 §8.5 `tenant_or_partner`/`individual_device` (implemented in `@kitluy/resource-scope`) vs resource-scope model v1.0.0 `tenant`/`device` (+ new `chain`, `file_object`, `support_session`, `release_cohort`). | OPEN |
-| KLREC-2026-07-26-013 | Permission-key drift: `releases.promote.stable` (infra spec §16.5, `@kitluy/rbac` seed) vs `releases.promote_stable` (RBAC permission registry v1.0.0, 107 keys). | OPEN |
+| KLREC-2026-07-26-009 | Terminal-profile identifiers: POS Desktop spec v4.0.0 §13.5 specifies `t1_intake_cashier`/`t2_customer_display`/`t3_ready_scan_in`/`t4_pickup_scan_out` (implemented in `verticals/phase1-laundry`); `kitluy-terminal-profile-contract-t1-t4-v1.0.0.md` uses device-profile codes `laundry_front_counter`/`laundry_ready_pickup`/`laundry_t1..t4` and does not restate the logical identifiers. | **RESOLVED 2026-07-27** by owner decision KLD-2026-07-26-002 (KL-DEC-001, all five groups OWNER-APPROVED). Implementation tracked by KL-DEC-001-T002..T006; approval alone is not implementation evidence (KLD-EVIDENCE-001) |
+| KLREC-2026-07-26-010 | Error-code naming: POS spec §14.3 codes `BOOKING_VERSION_CONFLICT`/`DUPLICATE_IDEMPOTENCY_KEY` (implemented in `@kitluy/api-errors`) vs API error registry v1.0.0 `RESOURCE_VERSION_CONFLICT`/`IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST` (~51 codes). | **RESOLVED 2026-07-27** by owner decision KLD-2026-07-26-002 (KL-DEC-001, all five groups OWNER-APPROVED). Implementation tracked by KL-DEC-001-T002..T006; approval alone is not implementation evidence (KLD-EVIDENCE-001) |
+| KLREC-2026-07-26-011 | Event-name format: repo `@kitluy/event-contracts` enforces `<domain>.<event>.v<major>` (POS spec §15.2); domain-event registry v1.0.0 canonicalizes unversioned `<context>.<fact>` with envelope schema_version and demotes `.v1` names to compatibility aliases. | **RESOLVED 2026-07-27** by owner decision KLD-2026-07-26-002 (KL-DEC-001, all five groups OWNER-APPROVED). Implementation tracked by KL-DEC-001-T002..T006; approval alone is not implementation evidence (KLD-EVIDENCE-001) |
+| KLREC-2026-07-26-012 | Scope taxonomy drift: RB v4 §8.5 `tenant_or_partner`/`individual_device` (implemented in `@kitluy/resource-scope`) vs resource-scope model v1.0.0 `tenant`/`device` (+ new `chain`, `file_object`, `support_session`, `release_cohort`). | **PARTIALLY RESOLVED 2026-07-27** — the scope-taxonomy vocabulary portion is settled by KLD-2026-07-26-002 (Group 3: `tenant_or_partner` -> `tenant`, `individual_device` -> `device`, plus additive `chain`/`file_object`/`support_session`/`release_cohort`). Implementation tracked by KL-DEC-001-T003 |
+| KLREC-2026-07-26-013 | Permission-key drift: `releases.promote.stable` (infra spec §16.5, `@kitluy/rbac` seed) vs `releases.promote_stable` (RBAC permission registry v1.0.0, 107 keys). | **RESOLVED 2026-07-27** by owner decision KLD-2026-07-26-002 (KL-DEC-001, all five groups OWNER-APPROVED). Implementation tracked by KL-DEC-001-T002..T006; approval alone is not implementation evidence (KLD-EVIDENCE-001) |
 
 ### Owner direction KLD-2026-07-26-003 — Close G1, begin executable data foundation (recorded verbatim intent, 2026-07-26)
 
@@ -130,7 +130,36 @@ stable; several are cited by live code and must not be renamed.
 | 6 | IMPLEMENTED-IN-DEV requires: applied dev migrations + assertions + RLS pos/neg execution + generated types + migration-safety review + authorization review + linked evidence | Evidence-gate restated |
 | 7 | No authoritative T1-T4/Hub/Booking/payment persistence before WS-02/03/04 executable foundations pass; WS-07/08 stay SCAFFOLDED until DB-backed integration evidence | Dependency rule recorded |
 
-NOT decided by this direction: KL-DEC-001 five-group ballot (KLD-2026-07-26-002) — still OWNER-APPROVAL-REQUIRED; Hub mutations stay blocked.
+NOT decided by this direction: KL-DEC-001 five-group ballot (KLD-2026-07-26-002) — still OWNER-APPROVAL-REQUIRED; Hub mutations stay blocked. **SUPERSEDED 2026-07-27: the ballot was decided — see the Cycle-7 owner decision below.**
+
+### Owner decision KLD-2026-07-26-002 — contract vocabulary and Edge API (OWNER-APPROVED 2026-07-27)
+
+| Field         | Value                                                                                                                                                                            |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Decision ID   | KLD-2026-07-26-002                                                                                                                                                               |
+| Task          | KL-DEC-001                                                                                                                                                                       |
+| Status        | **OWNER-APPROVED** (decision **ACTIVE**)                                                                                                                                         |
+| Decision date | 2026-07-27                                                                                                                                                                       |
+| Owner         | KitLuy Project Owner                                                                                                                                                             |
+| Record        | `docs/decisions/kitluy-contract-vocabulary-and-edge-api-owner-decision-v1.0.0.md`; ballot `docs/source/processed/reconciliation/kitluy-contract-vocabulary-owner-review-v1.0.0.md` |
+
+Group verdicts: 1 APPROVED (`/edge/v1/*` generic, `/edge/v1/laundry/*` vertical);
+2 APPROVED (logical profiles `laundry.t{1..4}.*`; physical device-profile codes
+unchanged; `t2_scan_in`/`t3_scan_out` never reusable); 3 APPROVED (grammar
+`<domain>.<resource_or_capability>.<verb>`; 107-key registry canonical; approved
+release/backup/certificate mappings; `tenant_or_partner`->`tenant`,
+`individual_device`->`device`; additive `chain`/`file_object`/`support_session`/
+`release_cohort`); 4 APPROVED WITH REGEX CORRECTION (`^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$`;
+versions only in `schema_version`); 5 APPROVED WITH ADDITIVE CODES AND
+`PAYMENT_PENDING` CLARIFICATION (adds `INTERNAL_ERROR`, `SCALE_UNSTABLE`,
+`GARMENT_COUNT_MISMATCH`, `HUB_READ_ONLY`; `PAYMENT_PENDING` is HTTP 202
+non-terminal and never a paid state).
+
+Losing forms are REJECTED-BEFORE-IMPLEMENTATION with no aliases or deprecation
+paths, because no affected mutation route, event or client was deployed.
+Approval removes the decision blockage only — it is NOT implementation evidence
+(KLD-EVIDENCE-001). BLK-003 moves to APPROVED-PENDING-IMPLEMENTATION and closes
+only on linked implementation evidence and an approving independent review.
 
 ### Batch-2 conflicts (KL-DOCS-002, 2026-07-26)
 
@@ -180,6 +209,10 @@ OWNER-APPROVAL-REQUIRED — no Edge/Hub route shapes, public event names, public
 error vocabulary or terminal-profile renames were finalized this cycle; custody
 event names stay internal (KLREC-2026-07-26-011 fence) and outbox publication
 stays unimplemented.
+
+> Cycle-7 update (2026-07-27): the KL-DEC-001 fence described above was lifted
+> by owner decision KLD-2026-07-26-002 (OWNER-APPROVED). The Cycle-6 statement
+> is preserved verbatim as the record of what was true at Cycle-6 close.
 
 ### Engineering decisions (bootstrap + this task)
 

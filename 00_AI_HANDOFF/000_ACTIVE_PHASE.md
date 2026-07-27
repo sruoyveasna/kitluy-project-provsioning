@@ -110,7 +110,11 @@ the phase fence and specifically does **not** imply:
 - configuration publication or cloud/Hub synchronization (WS-10) — SCAFFOLDED;
 - device provisioning or fleet management (WS-11) — BLOCKED (BLK-005);
 - T1–T4 authoritative interfaces or Edge/Hub mutation routes — SCAFFOLDED and
-  BLOCKED by BLK-003 until the KL-DEC-001 ballot is owner-approved;
+  BLOCKED by BLK-003 (Cycle-7 update: the KL-DEC-001 ballot was
+  OWNER-APPROVED 2026-07-27, so BLK-003 is APPROVED-PENDING-IMPLEMENTATION —
+  the decision blockage is lifted, but Hub/Edge mutation routes stay
+  fail-closed until the contract alignment is implemented, tested,
+  independently reviewed and evidence-linked);
 - offline operation, live KHQR provider integration (PAY-OD-001/BLK-006),
   cloud deployment, pilot operation or production application
   (KL-INF-P1-037 remains OWNER-LOCKED: production migrations are
