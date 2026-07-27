@@ -1376,4 +1376,1048 @@ begin
 end $$;
 rollback;
 
-select 'rls-tests complete: 14+9 baseline cases; cycle-5 WS5 7 negative + 7 positive and WS6 10 negative + 9 positive cases executed' as result;
+-- ============================================================================
+-- Cycle-6 (WS-07/WS-08) RLS behavior cases for groups 0075-0095.
+-- WS7-N* / WS7-P* = Booking aggregate + garment custody; WS8-N* / WS8-P* =
+-- payments + finance subledger. Same harness pattern (set_config + SET LOCAL
+-- ROLE, roll back after each case). KLSEC refs cite the Phase-1 security test
+-- system; KBR/AMD refs cite the business-rule/amendment contracts.
+-- Cycle-6 fixture UUIDs (dev-fixtures.sql ..0401-..0465):
+--   Booking A1 ..0401 (per-piece, PARTIALLY_PAID) | Booking A2 ..0404
+--   (per-weight, IN_PROGRESS, production READY) | garments ..0410/..0411/..0412
+--   tags ..0413 (voided)/..0414/..0422 | scans ..0415/..0416
+--   positions ..0417/..0419 (loc01) /..0420 (sibling loc02) | assignment ..0418
+--   tenders ..0425 (cash)/..0427 (KHQR) | khqr ..0429 | provider event ..0430
+--   refund ..0432 (APPROVED, u07 requester / u08 approver)
+--   reconciliation ..0436 + line ..0437 | settlement ..0438
+--   finance accounts ..0440-..0443 (A) / ..0456 (B)
+--   Tenant B attacker: loc ..0450, booking ..0452, line ..0453, tender ..0455
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- WS7 NEGATIVE CASES (13)
+-- ---------------------------------------------------------------------------
+
+-- WS7-N1 / KLSEC-018: anonymous access to the Booking aggregate is denied
+-- with no row or count leakage.
+begin;
+select set_config('request.jwt.claims', '{"role":"anon"}', true);
+set local role anon;
+do $$
+declare
+  v_count int;
+begin
+  begin
+    select count(*) into v_count from kitluy_orders.orders;
+    if v_count > 0 then
+      raise exception 'FAIL WS7-N1: anon saw % booking rows', v_count;
+    end if;
+  exception
+    when insufficient_privilege then
+      null; -- denied outright: pass
+  end;
+  raise notice 'PASS WS7-N1/KLSEC-018: anon denied on kitluy_orders.orders';
+end $$;
+rollback;
+
+-- WS7-N2 / KLSEC-018: cross-tenant Booking reads return zero rows in BOTH
+-- directions (u10 cannot see the Tenant B booking; u06 cannot see Booking A1).
+begin;
+select set_config('request.jwt.claims',
+  '{"sub": "00000000-0000-4000-8000-000000000010", "role": "authenticated"}', true);
+set local role authenticated;
+do $$
+declare
+  v_count int;
+begin
+  select count(*) into v_count from kitluy_orders.orders
+  where id = '00000000-0000-4000-8000-000000000452';
+  if v_count <> 0 then
+    raise exception 'FAIL WS7-N2: tenant A store staff read the Tenant B booking';
+  end if;
+end $$;
+select set_config('request.jwt.claims',
+  '{"sub": "00000000-0000-4000-8000-000000000006", "role": "authenticated"}', true);
+do $$
+declare
+  v_count int;
+begin
+  select count(*) into v_count from kitluy_orders.orders
+  where id = '00000000-0000-4000-8000-000000000401';
+  if v_count <> 0 then
+    raise exception 'FAIL WS7-N2: tenant B owner read Booking A1';
+  end if;
+  raise notice 'PASS WS7-N2/KLSEC-018: cross-tenant Booking reads return zero rows both ways';
+end $$;
+rollback;
+
+-- WS7-N3 / KLSEC-024: a cross-tenant Booking mutation by an authenticated
+-- client fails closed (no write grant, no write policy).
+begin;
+select set_config('request.jwt.claims',
+  '{"sub": "00000000-0000-4000-8000-000000000006", "role": "authenticated"}', true);
+set local role authenticated;
+do $$
+begin
+  begin
+    update kitluy_orders.orders
+       set payment_state = 'PAID'
+     where id = '00000000-0000-4000-8000-000000000401';
+    raise exception 'FAIL WS7-N3: cross-tenant booking UPDATE was accepted';
+  exception
+    when insufficient_privilege then
+      null;
+  end;
+  raise notice 'PASS WS7-N3/KLSEC-024: cross-tenant Booking mutation denied (no grant, no policy)';
+end $$;
+rollback;
+
+-- WS7-N4 / KLSEC-024 (KBR-TXN §4): a direct client status update on an
+-- own-store Booking is denied — lifecycle moves only through the engine
+-- command path.
+begin;
+select set_config('request.jwt.claims',
+  '{"sub": "00000000-0000-4000-8000-000000000010", "role": "authenticated"}', true);
+set local role authenticated;
+do $$
+begin
+  begin
+    update kitluy_orders.orders
+       set status = 'IN_PROGRESS', version = version + 1
+     where id = '00000000-0000-4000-8000-000000000401';
+    raise exception 'FAIL WS7-N4: direct client status update was accepted';
+  exception
+    when insufficient_privilege then
+      null;
+  end;
+  raise notice 'PASS WS7-N4/KLSEC-024: direct client Booking status writes fail closed';
+end $$;
+rollback;
+
+-- WS7-N5 (KBR-TXN; Cycle-6 §7): an order line claiming a different Digital
+-- Store than its Booking is rejected by the composite order_lines_store_order_fk
+-- even on the service path.
+begin;
+set local role service_role;
+do $$
+begin
+  begin
+    insert into kitluy_orders.order_lines
+      (tenant_id, digital_store_id, order_id, line_no, catalog_item_id,
+       service_code, pricing_mode, quantity, unit_price_minor, currency_code)
+    values
+      ('00000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000016',
+       '00000000-0000-4000-8000-000000000401', 99, '00000000-0000-4000-8000-000000000301',
+       'PROBE-N5', 'PER_PIECE', 1, 100, 'KHR');
+    raise exception 'FAIL WS7-N5: cross-store order line was accepted';
+  exception
+    when foreign_key_violation then
+      null;
+  end;
+  raise notice 'PASS WS7-N5/KBR-TXN: order line cannot escape the Booking Store (composite FK)';
+end $$;
+rollback;
+
+-- WS7-N6 / KLSEC-018 (child-cannot-escape): attaching a Tenant B customer to a
+-- Tenant A Booking is rejected by orders_tenant_customer_fk.
+begin;
+set local role service_role;
+do $$
+begin
+  begin
+    insert into kitluy_orders.orders
+      (tenant_id, digital_store_id, store_location_id, customer_id, order_number,
+       vertical_code, source_code, status, currency_code, idempotency_key)
+    values
+      ('00000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000015',
+       '00000000-0000-4000-8000-000000000018', '00000000-0000-4000-8000-000000000340',
+       'PROBE-N6', 'LAUNDRY', 'WALK_IN', 'DRAFT', 'KHR', 'PROBE-N6');
+    raise exception 'FAIL WS7-N6: foreign-tenant customer attachment was accepted';
+  exception
+    when foreign_key_violation then
+      null;
+  end;
+  raise notice 'PASS WS7-N6/KLSEC-018: foreign customer cannot attach to a Booking (composite FK)';
+end $$;
+rollback;
+
+-- WS7-N7 (KBR-TXN-002): a Booking line referencing a Tenant B catalog item is
+-- rejected by order_lines_store_catalog_item_fk.
+begin;
+set local role service_role;
+do $$
+begin
+  begin
+    insert into kitluy_orders.order_lines
+      (tenant_id, digital_store_id, order_id, line_no, catalog_item_id,
+       service_code, pricing_mode, quantity, unit_price_minor, currency_code)
+    values
+      ('00000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000015',
+       '00000000-0000-4000-8000-000000000401', 98, '00000000-0000-4000-8000-000000000313',
+       'PROBE-N7', 'PER_PIECE', 1, 100, 'KHR');
+    raise exception 'FAIL WS7-N7: foreign catalog reference was accepted';
+  exception
+    when foreign_key_violation then
+      null;
+  end;
+  raise notice 'PASS WS7-N7/KBR-TXN-002: foreign catalog item cannot price a Booking line (composite FK)';
+end $$;
+rollback;
+
+-- WS7-N8 (Cycle-6 §9.1 custody scope): a custody event can neither name a
+-- foreign-tenant Location nor claim a sibling Store of the same Tenant.
+begin;
+set local role service_role;
+do $$
+begin
+  begin
+    insert into kitluy_laundry.garment_scan_events
+      (tenant_id, digital_store_id, store_location_id, order_id, scan_type,
+       terminal_role, idempotency_key, aggregate_version)
+    values
+      ('00000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000015',
+       '00000000-0000-4000-8000-000000000450', '00000000-0000-4000-8000-000000000401',
+       'INTAKE', 't1_intake_cashier', 'PROBE-N8A', 1);
+    raise exception 'FAIL WS7-N8: custody event with a Tenant B Location was accepted';
+  exception
+    when foreign_key_violation then
+      null;
+  end;
+  begin
+    insert into kitluy_laundry.garment_scan_events
+      (tenant_id, digital_store_id, store_location_id, order_id, scan_type,
+       terminal_role, idempotency_key, aggregate_version)
+    values
+      ('00000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000016',
+       '00000000-0000-4000-8000-000000000018', '00000000-0000-4000-8000-000000000401',
+       'INTAKE', 't1_intake_cashier', 'PROBE-N8B', 1);
+    raise exception 'FAIL WS7-N8: custody event escaping to a sibling Store was accepted';
+  exception
+    when foreign_key_violation then
+      null;
+  end;
+  raise notice 'PASS WS7-N8/KLSEC-020: custody events cannot name foreign Locations or sibling Stores (composite FKs)';
+end $$;
+rollback;
+
+-- WS7-N9 (KBR-LND-004 TV3): a duplicate custody scan replay (same Tenant
+-- idempotency key) creates no second event.
+begin;
+set local role service_role;
+do $$
+begin
+  begin
+    insert into kitluy_laundry.garment_scan_events
+      (tenant_id, digital_store_id, store_location_id, order_id, garment_id,
+       scan_type, terminal_role, idempotency_key, aggregate_version)
+    values
+      ('00000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000015',
+       '00000000-0000-4000-8000-000000000018', '00000000-0000-4000-8000-000000000401',
+       '00000000-0000-4000-8000-000000000410', 'INTAKE', 't1_intake_cashier',
+       'DEV-SCAN-0001', 1);
+    raise exception 'FAIL WS7-N9: duplicate custody scan was accepted';
+  exception
+    when unique_violation then
+      null;
+  end;
+  raise notice 'PASS WS7-N9/KBR-LND-004: duplicate custody scan replay rejected (tenant idempotency key)';
+end $$;
+rollback;
+
+-- WS7-N10 (KBR-TXN stale-version rejection): a service-path UPDATE that does
+-- not advance the Booking version is rejected.
+begin;
+set local role service_role;
+do $$
+begin
+  begin
+    update kitluy_orders.orders
+       set updated_at = now(), version = version
+     where id = '00000000-0000-4000-8000-000000000401';
+    raise exception 'FAIL WS7-N10: stale-version booking UPDATE was accepted';
+  exception
+    when others then
+      if sqlerrm not like '%KLUY-ORD-STALE-VERSION%' then
+        raise;
+      end if;
+  end;
+  raise notice 'PASS WS7-N10/KBR-TXN: stale Booking version rejected (KLUY-ORD-STALE-VERSION)';
+end $$;
+rollback;
+
+-- WS7-N11 (KBR-LND-004; RB v4 §5.3): the Ready scan-in vocabulary is T3-only —
+-- a T1 terminal cannot record READY_SCAN_IN.
+begin;
+set local role service_role;
+do $$
+begin
+  begin
+    insert into kitluy_laundry.garment_scan_events
+      (tenant_id, digital_store_id, store_location_id, order_id, scan_type,
+       terminal_role, idempotency_key, aggregate_version)
+    values
+      ('00000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000015',
+       '00000000-0000-4000-8000-000000000018', '00000000-0000-4000-8000-000000000401',
+       'READY_SCAN_IN', 't1_intake_cashier', 'PROBE-N11', 1);
+    raise exception 'FAIL WS7-N11: T1 terminal recorded a Ready scan-in';
+  exception
+    when check_violation then
+      null;
+  end;
+  raise notice 'PASS WS7-N11/KBR-LND-004: READY_SCAN_IN restricted to t3_ready_scan_in (CHECK)';
+end $$;
+rollback;
+
+-- WS7-N12 (KBR-LND-005; RB v4 §5.3): pickup release cannot complete without a
+-- verified collector, and T2 owns no custody event vocabulary at all.
+begin;
+set local role service_role;
+do $$
+begin
+  insert into kitluy_laundry.pickup_handoffs
+    (tenant_id, digital_store_id, store_location_id, order_id)
+  values
+    ('00000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000015',
+     '00000000-0000-4000-8000-000000000018', '00000000-0000-4000-8000-000000000401');
+  begin
+    update kitluy_laundry.pickup_handoffs
+       set status = 'COMPLETED',
+           released_by = '00000000-0000-4000-8000-000000000003',
+           handed_over_at = now()
+     where order_id = '00000000-0000-4000-8000-000000000401';
+    raise exception 'FAIL WS7-N12: pickup completed without collector verification';
+  exception
+    when check_violation then
+      null;
+  end;
+  begin
+    insert into kitluy_laundry.garment_scan_events
+      (tenant_id, digital_store_id, store_location_id, order_id, scan_type,
+       terminal_role, idempotency_key, aggregate_version)
+    values
+      ('00000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000015',
+       '00000000-0000-4000-8000-000000000018', '00000000-0000-4000-8000-000000000401',
+       'INTAKE', 't2_customer_display', 'PROBE-N12', 1);
+    raise exception 'FAIL WS7-N12: a T2 terminal recorded a custody event';
+  exception
+    when check_violation then
+      null;
+  end;
+  raise notice 'PASS WS7-N12/KBR-LND-005: unverified pickup release and T2 custody events rejected (CHECKs)';
+end $$;
+rollback;
+
+-- WS7-N13 / KLSEC-036 (Cycle-6 §9.1): custody history is immutable on the
+-- service path — the UPDATE grant is revoked (defense in depth over the
+-- enforce_append_only trigger proven in assertions section 22).
+begin;
+set local role service_role;
+do $$
+begin
+  begin
+    update kitluy_laundry.garment_scan_events
+       set reason_code = 'tamper'
+     where id = '00000000-0000-4000-8000-000000000415';
+    raise exception 'FAIL WS7-N13: service path rewrote custody history';
+  exception
+    -- Defense in depth: the revoked grant denies first; the
+    -- enforce_append_only trigger is the second layer. Either rejection passes.
+    when insufficient_privilege then
+      null;
+    when others then
+      if sqlerrm not like '%KLUY-AUTH-APPEND-ONLY%' then
+        raise;
+      end if;
+  end;
+  raise notice 'PASS WS7-N13/KLSEC-036: custody scan history immutable for the service path';
+end $$;
+rollback;
+
+-- ---------------------------------------------------------------------------
+-- WS7 POSITIVE CASES (6)
+-- ---------------------------------------------------------------------------
+
+-- WS7-P1 (control for WS7-N2): store staff u10 reads both own-store Bookings
+-- with their priced lines; nothing foreign leaks into the set.
+begin;
+select set_config('request.jwt.claims',
+  '{"sub": "00000000-0000-4000-8000-000000000010", "role": "authenticated"}', true);
+set local role authenticated;
+do $$
+declare
+  v_bookings int;
+  v_foreign int;
+  v_lines int;
+begin
+  -- Fixture-scoped counts: the shared local dev database may also carry
+  -- integration-test bookings in the same store, so assert the fixture rows
+  -- and the foreign booking rather than whole-table totals.
+  select count(*) into v_bookings from kitluy_orders.orders
+  where id in ('00000000-0000-4000-8000-000000000401', '00000000-0000-4000-8000-000000000404');
+  select count(*) into v_foreign from kitluy_orders.orders
+  where id = '00000000-0000-4000-8000-000000000452';
+  select count(*) into v_lines from kitluy_orders.order_lines
+  where id in ('00000000-0000-4000-8000-000000000402', '00000000-0000-4000-8000-000000000405');
+  if v_bookings <> 2 or v_foreign <> 0 or v_lines <> 2 then
+    raise exception 'FAIL WS7-P1: booking read wrong (own=%, foreign=%, lines=%)',
+      v_bookings, v_foreign, v_lines;
+  end if;
+  raise notice 'PASS WS7-P1: store staff reads both own-store Bookings with lines; foreign booking invisible';
+end $$;
+rollback;
+
+-- WS7-P2 (KBR-LND §4): u10 reads the production projection (A2 is READY) and
+-- the append-only production status history.
+begin;
+select set_config('request.jwt.claims',
+  '{"sub": "00000000-0000-4000-8000-000000000010", "role": "authenticated"}', true);
+set local role authenticated;
+do $$
+declare
+  v_ready int;
+  v_states int;
+  v_history int;
+begin
+  select count(*) into v_ready from kitluy_laundry.booking_production_state
+  where order_id = '00000000-0000-4000-8000-000000000404' and production_status = 'READY';
+  select count(*) into v_states from kitluy_laundry.booking_production_state
+  where order_id in ('00000000-0000-4000-8000-000000000401', '00000000-0000-4000-8000-000000000404');
+  select count(*) into v_history from kitluy_laundry.booking_status_history
+  where id in ('00000000-0000-4000-8000-000000000407', '00000000-0000-4000-8000-000000000408',
+               '00000000-0000-4000-8000-000000000409');
+  if v_ready <> 1 or v_states <> 2 or v_history <> 3 then
+    raise exception 'FAIL WS7-P2: production read wrong (ready=%, states=%, history=%)',
+      v_ready, v_states, v_history;
+  end if;
+  raise notice 'PASS WS7-P2: production projection (READY) and status history readable in store scope';
+end $$;
+rollback;
+
+-- WS7-P3 (positive control for custody reads): u10 reads the garments, tags
+-- (incl. the voided predecessor) and custody scans of Booking A2.
+begin;
+select set_config('request.jwt.claims',
+  '{"sub": "00000000-0000-4000-8000-000000000010", "role": "authenticated"}', true);
+set local role authenticated;
+do $$
+declare
+  v_garments int;
+  v_tags int;
+  v_voided int;
+  v_scans int;
+begin
+  select count(*) into v_garments from kitluy_laundry.garments
+  where id in ('00000000-0000-4000-8000-000000000411', '00000000-0000-4000-8000-000000000412');
+  select count(*) into v_tags from kitluy_laundry.laundry_tags
+  where id in ('00000000-0000-4000-8000-000000000413', '00000000-0000-4000-8000-000000000414');
+  select count(*) into v_voided from kitluy_laundry.laundry_tags
+  where id = '00000000-0000-4000-8000-000000000413' and voided_at is not null;
+  select count(*) into v_scans from kitluy_laundry.garment_scan_events
+  where id = '00000000-0000-4000-8000-000000000416';
+  if v_garments <> 2 or v_tags <> 2 or v_voided <> 1 or v_scans <> 1 then
+    raise exception 'FAIL WS7-P3: custody read wrong (garments=%, tags=%, voided=%, scans=%)',
+      v_garments, v_tags, v_voided, v_scans;
+  end if;
+  raise notice 'PASS WS7-P3: garments, tag lineage (voided + replacement) and custody scans readable';
+end $$;
+rollback;
+
+-- WS7-P4 / KLSEC-020 (combined positive+negative): location-scoped staff u09
+-- reads the Ready storage positions of its own Location but never the
+-- sibling-Location position.
+begin;
+select set_config('request.jwt.claims',
+  '{"sub": "00000000-0000-4000-8000-000000000009", "role": "authenticated"}', true);
+set local role authenticated;
+do $$
+declare
+  v_own int;
+  v_sibling int;
+begin
+  select count(*) into v_own from kitluy_laundry.ready_storage_positions
+  where id in ('00000000-0000-4000-8000-000000000417', '00000000-0000-4000-8000-000000000419');
+  select count(*) into v_sibling from kitluy_laundry.ready_storage_positions
+  where id = '00000000-0000-4000-8000-000000000420';
+  if v_own <> 2 or v_sibling <> 0 then
+    raise exception 'FAIL WS7-P4: storage position scope wrong (own=%, sibling=%)', v_own, v_sibling;
+  end if;
+  raise notice 'PASS WS7-P4/KLSEC-020: storage positions confined to the assigned Location';
+end $$;
+rollback;
+
+-- WS7-P5 (permission gating is real): the partner owner u02 holds NO
+-- laundry.bookings.read grant — the store-scope policy still exposes the
+-- neutral Booking headers, but the permission-gated custody projection stays
+-- hidden. Frontend visibility is not authorization (RC-012).
+begin;
+select set_config('request.jwt.claims',
+  '{"sub": "00000000-0000-4000-8000-000000000002", "role": "authenticated"}', true);
+set local role authenticated;
+do $$
+declare
+  v_orders int;
+  v_production int;
+begin
+  select count(*) into v_orders from kitluy_orders.orders
+  where id in ('00000000-0000-4000-8000-000000000401', '00000000-0000-4000-8000-000000000404');
+  select count(*) into v_production from kitluy_laundry.booking_production_state;
+  if v_orders <> 2 or v_production <> 0 then
+    raise exception 'FAIL WS7-P5: permission gating wrong (orders=%, production=%)',
+      v_orders, v_production;
+  end if;
+  raise notice 'PASS WS7-P5: owner reads Booking headers (store scope) but not the permission-gated custody projection';
+end $$;
+rollback;
+
+-- WS7-P6 (control for WS7-N9/N11): a valid service-path custody scan with a
+-- fresh idempotency key inserts exactly one row (rolled back afterwards).
+begin;
+set local role service_role;
+do $$
+declare
+  v_rows int;
+begin
+  insert into kitluy_laundry.garment_scan_events
+    (tenant_id, digital_store_id, store_location_id, order_id, garment_id,
+     scan_type, terminal_role, from_state, to_state, actor_user_id,
+     idempotency_key, aggregate_version)
+  values
+    ('00000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000015',
+     '00000000-0000-4000-8000-000000000018', '00000000-0000-4000-8000-000000000401',
+     '00000000-0000-4000-8000-000000000410', 'WASH_START', 't1_intake_cashier',
+     'TAGGED', 'WASHING', '00000000-0000-4000-8000-000000000004',
+     'DEV-SCAN-PROBE-P6', 1);
+  get diagnostics v_rows = row_count;
+  if v_rows <> 1 then
+    raise exception 'FAIL WS7-P6: valid custody scan inserted % rows', v_rows;
+  end if;
+  raise notice 'PASS WS7-P6: valid custody scan with fresh idempotency key accepted (rolled back)';
+end $$;
+rollback;
+
+-- ---------------------------------------------------------------------------
+-- WS8 NEGATIVE CASES (13)
+-- ---------------------------------------------------------------------------
+
+-- WS8-N1 / KLSEC-018: anonymous access to the tender ledger is denied.
+begin;
+select set_config('request.jwt.claims', '{"role":"anon"}', true);
+set local role anon;
+do $$
+declare
+  v_count int;
+begin
+  begin
+    select count(*) into v_count from kitluy_payments.tenders;
+    if v_count > 0 then
+      raise exception 'FAIL WS8-N1: anon saw % tender rows', v_count;
+    end if;
+  exception
+    when insufficient_privilege then
+      null;
+  end;
+  raise notice 'PASS WS8-N1/KLSEC-018: anon denied on kitluy_payments.tenders';
+end $$;
+rollback;
+
+-- WS8-N2 / KLSEC-018: cross-tenant payment reads return zero rows in both
+-- directions.
+begin;
+select set_config('request.jwt.claims',
+  '{"sub": "00000000-0000-4000-8000-000000000010", "role": "authenticated"}', true);
+set local role authenticated;
+do $$
+declare
+  v_count int;
+begin
+  select count(*) into v_count from kitluy_payments.tenders
+  where id = '00000000-0000-4000-8000-000000000455';
+  if v_count <> 0 then
+    raise exception 'FAIL WS8-N2: tenant A store staff read the Tenant B tender';
+  end if;
+end $$;
+select set_config('request.jwt.claims',
+  '{"sub": "00000000-0000-4000-8000-000000000006", "role": "authenticated"}', true);
+do $$
+declare
+  v_count int;
+begin
+  select count(*) into v_count from kitluy_payments.tenders
+  where id = '00000000-0000-4000-8000-000000000425';
+  if v_count <> 0 then
+    raise exception 'FAIL WS8-N2: tenant B owner read the Tenant A tender';
+  end if;
+  raise notice 'PASS WS8-N2/KLSEC-018: cross-tenant tender reads return zero rows both ways';
+end $$;
+rollback;
+
+-- WS8-N3 / KLSEC-024: a direct client payment write is denied — payment truth
+-- moves only through the engine command path (KBR-PAY-003).
+begin;
+select set_config('request.jwt.claims',
+  '{"sub": "00000000-0000-4000-8000-000000000010", "role": "authenticated"}', true);
+set local role authenticated;
+do $$
+begin
+  begin
+    update kitluy_payments.tenders
+       set status = 'REFUNDED'
+     where id = '00000000-0000-4000-8000-000000000425';
+    raise exception 'FAIL WS8-N3: direct client tender UPDATE was accepted';
+  exception
+    when insufficient_privilege then
+      null;
+  end;
+  raise notice 'PASS WS8-N3/KLSEC-024: direct client payment writes fail closed';
+end $$;
+rollback;
+
+-- WS8-N4 (KBR-PAY-004): a tender allocated to a foreign-tenant Booking is
+-- rejected by the composite tenders_tenant_order_fk/tenders_store_order_fk.
+begin;
+set local role service_role;
+do $$
+begin
+  begin
+    insert into kitluy_payments.tenders
+      (tenant_id, digital_store_id, order_id, method_code, amount_minor,
+       currency_code, idempotency_key)
+    values
+      ('00000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000015',
+       '00000000-0000-4000-8000-000000000452', 'CASH', 100, 'KHR', 'PROBE-W8N4');
+    raise exception 'FAIL WS8-N4: tender against a foreign Booking was accepted';
+  exception
+    when foreign_key_violation then
+      null;
+  end;
+  raise notice 'PASS WS8-N4/KBR-PAY-004: tender cannot allocate to a foreign Booking (composite FK)';
+end $$;
+rollback;
+
+-- WS8-N5 (KBR-PAY-004; PAY-VEC-004): a USD tender on a KHR Booking is rejected
+-- with no implicit conversion (PRC-OD-005 open — no FX policy invented).
+begin;
+set local role service_role;
+do $$
+begin
+  begin
+    insert into kitluy_payments.tenders
+      (tenant_id, digital_store_id, order_id, method_code, amount_minor,
+       currency_code, idempotency_key)
+    values
+      ('00000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000015',
+       '00000000-0000-4000-8000-000000000401', 'CASH', 100, 'USD', 'PROBE-W8N5');
+    raise exception 'FAIL WS8-N5: cross-currency tender was accepted';
+  exception
+    when others then
+      if sqlerrm not like '%KLUY-PAY-CURRENCY-MISMATCH%' then
+        raise;
+      end if;
+  end;
+  raise notice 'PASS WS8-N5/KBR-PAY-004: cross-currency tender rejected (KLUY-PAY-CURRENCY-MISMATCH)';
+end $$;
+rollback;
+
+-- WS8-N6 / KLSEC-026 (KBR-PAY-005): refund four-eyes — the requester can never
+-- approve their own refund (refunds_four_eyes_check). The refundable CEILING is
+-- enforced by the canonical engine inside the command body (WS-08-T001 RV-001),
+-- not by a table constraint — the DB-level control probed here is four-eyes.
+begin;
+set local role service_role;
+do $$
+begin
+  begin
+    insert into kitluy_payments.refunds
+      (tenant_id, digital_store_id, order_id, tender_id, amount_minor,
+       currency_code, reason_code, status, requested_by, approved_by,
+       approved_at, idempotency_key)
+    values
+      ('00000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000015',
+       '00000000-0000-4000-8000-000000000404', '00000000-0000-4000-8000-000000000427',
+       100, 'KHR', 'PROBE_SELF_APPROVAL', 'APPROVED',
+       '00000000-0000-4000-8000-000000000007', '00000000-0000-4000-8000-000000000007',
+       now(), 'PROBE-W8N6');
+    raise exception 'FAIL WS8-N6: self-approved refund was accepted';
+  exception
+    when check_violation then
+      null;
+  end;
+  raise notice 'PASS WS8-N6/KLSEC-026: refund requester cannot approve own refund (four-eyes CHECK)';
+end $$;
+rollback;
+
+-- WS8-N7 (AMD-I4; PAY-VEC-009): a duplicate provider payment confirmation is
+-- rejected by the (provider_key, provider_event_id) uniqueness anchor.
+begin;
+set local role service_role;
+do $$
+begin
+  begin
+    insert into kitluy_payments.payment_provider_events
+      (tenant_id, tender_id, provider_key, provider_event_id, signature_valid,
+       payload_hash, status)
+    values
+      ('00000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000427',
+       'DEV_KHQR_SIM', 'DEV-EVT-KHQR-0001', true, 'probe-duplicate-hash',
+       'DUPLICATE_IGNORED');
+    raise exception 'FAIL WS8-N7: duplicate provider event was accepted';
+  exception
+    when unique_violation then
+      null;
+  end;
+  raise notice 'PASS WS8-N7/AMD-I4: duplicate provider confirmation rejected (provider event uniqueness)';
+end $$;
+rollback;
+
+-- WS8-N8 (engine runIdempotent; PAY-VEC-014): a second tender with a replayed
+-- Tenant idempotency key is rejected.
+begin;
+set local role service_role;
+do $$
+begin
+  begin
+    insert into kitluy_payments.tenders
+      (tenant_id, digital_store_id, order_id, method_code, amount_minor,
+       currency_code, idempotency_key)
+    values
+      ('00000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000015',
+       '00000000-0000-4000-8000-000000000401', 'CASH', 100, 'KHR', 'DEV-PAY-0001');
+    raise exception 'FAIL WS8-N8: duplicate tender idempotency key was accepted';
+  exception
+    when unique_violation then
+      null;
+  end;
+  raise notice 'PASS WS8-N8: duplicate tender idempotency key rejected (tenant scope)';
+end $$;
+rollback;
+
+-- WS8-N9 / KLSEC-036 (Cycle-6 §11): finalized payment history and void
+-- evidence are immutable for the service path (revoked grants over
+-- enforce_append_only — either layer rejecting is a pass).
+begin;
+set local role service_role;
+do $$
+begin
+  begin
+    update kitluy_payments.payment_status_history
+       set reason_code = 'tamper'
+     where id = '00000000-0000-4000-8000-000000000426';
+    raise exception 'FAIL WS8-N9: payment status history was rewritten';
+  exception
+    when insufficient_privilege then
+      null;
+    when others then
+      if sqlerrm not like '%KLUY-AUTH-APPEND-ONLY%' then
+        raise;
+      end if;
+  end;
+  begin
+    delete from kitluy_payments.voids
+     where tenant_id = '00000000-0000-4000-8000-000000000011';
+    raise exception 'FAIL WS8-N9: void evidence was deleted';
+  exception
+    when insufficient_privilege then
+      null;
+    when others then
+      if sqlerrm not like '%KLUY-AUTH-APPEND-ONLY%' then
+        raise;
+      end if;
+  end;
+  raise notice 'PASS WS8-N9/KLSEC-036: payment history and void evidence immutable for the service path';
+end $$;
+rollback;
+
+-- WS8-N10 (AMD-I2): direct journal mutation is impossible even for
+-- service_role — INSERT/UPDATE/DELETE grants on the journal relations are
+-- revoked; the security-definer RPC is the sole write path.
+begin;
+set local role service_role;
+do $$
+begin
+  begin
+    insert into kitluy_finance.journal_entries
+      (tenant_id, digital_store_id, business_date, entry_type, posting_rule_key,
+       source_type, source_id, currency_code)
+    values
+      ('00000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000015',
+       date '2026-07-27', 'DEV_PROBE', 'DEV-RULE-PROBE-DIRECT', 'TENDER',
+       gen_random_uuid(), 'KHR');
+    raise exception 'FAIL WS8-N10: direct journal INSERT was accepted for service_role';
+  exception
+    when insufficient_privilege then
+      null;
+  end;
+  begin
+    update kitluy_finance.journal_postings
+       set memo = 'tamper'
+     where tenant_id = '00000000-0000-4000-8000-000000000011';
+    raise exception 'FAIL WS8-N10: direct journal posting UPDATE was accepted';
+  exception
+    when insufficient_privilege then
+      null;
+    when others then
+      if sqlerrm not like '%KLUY-AUTH-APPEND-ONLY%' then
+        raise;
+      end if;
+  end;
+  begin
+    delete from kitluy_finance.journal_entries
+     where tenant_id = '00000000-0000-4000-8000-000000000011';
+    raise exception 'FAIL WS8-N10: direct journal DELETE was accepted';
+  exception
+    when insufficient_privilege then
+      null;
+    when others then
+      if sqlerrm not like '%KLUY-AUTH-APPEND-ONLY%' then
+        raise;
+      end if;
+  end;
+  raise notice 'PASS WS8-N10/AMD-I2: direct journal writes revoked even for service_role (RPC-only)';
+end $$;
+rollback;
+
+-- WS8-N11 / KLSEC-018 (combined negative+positive control): Tenant B reads
+-- zero Tenant A journal entries; Tenant A store staff reads the seeded entry.
+begin;
+select set_config('request.jwt.claims',
+  '{"sub": "00000000-0000-4000-8000-000000000006", "role": "authenticated"}', true);
+set local role authenticated;
+do $$
+declare
+  v_count int;
+begin
+  select count(*) into v_count from kitluy_finance.journal_entries
+  where tenant_id = '00000000-0000-4000-8000-000000000011';
+  if v_count <> 0 then
+    raise exception 'FAIL WS8-N11: tenant B owner saw % Tenant A journal entries', v_count;
+  end if;
+end $$;
+select set_config('request.jwt.claims',
+  '{"sub": "00000000-0000-4000-8000-000000000010", "role": "authenticated"}', true);
+do $$
+declare
+  v_count int;
+begin
+  select count(*) into v_count from kitluy_finance.journal_entries
+  where tenant_id = '00000000-0000-4000-8000-000000000011';
+  if v_count < 1 then
+    raise exception 'FAIL WS8-N11: tenant A staff cannot read own journal entries (positive control broken)';
+  end if;
+  raise notice 'PASS WS8-N11/KLSEC-018: journal entries invisible cross-tenant, readable in tenant scope';
+end $$;
+rollback;
+
+-- WS8-N12 (AMD-I2): the posting RPC is not executable by authenticated
+-- clients — EXECUTE is granted to service_role only.
+begin;
+select set_config('request.jwt.claims',
+  '{"sub": "00000000-0000-4000-8000-000000000010", "role": "authenticated"}', true);
+set local role authenticated;
+do $$
+declare
+  v_result jsonb;
+begin
+  begin
+    v_result := kitluy_finance.post_journal_entry_v1(
+      '00000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000015',
+      null, date '2026-07-27', 'DEV_PROBE', 'DEV-RULE-PROBE-CLIENT', null,
+      'TENDER', '00000000-0000-4000-8000-000000000425', 'PROBE-HASH-N12', 'KHR',
+      null, null, null, null, 'DEV-IDEM-PROBE-N12', '[]'::jsonb);
+    raise exception 'FAIL WS8-N12: authenticated client executed the posting RPC (%)', v_result;
+  exception
+    when insufficient_privilege then
+      null;
+  end;
+  raise notice 'PASS WS8-N12/AMD-I2: posting RPC not executable by authenticated clients';
+end $$;
+rollback;
+
+-- WS8-N13 (KBR-PAY §4): tender status corruption — CAPTURED can never move
+-- back to PENDING (forward-only whitelist).
+begin;
+set local role service_role;
+do $$
+begin
+  begin
+    update kitluy_payments.tenders
+       set status = 'PENDING', updated_at = now()
+     where id = '00000000-0000-4000-8000-000000000425';
+    raise exception 'FAIL WS8-N13: CAPTURED -> PENDING tender rewind was accepted';
+  exception
+    when others then
+      if sqlerrm not like '%KLUY-GUARD-INVALID-TRANSITION%' then
+        raise;
+      end if;
+  end;
+  raise notice 'PASS WS8-N13/KBR-PAY: tender lifecycle rewind rejected (KLUY-GUARD-INVALID-TRANSITION)';
+end $$;
+rollback;
+
+-- ---------------------------------------------------------------------------
+-- WS8 POSITIVE CASES (6)
+-- ---------------------------------------------------------------------------
+
+-- WS8-P1 (control for WS8-N2): u10 reads both own-store tenders, the KHQR
+-- transaction reference and the provider attempt.
+begin;
+select set_config('request.jwt.claims',
+  '{"sub": "00000000-0000-4000-8000-000000000010", "role": "authenticated"}', true);
+set local role authenticated;
+do $$
+declare
+  v_tenders int;
+  v_khqr int;
+  v_attempts int;
+begin
+  select count(*) into v_tenders from kitluy_payments.tenders
+  where id in ('00000000-0000-4000-8000-000000000425', '00000000-0000-4000-8000-000000000427');
+  select count(*) into v_khqr from kitluy_payments.khqr_transactions
+  where id = '00000000-0000-4000-8000-000000000429' and status = 'SUCCEEDED';
+  select count(*) into v_attempts from kitluy_payments.payment_attempts
+  where id = '00000000-0000-4000-8000-000000000428' and status = 'SUCCEEDED';
+  if v_tenders <> 2 or v_khqr <> 1 or v_attempts <> 1 then
+    raise exception 'FAIL WS8-P1: payment read wrong (tenders=%, khqr=%, attempts=%)',
+      v_tenders, v_khqr, v_attempts;
+  end if;
+  raise notice 'PASS WS8-P1: own-store tenders, KHQR reference and attempt readable';
+end $$;
+rollback;
+
+-- WS8-P2 (KBR-PAY-005 four-eyes evidence): the APPROVED refund carries a
+-- DISTINCT approver in the row itself.
+begin;
+select set_config('request.jwt.claims',
+  '{"sub": "00000000-0000-4000-8000-000000000010", "role": "authenticated"}', true);
+set local role authenticated;
+do $$
+declare
+  v_count int;
+begin
+  select count(*) into v_count from kitluy_payments.refunds
+  where id = '00000000-0000-4000-8000-000000000432'
+    and status = 'APPROVED'
+    and approved_by is not null
+    and approved_by <> requested_by;
+  if v_count <> 1 then
+    raise exception 'FAIL WS8-P2: approved refund with distinct approver not readable';
+  end if;
+  raise notice 'PASS WS8-P2: refund readable with distinct-approver four-eyes evidence';
+end $$;
+rollback;
+
+-- WS8-P3 (KBR-PAY-009/KBR-FIN-005): the reconciliation discrepancy under
+-- review and the settlement fee composition (gross = fee + net) are readable.
+begin;
+select set_config('request.jwt.claims',
+  '{"sub": "00000000-0000-4000-8000-000000000010", "role": "authenticated"}', true);
+set local role authenticated;
+do $$
+declare
+  v_recon int;
+  v_line int;
+  v_settlement int;
+begin
+  select count(*) into v_recon from kitluy_payments.payment_reconciliations
+  where id = '00000000-0000-4000-8000-000000000436' and status = 'EXCEPTIONS_FOUND';
+  select count(*) into v_line from kitluy_payments.payment_reconciliation_lines
+  where id = '00000000-0000-4000-8000-000000000437'
+    and difference_minor = -100 and review_status = 'PENDING_REVIEW';
+  select count(*) into v_settlement from kitluy_payments.settlement_refs
+  where id = '00000000-0000-4000-8000-000000000438'
+    and settled_amount_minor = 7500 and fee_minor = 100 and net_minor = 7400
+    and settled_amount_minor = fee_minor + net_minor;
+  if v_recon <> 1 or v_line <> 1 or v_settlement <> 1 then
+    raise exception 'FAIL WS8-P3: reconciliation read wrong (recon=%, line=%, settlement=%)',
+      v_recon, v_line, v_settlement;
+  end if;
+  raise notice 'PASS WS8-P3: reconciliation discrepancy (-100) and settlement fee composition (7500=100+7400) readable';
+end $$;
+rollback;
+
+-- WS8-P4 (Cycle-6 §11): u10 reads the append-only payment status history of
+-- both own-store tenders.
+begin;
+select set_config('request.jwt.claims',
+  '{"sub": "00000000-0000-4000-8000-000000000010", "role": "authenticated"}', true);
+set local role authenticated;
+do $$
+declare
+  v_count int;
+begin
+  select count(*) into v_count from kitluy_payments.payment_status_history
+  where id in ('00000000-0000-4000-8000-000000000426', '00000000-0000-4000-8000-000000000431')
+    and to_status = 'CAPTURED';
+  if v_count <> 2 then
+    raise exception 'FAIL WS8-P4: expected 2 payment status history rows, saw %', v_count;
+  end if;
+  raise notice 'PASS WS8-P4: payment status history readable for own-store tenders';
+end $$;
+rollback;
+
+-- WS8-P5 (AMD-I1/KBR-FIN-002): tenant-scoped finance read — the account
+-- registry and the seeded BALANCED journal (debits = credits = 2000) are
+-- readable; the Tenant B account stays invisible.
+begin;
+select set_config('request.jwt.claims',
+  '{"sub": "00000000-0000-4000-8000-000000000010", "role": "authenticated"}', true);
+set local role authenticated;
+do $$
+declare
+  v_accounts int;
+  v_foreign int;
+  v_entry_id uuid;
+  v_debits bigint;
+  v_credits bigint;
+begin
+  select count(*) into v_accounts from kitluy_finance.subledger_accounts
+  where id in ('00000000-0000-4000-8000-000000000440', '00000000-0000-4000-8000-000000000441',
+               '00000000-0000-4000-8000-000000000442', '00000000-0000-4000-8000-000000000443');
+  select count(*) into v_foreign from kitluy_finance.subledger_accounts
+  where id = '00000000-0000-4000-8000-000000000456';
+  select journal_entry_id into v_entry_id from kitluy_finance.source_postings
+  where tenant_id = '00000000-0000-4000-8000-000000000011'
+    and source_type = 'TENDER'
+    and source_id = '00000000-0000-4000-8000-000000000425'
+    and posting_rule_key = 'DEV-RULE-CASH-TENDER';
+  select
+    coalesce(sum(amount_minor) filter (where direction = 'DEBIT'), 0),
+    coalesce(sum(amount_minor) filter (where direction = 'CREDIT'), 0)
+    into v_debits, v_credits
+  from kitluy_finance.journal_postings
+  where journal_entry_id = v_entry_id;
+  if v_accounts <> 4 or v_foreign <> 0 then
+    raise exception 'FAIL WS8-P5: account registry wrong (accounts=%, foreign=%)', v_accounts, v_foreign;
+  end if;
+  if v_entry_id is null or v_debits <> 2000 or v_credits <> 2000 then
+    raise exception 'FAIL WS8-P5: balanced journal wrong (entry=%, debits=%, credits=%)',
+      v_entry_id, v_debits, v_credits;
+  end if;
+  raise notice 'PASS WS8-P5: tenant-scoped accounts + seeded balanced journal readable (debits=credits=2000)';
+end $$;
+rollback;
+
+-- WS8-P6 (control for WS8-N4/N5/N8): a valid service-path tender (fresh
+-- idempotency key, Booking-matching currency) inserts exactly one row
+-- (rolled back afterwards).
+begin;
+set local role service_role;
+do $$
+declare
+  v_rows int;
+begin
+  insert into kitluy_payments.tenders
+    (tenant_id, digital_store_id, store_location_id, order_id, method_code,
+     amount_minor, currency_code, idempotency_key, created_by)
+  values
+    ('00000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000015',
+     '00000000-0000-4000-8000-000000000018', '00000000-0000-4000-8000-000000000401',
+     'CASH', 500, 'KHR', 'DEV-PAY-PROBE-P6', '00000000-0000-4000-8000-000000000004');
+  get diagnostics v_rows = row_count;
+  if v_rows <> 1 then
+    raise exception 'FAIL WS8-P6: valid tender inserted % rows', v_rows;
+  end if;
+  raise notice 'PASS WS8-P6: valid currency-matched tender with fresh idempotency key accepted (rolled back)';
+end $$;
+rollback;
+
+select 'rls-tests complete: 14+9 baseline cases; cycle-5 WS5 7 negative + 7 positive and WS6 10 negative + 9 positive; cycle-6 WS7 13 negative + 6 positive and WS8 13 negative + 6 positive cases executed' as result;

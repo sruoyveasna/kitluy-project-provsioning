@@ -1,0 +1,34 @@
+{
+  "name": "@kitluy/payments-persistence",
+  "version": "0.1.0",
+  "private": true,
+  "description": "WS-08 persistence adapters: wire the canonical @kitluy/payments engine to the authoritative local Supabase schema (dev integration layer; no providers, no credentials)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "@types/node": "catalog:",
+    "@types/pg": "catalog:",
+    "vitest": "catalog:"
+  },
+  "dependencies": {
+    "@kitluy/money": "workspace:*",
+    "@kitluy/payments": "workspace:*",
+    "@kitluy/approvals": "workspace:*",
+    "@kitluy/shared-types": "workspace:*",
+    "pg": "catalog:"
+  }
+}

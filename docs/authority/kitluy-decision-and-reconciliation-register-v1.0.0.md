@@ -160,6 +160,27 @@ owner review path as Amendment-001); C4 missing customer-data RBAC key
 (PC-TENANT interim, registry amendment proposed); C8 kitluy_notifications
 partial schema (remainder group 0100).
 
+### Cycle-6 reconciliation (WS-07/08, 2026-07-27)
+
+Recorded, not silently resolved (register rule; higher-authority decision
+preserved in each cell):
+
+| ID  | Conflict / deviation                                                                                                                                                                                                                                                                                                                     | Disposition                                                                                                                                                                                                                                                                                                                                                     |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C11 | Enum-registry `laundry_booking_status` (14 values incl. `IN_PRODUCTION`, `QA`, `PICKUP_IN_PROGRESS`, `COMPLETED`) conflicts with the owner-canonical state machines: KBR-TXN §4 lifecycle (10 states incl. `CONFIRMED/FINALIZED`) + KBR-LND §4 production chain (7 states incl. `QA_PACKAGING`, `PICKED_UP`), which the tested engines implement | Persistence encodes the owner-canonical §4 vocabularies (migrations 0075/0080; engines are the canonical implementation per Cycle-6 §6). The enum-registry set is NOT encoded and NOT deleted — owner decision owed on the registry row; compatibility mapping required if both survive                                                                            |
+| C12 | Cycle-6 relations/columns mandated by the cycle instruction but absent from DD v1.0.0: `kitluy_laundry.booking_production_state` (projection), `kitluy_payments.payment_status_history` (append-only history); additive columns (orders `version`/`payment_state`/`required_deposit_minor`/intake verification, order_lines `weight_rounding_rule`, garments `unit_kind`/`container_id`, tenders `applied_minor`/`change_due_minor`); weight stored as integer grams (engine contract) vs DD `numeric(18,4)` quantity convention; DD has no payment-allocations relation (tender→order binding + `applied_minor` is the implemented allocation form) | Implemented-and-tested schema is the implementation truth (C1/C2 precedent); DD Amendment-003 REQUIRED (KLREQ-013). All differences are omission-class except the weight representation (convention conflict — engine integer grams preserved; DD convention row unchanged) and `laundry_booking_status` (see C11)                                                 |
+| C13 | RBAC 107-key registry has no neutral transaction-read key and no finance-read key for the new `kitluy_orders`/`kitluy_finance` SELECT policies                                                                                                                                                                                             | Interim strictest scopes encoded in group 0095 (store-scope-only / tenant-scope-only, C4 precedent); registry amendment proposed (KLREQ-014)                                                                                                                                                                                                                     |
+
+DD Amendment-002 (KLREQ-012, conflict C2) authored 2026-07-27 in
+decision-ready form at
+`docs/data/kitluy-suite-supabase-data-dictionary-amendment-002-customer-identity-and-consent-v1.0.0.md`
+— PROPOSED, pending independent schema review and owner approval; C1–C10
+records preserved unchanged. KL-DEC-001 (KLD-2026-07-26-002 ballot) remains
+OWNER-APPROVAL-REQUIRED — no Edge/Hub route shapes, public event names, public
+error vocabulary or terminal-profile renames were finalized this cycle; custody
+event names stay internal (KLREC-2026-07-26-011 fence) and outbox publication
+stays unimplemented.
+
 ### Engineering decisions (bootstrap + this task)
 
 KLBOOT-DEC-001..007 (see ADR-0001..0005 in `docs/decisions/`) remain in force.

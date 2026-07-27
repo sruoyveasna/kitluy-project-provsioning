@@ -48,7 +48,21 @@ const TYPES_HEADER =
     "// migrated development database. Regenerate instead of editing.",
     "",
   ].join("\n") + "\n";
-const KITLUY_SCHEMAS = ["public", "kitluy_core", "kitluy_auth", "kitluy_admin", "kitluy_audit"];
+// Cycle-6 (WS-07/WS-08) added kitluy_orders/kitluy_laundry/kitluy_payments/
+// kitluy_finance to generated-type coverage. Known gap (out of Cycle-6 scope,
+// recorded): Cycle-5's kitluy_config/kitluy_storefront/kitluy_notifications
+// are still absent from generation.
+const KITLUY_SCHEMAS = [
+  "public",
+  "kitluy_core",
+  "kitluy_auth",
+  "kitluy_admin",
+  "kitluy_audit",
+  "kitluy_orders",
+  "kitluy_laundry",
+  "kitluy_payments",
+  "kitluy_finance",
+];
 
 const command = process.argv[2];
 
@@ -136,7 +150,9 @@ function localDbUrl() {
 }
 
 function run(cmd, args, options = {}) {
-  const result = spawnSync(cmd, args, { stdio: "inherit", ...options });
+  // shell:true so launcher shims (pnpm.cmd, supabase.exe wrappers) resolve on
+  // Windows as well as POSIX (Cycle-6: repository moved to Windows Git Bash).
+  const result = spawnSync(cmd, args, { stdio: "inherit", shell: true, ...options });
   if (result.error) {
     console.error(`ERROR: failed to launch ${cmd}: ${result.error.message}`);
     process.exit(1);

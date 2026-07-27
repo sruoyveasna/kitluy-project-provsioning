@@ -568,3 +568,509 @@ values
    'VERIFIED', 'Identity verified for demo export case (fixture)', 'DEMO-EVIDENCE-352',
    '00000000-0000-4000-8000-000000000002', '2026-07-27T04:10:00Z')
 on conflict do nothing;
+
+-- ===========================================================================
+-- Cycle-6 fixtures (WS-07/WS-08, groups 0075-0095) — SYNTHETIC ONLY.
+-- Personas/cases (Cycle-6 instruction §20): per-piece Booking, per-weight
+-- Booking, verified intake, garment group/item/custody container, tag +
+-- replacement, custody scans, Ready storage assignment, deposit-required
+-- Booking, cash deposit, simulated KHQR payment, partially/fully paid
+-- Bookings, refund requester + DISTINCT reviewer, reconciliation discrepancy,
+-- balanced development finance posting (fictional DEV-* accounts only —
+-- FIN-OD-001 open), cross-Tenant attacker fixtures. No real names, phones,
+-- payment credentials or customer data. Idempotent: fixed UUIDs (..04NN) +
+-- "on conflict do nothing"; the one guarded lifecycle UPDATE is version-
+-- fenced so a second run matches zero rows. The finance posting runs through
+-- kitluy_finance.post_journal_entry_v1 and REPLAYS on the second run
+-- (source-dedupe AMD-I3) — the notice labels which path executed.
+-- ===========================================================================
+
+-- Dev permission fixtures for the WS-07/08 read policies (registry keys
+-- laundry.bookings.read / payments.read; production registry seeds remain
+-- migration group 0150 — these are DEV fixtures only, Cycle-5 precedent).
+insert into kitluy_auth.permissions (id, permission_key, version, risk_class, resource_types, environments, status)
+values
+  ('00000000-0000-4000-8000-000000000460', 'laundry.bookings.read', 1, 'LOW', '{laundry_booking,garment_custody,store_location}', '{all}', 'ACTIVE'),
+  ('00000000-0000-4000-8000-000000000461', 'payments.read', 1, 'LOW', '{payment,refund_request}', '{all}', 'ACTIVE')
+on conflict do nothing;
+
+insert into kitluy_auth.role_permission_grants (id, role_template_id, permission_id, effect)
+values
+  ('00000000-0000-4000-8000-000000000462', '00000000-0000-4000-8000-000000000037', '00000000-0000-4000-8000-000000000460', 'ALLOW'),
+  ('00000000-0000-4000-8000-000000000463', '00000000-0000-4000-8000-000000000037', '00000000-0000-4000-8000-000000000461', 'ALLOW'),
+  ('00000000-0000-4000-8000-000000000464', '00000000-0000-4000-8000-000000000036', '00000000-0000-4000-8000-000000000460', 'ALLOW'),
+  ('00000000-0000-4000-8000-000000000465', '00000000-0000-4000-8000-000000000036', '00000000-0000-4000-8000-000000000461', 'ALLOW')
+on conflict do nothing;
+
+-- Booking A1: per-piece, deposit-required, PARTIALLY_PAID (cash deposit).
+-- Verified intake at T1 by the cashier persona (KLD-2026-07-25-001 boundary).
+insert into kitluy_orders.orders
+  (id, tenant_id, digital_store_id, store_location_id, customer_id, order_number,
+   vertical_code, source_code, status, currency_code, subtotal_minor,
+   discount_minor, tax_minor, total_minor, required_deposit_minor, payment_state,
+   due_at, intake_verified_at, intake_verified_by, idempotency_key, created_by)
+values
+  ('00000000-0000-4000-8000-000000000401', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000015', '00000000-0000-4000-8000-000000000018',
+   '00000000-0000-4000-8000-000000000324', 'DEV-BKG-0001', 'LAUNDRY', 'WALK_IN',
+   'CONFIRMED/FINALIZED', 'KHR', 6000, 0, 0, 6000, 2000, 'PARTIALLY_PAID',
+   '2026-07-29T10:00:00Z', '2026-07-27T08:00:00Z',
+   '00000000-0000-4000-8000-000000000004', 'DEV-BKG-0001', '00000000-0000-4000-8000-000000000004')
+on conflict do nothing;
+
+insert into kitluy_orders.order_lines
+  (id, tenant_id, digital_store_id, order_id, line_no, catalog_item_id,
+   service_code, pricing_mode, quantity, unit_price_minor, price_version,
+   currency_code, subtotal_minor, total_minor)
+values
+  ('00000000-0000-4000-8000-000000000402', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000015', '00000000-0000-4000-8000-000000000401', 1,
+   '00000000-0000-4000-8000-000000000301', 'SHIRT-WASH', 'PER_PIECE', 3, 2000, 1,
+   'KHR', 6000, 6000)
+on conflict do nothing;
+
+insert into kitluy_orders.order_events
+  (id, tenant_id, order_id, event_type, from_status, to_status, from_version,
+   to_version, actor_user_id, idempotency_key, occurred_at)
+values
+  ('00000000-0000-4000-8000-000000000403', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000401', 'booking_confirmed_at_verified_intake',
+   null, 'CONFIRMED/FINALIZED', null, 1,
+   '00000000-0000-4000-8000-000000000004', 'DEV-EVT-0001', '2026-07-27T08:00:00Z')
+on conflict do nothing;
+
+-- Booking A2: per-weight, fully paid via simulated KHQR, production READY.
+insert into kitluy_orders.orders
+  (id, tenant_id, digital_store_id, store_location_id, customer_id, order_number,
+   vertical_code, source_code, status, currency_code, subtotal_minor,
+   discount_minor, tax_minor, total_minor, payment_state, due_at,
+   intake_verified_at, intake_verified_by, idempotency_key, created_by)
+values
+  ('00000000-0000-4000-8000-000000000404', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000015', '00000000-0000-4000-8000-000000000018',
+   '00000000-0000-4000-8000-000000000326', 'DEV-BKG-0002', 'LAUNDRY', 'WALK_IN',
+   'CONFIRMED/FINALIZED', 'KHR', 7500, 0, 0, 7500, 'PAID',
+   '2026-07-28T17:00:00Z', '2026-07-27T08:30:00Z',
+   '00000000-0000-4000-8000-000000000004', 'DEV-BKG-0002', '00000000-0000-4000-8000-000000000004')
+on conflict do nothing;
+
+insert into kitluy_orders.order_lines
+  (id, tenant_id, digital_store_id, order_id, line_no, catalog_item_id,
+   service_code, pricing_mode, weight_grams, weight_rounding_rule,
+   unit_price_minor, price_version, currency_code, subtotal_minor, total_minor)
+values
+  ('00000000-0000-4000-8000-000000000405', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000015', '00000000-0000-4000-8000-000000000404', 1,
+   '00000000-0000-4000-8000-000000000304', 'WASH-KG', 'PER_WEIGHT', 2500,
+   'round_half_up_minor_unit', 3000, 1, 'KHR', 7500, 7500)
+on conflict do nothing;
+
+insert into kitluy_orders.order_events
+  (id, tenant_id, order_id, event_type, from_status, to_status, from_version,
+   to_version, actor_user_id, idempotency_key, occurred_at)
+values
+  ('00000000-0000-4000-8000-000000000406', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000404', 'booking_confirmed_at_verified_intake',
+   null, 'CONFIRMED/FINALIZED', null, 1,
+   '00000000-0000-4000-8000-000000000004', 'DEV-EVT-0002', '2026-07-27T08:30:00Z')
+on conflict do nothing;
+
+-- Guarded lifecycle transition exercised inside the seed: CONFIRMED/FINALIZED
+-- -> IN_PROGRESS on Booking A2 (version-fenced; second run matches 0 rows).
+update kitluy_orders.orders
+  set status = 'IN_PROGRESS', version = 2
+  where id = '00000000-0000-4000-8000-000000000404'
+    and status = 'CONFIRMED/FINALIZED' and version = 1;
+
+-- Production projections + history (Booking-level summary; custody events
+-- remain the detailed evidence — KBR-LND §4 note).
+insert into kitluy_laundry.booking_production_state
+  (order_id, tenant_id, digital_store_id, store_location_id, production_status)
+values
+  ('00000000-0000-4000-8000-000000000401', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000015', '00000000-0000-4000-8000-000000000018', 'RECEIVED'),
+  ('00000000-0000-4000-8000-000000000404', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000015', '00000000-0000-4000-8000-000000000018', 'READY')
+on conflict do nothing;
+
+insert into kitluy_laundry.booking_status_history
+  (id, tenant_id, order_id, from_status, to_status, actor_user_id,
+   idempotency_key, aggregate_version, occurred_at)
+values
+  ('00000000-0000-4000-8000-000000000407', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000401', null, 'RECEIVED',
+   '00000000-0000-4000-8000-000000000004', 'DEV-PROD-0001', 1, '2026-07-27T08:05:00Z'),
+  ('00000000-0000-4000-8000-000000000408', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000404', null, 'RECEIVED',
+   '00000000-0000-4000-8000-000000000004', 'DEV-PROD-0002', 1, '2026-07-27T08:35:00Z'),
+  ('00000000-0000-4000-8000-000000000409', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000404', 'QA_PACKAGING', 'READY',
+   '00000000-0000-4000-8000-000000000003', 'DEV-PROD-0003', 1, '2026-07-27T11:00:00Z')
+on conflict do nothing;
+
+-- Garment group (per-piece Booking), custody container then garment item
+-- inside it (per-weight Booking). Active tag on the item after replacement.
+insert into kitluy_laundry.garments
+  (id, tenant_id, order_id, unit_kind, container_id, tag_code, garment_type,
+   piece_count, status, intake_notes)
+values
+  ('00000000-0000-4000-8000-000000000410', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000401', 'GARMENT_GROUP', null, 'DEV-TAG-0002',
+   'SHIRT_BATCH', 3, 'TAGGED', 'Demo intake batch, no defects noted (fixture)'),
+  ('00000000-0000-4000-8000-000000000412', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000404', 'CUSTODY_CONTAINER', null, null,
+   'WASH_BAG', null, 'READY', null)
+on conflict do nothing;
+
+insert into kitluy_laundry.garments
+  (id, tenant_id, order_id, unit_kind, container_id, tag_code, garment_type,
+   status, intake_notes)
+values
+  ('00000000-0000-4000-8000-000000000411', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000404', 'GARMENT_ITEM',
+   '00000000-0000-4000-8000-000000000412', 'DEV-TAG-0001R', 'BULK_WASH_LOAD',
+   'READY', 'Demo per-weight load (fixture)')
+on conflict do nothing;
+
+insert into kitluy_laundry.laundry_tags
+  (id, tenant_id, order_id, garment_id, tag_code, template_version, issued_by,
+   issued_at, voided_at, voided_by)
+values
+  ('00000000-0000-4000-8000-000000000413', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000404', '00000000-0000-4000-8000-000000000411',
+   'DEV-TAG-0001', 'v1', '00000000-0000-4000-8000-000000000004',
+   '2026-07-27T08:31:00Z', '2026-07-27T08:40:00Z', '00000000-0000-4000-8000-000000000004')
+on conflict do nothing;
+
+insert into kitluy_laundry.laundry_tags
+  (id, tenant_id, order_id, garment_id, tag_code, template_version,
+   replaces_tag_id, replacement_reason_code, issued_by, issued_at)
+values
+  ('00000000-0000-4000-8000-000000000414', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000404', '00000000-0000-4000-8000-000000000411',
+   'DEV-TAG-0001R', 'v1', '00000000-0000-4000-8000-000000000413',
+   'UNREADABLE_TAG', '00000000-0000-4000-8000-000000000004', '2026-07-27T08:40:00Z')
+on conflict do nothing;
+
+insert into kitluy_laundry.laundry_tags
+  (id, tenant_id, order_id, garment_id, tag_code, template_version, issued_by, issued_at)
+values
+  ('00000000-0000-4000-8000-000000000422', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000401', '00000000-0000-4000-8000-000000000410',
+   'DEV-TAG-0002', 'v1', '00000000-0000-4000-8000-000000000004', '2026-07-27T08:02:00Z')
+on conflict do nothing;
+
+-- Ready storage positions: occupied (A2), free spare, sibling-Location spare.
+insert into kitluy_laundry.ready_storage_positions
+  (id, tenant_id, digital_store_id, store_location_id, position_code,
+   position_type, status)
+values
+  ('00000000-0000-4000-8000-000000000417', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000015', '00000000-0000-4000-8000-000000000018',
+   'DEV-POS-A1', 'SHELF', 'OCCUPIED'),
+  ('00000000-0000-4000-8000-000000000419', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000015', '00000000-0000-4000-8000-000000000018',
+   'DEV-POS-A2', 'SHELF', 'AVAILABLE'),
+  ('00000000-0000-4000-8000-000000000420', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000015', '00000000-0000-4000-8000-000000000019',
+   'DEV-POS-B1', 'SHELF', 'AVAILABLE')
+on conflict do nothing;
+
+-- Custody chain evidence: T1 intake scan (A1) and T3 Ready scan-in (A2, with
+-- storage position) — append-only, Tenant-scoped idempotency keys.
+insert into kitluy_laundry.garment_scan_events
+  (id, tenant_id, digital_store_id, store_location_id, order_id, garment_id,
+   scan_type, terminal_role, from_state, to_state, storage_position_id,
+   actor_user_id, idempotency_key, aggregate_version, occurred_at)
+values
+  ('00000000-0000-4000-8000-000000000415', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000015', '00000000-0000-4000-8000-000000000018',
+   '00000000-0000-4000-8000-000000000401', '00000000-0000-4000-8000-000000000410',
+   'INTAKE', 't1_intake_cashier', null, 'RECEIVED', null,
+   '00000000-0000-4000-8000-000000000004', 'DEV-SCAN-0001', 1, '2026-07-27T08:01:00Z'),
+  ('00000000-0000-4000-8000-000000000416', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000015', '00000000-0000-4000-8000-000000000018',
+   '00000000-0000-4000-8000-000000000404', '00000000-0000-4000-8000-000000000411',
+   'READY_SCAN_IN', 't3_ready_scan_in', 'PACKED', 'READY',
+   '00000000-0000-4000-8000-000000000417',
+   '00000000-0000-4000-8000-000000000003', 'DEV-SCAN-0002', 2, '2026-07-27T11:00:00Z')
+on conflict do nothing;
+
+insert into kitluy_laundry.ready_storage_assignments
+  (id, tenant_id, order_id, position_id, garment_id, assigned_by, assigned_at)
+values
+  ('00000000-0000-4000-8000-000000000418', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000404', '00000000-0000-4000-8000-000000000417',
+   '00000000-0000-4000-8000-000000000411', '00000000-0000-4000-8000-000000000003',
+   '2026-07-27T11:01:00Z')
+on conflict do nothing;
+
+-- Rewash record (open, non-blocking) on the per-weight load.
+insert into kitluy_laundry.garment_exceptions
+  (id, tenant_id, order_id, garment_id, exception_type, severity, description,
+   blocking, opened_by, opened_at)
+values
+  ('00000000-0000-4000-8000-000000000421', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000404', '00000000-0000-4000-8000-000000000411',
+   'REWASH', 'LOW', 'Demo rewash record: one item re-queued after QA (fixture)',
+   false, '00000000-0000-4000-8000-000000000003', '2026-07-27T10:00:00Z')
+on conflict do nothing;
+
+-- Cash deposit tender on Booking A1 (CAPTURED; deposit semantics derive from
+-- the engine — KBR-PAY-004 keeps "deposit policy" an input, nothing guessed).
+insert into kitluy_payments.tenders
+  (id, tenant_id, digital_store_id, store_location_id, order_id, method_code,
+   amount_minor, applied_minor, change_due_minor, currency_code, status,
+   idempotency_key, captured_at, created_by)
+values
+  ('00000000-0000-4000-8000-000000000425', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000015', '00000000-0000-4000-8000-000000000018',
+   '00000000-0000-4000-8000-000000000401', 'CASH', 2000, 2000, 0, 'KHR',
+   'CAPTURED', 'DEV-PAY-0001', '2026-07-27T08:02:00Z',
+   '00000000-0000-4000-8000-000000000004')
+on conflict do nothing;
+
+insert into kitluy_payments.payment_status_history
+  (id, tenant_id, tender_id, from_status, to_status, actor_user_id, occurred_at)
+values
+  ('00000000-0000-4000-8000-000000000426', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000425', 'PENDING', 'CAPTURED',
+   '00000000-0000-4000-8000-000000000004', '2026-07-27T08:02:00Z')
+on conflict do nothing;
+
+-- Simulated KHQR payment on Booking A2 (verified simulator callback — the
+-- provider is [REQUIRED] PAY-OD-001/BLK-006; DEV_KHQR_SIM is clearly fictional).
+insert into kitluy_payments.tenders
+  (id, tenant_id, digital_store_id, store_location_id, order_id, method_code,
+   amount_minor, applied_minor, currency_code, status, provider_key,
+   idempotency_key, captured_at, created_by)
+values
+  ('00000000-0000-4000-8000-000000000427', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000015', '00000000-0000-4000-8000-000000000018',
+   '00000000-0000-4000-8000-000000000404', 'KHQR', 7500, 7500, 'KHR',
+   'CAPTURED', 'DEV_KHQR_SIM', 'DEV-PAY-0002', '2026-07-27T08:45:00Z',
+   '00000000-0000-4000-8000-000000000004')
+on conflict do nothing;
+
+insert into kitluy_payments.payment_attempts
+  (id, tenant_id, tender_id, provider_key, provider_attempt_ref, status, attempted_at)
+values
+  ('00000000-0000-4000-8000-000000000428', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000427', 'DEV_KHQR_SIM', 'DEV-KHQR-ATT-0001',
+   'SUCCEEDED', '2026-07-27T08:44:00Z')
+on conflict do nothing;
+
+insert into kitluy_payments.khqr_transactions
+  (id, tenant_id, tender_id, merchant_ref, qr_payload_hash, amount_minor,
+   currency_code, status, provider_transaction_id, expires_at, confirmed_at)
+values
+  ('00000000-0000-4000-8000-000000000429', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000427', 'DEV-KHQR-0001',
+   'f1c7000000000000000000000000000000000000000000000000000000000dee',
+   7500, 'KHR', 'SUCCEEDED', 'DEV-PTX-0001', '2026-07-27T09:00:00Z',
+   '2026-07-27T08:45:00Z')
+on conflict do nothing;
+
+insert into kitluy_payments.payment_provider_events
+  (id, tenant_id, tender_id, provider_key, provider_event_id,
+   provider_transaction_id, signature_valid, payload_hash,
+   reported_amount_minor, reported_currency_code, status, received_at, processed_at)
+values
+  ('00000000-0000-4000-8000-000000000430', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000427', 'DEV_KHQR_SIM', 'DEV-EVT-KHQR-0001',
+   'DEV-PTX-0001', true,
+   'e0e7000000000000000000000000000000000000000000000000000000000dee',
+   7500, 'KHR', 'APPLIED', '2026-07-27T08:45:00Z', '2026-07-27T08:45:01Z')
+on conflict do nothing;
+
+insert into kitluy_payments.payment_status_history
+  (id, tenant_id, tender_id, from_status, to_status, actor_user_id, occurred_at)
+values
+  ('00000000-0000-4000-8000-000000000431', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000427', 'PENDING', 'CAPTURED',
+   '00000000-0000-4000-8000-000000000004', '2026-07-27T08:45:00Z')
+on conflict do nothing;
+
+-- Refund with a DISTINCT reviewer (four-eyes: requester u07, approver u08 —
+-- thresholds PAY-OD-002 open, approval ALWAYS required in dev fixtures).
+insert into kitluy_auth.approval_requests
+  (id, policy_id, requester_id, resource_type, resource_id, environment, action,
+   payload_hash, reason, status, expires_at)
+values
+  ('00000000-0000-4000-8000-000000000433', '00000000-0000-4000-8000-000000000050',
+   '00000000-0000-4000-8000-000000000007', 'refund_request',
+   '00000000-0000-4000-8000-000000000427', 'development', 'payments.refund.approve',
+   'b4f1000000000000000000000000000000000000000000000000000000000dee',
+   'Demo refund approval request (fixture)', 'PENDING', '2026-12-31T00:00:00Z')
+on conflict do nothing;
+
+insert into kitluy_auth.approval_decisions
+  (id, approval_request_id, approver_id, decision, reason, decided_at)
+values
+  ('00000000-0000-4000-8000-000000000434', '00000000-0000-4000-8000-000000000433',
+   '00000000-0000-4000-8000-000000000008', 'APPROVED',
+   'Demo four-eyes refund approval by a distinct reviewer (fixture)',
+   '2026-07-27T09:00:00Z')
+on conflict do nothing;
+
+insert into kitluy_payments.refunds
+  (id, tenant_id, digital_store_id, order_id, tender_id, amount_minor,
+   currency_code, reason_code, status, requested_by, requested_at,
+   approval_request_id, approved_by, approved_at, idempotency_key)
+values
+  ('00000000-0000-4000-8000-000000000432', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000015', '00000000-0000-4000-8000-000000000404',
+   '00000000-0000-4000-8000-000000000427', 1000, 'KHR', 'DEV_REFUND_TEST',
+   'APPROVED', '00000000-0000-4000-8000-000000000007', '2026-07-27T08:55:00Z',
+   '00000000-0000-4000-8000-000000000433', '00000000-0000-4000-8000-000000000008',
+   '2026-07-27T09:00:00Z', 'DEV-REF-0001')
+on conflict do nothing;
+
+-- Reconciliation discrepancy under review + settlement reference with fee
+-- composition (gross = fee + net). Internal simulator evidence only —
+-- provider confirmation is never settlement or reconciliation (KBR-PAY-009).
+insert into kitluy_payments.payment_reconciliations
+  (id, tenant_id, digital_store_id, scope, period_start, period_end,
+   provider_key, currency_code, status, source_as_of)
+values
+  ('00000000-0000-4000-8000-000000000436', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000015', 'PROVIDER_DAILY', '2026-07-26',
+   '2026-07-26', 'DEV_KHQR_SIM', 'KHR', 'EXCEPTIONS_FOUND',
+   '2026-07-27T00:00:00Z')
+on conflict do nothing;
+
+insert into kitluy_payments.payment_reconciliation_lines
+  (id, tenant_id, reconciliation_id, tender_id, provider_transaction_ref,
+   expected_minor, actual_minor, difference_minor, currency_code, status,
+   difference_reason_code, review_status)
+values
+  ('00000000-0000-4000-8000-000000000437', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000436', '00000000-0000-4000-8000-000000000427',
+   'DEV-PTX-0001', 7500, 7400, -100, 'KHR', 'SETTLEMENT_AMOUNT_MISMATCH',
+   'DEV_PROVIDER_FEE_UNDER_REVIEW', 'PENDING_REVIEW')
+on conflict do nothing;
+
+insert into kitluy_payments.settlement_refs
+  (id, tenant_id, tender_id, provider_key, settlement_id, settled_amount_minor,
+   fee_minor, net_minor, currency_code, settled_at, reconciliation_status)
+values
+  ('00000000-0000-4000-8000-000000000438', '00000000-0000-4000-8000-000000000011',
+   '00000000-0000-4000-8000-000000000427', 'DEV_KHQR_SIM', 'DEV-SETL-0001',
+   7500, 100, 7400, 'KHR', '2026-07-27T02:00:00Z', 'MATCHED_WITH_FEE')
+on conflict do nothing;
+
+-- Fictional development subledger accounts (mechanism proof only; the
+-- canonical chart of accounts is open owner value FIN-OD-001).
+insert into kitluy_finance.subledger_accounts
+  (id, tenant_id, digital_store_id, account_code, account_class, normal_side, status)
+values
+  ('00000000-0000-4000-8000-000000000440', '00000000-0000-4000-8000-000000000011',
+   null, 'DEV-CASH-DRAWER', 'DEV_FIXTURE', 'DEBIT', 'ACTIVE'),
+  ('00000000-0000-4000-8000-000000000441', '00000000-0000-4000-8000-000000000011',
+   null, 'DEV-ACCOUNTS-RECEIVABLE', 'DEV_FIXTURE', 'DEBIT', 'ACTIVE'),
+  ('00000000-0000-4000-8000-000000000442', '00000000-0000-4000-8000-000000000011',
+   null, 'DEV-PROVIDER-CLEARING', 'DEV_FIXTURE', 'DEBIT', 'ACTIVE'),
+  ('00000000-0000-4000-8000-000000000443', '00000000-0000-4000-8000-000000000011',
+   null, 'DEV-TENDER-ASSET', 'DEV_FIXTURE', 'DEBIT', 'ACTIVE'),
+  ('00000000-0000-4000-8000-000000000456', '00000000-0000-4000-8000-000000000012',
+   null, 'DEV-ATK-CASH', 'DEV_FIXTURE', 'DEBIT', 'ACTIVE')
+on conflict do nothing;
+
+-- Balanced development finance posting through the ONLY journal write path
+-- (post_journal_entry_v1). First run posts; the second run REPLAYS via the
+-- AMD-I3 source dedupe — the notice records which path executed.
+do $$
+declare
+  v_result jsonb;
+begin
+  v_result := kitluy_finance.post_journal_entry_v1(
+    '00000000-0000-4000-8000-000000000011',
+    '00000000-0000-4000-8000-000000000015',
+    '00000000-0000-4000-8000-000000000018',
+    date '2026-07-27',
+    'DEV_PAYMENT_POSTING',
+    'DEV-RULE-CASH-TENDER',
+    '1',
+    'TENDER',
+    '00000000-0000-4000-8000-000000000425',
+    'DEV-SRC-HASH-0001',
+    'KHR',
+    null,
+    'Dev fixture: balanced cash-tender posting (fictional accounts)',
+    '00000000-0000-4000-8000-000000000004',
+    null,
+    'DEV-FINPOST-0001',
+    jsonb_build_array(
+      jsonb_build_object(
+        'line_no', 1,
+        'subledger_account_id', '00000000-0000-4000-8000-000000000440',
+        'direction', 'DEBIT',
+        'amount_minor', 2000,
+        'memo', 'Dev cash drawer'
+      ),
+      jsonb_build_object(
+        'line_no', 2,
+        'subledger_account_id', '00000000-0000-4000-8000-000000000441',
+        'direction', 'CREDIT',
+        'amount_minor', 2000,
+        'memo', 'Dev receivable settle'
+      )
+    )
+  );
+  raise notice 'PASS fixture finance posting: replayed=%', v_result ->> 'replayed';
+end $$;
+
+-- Cross-Tenant attacker fixtures (Tenant B): Location, finalized Booking,
+-- production state and captured cash tender for isolation probes.
+insert into kitluy_core.store_locations
+  (id, tenant_id, digital_store_id, location_code, name, operating_status)
+values
+  ('00000000-0000-4000-8000-000000000450', '00000000-0000-4000-8000-000000000012',
+   '00000000-0000-4000-8000-000000000017', 'ATK-PP-01',
+   'Tenant B Location (isolation fixture)', 'ACTIVE')
+on conflict do nothing;
+
+insert into kitluy_orders.orders
+  (id, tenant_id, digital_store_id, store_location_id, customer_id, order_number,
+   vertical_code, source_code, status, currency_code, subtotal_minor,
+   discount_minor, tax_minor, total_minor, payment_state, intake_verified_at,
+   intake_verified_by, idempotency_key, created_by)
+values
+  ('00000000-0000-4000-8000-000000000452', '00000000-0000-4000-8000-000000000012',
+   '00000000-0000-4000-8000-000000000017', '00000000-0000-4000-8000-000000000450',
+   '00000000-0000-4000-8000-000000000340', 'ATK-BKG-0001', 'LAUNDRY', 'WALK_IN',
+   'CONFIRMED/FINALIZED', 'KHR', 1800, 0, 0, 1800, 'PAID',
+   '2026-07-27T08:00:00Z', '00000000-0000-4000-8000-000000000006',
+   'ATK-BKG-0001', '00000000-0000-4000-8000-000000000006')
+on conflict do nothing;
+
+insert into kitluy_orders.order_lines
+  (id, tenant_id, digital_store_id, order_id, line_no, catalog_item_id,
+   service_code, pricing_mode, quantity, unit_price_minor, price_version,
+   currency_code, subtotal_minor, total_minor)
+values
+  ('00000000-0000-4000-8000-000000000453', '00000000-0000-4000-8000-000000000012',
+   '00000000-0000-4000-8000-000000000017', '00000000-0000-4000-8000-000000000452', 1,
+   '00000000-0000-4000-8000-000000000313', 'ATK-WASH', 'PER_PIECE', 1, 1800, 1,
+   'KHR', 1800, 1800)
+on conflict do nothing;
+
+insert into kitluy_laundry.booking_production_state
+  (order_id, tenant_id, digital_store_id, store_location_id, production_status)
+values
+  ('00000000-0000-4000-8000-000000000452', '00000000-0000-4000-8000-000000000012',
+   '00000000-0000-4000-8000-000000000017', '00000000-0000-4000-8000-000000000450',
+   'RECEIVED')
+on conflict do nothing;
+
+insert into kitluy_payments.tenders
+  (id, tenant_id, digital_store_id, store_location_id, order_id, method_code,
+   amount_minor, applied_minor, change_due_minor, currency_code, status,
+   idempotency_key, captured_at, created_by)
+values
+  ('00000000-0000-4000-8000-000000000455', '00000000-0000-4000-8000-000000000012',
+   '00000000-0000-4000-8000-000000000017', '00000000-0000-4000-8000-000000000450',
+   '00000000-0000-4000-8000-000000000452', 'CASH', 1800, 1800, 0, 'KHR',
+   'CAPTURED', 'ATK-PAY-0001', '2026-07-27T08:05:00Z',
+   '00000000-0000-4000-8000-000000000006')
+on conflict do nothing;

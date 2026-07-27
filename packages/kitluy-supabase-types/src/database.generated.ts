@@ -2779,6 +2779,2111 @@ export type Database = {
       [_ in never]: never;
     };
   };
+  kitluy_finance: {
+    Tables: {
+      idempotency_records: {
+        Row: {
+          created_at: string;
+          expires_at: string | null;
+          id: string;
+          idempotency_key: string;
+          request_hash: string;
+          response_ref: string | null;
+          scope_key: string;
+          status: string;
+          tenant_id: string;
+        };
+        Insert: {
+          created_at?: string;
+          expires_at?: string | null;
+          id?: string;
+          idempotency_key: string;
+          request_hash: string;
+          response_ref?: string | null;
+          scope_key: string;
+          status?: string;
+          tenant_id: string;
+        };
+        Update: {
+          created_at?: string;
+          expires_at?: string | null;
+          id?: string;
+          idempotency_key?: string;
+          request_hash?: string;
+          response_ref?: string | null;
+          scope_key?: string;
+          status?: string;
+          tenant_id?: string;
+        };
+        Relationships: [];
+      };
+      journal_entries: {
+        Row: {
+          actor_service_key: string | null;
+          actor_user_id: string | null;
+          business_date: string;
+          business_date_policy_version: string | null;
+          correlation_id: string | null;
+          created_at: string;
+          currency_code: string;
+          description: string | null;
+          device_id: string | null;
+          digital_store_id: string;
+          entry_type: string;
+          id: string;
+          origin: string;
+          origin_device_id: string | null;
+          origin_sequence: number | null;
+          original_business_date: string | null;
+          period_classification: string;
+          pos_session_id: string | null;
+          posted_at: string;
+          posting_rule_key: string;
+          posting_rule_version: string | null;
+          reason_code: string | null;
+          reverses_journal_entry_id: string | null;
+          shift_id: string | null;
+          source_id: string;
+          source_type: string;
+          store_location_id: string | null;
+          tenant_id: string;
+        };
+        Insert: {
+          actor_service_key?: string | null;
+          actor_user_id?: string | null;
+          business_date: string;
+          business_date_policy_version?: string | null;
+          correlation_id?: string | null;
+          created_at?: string;
+          currency_code: string;
+          description?: string | null;
+          device_id?: string | null;
+          digital_store_id: string;
+          entry_type: string;
+          id?: string;
+          origin?: string;
+          origin_device_id?: string | null;
+          origin_sequence?: number | null;
+          original_business_date?: string | null;
+          period_classification?: string;
+          pos_session_id?: string | null;
+          posted_at?: string;
+          posting_rule_key: string;
+          posting_rule_version?: string | null;
+          reason_code?: string | null;
+          reverses_journal_entry_id?: string | null;
+          shift_id?: string | null;
+          source_id: string;
+          source_type: string;
+          store_location_id?: string | null;
+          tenant_id: string;
+        };
+        Update: {
+          actor_service_key?: string | null;
+          actor_user_id?: string | null;
+          business_date?: string;
+          business_date_policy_version?: string | null;
+          correlation_id?: string | null;
+          created_at?: string;
+          currency_code?: string;
+          description?: string | null;
+          device_id?: string | null;
+          digital_store_id?: string;
+          entry_type?: string;
+          id?: string;
+          origin?: string;
+          origin_device_id?: string | null;
+          origin_sequence?: number | null;
+          original_business_date?: string | null;
+          period_classification?: string;
+          pos_session_id?: string | null;
+          posted_at?: string;
+          posting_rule_key?: string;
+          posting_rule_version?: string | null;
+          reason_code?: string | null;
+          reverses_journal_entry_id?: string | null;
+          shift_id?: string | null;
+          source_id?: string;
+          source_type?: string;
+          store_location_id?: string | null;
+          tenant_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "journal_entries_reverses_journal_entry_id_fkey";
+            columns: ["reverses_journal_entry_id"];
+            isOneToOne: false;
+            referencedRelation: "journal_entries";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      journal_postings: {
+        Row: {
+          amount_minor: number;
+          created_at: string;
+          currency_code: string;
+          direction: string;
+          id: string;
+          journal_entry_id: string;
+          line_no: number;
+          memo: string | null;
+          metadata: Json | null;
+          subledger_account_id: string;
+          tenant_id: string;
+        };
+        Insert: {
+          amount_minor: number;
+          created_at?: string;
+          currency_code: string;
+          direction: string;
+          id?: string;
+          journal_entry_id: string;
+          line_no: number;
+          memo?: string | null;
+          metadata?: Json | null;
+          subledger_account_id: string;
+          tenant_id: string;
+        };
+        Update: {
+          amount_minor?: number;
+          created_at?: string;
+          currency_code?: string;
+          direction?: string;
+          id?: string;
+          journal_entry_id?: string;
+          line_no?: number;
+          memo?: string | null;
+          metadata?: Json | null;
+          subledger_account_id?: string;
+          tenant_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "journal_postings_journal_entry_id_fkey";
+            columns: ["journal_entry_id"];
+            isOneToOne: false;
+            referencedRelation: "journal_entries";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "journal_postings_subledger_account_id_fkey";
+            columns: ["subledger_account_id"];
+            isOneToOne: false;
+            referencedRelation: "subledger_accounts";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "journal_postings_tenant_account_fk";
+            columns: ["tenant_id", "subledger_account_id"];
+            isOneToOne: false;
+            referencedRelation: "subledger_accounts";
+            referencedColumns: ["tenant_id", "id"];
+          },
+          {
+            foreignKeyName: "journal_postings_tenant_entry_fk";
+            columns: ["tenant_id", "journal_entry_id"];
+            isOneToOne: false;
+            referencedRelation: "journal_entries";
+            referencedColumns: ["tenant_id", "id"];
+          },
+        ];
+      };
+      source_postings: {
+        Row: {
+          created_at: string;
+          digital_store_id: string | null;
+          error_code: string | null;
+          first_posted_at: string;
+          id: string;
+          idempotency_key: string;
+          journal_entry_id: string | null;
+          last_observed_at: string;
+          posting_rule_key: string;
+          posting_rule_version: string | null;
+          source_hash: string | null;
+          source_id: string;
+          source_type: string;
+          status: string;
+          tenant_id: string;
+        };
+        Insert: {
+          created_at?: string;
+          digital_store_id?: string | null;
+          error_code?: string | null;
+          first_posted_at?: string;
+          id?: string;
+          idempotency_key: string;
+          journal_entry_id?: string | null;
+          last_observed_at?: string;
+          posting_rule_key: string;
+          posting_rule_version?: string | null;
+          source_hash?: string | null;
+          source_id: string;
+          source_type: string;
+          status?: string;
+          tenant_id: string;
+        };
+        Update: {
+          created_at?: string;
+          digital_store_id?: string | null;
+          error_code?: string | null;
+          first_posted_at?: string;
+          id?: string;
+          idempotency_key?: string;
+          journal_entry_id?: string | null;
+          last_observed_at?: string;
+          posting_rule_key?: string;
+          posting_rule_version?: string | null;
+          source_hash?: string | null;
+          source_id?: string;
+          source_type?: string;
+          status?: string;
+          tenant_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "source_postings_journal_entry_id_fkey";
+            columns: ["journal_entry_id"];
+            isOneToOne: false;
+            referencedRelation: "journal_entries";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "source_postings_tenant_entry_fk";
+            columns: ["tenant_id", "journal_entry_id"];
+            isOneToOne: false;
+            referencedRelation: "journal_entries";
+            referencedColumns: ["tenant_id", "id"];
+          },
+        ];
+      };
+      subledger_account_translations: {
+        Row: {
+          created_at: string;
+          description: string | null;
+          id: string;
+          locale: string;
+          name: string;
+          subledger_account_id: string;
+          updated_at: string;
+        };
+        Insert: {
+          created_at?: string;
+          description?: string | null;
+          id?: string;
+          locale: string;
+          name: string;
+          subledger_account_id: string;
+          updated_at?: string;
+        };
+        Update: {
+          created_at?: string;
+          description?: string | null;
+          id?: string;
+          locale?: string;
+          name?: string;
+          subledger_account_id?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "subledger_account_translations_subledger_account_id_fkey";
+            columns: ["subledger_account_id"];
+            isOneToOne: false;
+            referencedRelation: "subledger_accounts";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      subledger_accounts: {
+        Row: {
+          account_class: string;
+          account_code: string;
+          created_at: string;
+          digital_store_id: string | null;
+          effective_from: string;
+          effective_to: string | null;
+          id: string;
+          normal_side: string;
+          status: string;
+          tenant_id: string;
+          updated_at: string;
+          version: number;
+        };
+        Insert: {
+          account_class: string;
+          account_code: string;
+          created_at?: string;
+          digital_store_id?: string | null;
+          effective_from?: string;
+          effective_to?: string | null;
+          id?: string;
+          normal_side: string;
+          status?: string;
+          tenant_id: string;
+          updated_at?: string;
+          version?: number;
+        };
+        Update: {
+          account_class?: string;
+          account_code?: string;
+          created_at?: string;
+          digital_store_id?: string | null;
+          effective_from?: string;
+          effective_to?: string | null;
+          id?: string;
+          normal_side?: string;
+          status?: string;
+          tenant_id?: string;
+          updated_at?: string;
+          version?: number;
+        };
+        Relationships: [];
+      };
+    };
+    Views: {
+      [_ in never]: never;
+    };
+    Functions: {
+      post_journal_entry_v1: {
+        Args: {
+          p_actor_service_key: string;
+          p_actor_user_id: string;
+          p_business_date: string;
+          p_correlation_id?: string;
+          p_currency_code: string;
+          p_description: string;
+          p_digital_store_id: string;
+          p_entry_type: string;
+          p_idempotency_key: string;
+          p_posting_rule_key: string;
+          p_posting_rule_version: string;
+          p_postings: Json;
+          p_reason_code: string;
+          p_reverses_journal_entry_id?: string;
+          p_source_hash: string;
+          p_source_id: string;
+          p_source_type: string;
+          p_store_location_id: string;
+          p_tenant_id: string;
+        };
+        Returns: Json;
+      };
+    };
+    Enums: {
+      [_ in never]: never;
+    };
+    CompositeTypes: {
+      [_ in never]: never;
+    };
+  };
+  kitluy_laundry: {
+    Tables: {
+      booking_production_state: {
+        Row: {
+          created_at: string;
+          digital_store_id: string;
+          order_id: string;
+          production_status: string;
+          store_location_id: string | null;
+          tenant_id: string;
+          updated_at: string;
+          version: number;
+        };
+        Insert: {
+          created_at?: string;
+          digital_store_id: string;
+          order_id: string;
+          production_status?: string;
+          store_location_id?: string | null;
+          tenant_id: string;
+          updated_at?: string;
+          version?: number;
+        };
+        Update: {
+          created_at?: string;
+          digital_store_id?: string;
+          order_id?: string;
+          production_status?: string;
+          store_location_id?: string | null;
+          tenant_id?: string;
+          updated_at?: string;
+          version?: number;
+        };
+        Relationships: [];
+      };
+      booking_status_history: {
+        Row: {
+          actor_service_key: string | null;
+          actor_user_id: string | null;
+          aggregate_version: number;
+          device_id: string | null;
+          from_status: string | null;
+          id: string;
+          idempotency_key: string | null;
+          occurred_at: string;
+          order_id: string;
+          reason_code: string | null;
+          recorded_at: string;
+          tenant_id: string;
+          to_status: string;
+        };
+        Insert: {
+          actor_service_key?: string | null;
+          actor_user_id?: string | null;
+          aggregate_version: number;
+          device_id?: string | null;
+          from_status?: string | null;
+          id?: string;
+          idempotency_key?: string | null;
+          occurred_at?: string;
+          order_id: string;
+          reason_code?: string | null;
+          recorded_at?: string;
+          tenant_id: string;
+          to_status: string;
+        };
+        Update: {
+          actor_service_key?: string | null;
+          actor_user_id?: string | null;
+          aggregate_version?: number;
+          device_id?: string | null;
+          from_status?: string | null;
+          id?: string;
+          idempotency_key?: string | null;
+          occurred_at?: string;
+          order_id?: string;
+          reason_code?: string | null;
+          recorded_at?: string;
+          tenant_id?: string;
+          to_status?: string;
+        };
+        Relationships: [];
+      };
+      garment_exceptions: {
+        Row: {
+          approval_request_id: string | null;
+          blocking: boolean;
+          description: string;
+          exception_type: string;
+          garment_id: string | null;
+          id: string;
+          opened_at: string;
+          opened_by: string | null;
+          order_id: string;
+          resolution_reason_code: string | null;
+          resolved_at: string | null;
+          resolved_by: string | null;
+          severity: string | null;
+          tenant_id: string;
+        };
+        Insert: {
+          approval_request_id?: string | null;
+          blocking?: boolean;
+          description: string;
+          exception_type: string;
+          garment_id?: string | null;
+          id?: string;
+          opened_at?: string;
+          opened_by?: string | null;
+          order_id: string;
+          resolution_reason_code?: string | null;
+          resolved_at?: string | null;
+          resolved_by?: string | null;
+          severity?: string | null;
+          tenant_id: string;
+        };
+        Update: {
+          approval_request_id?: string | null;
+          blocking?: boolean;
+          description?: string;
+          exception_type?: string;
+          garment_id?: string | null;
+          id?: string;
+          opened_at?: string;
+          opened_by?: string | null;
+          order_id?: string;
+          resolution_reason_code?: string | null;
+          resolved_at?: string | null;
+          resolved_by?: string | null;
+          severity?: string | null;
+          tenant_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "garment_exceptions_same_order_garment_fk";
+            columns: ["order_id", "garment_id"];
+            isOneToOne: false;
+            referencedRelation: "garments";
+            referencedColumns: ["order_id", "id"];
+          },
+        ];
+      };
+      garment_scan_events: {
+        Row: {
+          actor_service_key: string | null;
+          actor_user_id: string | null;
+          aggregate_version: number;
+          device_id: string | null;
+          digital_store_id: string;
+          from_state: string | null;
+          garment_id: string | null;
+          id: string;
+          idempotency_key: string;
+          metadata: Json | null;
+          occurred_at: string;
+          order_id: string;
+          reason_code: string | null;
+          recorded_at: string;
+          scan_type: string;
+          storage_position_id: string | null;
+          store_location_id: string;
+          tenant_id: string;
+          terminal_role: string;
+          to_state: string | null;
+        };
+        Insert: {
+          actor_service_key?: string | null;
+          actor_user_id?: string | null;
+          aggregate_version: number;
+          device_id?: string | null;
+          digital_store_id: string;
+          from_state?: string | null;
+          garment_id?: string | null;
+          id?: string;
+          idempotency_key: string;
+          metadata?: Json | null;
+          occurred_at?: string;
+          order_id: string;
+          reason_code?: string | null;
+          recorded_at?: string;
+          scan_type: string;
+          storage_position_id?: string | null;
+          store_location_id: string;
+          tenant_id: string;
+          terminal_role: string;
+          to_state?: string | null;
+        };
+        Update: {
+          actor_service_key?: string | null;
+          actor_user_id?: string | null;
+          aggregate_version?: number;
+          device_id?: string | null;
+          digital_store_id?: string;
+          from_state?: string | null;
+          garment_id?: string | null;
+          id?: string;
+          idempotency_key?: string;
+          metadata?: Json | null;
+          occurred_at?: string;
+          order_id?: string;
+          reason_code?: string | null;
+          recorded_at?: string;
+          scan_type?: string;
+          storage_position_id?: string | null;
+          store_location_id?: string;
+          tenant_id?: string;
+          terminal_role?: string;
+          to_state?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "garment_scan_events_same_order_garment_fk";
+            columns: ["order_id", "garment_id"];
+            isOneToOne: false;
+            referencedRelation: "garments";
+            referencedColumns: ["order_id", "id"];
+          },
+          {
+            foreignKeyName: "garment_scan_events_storage_position_fk";
+            columns: ["storage_position_id"];
+            isOneToOne: false;
+            referencedRelation: "ready_storage_positions";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      garments: {
+        Row: {
+          color: string | null;
+          container_id: string | null;
+          created_at: string;
+          fabric: string | null;
+          garment_type: string | null;
+          id: string;
+          intake_notes: string | null;
+          order_id: string;
+          piece_count: number | null;
+          status: string;
+          tag_code: string | null;
+          tenant_id: string;
+          unit_kind: string;
+          updated_at: string;
+          version: number;
+        };
+        Insert: {
+          color?: string | null;
+          container_id?: string | null;
+          created_at?: string;
+          fabric?: string | null;
+          garment_type?: string | null;
+          id?: string;
+          intake_notes?: string | null;
+          order_id: string;
+          piece_count?: number | null;
+          status?: string;
+          tag_code?: string | null;
+          tenant_id: string;
+          unit_kind: string;
+          updated_at?: string;
+          version?: number;
+        };
+        Update: {
+          color?: string | null;
+          container_id?: string | null;
+          created_at?: string;
+          fabric?: string | null;
+          garment_type?: string | null;
+          id?: string;
+          intake_notes?: string | null;
+          order_id?: string;
+          piece_count?: number | null;
+          status?: string;
+          tag_code?: string | null;
+          tenant_id?: string;
+          unit_kind?: string;
+          updated_at?: string;
+          version?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "garments_same_order_container_fk";
+            columns: ["order_id", "container_id"];
+            isOneToOne: false;
+            referencedRelation: "garments";
+            referencedColumns: ["order_id", "id"];
+          },
+        ];
+      };
+      laundry_tags: {
+        Row: {
+          garment_id: string | null;
+          id: string;
+          issued_at: string;
+          issued_by: string | null;
+          order_id: string;
+          print_job_id: string | null;
+          replacement_reason_code: string | null;
+          replaces_tag_id: string | null;
+          tag_code: string;
+          template_version: string | null;
+          tenant_id: string;
+          voided_at: string | null;
+          voided_by: string | null;
+        };
+        Insert: {
+          garment_id?: string | null;
+          id?: string;
+          issued_at?: string;
+          issued_by?: string | null;
+          order_id: string;
+          print_job_id?: string | null;
+          replacement_reason_code?: string | null;
+          replaces_tag_id?: string | null;
+          tag_code: string;
+          template_version?: string | null;
+          tenant_id: string;
+          voided_at?: string | null;
+          voided_by?: string | null;
+        };
+        Update: {
+          garment_id?: string | null;
+          id?: string;
+          issued_at?: string;
+          issued_by?: string | null;
+          order_id?: string;
+          print_job_id?: string | null;
+          replacement_reason_code?: string | null;
+          replaces_tag_id?: string | null;
+          tag_code?: string;
+          template_version?: string | null;
+          tenant_id?: string;
+          voided_at?: string | null;
+          voided_by?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "laundry_tags_replaces_tag_id_fkey";
+            columns: ["replaces_tag_id"];
+            isOneToOne: false;
+            referencedRelation: "laundry_tags";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "laundry_tags_same_order_garment_fk";
+            columns: ["order_id", "garment_id"];
+            isOneToOne: false;
+            referencedRelation: "garments";
+            referencedColumns: ["order_id", "id"];
+          },
+        ];
+      };
+      pickup_handoffs: {
+        Row: {
+          approval_request_id: string | null;
+          balance_settled: boolean;
+          collector_reference: string | null;
+          collector_verified: boolean;
+          collector_verified_by: string | null;
+          created_at: string;
+          digital_store_id: string;
+          exception_reason_code: string | null;
+          handed_over_at: string | null;
+          id: string;
+          order_id: string;
+          release_completeness_verified: boolean;
+          released_by: string | null;
+          released_device_id: string | null;
+          status: string;
+          store_location_id: string;
+          tenant_id: string;
+          updated_at: string;
+        };
+        Insert: {
+          approval_request_id?: string | null;
+          balance_settled?: boolean;
+          collector_reference?: string | null;
+          collector_verified?: boolean;
+          collector_verified_by?: string | null;
+          created_at?: string;
+          digital_store_id: string;
+          exception_reason_code?: string | null;
+          handed_over_at?: string | null;
+          id?: string;
+          order_id: string;
+          release_completeness_verified?: boolean;
+          released_by?: string | null;
+          released_device_id?: string | null;
+          status?: string;
+          store_location_id: string;
+          tenant_id: string;
+          updated_at?: string;
+        };
+        Update: {
+          approval_request_id?: string | null;
+          balance_settled?: boolean;
+          collector_reference?: string | null;
+          collector_verified?: boolean;
+          collector_verified_by?: string | null;
+          created_at?: string;
+          digital_store_id?: string;
+          exception_reason_code?: string | null;
+          handed_over_at?: string | null;
+          id?: string;
+          order_id?: string;
+          release_completeness_verified?: boolean;
+          released_by?: string | null;
+          released_device_id?: string | null;
+          status?: string;
+          store_location_id?: string;
+          tenant_id?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      ready_storage_assignments: {
+        Row: {
+          assigned_at: string;
+          assigned_by: string | null;
+          assigned_device_id: string | null;
+          clear_reason_code: string | null;
+          cleared_at: string | null;
+          cleared_by: string | null;
+          cleared_device_id: string | null;
+          garment_id: string | null;
+          id: string;
+          order_id: string;
+          position_id: string;
+          tenant_id: string;
+        };
+        Insert: {
+          assigned_at?: string;
+          assigned_by?: string | null;
+          assigned_device_id?: string | null;
+          clear_reason_code?: string | null;
+          cleared_at?: string | null;
+          cleared_by?: string | null;
+          cleared_device_id?: string | null;
+          garment_id?: string | null;
+          id?: string;
+          order_id: string;
+          position_id: string;
+          tenant_id: string;
+        };
+        Update: {
+          assigned_at?: string;
+          assigned_by?: string | null;
+          assigned_device_id?: string | null;
+          clear_reason_code?: string | null;
+          cleared_at?: string | null;
+          cleared_by?: string | null;
+          cleared_device_id?: string | null;
+          garment_id?: string | null;
+          id?: string;
+          order_id?: string;
+          position_id?: string;
+          tenant_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "ready_storage_assignments_position_id_fkey";
+            columns: ["position_id"];
+            isOneToOne: false;
+            referencedRelation: "ready_storage_positions";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "ready_storage_assignments_same_order_garment_fk";
+            columns: ["order_id", "garment_id"];
+            isOneToOne: false;
+            referencedRelation: "garments";
+            referencedColumns: ["order_id", "id"];
+          },
+        ];
+      };
+      ready_storage_positions: {
+        Row: {
+          created_at: string;
+          digital_store_id: string;
+          id: string;
+          position_code: string;
+          position_type: string | null;
+          status: string;
+          store_location_id: string;
+          tenant_id: string;
+          updated_at: string;
+          version: number;
+        };
+        Insert: {
+          created_at?: string;
+          digital_store_id: string;
+          id?: string;
+          position_code: string;
+          position_type?: string | null;
+          status?: string;
+          store_location_id: string;
+          tenant_id: string;
+          updated_at?: string;
+          version?: number;
+        };
+        Update: {
+          created_at?: string;
+          digital_store_id?: string;
+          id?: string;
+          position_code?: string;
+          position_type?: string | null;
+          status?: string;
+          store_location_id?: string;
+          tenant_id?: string;
+          updated_at?: string;
+          version?: number;
+        };
+        Relationships: [];
+      };
+      service_addons: {
+        Row: {
+          addon_code: string;
+          created_at: string;
+          digital_store_id: string;
+          id: string;
+          name: string;
+          pricing_mode: string;
+          service_id: string;
+          status: string;
+          tenant_id: string;
+          updated_at: string;
+          version: number;
+        };
+        Insert: {
+          addon_code: string;
+          created_at?: string;
+          digital_store_id: string;
+          id?: string;
+          name: string;
+          pricing_mode: string;
+          service_id: string;
+          status?: string;
+          tenant_id: string;
+          updated_at?: string;
+          version?: number;
+        };
+        Update: {
+          addon_code?: string;
+          created_at?: string;
+          digital_store_id?: string;
+          id?: string;
+          name?: string;
+          pricing_mode?: string;
+          service_id?: string;
+          status?: string;
+          tenant_id?: string;
+          updated_at?: string;
+          version?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "service_addons_service_id_fkey";
+            columns: ["service_id"];
+            isOneToOne: false;
+            referencedRelation: "services";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      service_prices: {
+        Row: {
+          created_at: string;
+          created_by: string | null;
+          currency_code: string;
+          digital_store_id: string;
+          effective_from: string;
+          effective_to: string | null;
+          id: string;
+          min_charge_minor: number | null;
+          pricing_mode: string;
+          service_id: string;
+          store_location_id: string | null;
+          tenant_id: string;
+          unit_price_minor: number;
+          version: number;
+        };
+        Insert: {
+          created_at?: string;
+          created_by?: string | null;
+          currency_code: string;
+          digital_store_id: string;
+          effective_from: string;
+          effective_to?: string | null;
+          id?: string;
+          min_charge_minor?: number | null;
+          pricing_mode: string;
+          service_id: string;
+          store_location_id?: string | null;
+          tenant_id: string;
+          unit_price_minor: number;
+          version?: number;
+        };
+        Update: {
+          created_at?: string;
+          created_by?: string | null;
+          currency_code?: string;
+          digital_store_id?: string;
+          effective_from?: string;
+          effective_to?: string | null;
+          id?: string;
+          min_charge_minor?: number | null;
+          pricing_mode?: string;
+          service_id?: string;
+          store_location_id?: string | null;
+          tenant_id?: string;
+          unit_price_minor?: number;
+          version?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "service_prices_service_id_fkey";
+            columns: ["service_id"];
+            isOneToOne: false;
+            referencedRelation: "services";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      services: {
+        Row: {
+          catalog_item_id: string;
+          created_at: string;
+          digital_store_id: string;
+          id: string;
+          pricing_modes: string[];
+          production_profile: string | null;
+          service_code: string;
+          status: string;
+          tenant_id: string;
+          updated_at: string;
+          version: number;
+        };
+        Insert: {
+          catalog_item_id: string;
+          created_at?: string;
+          digital_store_id: string;
+          id?: string;
+          pricing_modes: string[];
+          production_profile?: string | null;
+          service_code: string;
+          status?: string;
+          tenant_id: string;
+          updated_at?: string;
+          version?: number;
+        };
+        Update: {
+          catalog_item_id?: string;
+          created_at?: string;
+          digital_store_id?: string;
+          id?: string;
+          pricing_modes?: string[];
+          production_profile?: string | null;
+          service_code?: string;
+          status?: string;
+          tenant_id?: string;
+          updated_at?: string;
+          version?: number;
+        };
+        Relationships: [];
+      };
+    };
+    Views: {
+      [_ in never]: never;
+    };
+    Functions: {
+      [_ in never]: never;
+    };
+    Enums: {
+      [_ in never]: never;
+    };
+    CompositeTypes: {
+      [_ in never]: never;
+    };
+  };
+  kitluy_orders: {
+    Tables: {
+      order_adjustments: {
+        Row: {
+          adjustment_type: string;
+          amount_minor: number;
+          approval_request_id: string | null;
+          created_at: string;
+          created_by: string | null;
+          currency_code: string;
+          id: string;
+          line_id: string | null;
+          order_id: string;
+          reason_code: string;
+          source_ref: string | null;
+          tenant_id: string;
+        };
+        Insert: {
+          adjustment_type: string;
+          amount_minor: number;
+          approval_request_id?: string | null;
+          created_at?: string;
+          created_by?: string | null;
+          currency_code: string;
+          id?: string;
+          line_id?: string | null;
+          order_id: string;
+          reason_code: string;
+          source_ref?: string | null;
+          tenant_id: string;
+        };
+        Update: {
+          adjustment_type?: string;
+          amount_minor?: number;
+          approval_request_id?: string | null;
+          created_at?: string;
+          created_by?: string | null;
+          currency_code?: string;
+          id?: string;
+          line_id?: string | null;
+          order_id?: string;
+          reason_code?: string;
+          source_ref?: string | null;
+          tenant_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "order_adjustments_line_id_fkey";
+            columns: ["line_id"];
+            isOneToOne: false;
+            referencedRelation: "order_lines";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "order_adjustments_order_id_fkey";
+            columns: ["order_id"];
+            isOneToOne: false;
+            referencedRelation: "orders";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "order_adjustments_tenant_order_fk";
+            columns: ["tenant_id", "order_id"];
+            isOneToOne: false;
+            referencedRelation: "orders";
+            referencedColumns: ["tenant_id", "id"];
+          },
+        ];
+      };
+      order_events: {
+        Row: {
+          actor_service_key: string | null;
+          actor_user_id: string | null;
+          device_id: string | null;
+          event_type: string;
+          from_status: string | null;
+          from_version: number | null;
+          id: string;
+          idempotency_key: string | null;
+          metadata: Json | null;
+          occurred_at: string;
+          order_id: string;
+          reason_code: string | null;
+          recorded_at: string;
+          tenant_id: string;
+          to_status: string | null;
+          to_version: number | null;
+        };
+        Insert: {
+          actor_service_key?: string | null;
+          actor_user_id?: string | null;
+          device_id?: string | null;
+          event_type: string;
+          from_status?: string | null;
+          from_version?: number | null;
+          id?: string;
+          idempotency_key?: string | null;
+          metadata?: Json | null;
+          occurred_at?: string;
+          order_id: string;
+          reason_code?: string | null;
+          recorded_at?: string;
+          tenant_id: string;
+          to_status?: string | null;
+          to_version?: number | null;
+        };
+        Update: {
+          actor_service_key?: string | null;
+          actor_user_id?: string | null;
+          device_id?: string | null;
+          event_type?: string;
+          from_status?: string | null;
+          from_version?: number | null;
+          id?: string;
+          idempotency_key?: string | null;
+          metadata?: Json | null;
+          occurred_at?: string;
+          order_id?: string;
+          reason_code?: string | null;
+          recorded_at?: string;
+          tenant_id?: string;
+          to_status?: string | null;
+          to_version?: number | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "order_events_order_id_fkey";
+            columns: ["order_id"];
+            isOneToOne: false;
+            referencedRelation: "orders";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "order_events_tenant_order_fk";
+            columns: ["tenant_id", "order_id"];
+            isOneToOne: false;
+            referencedRelation: "orders";
+            referencedColumns: ["tenant_id", "id"];
+          },
+        ];
+      };
+      order_lines: {
+        Row: {
+          catalog_item_id: string;
+          created_at: string;
+          currency_code: string;
+          digital_store_id: string;
+          discount_minor: number;
+          id: string;
+          line_no: number;
+          order_id: string;
+          price_version: number | null;
+          pricing_mode: string;
+          quantity: number | null;
+          service_code: string;
+          subtotal_minor: number;
+          tax_minor: number;
+          tenant_id: string;
+          total_minor: number;
+          unit_price_minor: number;
+          weight_grams: number | null;
+          weight_rounding_rule: string | null;
+        };
+        Insert: {
+          catalog_item_id: string;
+          created_at?: string;
+          currency_code: string;
+          digital_store_id: string;
+          discount_minor?: number;
+          id?: string;
+          line_no: number;
+          order_id: string;
+          price_version?: number | null;
+          pricing_mode: string;
+          quantity?: number | null;
+          service_code: string;
+          subtotal_minor?: number;
+          tax_minor?: number;
+          tenant_id: string;
+          total_minor?: number;
+          unit_price_minor: number;
+          weight_grams?: number | null;
+          weight_rounding_rule?: string | null;
+        };
+        Update: {
+          catalog_item_id?: string;
+          created_at?: string;
+          currency_code?: string;
+          digital_store_id?: string;
+          discount_minor?: number;
+          id?: string;
+          line_no?: number;
+          order_id?: string;
+          price_version?: number | null;
+          pricing_mode?: string;
+          quantity?: number | null;
+          service_code?: string;
+          subtotal_minor?: number;
+          tax_minor?: number;
+          tenant_id?: string;
+          total_minor?: number;
+          unit_price_minor?: number;
+          weight_grams?: number | null;
+          weight_rounding_rule?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "order_lines_order_id_fkey";
+            columns: ["order_id"];
+            isOneToOne: false;
+            referencedRelation: "orders";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "order_lines_store_order_fk";
+            columns: ["digital_store_id", "order_id"];
+            isOneToOne: false;
+            referencedRelation: "orders";
+            referencedColumns: ["digital_store_id", "id"];
+          },
+          {
+            foreignKeyName: "order_lines_tenant_order_fk";
+            columns: ["tenant_id", "order_id"];
+            isOneToOne: false;
+            referencedRelation: "orders";
+            referencedColumns: ["tenant_id", "id"];
+          },
+        ];
+      };
+      order_notes: {
+        Row: {
+          body: string;
+          created_at: string;
+          created_by: string | null;
+          id: string;
+          note_type: string;
+          order_id: string;
+          tenant_id: string;
+          visibility: string;
+        };
+        Insert: {
+          body: string;
+          created_at?: string;
+          created_by?: string | null;
+          id?: string;
+          note_type: string;
+          order_id: string;
+          tenant_id: string;
+          visibility?: string;
+        };
+        Update: {
+          body?: string;
+          created_at?: string;
+          created_by?: string | null;
+          id?: string;
+          note_type?: string;
+          order_id?: string;
+          tenant_id?: string;
+          visibility?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "order_notes_order_id_fkey";
+            columns: ["order_id"];
+            isOneToOne: false;
+            referencedRelation: "orders";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "order_notes_tenant_order_fk";
+            columns: ["tenant_id", "order_id"];
+            isOneToOne: false;
+            referencedRelation: "orders";
+            referencedColumns: ["tenant_id", "id"];
+          },
+        ];
+      };
+      orders: {
+        Row: {
+          created_at: string;
+          created_by: string | null;
+          currency_code: string;
+          customer_id: string | null;
+          digital_store_id: string;
+          discount_minor: number;
+          due_at: string | null;
+          id: string;
+          idempotency_key: string;
+          intake_verified_at: string | null;
+          intake_verified_by: string | null;
+          order_number: string;
+          payment_state: string;
+          pre_intake_reference: string | null;
+          required_deposit_minor: number | null;
+          source_code: string;
+          status: string;
+          store_location_id: string | null;
+          subtotal_minor: number;
+          tax_minor: number;
+          tenant_id: string;
+          total_minor: number;
+          updated_at: string;
+          version: number;
+          vertical_code: string;
+        };
+        Insert: {
+          created_at?: string;
+          created_by?: string | null;
+          currency_code: string;
+          customer_id?: string | null;
+          digital_store_id: string;
+          discount_minor?: number;
+          due_at?: string | null;
+          id?: string;
+          idempotency_key: string;
+          intake_verified_at?: string | null;
+          intake_verified_by?: string | null;
+          order_number: string;
+          payment_state?: string;
+          pre_intake_reference?: string | null;
+          required_deposit_minor?: number | null;
+          source_code: string;
+          status?: string;
+          store_location_id?: string | null;
+          subtotal_minor?: number;
+          tax_minor?: number;
+          tenant_id: string;
+          total_minor?: number;
+          updated_at?: string;
+          version?: number;
+          vertical_code: string;
+        };
+        Update: {
+          created_at?: string;
+          created_by?: string | null;
+          currency_code?: string;
+          customer_id?: string | null;
+          digital_store_id?: string;
+          discount_minor?: number;
+          due_at?: string | null;
+          id?: string;
+          idempotency_key?: string;
+          intake_verified_at?: string | null;
+          intake_verified_by?: string | null;
+          order_number?: string;
+          payment_state?: string;
+          pre_intake_reference?: string | null;
+          required_deposit_minor?: number | null;
+          source_code?: string;
+          status?: string;
+          store_location_id?: string | null;
+          subtotal_minor?: number;
+          tax_minor?: number;
+          tenant_id?: string;
+          total_minor?: number;
+          updated_at?: string;
+          version?: number;
+          vertical_code?: string;
+        };
+        Relationships: [];
+      };
+    };
+    Views: {
+      [_ in never]: never;
+    };
+    Functions: {
+      [_ in never]: never;
+    };
+    Enums: {
+      [_ in never]: never;
+    };
+    CompositeTypes: {
+      [_ in never]: never;
+    };
+  };
+  kitluy_payments: {
+    Tables: {
+      khqr_transactions: {
+        Row: {
+          amount_minor: number;
+          confirmed_at: string | null;
+          created_at: string;
+          currency_code: string;
+          expires_at: string | null;
+          id: string;
+          merchant_ref: string;
+          provider_transaction_id: string | null;
+          qr_payload_hash: string;
+          status: string;
+          tenant_id: string;
+          tender_id: string;
+          updated_at: string;
+        };
+        Insert: {
+          amount_minor: number;
+          confirmed_at?: string | null;
+          created_at?: string;
+          currency_code: string;
+          expires_at?: string | null;
+          id?: string;
+          merchant_ref: string;
+          provider_transaction_id?: string | null;
+          qr_payload_hash: string;
+          status?: string;
+          tenant_id: string;
+          tender_id: string;
+          updated_at?: string;
+        };
+        Update: {
+          amount_minor?: number;
+          confirmed_at?: string | null;
+          created_at?: string;
+          currency_code?: string;
+          expires_at?: string | null;
+          id?: string;
+          merchant_ref?: string;
+          provider_transaction_id?: string | null;
+          qr_payload_hash?: string;
+          status?: string;
+          tenant_id?: string;
+          tender_id?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "khqr_transactions_tenant_tender_fk";
+            columns: ["tenant_id", "tender_id"];
+            isOneToOne: false;
+            referencedRelation: "tenders";
+            referencedColumns: ["tenant_id", "id"];
+          },
+          {
+            foreignKeyName: "khqr_transactions_tender_id_fkey";
+            columns: ["tender_id"];
+            isOneToOne: false;
+            referencedRelation: "tenders";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      payment_attempts: {
+        Row: {
+          attempted_at: string;
+          client_result: string | null;
+          error_code: string | null;
+          id: string;
+          provider_attempt_ref: string | null;
+          provider_key: string;
+          request_hash: string | null;
+          status: string;
+          tenant_id: string;
+          tender_id: string;
+          updated_at: string;
+        };
+        Insert: {
+          attempted_at?: string;
+          client_result?: string | null;
+          error_code?: string | null;
+          id?: string;
+          provider_attempt_ref?: string | null;
+          provider_key: string;
+          request_hash?: string | null;
+          status?: string;
+          tenant_id: string;
+          tender_id: string;
+          updated_at?: string;
+        };
+        Update: {
+          attempted_at?: string;
+          client_result?: string | null;
+          error_code?: string | null;
+          id?: string;
+          provider_attempt_ref?: string | null;
+          provider_key?: string;
+          request_hash?: string | null;
+          status?: string;
+          tenant_id?: string;
+          tender_id?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "payment_attempts_tenant_tender_fk";
+            columns: ["tenant_id", "tender_id"];
+            isOneToOne: false;
+            referencedRelation: "tenders";
+            referencedColumns: ["tenant_id", "id"];
+          },
+          {
+            foreignKeyName: "payment_attempts_tender_id_fkey";
+            columns: ["tender_id"];
+            isOneToOne: false;
+            referencedRelation: "tenders";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      payment_provider_events: {
+        Row: {
+          id: string;
+          payload_hash: string;
+          processed_at: string | null;
+          provider_event_id: string;
+          provider_key: string;
+          provider_transaction_id: string | null;
+          received_at: string;
+          reported_amount_minor: number | null;
+          reported_currency_code: string | null;
+          signature_valid: boolean;
+          status: string;
+          tenant_id: string | null;
+          tender_id: string | null;
+          variance_minor: number | null;
+        };
+        Insert: {
+          id?: string;
+          payload_hash: string;
+          processed_at?: string | null;
+          provider_event_id: string;
+          provider_key: string;
+          provider_transaction_id?: string | null;
+          received_at?: string;
+          reported_amount_minor?: number | null;
+          reported_currency_code?: string | null;
+          signature_valid: boolean;
+          status: string;
+          tenant_id?: string | null;
+          tender_id?: string | null;
+          variance_minor?: number | null;
+        };
+        Update: {
+          id?: string;
+          payload_hash?: string;
+          processed_at?: string | null;
+          provider_event_id?: string;
+          provider_key?: string;
+          provider_transaction_id?: string | null;
+          received_at?: string;
+          reported_amount_minor?: number | null;
+          reported_currency_code?: string | null;
+          signature_valid?: boolean;
+          status?: string;
+          tenant_id?: string | null;
+          tender_id?: string | null;
+          variance_minor?: number | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "payment_provider_events_tender_id_fkey";
+            columns: ["tender_id"];
+            isOneToOne: false;
+            referencedRelation: "tenders";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      payment_reconciliation_lines: {
+        Row: {
+          actual_minor: number | null;
+          created_at: string;
+          currency_code: string;
+          difference_minor: number | null;
+          difference_reason_code: string | null;
+          expected_minor: number;
+          id: string;
+          provider_transaction_ref: string | null;
+          reconciliation_id: string;
+          resolution_ref: string | null;
+          resolved_at: string | null;
+          review_actor: string | null;
+          review_status: string | null;
+          status: string;
+          tenant_id: string;
+          tender_id: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          actual_minor?: number | null;
+          created_at?: string;
+          currency_code: string;
+          difference_minor?: number | null;
+          difference_reason_code?: string | null;
+          expected_minor: number;
+          id?: string;
+          provider_transaction_ref?: string | null;
+          reconciliation_id: string;
+          resolution_ref?: string | null;
+          resolved_at?: string | null;
+          review_actor?: string | null;
+          review_status?: string | null;
+          status: string;
+          tenant_id: string;
+          tender_id?: string | null;
+          updated_at?: string;
+        };
+        Update: {
+          actual_minor?: number | null;
+          created_at?: string;
+          currency_code?: string;
+          difference_minor?: number | null;
+          difference_reason_code?: string | null;
+          expected_minor?: number;
+          id?: string;
+          provider_transaction_ref?: string | null;
+          reconciliation_id?: string;
+          resolution_ref?: string | null;
+          resolved_at?: string | null;
+          review_actor?: string | null;
+          review_status?: string | null;
+          status?: string;
+          tenant_id?: string;
+          tender_id?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "payment_reconciliation_lines_reconciliation_id_fkey";
+            columns: ["reconciliation_id"];
+            isOneToOne: false;
+            referencedRelation: "payment_reconciliations";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "payment_reconciliation_lines_tenant_recon_fk";
+            columns: ["tenant_id", "reconciliation_id"];
+            isOneToOne: false;
+            referencedRelation: "payment_reconciliations";
+            referencedColumns: ["tenant_id", "id"];
+          },
+          {
+            foreignKeyName: "payment_reconciliation_lines_tenant_tender_fk";
+            columns: ["tenant_id", "tender_id"];
+            isOneToOne: false;
+            referencedRelation: "tenders";
+            referencedColumns: ["tenant_id", "id"];
+          },
+          {
+            foreignKeyName: "payment_reconciliation_lines_tender_id_fkey";
+            columns: ["tender_id"];
+            isOneToOne: false;
+            referencedRelation: "tenders";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      payment_reconciliations: {
+        Row: {
+          completed_at: string | null;
+          created_at: string;
+          currency_code: string;
+          digital_store_id: string | null;
+          id: string;
+          period_end: string;
+          period_start: string;
+          provider_key: string;
+          reopen_reason_code: string | null;
+          reviewed_by: string | null;
+          scope: string;
+          source_as_of: string | null;
+          status: string;
+          tenant_id: string;
+          updated_at: string;
+        };
+        Insert: {
+          completed_at?: string | null;
+          created_at?: string;
+          currency_code: string;
+          digital_store_id?: string | null;
+          id?: string;
+          period_end: string;
+          period_start: string;
+          provider_key: string;
+          reopen_reason_code?: string | null;
+          reviewed_by?: string | null;
+          scope: string;
+          source_as_of?: string | null;
+          status?: string;
+          tenant_id: string;
+          updated_at?: string;
+        };
+        Update: {
+          completed_at?: string | null;
+          created_at?: string;
+          currency_code?: string;
+          digital_store_id?: string | null;
+          id?: string;
+          period_end?: string;
+          period_start?: string;
+          provider_key?: string;
+          reopen_reason_code?: string | null;
+          reviewed_by?: string | null;
+          scope?: string;
+          source_as_of?: string | null;
+          status?: string;
+          tenant_id?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      payment_status_history: {
+        Row: {
+          actor_service_key: string | null;
+          actor_user_id: string | null;
+          from_status: string | null;
+          id: string;
+          occurred_at: string;
+          reason_code: string | null;
+          recorded_at: string;
+          tenant_id: string;
+          tender_id: string;
+          to_status: string;
+        };
+        Insert: {
+          actor_service_key?: string | null;
+          actor_user_id?: string | null;
+          from_status?: string | null;
+          id?: string;
+          occurred_at?: string;
+          reason_code?: string | null;
+          recorded_at?: string;
+          tenant_id: string;
+          tender_id: string;
+          to_status: string;
+        };
+        Update: {
+          actor_service_key?: string | null;
+          actor_user_id?: string | null;
+          from_status?: string | null;
+          id?: string;
+          occurred_at?: string;
+          reason_code?: string | null;
+          recorded_at?: string;
+          tenant_id?: string;
+          tender_id?: string;
+          to_status?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "payment_status_history_tenant_tender_fk";
+            columns: ["tenant_id", "tender_id"];
+            isOneToOne: false;
+            referencedRelation: "tenders";
+            referencedColumns: ["tenant_id", "id"];
+          },
+          {
+            foreignKeyName: "payment_status_history_tender_id_fkey";
+            columns: ["tender_id"];
+            isOneToOne: false;
+            referencedRelation: "tenders";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      refunds: {
+        Row: {
+          amount_minor: number;
+          approval_request_id: string | null;
+          approved_at: string | null;
+          approved_by: string | null;
+          completed_at: string | null;
+          currency_code: string;
+          digital_store_id: string;
+          id: string;
+          idempotency_key: string;
+          order_id: string;
+          reason_code: string;
+          requested_at: string;
+          requested_by: string;
+          status: string;
+          tenant_id: string;
+          tender_id: string;
+          updated_at: string;
+        };
+        Insert: {
+          amount_minor: number;
+          approval_request_id?: string | null;
+          approved_at?: string | null;
+          approved_by?: string | null;
+          completed_at?: string | null;
+          currency_code: string;
+          digital_store_id: string;
+          id?: string;
+          idempotency_key: string;
+          order_id: string;
+          reason_code: string;
+          requested_at?: string;
+          requested_by: string;
+          status?: string;
+          tenant_id: string;
+          tender_id: string;
+          updated_at?: string;
+        };
+        Update: {
+          amount_minor?: number;
+          approval_request_id?: string | null;
+          approved_at?: string | null;
+          approved_by?: string | null;
+          completed_at?: string | null;
+          currency_code?: string;
+          digital_store_id?: string;
+          id?: string;
+          idempotency_key?: string;
+          order_id?: string;
+          reason_code?: string;
+          requested_at?: string;
+          requested_by?: string;
+          status?: string;
+          tenant_id?: string;
+          tender_id?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "refunds_tenant_tender_fk";
+            columns: ["tenant_id", "tender_id"];
+            isOneToOne: false;
+            referencedRelation: "tenders";
+            referencedColumns: ["tenant_id", "id"];
+          },
+          {
+            foreignKeyName: "refunds_tender_id_fkey";
+            columns: ["tender_id"];
+            isOneToOne: false;
+            referencedRelation: "tenders";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      settlement_refs: {
+        Row: {
+          created_at: string;
+          currency_code: string;
+          fee_minor: number | null;
+          id: string;
+          net_minor: number | null;
+          provider_key: string;
+          reconciliation_status: string;
+          settled_amount_minor: number;
+          settled_at: string | null;
+          settlement_id: string;
+          tenant_id: string;
+          tender_id: string;
+        };
+        Insert: {
+          created_at?: string;
+          currency_code: string;
+          fee_minor?: number | null;
+          id?: string;
+          net_minor?: number | null;
+          provider_key: string;
+          reconciliation_status: string;
+          settled_amount_minor: number;
+          settled_at?: string | null;
+          settlement_id: string;
+          tenant_id: string;
+          tender_id: string;
+        };
+        Update: {
+          created_at?: string;
+          currency_code?: string;
+          fee_minor?: number | null;
+          id?: string;
+          net_minor?: number | null;
+          provider_key?: string;
+          reconciliation_status?: string;
+          settled_amount_minor?: number;
+          settled_at?: string | null;
+          settlement_id?: string;
+          tenant_id?: string;
+          tender_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "settlement_refs_tenant_tender_fk";
+            columns: ["tenant_id", "tender_id"];
+            isOneToOne: false;
+            referencedRelation: "tenders";
+            referencedColumns: ["tenant_id", "id"];
+          },
+          {
+            foreignKeyName: "settlement_refs_tender_id_fkey";
+            columns: ["tender_id"];
+            isOneToOne: false;
+            referencedRelation: "tenders";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      tenders: {
+        Row: {
+          amount_minor: number;
+          applied_minor: number | null;
+          captured_at: string | null;
+          change_due_minor: number | null;
+          created_at: string;
+          created_by: string | null;
+          currency_code: string;
+          digital_store_id: string;
+          id: string;
+          idempotency_key: string;
+          method_code: string;
+          order_id: string;
+          provider_key: string | null;
+          shift_id: string | null;
+          status: string;
+          store_location_id: string | null;
+          tenant_id: string;
+          updated_at: string;
+        };
+        Insert: {
+          amount_minor: number;
+          applied_minor?: number | null;
+          captured_at?: string | null;
+          change_due_minor?: number | null;
+          created_at?: string;
+          created_by?: string | null;
+          currency_code: string;
+          digital_store_id: string;
+          id?: string;
+          idempotency_key: string;
+          method_code: string;
+          order_id: string;
+          provider_key?: string | null;
+          shift_id?: string | null;
+          status?: string;
+          store_location_id?: string | null;
+          tenant_id: string;
+          updated_at?: string;
+        };
+        Update: {
+          amount_minor?: number;
+          applied_minor?: number | null;
+          captured_at?: string | null;
+          change_due_minor?: number | null;
+          created_at?: string;
+          created_by?: string | null;
+          currency_code?: string;
+          digital_store_id?: string;
+          id?: string;
+          idempotency_key?: string;
+          method_code?: string;
+          order_id?: string;
+          provider_key?: string | null;
+          shift_id?: string | null;
+          status?: string;
+          store_location_id?: string | null;
+          tenant_id?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      voids: {
+        Row: {
+          amount_minor: number | null;
+          approval_request_id: string | null;
+          currency_code: string | null;
+          decision: string;
+          id: string;
+          occurred_at: string;
+          order_id: string | null;
+          reason_code: string;
+          requested_by: string;
+          required_action: string | null;
+          tenant_id: string;
+          tender_id: string | null;
+          void_type: string;
+        };
+        Insert: {
+          amount_minor?: number | null;
+          approval_request_id?: string | null;
+          currency_code?: string | null;
+          decision: string;
+          id?: string;
+          occurred_at?: string;
+          order_id?: string | null;
+          reason_code: string;
+          requested_by: string;
+          required_action?: string | null;
+          tenant_id: string;
+          tender_id?: string | null;
+          void_type: string;
+        };
+        Update: {
+          amount_minor?: number | null;
+          approval_request_id?: string | null;
+          currency_code?: string | null;
+          decision?: string;
+          id?: string;
+          occurred_at?: string;
+          order_id?: string | null;
+          reason_code?: string;
+          requested_by?: string;
+          required_action?: string | null;
+          tenant_id?: string;
+          tender_id?: string | null;
+          void_type?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "voids_tenant_tender_fk";
+            columns: ["tenant_id", "tender_id"];
+            isOneToOne: false;
+            referencedRelation: "tenders";
+            referencedColumns: ["tenant_id", "id"];
+          },
+          {
+            foreignKeyName: "voids_tender_id_fkey";
+            columns: ["tender_id"];
+            isOneToOne: false;
+            referencedRelation: "tenders";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+    };
+    Views: {
+      [_ in never]: never;
+    };
+    Functions: {
+      [_ in never]: never;
+    };
+    Enums: {
+      [_ in never]: never;
+    };
+    CompositeTypes: {
+      [_ in never]: never;
+    };
+  };
   public: {
     Tables: {
       [_ in never]: never;
@@ -2920,6 +5025,18 @@ export const Constants = {
     Enums: {},
   },
   kitluy_core: {
+    Enums: {},
+  },
+  kitluy_finance: {
+    Enums: {},
+  },
+  kitluy_laundry: {
+    Enums: {},
+  },
+  kitluy_orders: {
+    Enums: {},
+  },
+  kitluy_payments: {
     Enums: {},
   },
   public: {

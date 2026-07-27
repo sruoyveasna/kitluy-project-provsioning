@@ -1,0 +1,33 @@
+{
+  "name": "@kitluy-verticals/phase1-laundry-persistence",
+  "version": "0.1.0",
+  "private": true,
+  "description": "WS-07 persistence adapters: wire the canonical phase1-laundry Booking/production engines to the authoritative local Supabase schema (dev integration layer)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "@types/node": "catalog:",
+    "@types/pg": "catalog:",
+    "vitest": "catalog:"
+  },
+  "dependencies": {
+    "@kitluy/money": "workspace:*",
+    "@kitluy/payments-persistence": "workspace:*",
+    "@kitluy-verticals/phase1-laundry": "workspace:*",
+    "pg": "catalog:"
+  }
+}

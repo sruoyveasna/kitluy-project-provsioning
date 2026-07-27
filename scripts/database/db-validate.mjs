@@ -22,6 +22,12 @@ import { join } from "node:path";
 
 const MIGRATIONS_DIR = "supabase/migrations";
 const DICTIONARY = "docs/source/data-contracts/kitluy-suite-supabase-data-dictionary-v1.0.0.md";
+// Additive data-dictionary amendments are part of the canonical dictionary
+// (amendment rule 1: strictly additive; e.g. Amendment-001 adds
+// kitluy_finance — FIN-DD-001, CONTRACT-APPROVED).
+const DICTIONARY_AMENDMENTS_DIR = "docs/data";
+const DICTIONARY_AMENDMENT_PATTERN =
+  /^kitluy-suite-supabase-data-dictionary-amendment-\d{3}-[a-z0-9-]+-v\d+\.\d+\.\d+\.md$/;
 // Control-plane schemas deliberately absent from the domain data dictionary
 // (see migration plan group 0000).
 const CONTROL_PLANE_SCHEMAS = new Set(["kitluy_ops"]);
@@ -59,13 +65,24 @@ if (files.length === 0) {
   pass("migrations:present", `${files.length} migration file(s) found`);
 }
 
-// Dictionary schema set (for check 6).
+// Dictionary schema set (for check 6): base dictionary + additive amendments.
 let dictionarySchemas = new Set();
 if (existsSync(DICTIONARY)) {
-  const dict = readFileSync(DICTIONARY, "utf8");
-  for (const m of dict.matchAll(/`(kitluy_[a-z0-9_]+)`/g)) dictionarySchemas.add(m[1]);
-  for (const m of dict.matchAll(/\b(kitluy_[a-z0-9_]+)\./g)) dictionarySchemas.add(m[1]);
-  pass("dictionary:present", `${dictionarySchemas.size} kitluy_* schema names loaded`);
+  const sources = [DICTIONARY];
+  if (existsSync(DICTIONARY_AMENDMENTS_DIR)) {
+    for (const f of readdirSync(DICTIONARY_AMENDMENTS_DIR).sort()) {
+      if (DICTIONARY_AMENDMENT_PATTERN.test(f)) sources.push(join(DICTIONARY_AMENDMENTS_DIR, f));
+    }
+  }
+  for (const source of sources) {
+    const dict = readFileSync(source, "utf8");
+    for (const m of dict.matchAll(/`(kitluy_[a-z0-9_]+)`/g)) dictionarySchemas.add(m[1]);
+    for (const m of dict.matchAll(/\b(kitluy_[a-z0-9_]+)\./g)) dictionarySchemas.add(m[1]);
+  }
+  pass(
+    "dictionary:present",
+    `${dictionarySchemas.size} kitluy_* schema names loaded (base + ${sources.length - 1} amendment(s))`,
+  );
 } else {
   fail("dictionary:present", `${DICTIONARY} is missing; schema cross-check impossible`);
 }

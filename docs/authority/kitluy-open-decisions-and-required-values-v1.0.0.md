@@ -39,6 +39,19 @@ against the current corpus is a registered follow-up owner task.
 | KLREQ-010 | AI Swarm Operating System adoption decision: replace repo-root governance + handoff system with the pack, map handoff/evidence vocabularies onto the 11-status model, migrate existing handoff records | OPEN (KLREC-2026-07-26-015/-020) |
 | KLREQ-011 | Canonical security test plan selection/merge (batch-1 phase1 plan vs batch-2 plan, incompatible ID namespaces) | OPEN (KLREC-2026-07-26-017) |
 
+### Cycle-6 additions (WS-07/WS-08 execution, 2026-07-27)
+
+| ID        | Required value / decision                                                                                                                                                                                                                                                                       | State                                                                                                                                                                                                            |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| KLREQ-012 | Data Dictionary Amendment-002 (customer identity + consent; the ten Cycle-5 entities absent from DD v1.0.0 per conflict C2)                                                                                                                                                                       | DECISION-READY — authored 2026-07-27 at `docs/data/kitluy-suite-supabase-data-dictionary-amendment-002-customer-identity-and-consent-v1.0.0.md`; OPEN pending independent schema review AND owner approval        |
+| KLREQ-013 | Data Dictionary amendment for Cycle-6 additions recorded in reconciliation C12: `kitluy_laundry.booking_production_state`, `kitluy_payments.payment_status_history`, additive columns on DD relations (orders version/payment_state/deposit input, garment unit_kind, tender applied/change) and the weight-quantity representation (integer grams vs DD `numeric(18,4)` convention) | OPEN — Amendment-003 candidate; implemented-and-tested schema is the implementation truth, dictionary update owed (C2/C12 precedent)                                                                              |
+| KLREQ-014 | RBAC registry amendment: neutral transaction-read permission key (kitluy_orders SELECT is store-scope-only interim) and finance-read permission key (kitluy_finance SELECT is tenant-scope-only interim)                                                                                          | OPEN — C4 precedent; interim strictest scopes encoded in migration group 0095                                                                                                                                    |
+
+Staleness correction (Cycle-5/6): the KLREQ-001 row above predates BLK-001
+closure — the schema/RLS/migration-plan trio now exists under `docs/data/` and
+is CONTRACT-APPROVED (see the decision register); the row is retained verbatim
+as bootstrap history only.
+
 ### Repository-level required values (bootstrap section F, unchanged)
 
 Legal entity for LICENSE · security contact (SECURITY.md) · conduct contact ·
