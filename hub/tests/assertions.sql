@@ -1,0 +1,1284 @@
+-- ===========================================================================
+-- KitLuy Store Hub local database — structural and behavioural assertions.
+--
+-- Executes against the LOCAL Hub database via `pnpm hub:db:test`
+-- (scripts/hub/hub-db.mjs) after `pnpm hub:db:reset` + `pnpm hub:db:seed`.
+--
+-- Pattern follows supabase/tests/assertions.sql: DO blocks; a failed assertion
+-- raises and aborts the run. Negative probes run inside a plpgsql sub-block so
+-- the attempted mutation is rolled back and the database is left unchanged.
+--
+-- Authority: docs/source/offline/kitluy-storehub-local-database-schema-v1.0.0.md
+--   §1 conventions, §2 schemas, §5 shared types, §6 catalogue, §8 indexes,
+--   §9 transaction invariant, §12 acceptance tests;
+--   kitluy-offline-idempotency-and-sequencing-v1.0.0.md §2/§4/§19;
+--   docs/data/kitluy-storehub-local-schema-reconciliation-v1.0.0.md G1-G8, R4.
+-- ===========================================================================
+
+-- ---------------------------------------------------------------------------
+-- 1. The ten canonical schemas (§2) exist — plus the edge_ops control plane.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  s text;
+  v_count int;
+begin
+  foreach s in array array['edge_identity', 'edge_config', 'edge_core', 'edge_laundry',
+                           'edge_payments', 'edge_documents', 'edge_files', 'edge_sync',
+                           'edge_hardware', 'edge_audit'] loop
+    if not exists (select 1 from pg_namespace where nspname = s) then
+      raise exception 'ASSERT FAIL: schema % is missing', s;
+    end if;
+  end loop;
+  if not exists (select 1 from pg_namespace where nspname = 'edge_ops') then
+    raise exception 'ASSERT FAIL: the edge_ops migration control plane is missing';
+  end if;
+  -- No eleventh business schema may appear: the Cycle-8 instruction's
+  -- edge_commands/edge_events/edge_print/edge_finance are NOT canonical
+  -- (reconciliation G5 and G8; §2 governs).
+  select count(*) into v_count
+  from pg_namespace where nspname like 'edge\_%' and nspname <> 'edge_ops';
+  if v_count <> 10 then
+    raise exception 'ASSERT FAIL: expected exactly 10 canonical edge schemas, found %', v_count;
+  end if;
+  if exists (select 1 from pg_namespace where nspname in ('edge_finance', 'edge_commands', 'edge_events', 'edge_print')) then
+    raise exception 'ASSERT FAIL: a non-canonical schema exists (reconciliation G5/G8)';
+  end if;
+  raise notice 'PASS schemas: the ten canonical §2 schemas exist, edge_ops is present, no edge_finance/edge_commands/edge_events/edge_print';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 2. Every §6 relation exists and has a primary key.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  t text;
+  v_canonical text[] := array[
+    -- §6.1 edge_identity (7)
+    'edge_identity.hub_device', 'edge_identity.hub_installation',
+    'edge_identity.hub_assignment', 'edge_identity.device_credential',
+    'edge_identity.terminal_device', 'edge_identity.terminal_session',
+    'edge_identity.staff_cache',
+    -- §6.2 edge_config (6)
+    'edge_config.configuration_snapshot', 'edge_config.configuration_section',
+    'edge_config.configuration_activation', 'edge_config.terminal_profile_assignment',
+    'edge_config.hardware_profile', 'edge_config.peripheral_binding',
+    -- §6.3 edge_core (5)
+    'edge_core.customer', 'edge_core.customer_identifier', 'edge_core.business_sequence',
+    'edge_core.shift', 'edge_core.cash_movement',
+    -- §6.4 edge_laundry (12)
+    'edge_laundry.booking', 'edge_laundry.booking_line', 'edge_laundry.garment',
+    'edge_laundry.bag', 'edge_laundry.tag', 'edge_laundry.status_event',
+    'edge_laundry.exception', 'edge_laundry.storage_position',
+    'edge_laundry.storage_assignment', 'edge_laundry.custody_event',
+    'edge_laundry.ready_scan_session', 'edge_laundry.pickup_session',
+    -- §6.5 edge_payments (4)
+    'edge_payments.payment', 'edge_payments.payment_attempt',
+    'edge_payments.tender_leg', 'edge_payments.refund_adjustment',
+    -- §6.6 edge_documents (3)
+    'edge_documents.receipt', 'edge_documents.print_job', 'edge_documents.print_attempt',
+    -- §6.7 edge_files (3)
+    'edge_files.asset', 'edge_files.asset_chunk', 'edge_files.file_transfer_job',
+    -- §6.8 edge_sync (6 canonical)
+    'edge_sync.local_event', 'edge_sync.outbox', 'edge_sync.inbox',
+    'edge_sync.sync_cursor', 'edge_sync.sync_conflict', 'edge_sync.dead_letter_item',
+    -- §6.9 edge_hardware (2)
+    'edge_hardware.peripheral_observation', 'edge_hardware.device_heartbeat',
+    -- §6.10 edge_audit (3)
+    'edge_audit.audit_event', 'edge_audit.security_event', 'edge_audit.support_session'
+  ];
+begin
+  foreach t in array v_canonical loop
+    if to_regclass(t) is null then
+      raise exception 'ASSERT FAIL: canonical §6 relation % is missing', t;
+    end if;
+    if not exists (
+      select 1 from pg_constraint c where c.conrelid = to_regclass(t) and c.contype = 'p'
+    ) then
+      raise exception 'ASSERT FAIL: relation % has no primary key', t;
+    end if;
+  end loop;
+  raise notice 'PASS relations: all % canonical §6 relations exist with primary keys', array_length(v_canonical, 1);
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 3. Additive extensions recorded in WS-09-T001 (gaps G3/G4 and R4).
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  t text;
+begin
+  foreach t in array array['edge_sync.sequence_gap', 'edge_sync.command_result'] loop
+    if to_regclass(t) is null then
+      raise exception 'ASSERT FAIL: additive extension % is missing (gap G3)', t;
+    end if;
+    if not exists (select 1 from pg_constraint c where c.conrelid = to_regclass(t) and c.contype = 'p') then
+      raise exception 'ASSERT FAIL: additive extension % has no primary key', t;
+    end if;
+  end loop;
+
+  -- R4: booking.refunded_minor is required by the canonical §6.4 balance CHECK.
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'edge_laundry' and table_name = 'booking'
+      and column_name = 'refunded_minor' and data_type = 'bigint'
+  ) then
+    raise exception 'ASSERT FAIL: edge_laundry.booking.refunded_minor is missing (reconciliation R4)';
+  end if;
+
+  -- G4: assignment_generation on local_event AND outbox.
+  foreach t in array array['local_event', 'outbox'] loop
+    if not exists (
+      select 1 from information_schema.columns
+      where table_schema = 'edge_sync' and table_name = t and column_name = 'assignment_generation'
+    ) then
+      raise exception 'ASSERT FAIL: edge_sync.%.assignment_generation is missing (gap G4)', t;
+    end if;
+  end loop;
+
+  -- The ordering namespace (location_id, assignment_generation, hub_sequence).
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'local_event_ordering_uq' and conrelid = 'edge_sync.local_event'::regclass
+  ) then
+    raise exception 'ASSERT FAIL: the (location_id, assignment_generation, hub_sequence) unique key is missing (offline §5.1)';
+  end if;
+
+  raise notice 'PASS additive-extensions: sequence_gap, command_result, booking.refunded_minor, assignment_generation on local_event+outbox, ordering namespace unique';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 4. §5 shared types exist with EXACT value lists.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  r record;
+  v_actual text[];
+  v_expected text[];
+  v_checked int := 0;
+begin
+  for r in
+    select * from (values
+      ('edge_sync', 'delivery_state',
+       array['pending','sending','acknowledged','retry_wait','blocked','dead_letter']),
+      ('edge_sync', 'inbox_state',
+       array['received','verified','applied','rejected','dead_letter']),
+      ('edge_sync', 'conflict_state',
+       array['open','auto_resolved','operator_required','resolved','waived']),
+      ('edge_documents', 'print_state',
+       array['queued','dispatching','printed','failed','retry_wait','dead_letter','cancelled']),
+      ('edge_config', 'activation_state',
+       array['downloaded','verified','staged','active','rejected','rolled_back']),
+      ('edge_files', 'transfer_state',
+       array['local_only','queued','uploading','uploaded','verifying','available','failed','quarantined','evicted']),
+      ('edge_hardware', 'health_state',
+       array['unknown','ready','busy','degraded','disconnected','misconfigured','unsupported','maintenance_required'])
+    ) as x(schema_name, type_name, labels)
+  loop
+    v_expected := r.labels;
+    select array_agg(e.enumlabel::text order by e.enumsortorder) into v_actual
+    from pg_type t
+    join pg_namespace n on n.oid = t.typnamespace
+    join pg_enum e on e.enumtypid = t.oid
+    where n.nspname = r.schema_name and t.typname = r.type_name;
+
+    if v_actual is null then
+      raise exception 'ASSERT FAIL: enum type %.% is missing (§5)', r.schema_name, r.type_name;
+    end if;
+    if v_actual <> v_expected then
+      raise exception 'ASSERT FAIL: enum %.% has values % but §5 declares %',
+        r.schema_name, r.type_name, v_actual, v_expected;
+    end if;
+    v_checked := v_checked + 1;
+  end loop;
+  if v_checked <> 7 then
+    raise exception 'ASSERT FAIL: expected 7 §5 enum types, checked %', v_checked;
+  end if;
+  raise notice 'PASS enum-types: all 7 §5 shared types exist with the exact declared value lists';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 5. Appendix A scope columns on every business relation.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  t text;
+  c text;
+  v_scoped text[] := array[
+    'edge_identity.hub_assignment', 'edge_identity.terminal_device',
+    'edge_identity.terminal_session', 'edge_identity.staff_cache',
+    'edge_config.configuration_snapshot', 'edge_config.configuration_activation',
+    'edge_config.terminal_profile_assignment', 'edge_config.peripheral_binding',
+    'edge_core.customer', 'edge_core.customer_identifier', 'edge_core.shift',
+    'edge_core.cash_movement',
+    'edge_laundry.booking', 'edge_laundry.booking_line', 'edge_laundry.garment',
+    'edge_laundry.bag', 'edge_laundry.tag', 'edge_laundry.status_event',
+    'edge_laundry.exception', 'edge_laundry.storage_position',
+    'edge_laundry.storage_assignment', 'edge_laundry.custody_event',
+    'edge_laundry.ready_scan_session', 'edge_laundry.pickup_session',
+    'edge_payments.payment', 'edge_payments.payment_attempt',
+    'edge_payments.tender_leg', 'edge_payments.refund_adjustment',
+    'edge_documents.receipt', 'edge_documents.print_job',
+    'edge_files.asset', 'edge_files.file_transfer_job',
+    'edge_sync.local_event', 'edge_sync.outbox', 'edge_sync.inbox',
+    'edge_sync.sync_conflict', 'edge_sync.dead_letter_item',
+    'edge_sync.sequence_gap', 'edge_sync.command_result',
+    'edge_hardware.peripheral_observation', 'edge_hardware.device_heartbeat',
+    'edge_audit.audit_event', 'edge_audit.support_session'
+  ];
+begin
+  foreach t in array v_scoped loop
+    foreach c in array array['tenant_id', 'digital_store_id', 'location_id'] loop
+      if not exists (
+        select 1 from information_schema.columns
+        where table_schema = split_part(t, '.', 1) and table_name = split_part(t, '.', 2)
+          and column_name = c and data_type = 'uuid' and is_nullable = 'NO'
+      ) then
+        raise exception 'ASSERT FAIL: %.% is missing or nullable (Appendix A scope columns)', t, c;
+      end if;
+    end loop;
+  end loop;
+
+  -- §6.10 verbatim exemption: security_event scope columns are NULLABLE so a
+  -- pre-assignment device can still emit evidence.
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'edge_audit' and table_name = 'security_event'
+      and column_name in ('tenant_id', 'digital_store_id', 'location_id')
+      and is_nullable = 'NO'
+  ) then
+    raise exception 'ASSERT FAIL: edge_audit.security_event scope columns must stay nullable (§6.10)';
+  end if;
+
+  raise notice 'PASS scope-columns: all % business relations carry NOT NULL tenant_id/digital_store_id/location_id; security_event stays nullable by contract', array_length(v_scoped, 1);
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 6. Money representation (§1; repository rule 12) — integer minor units,
+--    explicit currency and exponent, and NO floating point anywhere.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  r record;
+  v_minor int;
+  v_currency int;
+  v_exponent int;
+begin
+  -- (a) no floating-point column exists in ANY edge_* schema.
+  for r in
+    select table_schema, table_name, column_name, data_type
+    from information_schema.columns
+    where table_schema like 'edge\_%' and data_type in ('real', 'double precision')
+  loop
+    raise exception 'ASSERT FAIL: floating-point column %.%.% (%) — money and quantities are never floating point (§1)',
+      r.table_schema, r.table_name, r.column_name, r.data_type;
+  end loop;
+
+  -- (b) every *_minor column is bigint.
+  for r in
+    select table_schema, table_name, column_name, data_type
+    from information_schema.columns
+    where table_schema like 'edge\_%' and column_name like '%\_minor'
+  loop
+    if r.data_type <> 'bigint' then
+      raise exception 'ASSERT FAIL: %.%.% is % but minor units must be bigint (§1)',
+        r.table_schema, r.table_name, r.column_name, r.data_type;
+    end if;
+  end loop;
+  select count(*) into v_minor from information_schema.columns
+  where table_schema like 'edge\_%' and column_name like '%\_minor';
+
+  -- (c) every currency_code is char(3); every currency_exponent is smallint.
+  for r in
+    select table_schema, table_name, column_name, data_type, character_maximum_length
+    from information_schema.columns
+    where table_schema like 'edge\_%' and column_name = 'currency_code'
+  loop
+    if r.data_type <> 'character' or r.character_maximum_length <> 3 then
+      raise exception 'ASSERT FAIL: %.%.currency_code is %(%) but §1 requires char(3)',
+        r.table_schema, r.table_name, r.data_type, r.character_maximum_length;
+    end if;
+  end loop;
+  select count(*) into v_currency from information_schema.columns
+  where table_schema like 'edge\_%' and column_name = 'currency_code';
+
+  for r in
+    select table_schema, table_name, data_type
+    from information_schema.columns
+    where table_schema like 'edge\_%' and column_name = 'currency_exponent'
+  loop
+    if r.data_type <> 'smallint' then
+      raise exception 'ASSERT FAIL: %.%.currency_exponent is % but §1 requires smallint',
+        r.table_schema, r.table_name, r.data_type;
+    end if;
+  end loop;
+  select count(*) into v_exponent from information_schema.columns
+  where table_schema like 'edge\_%' and column_name = 'currency_exponent';
+
+  -- (d) every money group is COMPLETE: a currency_code never appears without
+  --     its exponent (§1 three-column money representation).
+  if v_currency <> v_exponent then
+    raise exception 'ASSERT FAIL: % currency_code column(s) but % currency_exponent column(s) — §1 money is amount_minor + currency_code + currency_exponent',
+      v_currency, v_exponent;
+  end if;
+
+  -- (e) no numeric/decimal column is used for money.
+  for r in
+    select table_schema, table_name, column_name
+    from information_schema.columns
+    where table_schema like 'edge\_%' and data_type = 'numeric'
+      and (column_name like '%amount%' or column_name like '%price%'
+           or column_name like '%total%' or column_name like '%minor%'
+           or column_name like '%cash%')
+  loop
+    raise exception 'ASSERT FAIL: numeric money column %.%.% — money is integer minor units (§1)',
+      r.table_schema, r.table_name, r.column_name;
+  end loop;
+
+  raise notice 'PASS money: % *_minor bigint column(s), % currency_code char(3) + % currency_exponent smallint, zero float/real/double, zero numeric money',
+    v_minor, v_currency, v_exponent;
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 7. Quantities are numeric(18,4) (§1).
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  r record;
+begin
+  select data_type, numeric_precision, numeric_scale into r
+  from information_schema.columns
+  where table_schema = 'edge_laundry' and table_name = 'booking_line' and column_name = 'quantity';
+  if r.data_type <> 'numeric' or r.numeric_precision <> 18 or r.numeric_scale <> 4 then
+    raise exception 'ASSERT FAIL: edge_laundry.booking_line.quantity is %(%,%) but §1 requires numeric(18,4)',
+      r.data_type, r.numeric_precision, r.numeric_scale;
+  end if;
+  raise notice 'PASS quantities: booking_line.quantity is numeric(18,4) (§1 "never floating point")';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 8. Append-only triggers on finance / payment / custody / audit (§1).
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  t text;
+  v_append_only text[] := array[
+    'edge_core.cash_movement', 'edge_laundry.status_event', 'edge_laundry.custody_event',
+    'edge_payments.refund_adjustment', 'edge_sync.local_event', 'edge_audit.audit_event'
+  ];
+begin
+  foreach t in array v_append_only loop
+    if not exists (
+      select 1 from pg_trigger tg
+      where tg.tgrelid = to_regclass(t) and not tg.tgisinternal
+        and tg.tgfoid = 'edge_audit.enforce_append_only()'::regprocedure
+        -- tgtype bit 4 = UPDATE, bit 8 = DELETE
+        and (tg.tgtype & 16) > 0 and (tg.tgtype & 8) > 0
+    ) then
+      raise exception 'ASSERT FAIL: % has no append-only trigger covering UPDATE and DELETE (§1)', t;
+    end if;
+  end loop;
+  raise notice 'PASS append-only-triggers: all % finance/payment/custody/audit ledgers reject UPDATE and DELETE', array_length(v_append_only, 1);
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 9. Append-only is BEHAVIOURALLY enforced, not just declared.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_blocked int := 0;
+  v_rows int;
+  t text;
+begin
+  -- Precondition: a BEFORE ... FOR EACH ROW trigger never fires when no row
+  -- matches, so a missing fixture would silently "pass" this probe.
+  foreach t in array array['edge_laundry.custody_event|e0000000-0000-4000-8000-000000000083',
+                           'edge_core.cash_movement|e0000000-0000-4000-8000-000000000095',
+                           'edge_audit.audit_event|e0000000-0000-4000-8000-0000000000f8',
+                           'edge_payments.refund_adjustment|e0000000-0000-4000-8000-000000000094'] loop
+    execute format('select count(*) from %s where id = %L', split_part(t, '|', 1), split_part(t, '|', 2))
+      into v_rows;
+    if v_rows <> 1 then
+      raise exception 'ASSERT FAIL: fixture row % is missing from % — run pnpm hub:db:seed first',
+        split_part(t, '|', 2), split_part(t, '|', 1);
+    end if;
+  end loop;
+
+  begin
+    update edge_laundry.custody_event set to_custody_state = 'tampered'
+    where id = 'e0000000-0000-4000-8000-000000000083';
+    raise exception 'ASSERT FAIL: UPDATE on edge_laundry.custody_event was accepted';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  begin
+    delete from edge_core.cash_movement where id = 'e0000000-0000-4000-8000-000000000095';
+    raise exception 'ASSERT FAIL: DELETE on edge_core.cash_movement was accepted';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  begin
+    update edge_audit.audit_event set event_code = 'tampered'
+    where id = 'e0000000-0000-4000-8000-0000000000f8';
+    raise exception 'ASSERT FAIL: UPDATE on edge_audit.audit_event was accepted';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  begin
+    delete from edge_payments.refund_adjustment where id = 'e0000000-0000-4000-8000-000000000094';
+    raise exception 'ASSERT FAIL: DELETE on edge_payments.refund_adjustment was accepted';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  if v_blocked <> 4 then
+    raise exception 'ASSERT FAIL: expected 4 blocked append-only mutations, got %', v_blocked;
+  end if;
+  raise notice 'PASS append-only-behaviour: custody UPDATE, cash DELETE, audit UPDATE and refund DELETE are all rejected';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 10. No hard delete for finalized business records (§1 "Deletion").
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  t text;
+  v_no_delete text[] := array[
+    'edge_core.customer', 'edge_core.shift',
+    'edge_laundry.booking', 'edge_laundry.booking_line', 'edge_laundry.garment',
+    'edge_laundry.bag', 'edge_laundry.tag', 'edge_laundry.exception',
+    'edge_laundry.storage_assignment', 'edge_laundry.ready_scan_session',
+    'edge_laundry.pickup_session',
+    'edge_payments.payment', 'edge_payments.payment_attempt', 'edge_payments.tender_leg',
+    'edge_documents.receipt', 'edge_documents.print_job', 'edge_documents.print_attempt',
+    'edge_config.configuration_snapshot', 'edge_config.configuration_section',
+    'edge_config.configuration_activation',
+    'edge_sync.outbox', 'edge_sync.inbox', 'edge_sync.sequence_gap',
+    'edge_audit.security_event', 'edge_audit.support_session'
+  ];
+begin
+  foreach t in array v_no_delete loop
+    if not exists (
+      select 1 from pg_trigger tg
+      where tg.tgrelid = to_regclass(t) and not tg.tgisinternal
+        and tg.tgfoid = 'edge_audit.enforce_no_hard_delete()'::regprocedure
+    ) then
+      raise exception 'ASSERT FAIL: % has no no-hard-delete trigger (§1)', t;
+    end if;
+  end loop;
+
+  begin
+    delete from edge_laundry.booking where id = 'e0000000-0000-4000-8000-000000000070';
+    raise exception 'ASSERT FAIL: DELETE on a finalized Booking was accepted';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+  end;
+
+  begin
+    delete from edge_payments.payment where id = 'e0000000-0000-4000-8000-000000000090';
+    raise exception 'ASSERT FAIL: DELETE on a confirmed payment was accepted (§12 acceptance test 6)';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+  end;
+
+  raise notice 'PASS no-hard-delete: % finalized relations carry the guard; Booking and confirmed-payment DELETE both rejected', array_length(v_no_delete, 1);
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 11. No role holds DELETE on any edge_* relation (§3 privileges).
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  r record;
+begin
+  for r in
+    select table_schema, table_name, grantee
+    from information_schema.role_table_grants
+    where table_schema like 'edge\_%' and privilege_type = 'DELETE'
+      and grantee in ('kitluy_hub_runtime', 'kitluy_sync_worker', 'kitluy_backup',
+                      'kitluy_support_ro', 'PUBLIC')
+  loop
+    raise exception 'ASSERT FAIL: % holds DELETE on %.% — no Hub role may hard-delete (§1/§3)',
+      r.grantee, r.table_schema, r.table_name;
+  end loop;
+  raise notice 'PASS role-privileges: no Hub role (runtime, sync worker, backup, support, PUBLIC) holds DELETE on any edge_* relation';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 12. Canonical idempotency key (offline §2; reconciliation G1).
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_canonical text := 'kl1.0198d4f0-6f4a-7e6e-bd3d-9f3c9153e1c1.8821';
+  v_legacy    text := 'location:e0000000-0000-4000-8000-000000000003:hub:e0000000-0000-4000-8000-000000000010:seq:7';
+begin
+  if not edge_sync.is_canonical_idempotency_key(v_canonical) then
+    raise exception 'ASSERT FAIL: the canonical kl1 example from offline contract §2 was rejected';
+  end if;
+  if edge_sync.is_canonical_idempotency_key(v_legacy) then
+    raise exception 'ASSERT FAIL: the non-canonical location:...:hub:...:seq:N format was accepted (gap G1)';
+  end if;
+  if edge_sync.is_canonical_idempotency_key('kl1.not-a-uuid.1') then
+    raise exception 'ASSERT FAIL: a malformed kl1 key was accepted';
+  end if;
+
+  -- The CHECK constraint must reject it at INSERT time, not merely the helper.
+  begin
+    insert into edge_sync.command_result
+      (id, tenant_id, digital_store_id, location_id, idempotency_key, request_hash,
+       command_type, terminal_device_id, origin_sequence, assignment_generation,
+       aggregate_type, sync_state, commit_status, created_at)
+    values
+      (gen_random_uuid(), 'e0000000-0000-4000-8000-000000000001',
+       'e0000000-0000-4000-8000-000000000002', 'e0000000-0000-4000-8000-000000000003',
+       v_legacy, encode(sha256('probe'), 'hex'), 'probe.command',
+       'e0000000-0000-4000-8000-000000000020', 9999, 1, 'probe', null,
+       'in_progress', now());
+    raise exception 'ASSERT FAIL: command_result accepted the non-canonical idempotency key format';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+  end;
+
+  raise notice 'PASS idempotency-key: kl1.{terminal_device_uuid}.{client_sequence} accepted; the non-canonical location:...:hub:...:seq:N shape rejected by helper AND CHECK (gap G1)';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 13. Every relation that stores an idempotency key CHECKs the canonical shape.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  r record;
+  v_count int := 0;
+begin
+  for r in
+    select c.table_schema, c.table_name
+    from information_schema.columns c
+    where c.table_schema like 'edge\_%' and c.column_name = 'idempotency_key'
+  loop
+    if not exists (
+      select 1 from pg_constraint k
+      where k.conrelid = format('%I.%I', r.table_schema, r.table_name)::regclass
+        and k.contype = 'c'
+        and pg_get_constraintdef(k.oid) like '%is_canonical_idempotency_key%'
+    ) then
+      raise exception 'ASSERT FAIL: %.% stores idempotency_key without the canonical CHECK (offline §2)',
+        r.table_schema, r.table_name;
+    end if;
+    v_count := v_count + 1;
+  end loop;
+  if v_count < 5 then
+    raise exception 'ASSERT FAIL: expected at least 5 idempotency-key relations, found %', v_count;
+  end if;
+  raise notice 'PASS idempotency-key-coverage: % relation(s) store an idempotency key and every one CHECKs the canonical kl1 shape', v_count;
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 14. §9 event/outbox transaction invariant is structurally enforced.
+-- ---------------------------------------------------------------------------
+do $$
+begin
+  if not exists (
+    select 1 from pg_trigger
+    where tgname = 'local_event_outbox_invariant'
+      and tgrelid = 'edge_sync.local_event'::regclass
+      and tgdeferrable and tginitdeferred
+  ) then
+    raise exception 'ASSERT FAIL: the deferred §9 outbox-invariant constraint trigger is missing';
+  end if;
+
+  begin
+    insert into edge_sync.local_event
+      (id, tenant_id, digital_store_id, location_id, hub_device_id, origin_device_id,
+       aggregate_type, aggregate_id, aggregate_version, event_type, schema_version,
+       business_date, occurred_at, hub_sequence, origin_sequence, assignment_generation,
+       idempotency_key, payload_sha256, payload, created_at)
+    values
+      (gen_random_uuid(), 'e0000000-0000-4000-8000-000000000001',
+       'e0000000-0000-4000-8000-000000000002', 'e0000000-0000-4000-8000-000000000003',
+       'e0000000-0000-4000-8000-000000000010', 'e0000000-0000-4000-8000-000000000020',
+       'booking', 'e0000000-0000-4000-8000-000000000070', 99, 'probe_event', 1,
+       '2026-07-27', now(), nextval('edge_sync.hub_sequence_seq'), 9998, 1,
+       'kl1.e0000000-0000-4000-8000-000000000020.9998',
+       encode(sha256('probe'), 'hex'), '{}'::jsonb, now());
+    -- Force the DEFERRED check to run now, inside this sub-transaction.
+    execute 'set constraints all immediate';
+    raise exception 'ASSERT FAIL: a local_event committed without its outbox row (§9 invariant broken)';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+  end;
+  execute 'set constraints all deferred';
+
+  -- Every seeded event DOES have its outbox row.
+  if exists (
+    select 1 from edge_sync.local_event e
+    left join edge_sync.outbox o on o.event_id = e.id
+    where o.event_id is null
+  ) then
+    raise exception 'ASSERT FAIL: a persisted local_event has no outbox row';
+  end if;
+
+  raise notice 'PASS outbox-invariant: a local_event without an outbox row cannot commit (§9); every persisted event has its outbox row';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 15. Confirmed payments cannot be silently rewritten (§12 acceptance test 6).
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_blocked int := 0;
+begin
+  begin
+    update edge_payments.payment set amount_minor = 1
+    where id = 'e0000000-0000-4000-8000-000000000090';
+    raise exception 'ASSERT FAIL: the amount of a confirmed payment was rewritten';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  begin
+    update edge_payments.payment set state = 'failed'
+    where id = 'e0000000-0000-4000-8000-000000000090';
+    raise exception 'ASSERT FAIL: a confirmed payment was moved back to failed';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  begin
+    update edge_payments.payment set idempotency_key = 'kl1.e0000000-0000-4000-8000-000000000020.7777'
+    where id = 'e0000000-0000-4000-8000-000000000090';
+    raise exception 'ASSERT FAIL: the idempotency key of a confirmed payment was rewritten';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  if v_blocked <> 3 then
+    raise exception 'ASSERT FAIL: expected 3 blocked payment rewrites, got %', v_blocked;
+  end if;
+  raise notice 'PASS payment-immutability: amount, state regression and idempotency-key rewrite of a confirmed payment are all rejected';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 16. Command-result immutability (offline §4 "store immutable command result").
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_blocked int := 0;
+begin
+  begin
+    update edge_sync.command_result set result_json = '{"tampered": true}'::jsonb
+    where idempotency_key = 'kl1.e0000000-0000-4000-8000-000000000020.1001';
+    raise exception 'ASSERT FAIL: a terminal command result was rewritten';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  begin
+    delete from edge_sync.command_result
+    where idempotency_key = 'kl1.e0000000-0000-4000-8000-000000000020.1001';
+    raise exception 'ASSERT FAIL: a command result was deleted';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- A reused key is impossible: the unique index IS the reservation (§4).
+  begin
+    insert into edge_sync.command_result
+      (id, tenant_id, digital_store_id, location_id, idempotency_key, request_hash,
+       command_type, terminal_device_id, origin_sequence, assignment_generation,
+       aggregate_type, sync_state, commit_status, created_at)
+    values
+      (gen_random_uuid(), 'e0000000-0000-4000-8000-000000000001',
+       'e0000000-0000-4000-8000-000000000002', 'e0000000-0000-4000-8000-000000000003',
+       'kl1.e0000000-0000-4000-8000-000000000020.1001', encode(sha256('different'), 'hex'),
+       'payments.record_cash_payment', 'e0000000-0000-4000-8000-000000000020', 1001, 1,
+       'payment', null, 'in_progress', now());
+    raise exception 'ASSERT FAIL: an idempotency key was reserved twice';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  if v_blocked <> 3 then
+    raise exception 'ASSERT FAIL: expected 3 blocked command-result mutations, got %', v_blocked;
+  end if;
+  raise notice 'PASS command-result: terminal results cannot be rewritten or deleted, and one idempotency key can be reserved only once (offline §4/§19)';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 17. No fabricated cloud acknowledgement (WS-09-T004 truthful sync state).
+-- ---------------------------------------------------------------------------
+do $$
+begin
+  begin
+    insert into edge_sync.outbox
+      (event_id, tenant_id, digital_store_id, location_id, hub_sequence,
+       assignment_generation, delivery_state, attempt_count, next_attempt_at)
+    values
+      ('e0000000-0000-4000-8000-0000000000d2', 'e0000000-0000-4000-8000-000000000001',
+       'e0000000-0000-4000-8000-000000000002', 'e0000000-0000-4000-8000-000000000003',
+       9999, 1, 'acknowledged', 1, now());
+    raise exception 'ASSERT FAIL: an acknowledged outbox row was accepted without a cloud ack id';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+  end;
+
+  if exists (
+    select 1 from edge_sync.outbox
+    where delivery_state = 'acknowledged' and (cloud_ack_id is null or acknowledged_at is null)
+  ) then
+    raise exception 'ASSERT FAIL: an acknowledged outbox row lacks its cloud acknowledgement identity';
+  end if;
+
+  raise notice 'PASS truthful-sync-state: delivery_state=acknowledged requires a real cloud ack id and timestamp; WS-09 fabricates none';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 18. Storage: single active assignment per unit and no over-capacity
+--     (§6.4, §12 acceptance test 4).
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_blocked int := 0;
+begin
+  begin
+    insert into edge_laundry.storage_assignment
+      (id, tenant_id, digital_store_id, location_id, booking_id, garment_id, bag_id,
+       storage_position_id, assigned_at, assigned_by, terminal_device_id, assignment_event_id)
+    values
+      (gen_random_uuid(), 'e0000000-0000-4000-8000-000000000001',
+       'e0000000-0000-4000-8000-000000000002', 'e0000000-0000-4000-8000-000000000003',
+       'e0000000-0000-4000-8000-000000000070', 'e0000000-0000-4000-8000-000000000074', null,
+       'e0000000-0000-4000-8000-000000000079', now(),
+       'e0000000-0000-4000-8000-000000000041', 'e0000000-0000-4000-8000-000000000022',
+       gen_random_uuid());
+    raise exception 'ASSERT FAIL: a second unit was assigned to a capacity-1 storage position';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  begin
+    insert into edge_laundry.storage_assignment
+      (id, tenant_id, digital_store_id, location_id, booking_id, garment_id, bag_id,
+       storage_position_id, assigned_at, assigned_by, terminal_device_id, assignment_event_id)
+    values
+      (gen_random_uuid(), 'e0000000-0000-4000-8000-000000000001',
+       'e0000000-0000-4000-8000-000000000002', 'e0000000-0000-4000-8000-000000000003',
+       'e0000000-0000-4000-8000-000000000070', 'e0000000-0000-4000-8000-000000000073', null,
+       'e0000000-0000-4000-8000-00000000007a', now(),
+       'e0000000-0000-4000-8000-000000000041', 'e0000000-0000-4000-8000-000000000022',
+       gen_random_uuid());
+    raise exception 'ASSERT FAIL: a garment was actively stored in two positions at once';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  if v_blocked <> 2 then
+    raise exception 'ASSERT FAIL: expected 2 blocked storage assignments, got %', v_blocked;
+  end if;
+  raise notice 'PASS storage: over-capacity assignment and double active assignment of one unit are both rejected (§12 acceptance test 4)';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 19. Booking balance projection CHECK, including the R4 additive column.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_def text;
+begin
+  select pg_get_constraintdef(oid) into v_def
+  from pg_constraint where conname = 'booking_balance_ck'
+    and conrelid = 'edge_laundry.booking'::regclass;
+  if v_def is null then
+    raise exception 'ASSERT FAIL: edge_laundry.booking has no balance CHECK (§6.4)';
+  end if;
+  if v_def not like '%refunded_minor%' then
+    raise exception 'ASSERT FAIL: the balance CHECK does not reference refunded_minor (reconciliation R4)';
+  end if;
+
+  begin
+    update edge_laundry.booking set balance_minor = 0
+    where id = 'e0000000-0000-4000-8000-000000000070';
+    raise exception 'ASSERT FAIL: an inconsistent Booking balance was accepted';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+  end;
+
+  raise notice 'PASS booking-balance: balance_minor = total_minor - paid_minor + refunded_minor is enforced (§6.4 with R4)';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 20. §8 required indexes.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  r record;
+  i text;
+  v_missing text[] := array[]::text[];
+  v_named text[] := array[
+    'outbox_open_idx',                          -- open outbox partial
+    'inbox_state_idx',                          -- (state, cloud_sequence)
+    'booking_number_uq',                        -- (location_id, booking_number)
+    'booking_customer_idx',                     -- (location_id, customer_id, updated_at desc)
+    'tag_code_uq',                              -- (location_id, tag_code)
+    'storage_assignment_active_idx',            -- active storage partial
+    'payment_provider_reference_idx',           -- provider ref partial
+    'file_transfer_job_queue_idx',              -- (state, next_attempt_at)
+    'audit_event_location_time_idx',            -- (location_id, occurred_at desc)
+    'security_event_severity_idx',              -- (severity, detected_at desc)
+    'hub_assignment_active_uq',
+    'terminal_session_active_uq',
+    'configuration_snapshot_active_uq',
+    'terminal_profile_assignment_active_uq',
+    'storage_assignment_active_garment_uq',
+    'storage_assignment_active_bag_uq'
+  ];
+  v_scope int := 0;
+begin
+  foreach i in array v_named loop
+    if not exists (select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+                   where c.relkind = 'i' and c.relname = i and n.nspname like 'edge\_%') then
+      v_missing := v_missing || i;
+    end if;
+  end loop;
+  if array_length(v_missing, 1) is not null then
+    raise exception 'ASSERT FAIL: §8 index(es) missing: %', array_to_string(v_missing, ', ');
+  end if;
+
+  -- §8: "All scoped tables: (tenant_id, digital_store_id, location_id)".
+  for r in
+    select c.table_schema as s, c.table_name as t
+    from information_schema.columns c
+    join information_schema.tables tb
+      on tb.table_schema = c.table_schema and tb.table_name = c.table_name
+    where c.table_schema like 'edge\_%' and tb.table_type = 'BASE TABLE'
+      and c.column_name in ('tenant_id', 'digital_store_id', 'location_id')
+      and c.is_nullable = 'NO'
+    group by c.table_schema, c.table_name
+    having count(distinct c.column_name) = 3
+  loop
+    if not exists (
+      select 1 from pg_indexes
+      where schemaname = r.s and tablename = r.t and indexname = r.s || '_' || r.t || '_scope_idx'
+    ) then
+      raise exception 'ASSERT FAIL: scoped relation %.% has no (tenant_id, digital_store_id, location_id) index (§8)', r.s, r.t;
+    end if;
+    v_scope := v_scope + 1;
+  end loop;
+
+  raise notice 'PASS indexes: all 16 named §8 indexes exist and all % scoped relations carry the scope index', v_scope;
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 21. §7 procedures and the §6.2/§3 views exist.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  p text;
+begin
+  foreach p in array array[
+    'edge_core.allocate_business_number', 'edge_core.format_display_number',
+    'edge_sync.allocate_hub_sequence', 'edge_sync.record_sequence_gap',
+    'edge_sync.accept_terminal_command', 'edge_sync.complete_command',
+    'edge_sync.is_canonical_idempotency_key', 'edge_documents.is_canonical_suppression_key',
+    'edge_audit.enforce_append_only', 'edge_audit.enforce_no_hard_delete',
+    'edge_sync.assert_event_has_outbox', 'edge_laundry.enforce_storage_capacity',
+    'edge_payments.enforce_payment_immutability',
+    'edge_sync.enforce_command_result_immutability'
+  ] loop
+    if not exists (
+      select 1 from pg_proc pr join pg_namespace n on n.oid = pr.pronamespace
+      where n.nspname = split_part(p, '.', 1) and pr.proname = split_part(p, '.', 2)
+    ) then
+      raise exception 'ASSERT FAIL: routine % is missing', p;
+    end if;
+  end loop;
+
+  foreach p in array array['edge_config.active_configuration', 'edge_sync.outbox_pending',
+                           'edge_audit.support_booking_summary', 'edge_audit.support_sync_health'] loop
+    if not exists (
+      select 1 from pg_views where schemaname = split_part(p, '.', 1) and viewname = split_part(p, '.', 2)
+    ) then
+      raise exception 'ASSERT FAIL: view % is missing', p;
+    end if;
+  end loop;
+
+  -- §3: kitluy_support_ro sees REDACTED views only and holds no table grant.
+  if exists (
+    select 1 from information_schema.role_table_grants g
+    join information_schema.tables t
+      on t.table_schema = g.table_schema and t.table_name = g.table_name
+    where g.grantee = 'kitluy_support_ro' and g.table_schema like 'edge\_%'
+      and t.table_type = 'BASE TABLE'
+  ) then
+    raise exception 'ASSERT FAIL: kitluy_support_ro holds a BASE TABLE grant; §3 allows redacted views only';
+  end if;
+
+  -- The support views must not expose customer identity.
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'edge_audit' and table_name = 'support_booking_summary'
+      and column_name in ('customer_id', 'display_name', 'phone_e164', 'email_normalized')
+  ) then
+    raise exception 'ASSERT FAIL: the support diagnostic view exposes customer identity';
+  end if;
+
+  raise notice 'PASS procedures-views: 14 routines and 4 views exist; kitluy_support_ro has redacted views only and no customer identity';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 22. Business-number allocator is collision-safe (§12 acceptance test 8).
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_a bigint;
+  v_b bigint;
+begin
+  begin
+    v_a := edge_core.allocate_business_number(
+             'e0000000-0000-4000-8000-000000000003', 'assert_probe', '2026-07-27');
+    v_b := edge_core.allocate_business_number(
+             'e0000000-0000-4000-8000-000000000003', 'assert_probe', '2026-07-27');
+    if v_a <> 1 or v_b <> 2 then
+      raise exception 'ASSERT FAIL: allocator returned %/% instead of 1/2', v_a, v_b;
+    end if;
+    if edge_core.format_display_number('KLB', 'pp001', '2026-07-27', v_b)
+       <> 'KLB-PP001-260727-000002' then
+      raise exception 'ASSERT FAIL: display-number format does not match Appendix B';
+    end if;
+    -- Roll the probe back: assertions leave the database unchanged.
+    raise exception 'ROLLBACK_PROBE';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm <> 'ROLLBACK_PROBE' then raise; end if;
+  end;
+  raise notice 'PASS display-numbers: allocate_business_number returns 1 then 2 and Appendix B formatting is KLB-PP001-260727-000002';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 23. accept_terminal_command implements the offline §4 acceptance algorithm.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_out edge_sync.command_outcome;
+  v_hits int := 0;
+begin
+  -- (a) duplicate key + SAME request hash returns the stored result.
+  v_out := edge_sync.accept_terminal_command(
+    gen_random_uuid(), 'e0000000-0000-4000-8000-000000000001',
+    'e0000000-0000-4000-8000-000000000002', 'e0000000-0000-4000-8000-000000000003',
+    'e0000000-0000-4000-8000-000000000020',
+    'kl1.e0000000-0000-4000-8000-000000000020.1001',
+    encode(sha256('fixture:request-hash:cash-payment-3000'), 'hex'),
+    'payments.record_cash_payment', 'payment');
+  if v_out.outcome <> 'duplicate' then
+    raise exception 'ASSERT FAIL: a replayed command returned outcome % instead of duplicate', v_out.outcome;
+  end if;
+  if v_out.aggregate_id <> 'e0000000-0000-4000-8000-000000000090' then
+    raise exception 'ASSERT FAIL: the replay did not return the ORIGINAL stored result';
+  end if;
+  v_hits := v_hits + 1;
+
+  -- (b) duplicate key + DIFFERENT request hash is EDGE_IDEMPOTENCY_PAYLOAD_MISMATCH.
+  begin
+    v_out := edge_sync.accept_terminal_command(
+      gen_random_uuid(), 'e0000000-0000-4000-8000-000000000001',
+      'e0000000-0000-4000-8000-000000000002', 'e0000000-0000-4000-8000-000000000003',
+      'e0000000-0000-4000-8000-000000000020',
+      'kl1.e0000000-0000-4000-8000-000000000020.1001',
+      encode(sha256('a different body'), 'hex'), 'payments.record_cash_payment', 'payment');
+    raise exception 'ASSERT FAIL: a key reused with a different request hash was accepted';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%EDGE_IDEMPOTENCY_PAYLOAD_MISMATCH%' then
+      raise exception 'ASSERT FAIL: expected EDGE_IDEMPOTENCY_PAYLOAD_MISMATCH, got %', sqlerrm;
+    end if;
+    v_hits := v_hits + 1;
+  end;
+
+  -- (c) cross-Location command is refused (§12 acceptance test 9).
+  begin
+    v_out := edge_sync.accept_terminal_command(
+      gen_random_uuid(), 'e0000000-0000-4000-8000-000000000001',
+      'e0000000-0000-4000-8000-000000000002', 'e0000000-0000-4000-8000-0000000000a4',
+      'e0000000-0000-4000-8000-000000000020',
+      'kl1.e0000000-0000-4000-8000-000000000020.5555',
+      encode(sha256('probe'), 'hex'), 'probe.command', 'booking');
+    raise exception 'ASSERT FAIL: a cross-Location command was accepted';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%EDGE_SCOPE_MISMATCH%' then
+      raise exception 'ASSERT FAIL: expected EDGE_SCOPE_MISMATCH, got %', sqlerrm;
+    end if;
+    v_hits := v_hits + 1;
+  end;
+
+  -- (d) a lower unknown terminal sequence is a replay rejection (offline §19).
+  begin
+    v_out := edge_sync.accept_terminal_command(
+      gen_random_uuid(), 'e0000000-0000-4000-8000-000000000001',
+      'e0000000-0000-4000-8000-000000000002', 'e0000000-0000-4000-8000-000000000003',
+      'e0000000-0000-4000-8000-000000000020',
+      'kl1.e0000000-0000-4000-8000-000000000020.500',
+      encode(sha256('probe'), 'hex'), 'probe.command', 'booking', null, 500);
+    raise exception 'ASSERT FAIL: a stale terminal sequence was accepted';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%EDGE_SEQUENCE_REPLAY_REJECTED%' then
+      raise exception 'ASSERT FAIL: expected EDGE_SEQUENCE_REPLAY_REJECTED, got %', sqlerrm;
+    end if;
+    v_hits := v_hits + 1;
+  end;
+
+  -- (e) a higher sequence with a gap is refused, not silently accepted.
+  begin
+    v_out := edge_sync.accept_terminal_command(
+      gen_random_uuid(), 'e0000000-0000-4000-8000-000000000001',
+      'e0000000-0000-4000-8000-000000000002', 'e0000000-0000-4000-8000-000000000003',
+      'e0000000-0000-4000-8000-000000000020',
+      'kl1.e0000000-0000-4000-8000-000000000020.9000',
+      encode(sha256('probe'), 'hex'), 'probe.command', 'booking', null, 9000);
+    raise exception 'ASSERT FAIL: a terminal sequence gap was accepted';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%EDGE_SEQUENCE_GAP%' then
+      raise exception 'ASSERT FAIL: expected EDGE_SEQUENCE_GAP, got %', sqlerrm;
+    end if;
+    v_hits := v_hits + 1;
+  end;
+
+  if v_hits <> 5 then
+    raise exception 'ASSERT FAIL: expected 5 acceptance-algorithm outcomes, got %', v_hits;
+  end if;
+  raise notice 'PASS acceptance-algorithm: duplicate returns the stored result; payload mismatch, scope mismatch, replay and sequence gap are all refused (offline §4/§19)';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 24. Fixture personas required by WS-09 (§12 acceptance test 9 and the
+--     canonical dotted logical profiles, KLD-2026-07-26-002 Group 2).
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  p text;
+  v_count int;
+begin
+  foreach p in array array['laundry.t1.intake_cashier', 'laundry.t2.customer_display',
+                           'laundry.t3.ready_scan_in', 'laundry.t4.pickup_scan_out'] loop
+    if not exists (select 1 from edge_config.terminal_profile_assignment where profile_code = p and enabled) then
+      raise exception 'ASSERT FAIL: no enabled terminal profile assignment for the canonical profile %', p;
+    end if;
+    if not exists (select 1 from edge_identity.terminal_session where profile_code = p) then
+      raise exception 'ASSERT FAIL: no terminal session for the canonical profile %', p;
+    end if;
+  end loop;
+  -- No legacy three-terminal or underscore form may appear (repository rule 10).
+  if exists (
+    select 1 from edge_config.terminal_profile_assignment
+    where profile_code !~ '^laundry\.t[1-4]\.[a-z_]+$'
+  ) then
+    raise exception 'ASSERT FAIL: a non-canonical logical profile code is assigned';
+  end if;
+
+  if not exists (select 1 from edge_identity.staff_cache
+                 where disabled and cardinality(profile_codes) = 0) then
+    raise exception 'ASSERT FAIL: the unauthorized-actor persona is missing';
+  end if;
+  if not exists (select 1 from edge_identity.terminal_device where lifecycle_status = 'revoked') then
+    raise exception 'ASSERT FAIL: the revoked-device persona is missing';
+  end if;
+  if not exists (select 1 from edge_identity.device_credential
+                 where status = 'revoked' and revoked_at is not null and revocation_reason is not null) then
+    raise exception 'ASSERT FAIL: the revoked-credential persona is missing';
+  end if;
+
+  -- Cross-Tenant and cross-Location attacker rows.
+  if not exists (select 1 from edge_laundry.booking
+                 where tenant_id <> 'e0000000-0000-4000-8000-000000000001') then
+    raise exception 'ASSERT FAIL: the cross-Tenant attacker row is missing';
+  end if;
+  if not exists (select 1 from edge_laundry.booking
+                 where tenant_id = 'e0000000-0000-4000-8000-000000000001'
+                   and location_id <> 'e0000000-0000-4000-8000-000000000003') then
+    raise exception 'ASSERT FAIL: the cross-Location attacker row is missing';
+  end if;
+
+  -- Duplicate-command and stale-command fixtures.
+  if not exists (select 1 from edge_sync.command_result
+                 where commit_status = 'committed' and cardinality(event_ids) > 0) then
+    raise exception 'ASSERT FAIL: the duplicate-command fixture is missing';
+  end if;
+  select count(*) into v_count from edge_sync.command_result
+  where commit_status = 'rejected'
+    and error_code in ('EDGE_SEQUENCE_REPLAY_REJECTED', 'EDGE_AGGREGATE_VERSION_CONFLICT');
+  if v_count < 2 then
+    raise exception 'ASSERT FAIL: the stale-command fixtures are missing (found %)', v_count;
+  end if;
+
+  -- Payment personas.
+  if not exists (select 1 from edge_payments.payment where state = 'pending' and confirmed_at is null) then
+    raise exception 'ASSERT FAIL: the pending-payment persona is missing';
+  end if;
+  if not exists (select 1 from edge_payments.payment where state = 'confirmed' and confirmed_at is not null) then
+    raise exception 'ASSERT FAIL: the confirmed-payment persona is missing';
+  end if;
+  if not exists (select 1 from edge_payments.refund_adjustment where adjustment_type = 'refund') then
+    raise exception 'ASSERT FAIL: the refund-adjustment persona is missing';
+  end if;
+
+  raise notice 'PASS fixtures: canonical T1-T4 dotted profiles, unauthorized actor, revoked device+credential, cross-Tenant and cross-Location attacker rows, duplicate/stale commands, pending+confirmed payment and refund all present';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 25. Hashes are lowercase-hex SHA-256 char(64) (§1).
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  r record;
+  v_count int := 0;
+begin
+  for r in
+    select table_schema, table_name, column_name, data_type, character_maximum_length
+    from information_schema.columns
+    where table_schema like 'edge\_%'
+      and (column_name like '%sha256%' or column_name like '%\_hash'
+           or column_name in ('root_key_fingerprint', 'public_key_fingerprint'))
+  loop
+    if r.data_type <> 'character' or r.character_maximum_length <> 64 then
+      raise exception 'ASSERT FAIL: hash column %.%.% is %(%) but §1 requires char(64)',
+        r.table_schema, r.table_name, r.column_name, r.data_type, r.character_maximum_length;
+    end if;
+    v_count := v_count + 1;
+  end loop;
+  raise notice 'PASS hashes: all % hash/fingerprint column(s) are char(64) lowercase-hex SHA-256 (§1)', v_count;
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 26. Migration journal is checksum-registered (§4; gap G6).
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_count int;
+  v_bad int;
+begin
+  if to_regclass('edge_ops.migration_journal') is null then
+    raise exception 'ASSERT FAIL: edge_ops.migration_journal is missing (§4 checksum registry)';
+  end if;
+  select count(*) into v_count from edge_ops.migration_journal;
+  if v_count < 15 then
+    raise exception 'ASSERT FAIL: only % migration(s) journalled; the canonical §4 set has 15 files', v_count;
+  end if;
+  select count(*) into v_bad from edge_ops.migration_journal
+  where checksum_sha256 !~ '^[0-9a-f]{64}$';
+  if v_bad > 0 then
+    raise exception 'ASSERT FAIL: % journal row(s) have a malformed checksum', v_bad;
+  end if;
+  raise notice 'PASS migration-journal: % migration(s) journalled with lowercase-hex sha256 checksums (§4 "an applied file is never edited")', v_count;
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 27. Print duplicate-suppression key format (offline §11.1).
+-- ---------------------------------------------------------------------------
+do $$
+begin
+  if not edge_documents.is_canonical_suppression_key(
+       'print1.e0000000-0000-4000-8000-0000000000a0.3.e0000000-0000-4000-8000-000000000059.1') then
+    raise exception 'ASSERT FAIL: the canonical print1 suppression key was rejected';
+  end if;
+  if edge_documents.is_canonical_suppression_key('receipt-1-copy-1') then
+    raise exception 'ASSERT FAIL: a non-canonical suppression key was accepted';
+  end if;
+  begin
+    insert into edge_documents.print_job
+      (id, tenant_id, digital_store_id, location_id, document_type, document_id,
+       printer_binding_id, template_version, payload_sha256, copies,
+       duplicate_suppression_key, state, priority, created_at, next_attempt_at,
+       attempt_count, created_by, terminal_device_id)
+    values
+      (gen_random_uuid(), 'e0000000-0000-4000-8000-000000000001',
+       'e0000000-0000-4000-8000-000000000002', 'e0000000-0000-4000-8000-000000000003',
+       'payment_receipt', 'e0000000-0000-4000-8000-0000000000a0',
+       'e0000000-0000-4000-8000-000000000059', 3, encode(sha256('probe'), 'hex'), 1,
+       'receipt-probe-copy-1', 'queued', 0, now(), now(), 0,
+       'e0000000-0000-4000-8000-000000000040', 'e0000000-0000-4000-8000-000000000020');
+    raise exception 'ASSERT FAIL: print_job accepted a non-canonical suppression key';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+  end;
+  raise notice 'PASS print-suppression: print1.{document_id}.{document_version}.{printer_binding_id}.{copy_index} enforced (offline §11.1)';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 28. Single-active invariants stated in prose by §6.1/§6.2.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_blocked int := 0;
+begin
+  begin
+    insert into edge_identity.hub_assignment
+      (id, hub_device_id, tenant_id, digital_store_id, location_id, assignment_generation,
+       assigned_at, status, operational_cert_serial)
+    values
+      (gen_random_uuid(), 'e0000000-0000-4000-8000-000000000010',
+       'e0000000-0000-4000-8000-000000000001', 'e0000000-0000-4000-8000-000000000002',
+       'e0000000-0000-4000-8000-0000000000a4', 2, now(), 'active', 'PROBE-CERT');
+    raise exception 'ASSERT FAIL: a Hub received a second ACTIVE assignment';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  begin
+    update edge_config.configuration_snapshot set state = 'active'
+    where id = 'e0000000-0000-4000-8000-000000000051';
+    raise exception 'ASSERT FAIL: a Location received a second ACTIVE configuration snapshot';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  if (select count(*) from edge_config.active_configuration
+      where location_id = 'e0000000-0000-4000-8000-000000000003') <> 1 then
+    raise exception 'ASSERT FAIL: the active-configuration view does not expose exactly one snapshot (§6.2)';
+  end if;
+
+  if v_blocked <> 2 then
+    raise exception 'ASSERT FAIL: expected 2 blocked single-active violations, got %', v_blocked;
+  end if;
+  raise notice 'PASS single-active: one active assignment per Hub, one active snapshot per Location, and the active-configuration view exposes exactly one';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 29. Final tally.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_tables int;
+  v_indexes int;
+  v_triggers int;
+begin
+  select count(*) into v_tables from pg_class c join pg_namespace n on n.oid = c.relnamespace
+  where c.relkind = 'r' and n.nspname like 'edge\_%' and n.nspname <> 'edge_ops';
+  select count(*) into v_indexes from pg_indexes where schemaname like 'edge\_%';
+  select count(*) into v_triggers from pg_trigger t
+  join pg_class c on c.oid = t.tgrelid join pg_namespace n on n.oid = c.relnamespace
+  where not t.tgisinternal and n.nspname like 'edge\_%';
+  if v_tables <> 53 then
+    raise exception 'ASSERT FAIL: expected 53 relations (51 canonical §6 + 2 additive), found %', v_tables;
+  end if;
+  raise notice 'PASS tally: % relations (51 canonical §6 + 2 additive G3 extensions), % indexes, % triggers',
+    v_tables, v_indexes, v_triggers;
+end $$;
