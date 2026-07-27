@@ -39,8 +39,8 @@ import type { LaundryTerminalProfile } from "./terminal-profiles.js";
  */
 export function emittingProfile(event: CustodyEventType): LaundryTerminalProfile {
   return (T3_READY_EVENTS as readonly string[]).includes(event)
-    ? "t3_ready_scan_in"
-    : "t4_pickup_scan_out";
+    ? "laundry.t3.ready_scan_in"
+    : "laundry.t4.pickup_scan_out";
 }
 
 export function assertProfileMayEmit(

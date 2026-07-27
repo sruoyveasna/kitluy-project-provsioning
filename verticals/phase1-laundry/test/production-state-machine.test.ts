@@ -26,14 +26,14 @@ import {
 } from "../src/index.js";
 
 const VALID_T3_COMMIT: T3ReadyCommitInput = {
-  profile: "t3_ready_scan_in",
+  profile: "laundry.t3.ready_scan_in",
   qaPassed: true,
   countVerified: true,
   storageAssigned: true,
 };
 
 const VALID_T4_RELEASE: T4ReleaseInput = {
-  profile: "t4_pickup_scan_out",
+  profile: "laundry.t4.pickup_scan_out",
   collectorVerified: true,
   balanceSettled: true,
   releaseCompletenessVerified: true,
@@ -147,15 +147,15 @@ describe("T3-only atomic READY commit (KBR-LND-004)", () => {
 
   it("denies T1, T2 and T4 attempting the ready commit (T3 is the only Ready scan-in role)", () => {
     for (const profile of [
-      "t1_intake_cashier",
-      "t2_customer_display",
-      "t4_pickup_scan_out",
+      "laundry.t1.intake_cashier",
+      "laundry.t2.customer_display",
+      "laundry.t4.pickup_scan_out",
     ] as const) {
       expect(() => markReady("QA_PACKAGING", { ...VALID_T3_COMMIT, profile })).toThrow(
         T3ReadyCommitError,
       );
       expect(() => markReady("QA_PACKAGING", { ...VALID_T3_COMMIT, profile })).toThrow(
-        /only t3_ready_scan_in/,
+        /only laundry\.t3\.ready_scan_in/,
       );
     }
   });
@@ -186,7 +186,7 @@ describe("T3-only atomic READY commit (KBR-LND-004)", () => {
 
   it("error message cites KBR-LND-004", () => {
     expect(() =>
-      markReady("QA_PACKAGING", { ...VALID_T3_COMMIT, profile: "t1_intake_cashier" }),
+      markReady("QA_PACKAGING", { ...VALID_T3_COMMIT, profile: "laundry.t1.intake_cashier" }),
     ).toThrow(/KBR-LND-004/);
   });
 });
@@ -199,13 +199,13 @@ describe("T4-only release and pickup completion (KBR-LND-005)", () => {
 
   it("denies T1, T2 and T3 attempting release (T4 is the only release profile)", () => {
     for (const profile of [
-      "t1_intake_cashier",
-      "t2_customer_display",
-      "t3_ready_scan_in",
+      "laundry.t1.intake_cashier",
+      "laundry.t2.customer_display",
+      "laundry.t3.ready_scan_in",
     ] as const) {
       expect(() => releaseCustody({ ...VALID_T4_RELEASE, profile })).toThrow(T4ReleaseError);
       expect(() => completePickup("READY", { ...VALID_T4_RELEASE, profile })).toThrow(
-        /only t4_pickup_scan_out/,
+        /only laundry\.t4\.pickup_scan_out/,
       );
     }
   });
@@ -243,7 +243,7 @@ describe("T4-only release and pickup completion (KBR-LND-005)", () => {
 
   it("error message cites KBR-LND-005", () => {
     expect(() =>
-      completePickup("READY", { ...VALID_T4_RELEASE, profile: "t3_ready_scan_in" }),
+      completePickup("READY", { ...VALID_T4_RELEASE, profile: "laundry.t3.ready_scan_in" }),
     ).toThrow(/KBR-LND-005/);
   });
 });
@@ -295,5 +295,52 @@ describe("RV-001 — release completeness precondition (KBR-LND-005 TV3)", () =>
     expect(() =>
       completePickup("READY", { ...VALID_T4_RELEASE, releaseCompletenessVerified: false }),
     ).toThrow(/release completeness/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// KLD-2026-07-26-002 Group 2: "Shared T3/T4 hardware continues to use separate,
+// audited application modes and actor sessions." The rename must not merge the
+// two roles — each guard is asserted against the canonical dotted identifiers.
+// ---------------------------------------------------------------------------
+describe("T3/T4 role separation under the canonical identifiers (KLD-2026-07-26-002 Group 2)", () => {
+  it("T3 cannot execute the T4 pickup completion", () => {
+    const t3AtPickup: T4ReleaseInput = { ...VALID_T4_RELEASE, profile: "laundry.t3.ready_scan_in" };
+    expect(() => completePickup("READY", t3AtPickup)).toThrow(T4ReleaseError);
+    expect(() => completePickup("READY", t3AtPickup)).toThrow(/only laundry\.t4\.pickup_scan_out/);
+    expect(() => releaseCustody(t3AtPickup)).toThrow(T4ReleaseError);
+  });
+
+  it("T4 cannot execute the T3 Ready commit", () => {
+    const t4AtReady: T3ReadyCommitInput = {
+      ...VALID_T3_COMMIT,
+      profile: "laundry.t4.pickup_scan_out",
+    };
+    expect(() => markReady("QA_PACKAGING", t4AtReady)).toThrow(T3ReadyCommitError);
+    expect(() => markReady("QA_PACKAGING", t4AtReady)).toThrow(/only laundry\.t3\.ready_scan_in/);
+  });
+
+  it("neither retired nor pre-rename spellings satisfy a role guard", () => {
+    for (const stale of [
+      "t2_scan_in",
+      "t3_scan_out",
+      "t1_intake_cashier",
+      "t2_customer_display",
+      "t3_ready_scan_in",
+      "t4_pickup_scan_out",
+    ]) {
+      // Cast: these identifiers are deliberately outside the canonical union —
+      // the guards must still fail closed if one reaches the boundary.
+      const profile = stale as T3ReadyCommitInput["profile"];
+      expect(() => markReady("QA_PACKAGING", { ...VALID_T3_COMMIT, profile })).toThrow(
+        T3ReadyCommitError,
+      );
+      expect(() => releaseCustody({ ...VALID_T4_RELEASE, profile })).toThrow(T4ReleaseError);
+    }
+  });
+
+  it("the canonical T3 and T4 profiles each satisfy exactly their own guard", () => {
+    expect(markReady("QA_PACKAGING", VALID_T3_COMMIT)).toBe("READY");
+    expect(completePickup("READY", VALID_T4_RELEASE)).toBe("PICKED_UP");
   });
 });

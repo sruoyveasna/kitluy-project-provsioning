@@ -166,16 +166,16 @@ export interface T3ReadyCommitInput {
  * Commit QA_PACKAGING → READY. T3 is "the only canonical Clean & Ready
  * scan-in role" (KBR-LND-004); "READY confirmation restricted to T3 profile"
  * (KBR-LND-003 permissions). Throws unless the caller is
- * `t3_ready_scan_in` AND QA, count and storage preconditions all hold.
+ * `laundry.t3.ready_scan_in` AND QA, count and storage preconditions all hold.
  */
 export function markReady(from: ProductionState, input: T3ReadyCommitInput): ProductionState {
   if (!canProductionTransition(from, "READY")) {
     // e.g. WASHING → READY denied (KBR-LND-003 TV2).
     throw new ProductionTransitionError(from, "READY");
   }
-  if (input.profile !== "t3_ready_scan_in") {
+  if (input.profile !== "laundry.t3.ready_scan_in") {
     throw new T3ReadyCommitError(
-      `terminal profile ${input.profile} may not commit READY; only t3_ready_scan_in may`,
+      `terminal profile ${input.profile} may not commit READY; only laundry.t3.ready_scan_in may`,
     );
   }
   if (!input.qaPassed) {
@@ -227,13 +227,14 @@ export interface T4ReleaseInput {
 /**
  * Guard for releasing garments to a customer. "T4 [is] the only terminal
  * profile authorized to release garments and complete customer pickup"
- * (KBR-LND-005 purpose). Throws unless the caller is `t4_pickup_scan_out`
- * with the collector verified and the balance settled.
+ * (KBR-LND-005 purpose). Throws unless the caller is
+ * `laundry.t4.pickup_scan_out` with the collector verified and the balance
+ * settled.
  */
 export function releaseCustody(input: T4ReleaseInput): void {
-  if (input.profile !== "t4_pickup_scan_out") {
+  if (input.profile !== "laundry.t4.pickup_scan_out") {
     throw new T4ReleaseError(
-      `terminal profile ${input.profile} may not release garments; only t4_pickup_scan_out may`,
+      `terminal profile ${input.profile} may not release garments; only laundry.t4.pickup_scan_out may`,
     );
   }
   if (!input.collectorVerified) {

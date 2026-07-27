@@ -1184,7 +1184,7 @@ begin
     values
       ('00000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000015',
        '00000000-0000-4000-8000-000000000018', '00000000-0000-4000-8000-000000000401',
-       '00000000-0000-4000-8000-000000000410', 'INTAKE', 't1_intake_cashier',
+       '00000000-0000-4000-8000-000000000410', 'INTAKE', 'laundry.t1.intake_cashier',
        'DEV-SCAN-0001', 1);
     raise exception 'ASSERT FAIL: duplicate custody scan idempotency key was accepted';
   exception

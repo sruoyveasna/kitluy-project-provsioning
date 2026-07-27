@@ -158,7 +158,7 @@ describe.runIf(dbAvailable)("WS-07 laundry persistence (DB-backed)", () => {
     const ready = await commitReady(pool, {
       orderId: booking.orderId,
       expectedVersion: version,
-      profile: "t3_ready_scan_in",
+      profile: "laundry.t3.ready_scan_in",
       qaPassed: true,
       countVerified: true,
       storagePositionId: POSITION_FREE,
@@ -169,7 +169,7 @@ describe.runIf(dbAvailable)("WS-07 laundry persistence (DB-backed)", () => {
     const released = await completePickupRelease(pool, {
       orderId: booking.orderId,
       expectedVersion: ready.version,
-      profile: "t4_pickup_scan_out",
+      profile: "laundry.t4.pickup_scan_out",
       collectorVerified: true,
       releaseCompletenessVerified: true,
       actor: { userId: MANAGER },
@@ -295,7 +295,7 @@ describe.runIf(dbAvailable)("WS-07 laundry persistence (DB-backed)", () => {
     const first = await recordCustodyScan(pool, {
       orderId: booking.orderId,
       scanType: "INTAKE",
-      terminalRole: "t1_intake_cashier",
+      terminalRole: "laundry.t1.intake_cashier",
       toState: "RECEIVED",
       actor: { userId: CASHIER },
       idempotencyKey: key,
@@ -304,7 +304,7 @@ describe.runIf(dbAvailable)("WS-07 laundry persistence (DB-backed)", () => {
     const replay = await recordCustodyScan(pool, {
       orderId: booking.orderId,
       scanType: "INTAKE",
-      terminalRole: "t1_intake_cashier",
+      terminalRole: "laundry.t1.intake_cashier",
       toState: "RECEIVED",
       actor: { userId: CASHIER },
       idempotencyKey: key,
@@ -337,7 +337,7 @@ describe.runIf(dbAvailable)("WS-07 laundry persistence (DB-backed)", () => {
       commitReady(pool, {
         orderId: booking.orderId,
         expectedVersion: version,
-        profile: "t1_intake_cashier", // not T3
+        profile: "laundry.t1.intake_cashier", // not T3
         qaPassed: true,
         countVerified: true,
         storagePositionId: POSITION_FREE,
@@ -349,7 +349,7 @@ describe.runIf(dbAvailable)("WS-07 laundry persistence (DB-backed)", () => {
       commitReady(pool, {
         orderId: booking.orderId,
         expectedVersion: version,
-        profile: "t3_ready_scan_in",
+        profile: "laundry.t3.ready_scan_in",
         qaPassed: false, // QA missing
         countVerified: true,
         storagePositionId: POSITION_FREE,
@@ -380,7 +380,7 @@ describe.runIf(dbAvailable)("WS-07 laundry persistence (DB-backed)", () => {
     const ready = await commitReady(pool, {
       orderId: booking.orderId,
       expectedVersion: version,
-      profile: "t3_ready_scan_in",
+      profile: "laundry.t3.ready_scan_in",
       qaPassed: true,
       countVerified: true,
       storagePositionId: POSITION_FREE,
@@ -393,7 +393,7 @@ describe.runIf(dbAvailable)("WS-07 laundry persistence (DB-backed)", () => {
       completePickupRelease(pool, {
         orderId: booking.orderId,
         expectedVersion: ready.version,
-        profile: "t4_pickup_scan_out",
+        profile: "laundry.t4.pickup_scan_out",
         collectorVerified: true,
         releaseCompletenessVerified: true,
         actor: { userId: MANAGER },
@@ -411,7 +411,7 @@ describe.runIf(dbAvailable)("WS-07 laundry persistence (DB-backed)", () => {
     const released = await completePickupRelease(pool, {
       orderId: booking.orderId,
       expectedVersion: ready.version,
-      profile: "t4_pickup_scan_out",
+      profile: "laundry.t4.pickup_scan_out",
       collectorVerified: true,
       releaseCompletenessVerified: true,
       actor: { userId: MANAGER },

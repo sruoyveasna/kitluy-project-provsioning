@@ -180,7 +180,7 @@ export interface CustodyScanCommand {
     | "PICKUP_SCAN_OUT"
     | "REWASH"
     | "ISSUE";
-  readonly terminalRole: Exclude<LaundryTerminalProfile, "t2_customer_display">;
+  readonly terminalRole: Exclude<LaundryTerminalProfile, "laundry.t2.customer_display">;
   readonly fromState?: string;
   readonly toState?: string;
   readonly storagePositionId?: string;
@@ -348,7 +348,7 @@ export async function commitReady(
       orderId: cmd.orderId,
       garmentId: cmd.garmentId,
       scanType: "READY_SCAN_IN",
-      terminalRole: "t3_ready_scan_in",
+      terminalRole: "laundry.t3.ready_scan_in",
       fromState: "PACKED",
       toState: "READY",
       storagePositionId: cmd.storagePositionId,
@@ -484,7 +484,7 @@ export async function completePickupRelease(
     await recordCustodyScanInTx(client, {
       orderId: cmd.orderId,
       scanType: "PICKUP_SCAN_OUT",
-      terminalRole: "t4_pickup_scan_out",
+      terminalRole: "laundry.t4.pickup_scan_out",
       fromState: "READY",
       toState: "RELEASED",
       actor: cmd.actor,

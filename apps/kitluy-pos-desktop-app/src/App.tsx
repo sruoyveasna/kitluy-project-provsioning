@@ -28,11 +28,13 @@ export const MESSAGES = {
   },
 } as const;
 
+// Canonical logical terminal-profile identifiers (KLD-2026-07-26-002 Group 2).
+// Labels are presentation only — a profile identifier is not a permission.
 const PROFILE_LABELS: Record<LaundryTerminalProfile, string> = {
-  t1_intake_cashier: "T1 — POS Cashier / Intake",
-  t2_customer_display: "T2 — Customer Display Screen",
-  t3_ready_scan_in: "T3 — Clean & Ready Scan-In",
-  t4_pickup_scan_out: "T4 — Customer Pickup Scan-Out",
+  "laundry.t1.intake_cashier": "T1 — POS Cashier / Intake",
+  "laundry.t2.customer_display": "T2 — Customer Display Screen",
+  "laundry.t3.ready_scan_in": "T3 — Clean & Ready Scan-In",
+  "laundry.t4.pickup_scan_out": "T4 — Customer Pickup Scan-Out",
 };
 
 export function App() {

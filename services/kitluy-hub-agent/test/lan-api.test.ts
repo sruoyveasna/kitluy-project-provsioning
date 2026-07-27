@@ -12,10 +12,10 @@ const identity = {
 describe("Store Hub LAN API kernel (/edge/v1)", () => {
   it("locks the four terminal profiles; legacy identifiers are retired", () => {
     expect(TERMINAL_PROFILES).toEqual([
-      "t1_intake_cashier",
-      "t2_customer_display",
-      "t3_ready_scan_in",
-      "t4_pickup_scan_out",
+      "laundry.t1.intake_cashier",
+      "laundry.t2.customer_display",
+      "laundry.t3.ready_scan_in",
+      "laundry.t4.pickup_scan_out",
     ]);
     expect(TERMINAL_PROFILES).not.toContain("t2_scan_in");
     expect(TERMINAL_PROFILES).not.toContain("t3_scan_out");

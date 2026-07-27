@@ -1577,7 +1577,7 @@ begin
     values
       ('00000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000015',
        '00000000-0000-4000-8000-000000000450', '00000000-0000-4000-8000-000000000401',
-       'INTAKE', 't1_intake_cashier', 'PROBE-N8A', 1);
+       'INTAKE', 'laundry.t1.intake_cashier', 'PROBE-N8A', 1);
     raise exception 'FAIL WS7-N8: custody event with a Tenant B Location was accepted';
   exception
     when foreign_key_violation then
@@ -1590,7 +1590,7 @@ begin
     values
       ('00000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000016',
        '00000000-0000-4000-8000-000000000018', '00000000-0000-4000-8000-000000000401',
-       'INTAKE', 't1_intake_cashier', 'PROBE-N8B', 1);
+       'INTAKE', 'laundry.t1.intake_cashier', 'PROBE-N8B', 1);
     raise exception 'FAIL WS7-N8: custody event escaping to a sibling Store was accepted';
   exception
     when foreign_key_violation then
@@ -1613,7 +1613,7 @@ begin
     values
       ('00000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000015',
        '00000000-0000-4000-8000-000000000018', '00000000-0000-4000-8000-000000000401',
-       '00000000-0000-4000-8000-000000000410', 'INTAKE', 't1_intake_cashier',
+       '00000000-0000-4000-8000-000000000410', 'INTAKE', 'laundry.t1.intake_cashier',
        'DEV-SCAN-0001', 1);
     raise exception 'FAIL WS7-N9: duplicate custody scan was accepted';
   exception
@@ -1658,13 +1658,13 @@ begin
     values
       ('00000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000015',
        '00000000-0000-4000-8000-000000000018', '00000000-0000-4000-8000-000000000401',
-       'READY_SCAN_IN', 't1_intake_cashier', 'PROBE-N11', 1);
+       'READY_SCAN_IN', 'laundry.t1.intake_cashier', 'PROBE-N11', 1);
     raise exception 'FAIL WS7-N11: T1 terminal recorded a Ready scan-in';
   exception
     when check_violation then
       null;
   end;
-  raise notice 'PASS WS7-N11/KBR-LND-004: READY_SCAN_IN restricted to t3_ready_scan_in (CHECK)';
+  raise notice 'PASS WS7-N11/KBR-LND-004: READY_SCAN_IN restricted to laundry.t3.ready_scan_in (CHECK)';
 end $$;
 rollback;
 
@@ -1697,7 +1697,7 @@ begin
     values
       ('00000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000015',
        '00000000-0000-4000-8000-000000000018', '00000000-0000-4000-8000-000000000401',
-       'INTAKE', 't2_customer_display', 'PROBE-N12', 1);
+       'INTAKE', 'laundry.t2.customer_display', 'PROBE-N12', 1);
     raise exception 'FAIL WS7-N12: a T2 terminal recorded a custody event';
   exception
     when check_violation then
@@ -1884,7 +1884,7 @@ begin
   values
     ('00000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000015',
      '00000000-0000-4000-8000-000000000018', '00000000-0000-4000-8000-000000000401',
-     '00000000-0000-4000-8000-000000000410', 'WASH_START', 't1_intake_cashier',
+     '00000000-0000-4000-8000-000000000410', 'WASH_START', 'laundry.t1.intake_cashier',
      'TAGGED', 'WASHING', '00000000-0000-4000-8000-000000000004',
      'DEV-SCAN-PROBE-P6', 1);
   get diagnostics v_rows = row_count;
