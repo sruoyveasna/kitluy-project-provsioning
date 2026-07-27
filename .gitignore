@@ -41,3 +41,8 @@ supabase/.temp/
 playwright-report/
 test-results/
 dist-electron/
+
+# Store Hub local development backups (WS-09) — binary pg_dump artifacts.
+# Backup/restore is exercised by `pnpm hub:db:backup` / `hub:db:restore`;
+# the dumps themselves are disposable local evidence, never committed.
+hub/.backups/
