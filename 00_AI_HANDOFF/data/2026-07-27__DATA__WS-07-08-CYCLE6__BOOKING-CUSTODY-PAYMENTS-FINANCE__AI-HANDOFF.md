@@ -122,10 +122,15 @@ executed are labeled inside `supabase/tests/rls-tests.sql` case names.
 
 ## Current implementation status (evidence register delta)
 
-WS-07 and WS-08 → IMPLEMENTED-IN-DEV (2026-07-27) upon independent execution
-review approval (00_AI_HANDOFF/reviews/2026-07-27__WS-07-08-EXECUTION__REVIEW.md).
-WS-09/WS-10 remain SCAFFOLDED; T1–T4 interfaces SCAFFOLDED; Edge/Hub
-mutations BLOCKED (BLK-003).
+WS-07 and WS-08 → IMPLEMENTED-IN-DEV (2026-07-27), promoted on the independent
+execution review verdict **APPROVED-WITH-CONDITIONS**
+(00_AI_HANDOFF/reviews/2026-07-27__WS-07-08-EXECUTION__REVIEW.md; 47/47
+adversarial probes held). Carried non-blocking conditions: RV-002 (optional
+DB-level refund ceiling, group 0130+), RV-003 (dev KHQR literal must not reach
+a real provider adapter — PAY-OD-001). OPEN and owner-reserved: acceptance of
+the financial/custody surface. WS-09/WS-10 remain SCAFFOLDED; T1–T4 interfaces
+SCAFFOLDED; Edge/Hub mutations BLOCKED (BLK-003). NOT INTEGRATION-VERIFIED,
+NOT PILOT-READY, NOT DEPLOYED, NOT PRODUCTION-READY.
 
 ## Recommended next task
 

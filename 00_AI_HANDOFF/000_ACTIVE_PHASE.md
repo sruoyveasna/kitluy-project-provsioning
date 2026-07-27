@@ -97,3 +97,26 @@ A task that needs to cross this fence must stop and file a conflict/decision rec
 - impact on schema, APIs, offline behavior, products, migration, security, operations, and roadmap;
 - options and recommendation;
 - owner decision required.
+
+## 7. Cycle-6 execution boundary (2026-07-27)
+
+Cloud-side authoritative persistence for the Laundry Booking aggregate,
+garment identity and custody, payments/refunds/reconciliation and the finance
+subledger is **IMPLEMENTED-IN-DEV** on the LOCAL development stack (WS-07,
+WS-08; independent review APPROVED-WITH-CONDITIONS). This does **not** move
+the phase fence and specifically does **not** imply:
+
+- Store Hub local runtime or Hub-authoritative persistence (WS-09) — SCAFFOLDED;
+- configuration publication or cloud/Hub synchronization (WS-10) — SCAFFOLDED;
+- device provisioning or fleet management (WS-11) — BLOCKED (BLK-005);
+- T1–T4 authoritative interfaces or Edge/Hub mutation routes — SCAFFOLDED and
+  BLOCKED by BLK-003 until the KL-DEC-001 ballot is owner-approved;
+- offline operation, live KHQR provider integration (PAY-OD-001/BLK-006),
+  cloud deployment, pilot operation or production application
+  (KL-INF-P1-037 remains OWNER-LOCKED: production migrations are
+  human-operated under four-eyes, never automatic).
+
+The T1–T4 role boundaries in §2 are unchanged and were encoded as executable
+database constraints this cycle (T2 can never emit custody; Ready scan-in is
+T3-only; pickup release is T4-only and requires collector verification,
+release completeness and settled balance or an approved exception).
