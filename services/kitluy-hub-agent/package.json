@@ -15,6 +15,7 @@
   "dependencies": {
     "@kitluy/api-errors": "workspace:*",
     "@kitluy/audit": "workspace:*",
+    "@kitluy/edge-contracts": "workspace:*",
     "@kitluy/observability": "workspace:*",
     "@kitluy/shared-config": "workspace:*",
     "@kitluy/shared-types": "workspace:*",

@@ -123,9 +123,16 @@ The Digital Store is the control plane. The Store Location is the physical edge 
 Owner original (immutable): `docs/source/canonical/kitluy-glossary-and-naming-standard-v1.0.0.md`.
 Preserved bootstrap-era registrations (proposals where they exceed the owner text):
 
-- **Terminal profile identifier strings** (POS Desktop spec v4.0.0 §13.5,
-  implemented in `verticals/phase1-laundry`): `t1_intake_cashier`,
-  `t2_customer_display`, `t3_ready_scan_in`, `t4_pickup_scan_out`.
+- **Logical terminal-profile identifier strings** (canonical per owner decision
+  KLD-2026-07-26-002 Group 2, OWNER-APPROVED 2026-07-27; implemented in
+  `verticals/phase1-laundry`): `laundry.t1.intake_cashier`,
+  `laundry.t2.customer_display`, `laundry.t3.ready_scan_in`,
+  `laundry.t4.pickup_scan_out`.
+  The pre-decision snake_case forms (`t1_intake_cashier`, `t2_customer_display`,
+  `t3_ready_scan_in`, `t4_pickup_scan_out`) from POS Desktop spec v4.0.0 §13.5
+  are REJECTED-BEFORE-IMPLEMENTATION with no alias layer, because no affected
+  identifier was deployed. `t2_scan_in` and `t3_scan_out` remain permanently
+  retired and are never reusable.
   NOTE: `kitluy-terminal-profile-contract-t1-t4-v1.0.0.md` uses device-profile
   codes (`laundry_front_counter`, `laundry_ready_pickup`, `laundry_t1..t4`)
   and does not restate these logical identifiers — recorded as conflict

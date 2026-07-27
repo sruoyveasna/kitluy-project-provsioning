@@ -462,6 +462,9 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: 5.7.3
+      vitest:
+        specifier: 'catalog:'
+        version: 2.1.9(@types/node@22.20.1)(terser@5.49.0)
 
   packages/entitlements:
     devDependencies:
@@ -484,6 +487,9 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: 5.7.3
+      vitest:
+        specifier: 'catalog:'
+        version: 2.1.9(@types/node@22.20.1)(terser@5.49.0)
 
   packages/feature-flags:
     dependencies:
@@ -723,6 +729,9 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: 5.7.3
+      vitest:
+        specifier: 'catalog:'
+        version: 2.1.9(@types/node@22.20.1)(terser@5.49.0)
 
   packages/shared-config:
     dependencies:
@@ -1065,6 +1074,9 @@ importers:
       '@kitluy/audit':
         specifier: workspace:*
         version: link:../../packages/audit
+      '@kitluy/edge-contracts':
+        specifier: workspace:*
+        version: link:../../packages/edge-contracts
       '@kitluy/observability':
         specifier: workspace:*
         version: link:../../packages/observability
