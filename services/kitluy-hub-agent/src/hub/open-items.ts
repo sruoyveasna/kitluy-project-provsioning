@@ -177,12 +177,40 @@ export const OPEN_ITEM_RECONCILIATION_CLEARANCE_KEY: HubOpenReconciliationItem =
   ],
 };
 
+/**
+ * KLREQ-030 — no RBAC key for ABANDONING a dead-lettered sync item.
+ *
+ * Found while implementing audited operator repair in Cycle 9. Requeueing has a
+ * key (`fleet.sync.trigger`, "Request a safe sync/reconciliation cycle").
+ * Abandoning does not, and it is a materially different act.
+ */
+export const OPEN_ITEM_DEAD_LETTER_ABANDONMENT_KEY: HubOpenReconciliationItem = {
+  id: "KLREQ-030",
+  status: "OPEN — awaiting owner ruling",
+  conflict:
+    "Schema contract §6.8 says a dead letter is never silently discarded and requires operator action. Requeueing is covered by fleet.sync.trigger — asking the system to try again, whose whole point is that nothing is lost. ABANDONING one accepts PERMANENT LOSS of a recorded business effect, and no registry key permits that. Reusing the retry key would make 'try again' and 'give up' the same authority.",
+  sources: [
+    "docs/source/offline/kitluy-storehub-local-database-schema-v1.0.0.md §6.8 — dead_letter_item, operator_action_required",
+    "docs/source/security/kitluy-suite-rbac-permission-registry-v1.0.0.csv — fleet.sync.trigger",
+    "services/kitluy-hub-agent/src/hub/sync/operations.ts — ABANDON_PERMISSION",
+  ],
+  currentBehaviour:
+    "Requeue is implemented and audited: it demands an authorized actor and a reason, preserves attempt_count, and leaves the conflict dimension exactly where it was — repairing transport is not declaring a divergence resolved. Abandonment has NO code path: abandonDeadLetter throws EDGE_PERMISSION_KEY_UNREGISTERED, and edge_sync.dead_letter_item.resolution_action CHECKs a value list containing only 'requeued', so the database refuses it too.",
+  rulingRequired:
+    "[REQUIRED: canonical RBAC permission key for abandoning a dead-lettered sync item, with its approval requirement (four-eyes is likely, given permanent loss of a recorded business effect), reauthentication requirement, reason requirement and primary audit event.]",
+  doNot: [
+    "Do NOT reuse fleet.sync.trigger for abandonment — it permits retrying, not accepting loss.",
+    "Do NOT add an 'abandoned' resolution_action before a key exists.",
+  ],
+};
+
 export const HUB_OPEN_RECONCILIATION_ITEMS: readonly HubOpenReconciliationItem[] = [
   OPEN_ITEM_BOOKING_STATUS_VS_PRODUCTION_CHAIN,
   OPEN_ITEM_PERMISSION_GRANT_PROJECTION,
   OPEN_ITEM_HUB_EVENT_KEY_NAMESPACE,
   OPEN_ITEM_PROVIDER_CALLBACK_LEDGER,
   OPEN_ITEM_RECONCILIATION_CLEARANCE_KEY,
+  OPEN_ITEM_DEAD_LETTER_ABANDONMENT_KEY,
 ];
 
 /**

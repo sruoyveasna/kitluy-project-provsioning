@@ -311,6 +311,7 @@ export const HUB_MIGRATION_ORDER = [
   "0020_revoke_public_execute.sql",
   "0021_cloud_inbox_and_provider_outcomes.sql",
   "0022_signed_grants_and_activation.sql",
+  "0023_operator_repair_and_recovery.sql",
 ] as const;
 
 /**
