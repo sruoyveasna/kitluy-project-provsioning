@@ -239,6 +239,8 @@ declare
     'edge_sync.transmission_batch',
     -- WS-10 additive extension G10 (KLREQ-027 provider-outcome dedupe).
     'edge_sync.provider_outcome_delivery',
+    -- WS-10 additive extension G11 (KLREQ-025 signed grant projection).
+    'edge_config.permission_grant_projection',
     'edge_hardware.peripheral_observation', 'edge_hardware.device_heartbeat',
     'edge_audit.audit_event', 'edge_audit.support_session'
   ];
@@ -1634,11 +1636,11 @@ begin
   select count(*) into v_triggers from pg_trigger t
   join pg_class c on c.oid = t.tgrelid join pg_namespace n on n.oid = c.relnamespace
   where not t.tgisinternal and n.nspname like 'edge\_%';
-  if v_tables <> 56 then
+  if v_tables <> 57 then
     raise exception
-      'ASSERT FAIL: expected 56 relations (51 canonical §6 + 2 additive G3 + 2 additive G9 + 1 additive G10), found %',
+      'ASSERT FAIL: expected 57 relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11), found %',
       v_tables;
   end if;
-  raise notice 'PASS tally: % relations (51 canonical §6 + 2 additive G3 + 2 additive G9 + 1 additive G10 WS-10 extensions), % indexes, % triggers',
+  raise notice 'PASS tally: % relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11 WS-10 extensions), % indexes, % triggers',
     v_tables, v_indexes, v_triggers;
 end $$;
