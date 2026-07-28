@@ -104,6 +104,17 @@ Cycle 9 is authorized for **WS-10 synchronization and configuration publication
 only**, and only after the seven WS-10-critical decisions are ruled (ballot:
 `docs/decisions/kitluy-ws10-prerequisite-decisions-owner-review-v1.0.0.md`).
 
+**Gate status 2026-07-28: SATISFIED.** All seven decisions were ruled by
+KLD-2026-07-28-001, and the last remaining reconciliation (C26, the delivery-
+and conflict-state model) was resolved by amendment KLD-2026-07-28-001-A01.
+**WS-10 is authorized to begin.** Cycle 9 must additionally honor the amendment:
+delivery state carries `pending`, `in_flight`, `retry_wait`, `acknowledged`,
+`rejected`, `dead_letter`; `reconciliation_required` is an ORTHOGONAL conflict
+state and is never folded into the delivery enum; enum alignment happens by
+ADDITIVE forward migration; external status comes from ONE shared projection
+with conflict override taking precedence; and a delivery worker may never
+independently clear `reconciliation_required`.
+
 **In scope:** Hub outbox selection → signed cloud transmission → idempotent
 cloud ingestion → acknowledgement recording → retry and backoff → dead-letter
 handling → rejection handling → reconciliation-required state → configuration

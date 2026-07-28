@@ -252,11 +252,60 @@ Resolved: **KLREQ-020** (canonical terminal key `kl1.{terminal_device_uuid}.{ter
 
 Deferred and ruled together: **KLREQ-024** and **KLREQ-028**. Until resolved the strict production-state guard remains, no production-stage route or permission may be invented, **no complete T1→T4 lifecycle may be claimed**, WS-10 may synchronize existing supported aggregates but must not introduce production-stage semantics, and WS-12–WS-15 cannot claim full lifecycle integration.
 
+### Amendment KLD-2026-07-28-001-A01 — WS-10 delivery and reconciliation state model (OWNER-APPROVED 2026-07-28)
+
+Resolves conflict **C26**. `reconciliation_required` remains an **orthogonal
+conflict/reconciliation state** and must NOT be added to
+`edge_sync.delivery_state`. Delivery state records the transport and
+cloud-processing lifecycle; conflict state records whether an acknowledged or
+rejected business effect requires reconciliation. The two dimensions stay
+separately queryable and auditable.
+
+Canonical `edge_sync.delivery_state`: `pending`, `in_flight`, `retry_wait`,
+`acknowledged`, `rejected`, `dead_letter`. Aligned by ADDITIVE forward
+migration in Cycle 9: `sending → in_flight`, `blocked → rejected`. The applied
+migration that introduced the enum is NOT edited. No runtime aliases are
+required because no production or pilot deployment exists.
+
+`rejected` means a DURABLE cloud rejection. It must never be used for temporary
+network errors, rate limiting, a scheduled retry, an in-progress attempt, a
+local operator pause, or an unverified timeout — those belong to `retry_wait`,
+`in_flight` or separate operational metadata.
+
+External status is derived by ONE shared mapping function or view, with
+**conflict override first**: when reconciliation is required, report
+`reconciliation_required` regardless of whether delivery state is
+`acknowledged`, `rejected` or `dead_letter`. Otherwise map delivery state
+directly. Services must not maintain divergent mappings.
+
+Transition ownership: WS-09 runtime creates outbox records only as `pending`;
+WS-10 owns `in_flight`, `retry_wait`, `acknowledged`, `rejected`,
+`dead_letter`. A delivery worker must NOT independently clear
+`reconciliation_required` — clearing requires an authorized actor or governed
+automated reconciliation, a reason, prior and resulting states, immutable
+audit, and correlation to the repair or compensating action.
+
+**Pre-rename audit (required by §1, executed 2026-07-28).** Every executable
+use of `blocked` was enumerated before authorizing the rename:
+
+| Location                                                     | Use                                      | Verdict                            |
+| ------------------------------------------------------------ | ---------------------------------------- | ---------------------------------- |
+| `hub/migrations/0001_types_and_helpers.sql:15`               | the enum value declaration itself        | mechanical                         |
+| `hub/tests/assertions.sql:163`                               | assertion listing the expected enum values | mechanical                         |
+| `services/kitluy-hub-agent/src/hub-database.ts:69` (+ test)  | TypeScript union mirror of the enum      | mechanical                         |
+| live `edge_sync.outbox` rows with `delivery_state='blocked'` | **0 rows**                               | nothing to migrate                 |
+
+All other `blocked` occurrences are unrelated: `blocked_balance_due` is a
+pickup payment-gate reason code, and `v_blocked` is a local counter in the
+assertions. **No code branches on the value and nothing has ever been written
+with it**, so no ambiguous use exists to correct. The rename is purely
+mechanical and safe.
+
 ### Cycle-9 reconciliation — decision vs implemented enum (2026-07-28)
 
 | ID  | Conflict                                                                                                                                                                                                                                                                                              | Disposition                                                                                                                                                                                                                                                     |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| C26 | **KLD-2026-07-28-001 §KLREQ-021 approves a local-persistence vocabulary that differs from the deployed `edge_sync.delivery_state` enum.** Approved: `pending, in_flight, retry_wait, acknowledged, rejected, reconciliation_required, dead_letter`. Deployed (created verbatim from canonical Hub schema §5): `pending, sending, acknowledged, retry_wait, blocked, dead_letter`. Three differences: `in_flight` vs `sending`; `rejected` vs `blocked`; `reconciliation_required` is absent from `delivery_state` and lives in the separate `conflict_state` enum | **NOT silently resolved.** The owner decision (2026-07-28) outranks the canonical schema document, so the approved vocabulary governs. Realignment requires an ADDITIVE forward migration in Cycle 9 (`ALTER TYPE ... RENAME VALUE` for the two renames, plus a decision on whether `reconciliation_required` becomes a `delivery_state` value or stays a `conflict_state` projection). Applied migrations are NOT rewritten. An amendment to canonical Hub schema §5 is owed. **WS-09 is unaffected — it only ever writes `pending`** |
+| C26 | **KLD-2026-07-28-001 §KLREQ-021 approves a local-persistence vocabulary that differs from the deployed `edge_sync.delivery_state` enum.** Approved: `pending, in_flight, retry_wait, acknowledged, rejected, reconciliation_required, dead_letter`. Deployed (created verbatim from canonical Hub schema §5): `pending, sending, acknowledged, retry_wait, blocked, dead_letter`. Three differences: `in_flight` vs `sending`; `rejected` vs `blocked`; `reconciliation_required` is absent from `delivery_state` and lives in the separate `conflict_state` enum | **RESOLVED 2026-07-28** by amendment KLD-2026-07-28-001-A01. `reconciliation_required` stays an ORTHOGONAL conflict state and is NOT added to `delivery_state`. The enum aligns by additive forward migration in Cycle 9 (`sending`→`in_flight`, `blocked`→`rejected`); the applied migration is not edited. Pre-rename audit executed: only 3 mechanical executable uses of `blocked` and 0 live rows, so no ambiguous use required correction |
 
 ### Cycle-8/8B residual risks — Store Hub (WS-09, 2026-07-27)
 

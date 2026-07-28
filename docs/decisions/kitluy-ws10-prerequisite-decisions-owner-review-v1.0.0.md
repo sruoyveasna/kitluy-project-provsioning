@@ -3,8 +3,8 @@
 **Filename:** `kitluy-ws10-prerequisite-decisions-owner-review-v1.0.0.md`
 **Version:** v1.0.0
 **Date:** 2026-07-27
-**Status:** **DECIDED — OWNER-APPROVED 2026-07-28 as KLD-2026-07-28-001.** Groups 1-4 APPROVED; Groups 5-7 APPROVED WITH DEFINITION. KLREQ-024 and KLREQ-028 remain deferred and are ruled together.
-**Blocks:** Cycle 9 (WS-10 synchronization and configuration publication)
+**Status:** **DECIDED — OWNER-APPROVED 2026-07-28 as KLD-2026-07-28-001**, amended the same day by **KLD-2026-07-28-001-A01** (Group 2 / C26 delivery- and conflict-state model). Groups 1-4 APPROVED; Groups 5-7 APPROVED WITH DEFINITION. KLREQ-024 and KLREQ-028 remain deferred and are ruled together.
+**Blocks:** nothing further — Cycle 9 (WS-10 synchronization and configuration publication) is **authorized to begin**
 **Evidence discipline:** approving this ballot resolves a DECISION blockage only. It is not implementation evidence (KLD-EVIDENCE-001).
 
 > Each item states the recommendation, what it would bind, and the alternative,
@@ -35,6 +35,15 @@ Binds: persisted delivery state uses `edge_sync.delivery_state`; the wire value 
 Also binds the WS-09/WS-10 split: WS-09 writes only `pending`; `sending`, `acknowledged`, `blocked`, `dead_letter`, `retry_wait` and conflict states are **WS-10's to write**.
 
 Alternative: collapse persisted and wire vocabularies into one set, which would require changing either the canonical enum or the LAN API envelope.
+
+> **AMENDED 2026-07-28 by KLD-2026-07-28-001-A01 (resolves C26).** Canonical
+> delivery states are `pending`, `in_flight`, `retry_wait`, `acknowledged`,
+> `rejected`, `dead_letter`. `reconciliation_required` is an **orthogonal
+> conflict state** and is never added to `delivery_state`. Cycle 9 aligns the
+> deployed enum by ADDITIVE forward migration (`sending` → `in_flight`,
+> `blocked` → `rejected`); the applied migration is not edited. Read the two
+> state names above as their post-migration equivalents. The WS-09/WS-10 split
+> itself is unchanged.
 
 ---
 
