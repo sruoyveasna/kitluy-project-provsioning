@@ -1,11 +1,15 @@
 /**
- * Store Hub COMMAND LAYER (WS-09-T002/T003/T004, service half).
+ * Store Hub COMMAND LAYER and SAFETY MODES (WS-09-T002..T006, service half).
  *
  * STATUS CEILING: IMPLEMENTED-IN-DEV against the local Hub database. No T1-T4
  * client integration is claimed, `lan-api.ts` still fails closed for every
  * mutating verb, and WS-10 (WAN transmission, cloud acknowledgement,
  * reconciliation) remains SCAFFOLDED — this layer writes `delivery_state
  * 'pending'` and reports `pending_cloud_sync` and NOTHING else (amendment §2).
+ *
+ * Open reconciliation items and residual risks are exported from
+ * `./open-items.js` so they stay visible and cannot be dropped once a
+ * workaround exists.
  */
 export * from "./db.js";
 export * from "./errors.js";
@@ -15,6 +19,8 @@ export * from "./authorization.js";
 export * from "./command-registry.js";
 export * from "./command-pipeline.js";
 export * from "./booking-status.js";
+export * from "./safety-mode.js";
+export * from "./open-items.js";
 export * from "./outbox.js";
 export * from "./repositories/index.js";
 export * from "./commands/shared.js";

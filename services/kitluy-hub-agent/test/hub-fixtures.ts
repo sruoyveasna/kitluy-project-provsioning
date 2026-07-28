@@ -14,8 +14,10 @@ import type pg from "pg";
 import { asId, type UserId } from "@kitluy/shared-types";
 import type { PermissionGrant } from "@kitluy/rbac";
 import { buildIdempotencyKey } from "../src/hub-database.js";
-import { createHubPool, isHubDatabaseReachable } from "../src/hub/db.js";
+import { createHubPool, isHubDatabaseReachable, withHubTransaction } from "../src/hub/db.js";
 import type { HubApprovalEvidence, HubDeviceContext } from "../src/hub/authorization.js";
+import { readAppliedMigrations } from "../src/hub/safety-mode.js";
+import type { HubMigrationEntry, HubSafetyObservations } from "../src/hub/safety-mode.js";
 import { uuidv7 } from "../src/hub/uuid.js";
 
 // --- shipped fixture identifiers (hub/seed/dev-fixtures.sql) ----------------
@@ -69,9 +71,15 @@ export async function ensureRuntimeRoleMembership(p: pg.Pool): Promise<boolean> 
       `select pg_has_role(current_user, 'kitluy_hub_runtime', 'USAGE') as ok`,
     );
     if (already.rows[0]?.ok === true) return true;
-    // NOTE: the grantee is spelled out explicitly. `GRANT ... TO current_user`
-    // segfaults the PostgreSQL 15.8 development server (recorded gap G7: the
-    // Hub production target is PG16).
+    // HAZARD KLRISK-HUB-001 (residual — see src/hub/open-items.ts). The grantee
+    // is spelled out explicitly because `GRANT ... TO current_user` SEGFAULTS
+    // the PostgreSQL 15.8 development server: the backend dies with signal 11,
+    // the postmaster terminates every other backend and the whole cluster
+    // restarts into crash recovery. This form only AVOIDS the bug here; the
+    // server crash itself is NOT fixed, so any other caller using the
+    // `current_user` form will bring the cluster down again. (Recorded gap G7:
+    // the Hub production target is PG16, so this is development-image specific
+    // and must not be assumed absent on the Hub image without evidence.)
     const who = await p.query<{ u: string }>(`select current_user as u`);
     const grantee = (who.rows[0]?.u ?? "postgres").replace(/"/g, '""');
     await p.query(`grant kitluy_hub_runtime, kitluy_sync_worker to "${grantee}"`);
@@ -81,8 +89,16 @@ export async function ensureRuntimeRoleMembership(p: pg.Pool): Promise<boolean> 
   }
 }
 
-export function pool(): pg.Pool {
-  return createHubPool();
+/**
+ * Suite pool. `max` is deliberately SMALL: every suite file runs in its own
+ * vitest worker and the whole monorepo test run executes many DB-backed
+ * packages in parallel against ONE development PostgreSQL server
+ * (`max_connections = 100`). A large per-suite ceiling exhausts it and turns
+ * unrelated suites red. Four is more than the concurrency probes need (the
+ * parallel-duplicate test needs two).
+ */
+export function pool(max = 4): pg.Pool {
+  return createHubPool(process.env, max);
 }
 
 /** Business date the Hub is operating on, taken from the database clock. */
@@ -383,4 +399,52 @@ export function locationGrants(
 export async function countRows(p: pg.Pool, sql: string, params: unknown[] = []): Promise<number> {
   const result = await p.query<{ count: string }>(sql, params);
   return Number(result.rows[0]?.count ?? "0");
+}
+
+/**
+ * A HEALTHY Hub safety reading. Every WS-09-T005 suite starts from this and
+ * overrides exactly the one dimension it is probing, so a test can never pass
+ * because an unrelated mode happened to be active.
+ */
+export function safetyObservations(
+  overrides: Partial<HubSafetyObservations> = {},
+): HubSafetyObservations {
+  return {
+    readOnlyDeclared: false,
+    diskUsedPercent: 12,
+    migration: { expected: [], applied: [] },
+    databaseIntegritySuspect: false,
+    configuration: { compatible: true, knownGoodActive: true },
+    clockOffsetSeconds: 1,
+    ...overrides,
+  };
+}
+
+/** The applied migration ledger, read through the safety-mode source adapter. */
+export async function appliedMigrations(p: pg.Pool): Promise<readonly HubMigrationEntry[]> {
+  return withHubTransaction(p, (client) => readAppliedMigrations(client));
+}
+
+/**
+ * Terminate ONE PostgreSQL backend by pid — a real server-side process kill,
+ * which is how these suites simulate a crash. Nothing is mocked: the backend
+ * dies, its transaction is aborted by PostgreSQL and the client sees 57P01.
+ */
+export async function terminateBackend(p: pg.Pool, pid: number): Promise<void> {
+  await p.query(`select pg_terminate_backend($1::int)`, [pid]);
+}
+
+/** Every `edge_*` relation's row count — the backup/restore fingerprint body. */
+export async function relationFingerprint(p: pg.Pool): Promise<ReadonlyMap<string, number>> {
+  const result = await p.query<{ relation: string; rows: string }>(
+    `select format('%s.%s', n.nspname, c.relname) as relation,
+            (xpath('/row/c/text()',
+                   query_to_xml(format('select count(*) as c from %I.%I', n.nspname, c.relname),
+                                false, true, '')))[1]::text as rows
+       from pg_class c
+       join pg_namespace n on n.oid = c.relnamespace
+      where c.relkind = 'r' and n.nspname like 'edge\\_%'
+      order by 1`,
+  );
+  return new Map(result.rows.map((row) => [row.relation, Number(row.rows)]));
 }

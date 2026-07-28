@@ -8,21 +8,33 @@
  * projection value and back, so a loaded Booking can be handed to the engine as
  * its own state.
  *
- * RECORDED CONFLICT (report, do not silently resolve — CLAUDE.md hard rule 8).
+ * OPEN RECONCILIATION ITEM KLREQ-024 — NOT RESOLVED HERE.
  * `edge_laundry.booking.status` carries no CHECK constraint and the canonical
  * schema document names no value list. The only evidence is
  * `hub/seed/dev-fixtures.sql`, which uses `draft`, `intake_confirmed` and
  * `ready`, and whose second `status_event` goes `intake_confirmed -> ready`
- * directly. That edge is RECEIVED -> READY, which the canonical production
- * machine refuses (`canProductionTransition('RECEIVED','READY') === false`,
- * KBR-LND-003 forward-only chain; READY additionally requires the guarded
- * `markReady`). The command layer therefore:
- *   - adopts the three fixture values verbatim,
- *   - adds the remaining canonical production stages in the same lowercase
+ * directly. Read as a PRODUCTION state that edge is RECEIVED -> READY, which
+ * the canonical production machine refuses
+ * (`canProductionTransition('RECEIVED','READY') === false`, KBR-LND-003
+ * forward-only chain; READY additionally requires the guarded `markReady`).
+ *
+ * It is UNRESOLVED whether `booking.status` is the production-state projection
+ * or a DERIVED CUSTOMER-FACING SUMMARY independent of the garment production
+ * chain. The owner ruling is still owed — see
+ * `OPEN_ITEM_BOOKING_STATUS_VS_PRODUCTION_CHAIN` in `./open-items.ts`, which
+ * carries the full record, the sources on both sides and the explicit
+ * "do not" list.
+ *
+ * Until that ruling lands, this module implements the STRICT reading, because
+ * it is the only one that keeps the canonical engine as the sole
+ * transition-decision authority:
+ *   - it adopts the three fixture values verbatim,
+ *   - it adds the remaining canonical production stages in the same lowercase
  *     snake_case style so the full chain is representable, and
- *   - REFUSES the fixture's direct edge, because the engine refuses it.
- * The Hub has no approved Edge route and no canonical permission key for the
- * plant stages (`washing`/`drying`/`pressing`), so no command exposes them —
+ *   - it REFUSES the fixture's direct edge, because the engine refuses it.
+ * The seed is NOT edited and the engine guards are NOT relaxed to make anything
+ * pass. The Hub has no approved Edge route and no canonical permission key for
+ * the plant stages (`washing`/`drying`/`pressing`), so no command exposes them —
  * that gap is reported, not stubbed.
  */
 import {
