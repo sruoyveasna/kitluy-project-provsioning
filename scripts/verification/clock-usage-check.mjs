@@ -42,7 +42,11 @@ const CONSUMERS = [
     note: "WS-11-T003 step 4",
     implementationFile: "packages/device-identity/src/certificate-validity.ts",
     integrationTest: "packages/device-identity/test/certificate-validity.test.ts",
-    trustedTimeSymbol: "TrustedTime",
+    // Real dependency injection, checked with comments STRIPPED:
+    //   - imports the trusted-time module
+    //   - names TrustedTimeEvaluation in a type position
+    //   - actually CALLS a trusted-time guard
+    requiresInjection: true,
   },
   {
     id: "certificate.renewal_eligibility",
@@ -51,7 +55,11 @@ const CONSUMERS = [
     note: "WS-11-T003 step 4",
     implementationFile: "packages/device-identity/src/certificate-renewal.ts",
     integrationTest: "packages/device-identity/test/certificate-renewal.test.ts",
-    trustedTimeSymbol: "TrustedTime",
+    // Real dependency injection, checked with comments STRIPPED:
+    //   - imports the trusted-time module
+    //   - names TrustedTimeEvaluation in a type position
+    //   - actually CALLS a trusted-time guard
+    requiresInjection: true,
   },
   {
     id: "revocation_snapshot.validity",
@@ -60,7 +68,11 @@ const CONSUMERS = [
     note: "WS-11-T003 step 5",
     implementationFile: "packages/device-identity/src/revocation-snapshot.ts",
     integrationTest: "packages/device-identity/test/revocation-snapshot.test.ts",
-    trustedTimeSymbol: "TrustedTime",
+    // Real dependency injection, checked with comments STRIPPED:
+    //   - imports the trusted-time module
+    //   - names TrustedTimeEvaluation in a type position
+    //   - actually CALLS a trusted-time guard
+    requiresInjection: true,
   },
   {
     id: "configuration_snapshot.validity",
@@ -69,7 +81,11 @@ const CONSUMERS = [
     note: "WS-11-T003 step 5",
     implementationFile: "packages/device-identity/src/configuration-validity.ts",
     integrationTest: "packages/device-identity/test/configuration-validity.test.ts",
-    trustedTimeSymbol: "TrustedTime",
+    // Real dependency injection, checked with comments STRIPPED:
+    //   - imports the trusted-time module
+    //   - names TrustedTimeEvaluation in a type position
+    //   - actually CALLS a trusted-time guard
+    requiresInjection: true,
   },
 ];
 
@@ -89,6 +105,45 @@ const exists = (path) => {
   } catch {
     return false;
   }
+};
+
+/**
+ * Removes comments so a check cannot be satisfied by prose.
+ *
+ * Review finding RV-A4: the previous version searched raw source for the string
+ * "TrustedTime". A consumer with its dependency entirely removed still passed,
+ * because the word survived in the file header. A gate that a comment can
+ * satisfy is not a gate.
+ */
+const stripComments = (source) =>
+  source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("//"))
+    .join("\n");
+
+/**
+ * Verifies that a consumer really takes trusted time as a dependency, rather
+ * than merely mentioning it. All three must hold in NON-COMMENT source.
+ */
+const injectionProblems = (source) => {
+  const code = stripComments(source);
+  const problems = [];
+  if (!/from\s+"\.\/trusted-time\.js"/.test(code)) {
+    problems.push("does not import the trusted-time module");
+  }
+  if (!/TrustedTimeEvaluation/.test(code)) {
+    problems.push("does not name TrustedTimeEvaluation in a type position");
+  }
+  // Review finding RV-A5: searching for `trustedInstant(` or `isRestricted(`
+  // is satisfied by the function DEFINITION, not only by a call, so a
+  // consumer that defined a guard and then ignored it still passed. The
+  // dependency that cannot be faked is READING THE STATUS off the
+  // evaluation — a file that dropped trusted time has no status to read.
+  if (!/\.trustedTime\.status|\bevaluation\.status\b/.test(code)) {
+    problems.push("never reads .status off a trusted-time evaluation");
+  }
+  return problems;
 };
 
 const scanForClock = (relPath) => {
@@ -128,8 +183,8 @@ for (const consumer of CONSUMERS) {
   if (hasImpl) {
     clockFindings.push(...scanForClock(consumer.implementationFile));
     const source = readFileSync(join(ROOT, consumer.implementationFile), "utf8");
-    if (!source.includes(consumer.trustedTimeSymbol)) {
-      problems.push(`no ${consumer.trustedTimeSymbol} dependency`);
+    if (consumer.requiresInjection) {
+      problems.push(...injectionProblems(source));
     }
   }
 

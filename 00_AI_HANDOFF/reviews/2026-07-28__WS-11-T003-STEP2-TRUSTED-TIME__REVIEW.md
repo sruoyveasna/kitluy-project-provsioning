@@ -41,6 +41,34 @@ would have passed it. The gate caught it because it also requires the
 
 Baseline restored and re-confirmed: `COMPLETE — 4/4`.
 
+### RV-A4 / RV-A5 — the gate WAS foolable (owner-directed re-probe)
+
+The owner required proof that the gate tests real DEPENDENCY INJECTION, not
+file presence or exported names. The three probes above did not establish
+that, and the original review recorded it only as condition C3. Re-probed:
+
+| Field                          | RV-A4                                                                                                                                                                                                                                                       | RV-A5                                                                                                                                                                                      |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Severity**                   | MEDIUM                                                                                                                                                                                                                                                      | MEDIUM                                                                                                                                                                                     |
+| **Attack**                     | Strip the TrustedTime dependency entirely from `certificate-validity.ts` — no type import, no guard, `trustedInstant` returns the raw date — leaving the filename, exports and the word `TrustedTime` in the header comment                                 | Keep the imports and types; remove only the code that READS `.status`                                                                                                                      |
+| **Actual result (before fix)** | `COMPLETE — 4/4`, exit 0. **Gate fooled.**                                                                                                                                                                                                                  | `COMPLETE — 4/4`, exit 0. **Gate fooled.**                                                                                                                                                 |
+| **Expected**                   | `INCOMPLETE`, exit 1                                                                                                                                                                                                                                        | `INCOMPLETE`, exit 1                                                                                                                                                                       |
+| **Root cause**                 | The check was `source.includes("TrustedTime")` over RAW source, so a comment satisfied it                                                                                                                                                                   | After stripping comments, the replacement check searched for `trustedInstant(` / `isRestricted(` — which the function DEFINITION matches, so a consumer could define a guard and ignore it |
+| **Requirement**                | Owner instruction 2026-07-28: removing TrustedTime while leaving filenames intact must make the gate fail                                                                                                                                                   |
+| **Blocking**                   | YES for the gate's own credibility — every other gate result depends on it                                                                                                                                                                                  |
+| **Remediation**                | Comments are stripped before any check; the gate now requires the trusted-time IMPORT, the `TrustedTimeEvaluation` TYPE, and a read of `.status` off the evaluation. Reading the status is the one signal a file that dropped the dependency cannot produce |
+| **Retest**                     | RV-A4 -> `INCOMPLETE — 3/4`, exit 1, `never reads .status off a trusted-time evaluation`. RV-A5 -> same. Baseline restored `COMPLETE — 4/4`, exit 0                                                                                                         |
+
+**Condition C3 is CLOSED by this fix.** The gate no longer rests on a textual
+symbol search. It remains true that a file could read `.status` and then
+ignore the result; the cross-consumer test is the behavioural counterpart and
+the two controls stay complementary.
+
+**An honest note on process.** The original review reported "gate integrity:
+HOLDS" on the strength of three probes, one of which (RV-A3) replaced a whole
+file. That was too weak a test for the claim, and the owner's narrower probe
+broke it twice. The verdict below is re-issued on the retested gate.
+
 **Gate integrity: HOLDS.** No finding.
 
 Residual, recorded not fixed: the symbol check is textual. A file could import
