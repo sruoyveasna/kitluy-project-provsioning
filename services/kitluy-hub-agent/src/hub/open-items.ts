@@ -325,10 +325,30 @@ export const RESIDUAL_RISK_BACKUP_RESTORE_GRADE: HubResidualRisk = {
   severity: "medium",
 };
 
+/**
+ * KLRISK-HUB-006 — a cloud database reset DESTROYS the Hub-local database.
+ *
+ * Observed twice in Cycle 9: once silently, then once deliberately while
+ * collecting close-out evidence.
+ */
+export const RESIDUAL_RISK_CLOUD_RESET_DESTROYS_HUB_DB: HubResidualRisk = {
+  id: "KLRISK-HUB-006",
+  hazard:
+    "`pnpm db:reset` (Supabase CLI `db reset`) recreates the whole local PostgreSQL cluster, not just the cloud database. The Hub-local database `kitluy_hub_local` lives in the SAME development cluster (recorded gaps G6/G7), so a cloud reset drops it outright.",
+  observedImpact:
+    "Observed twice in Cycle 9. First silently: Hub business data was found missing while the schema and migration journal still looked intact, and the cause was not identified at the time. Then deliberately, while collecting close-out evidence: running the cloud gate before the Hub gate left the Hub database non-existent, and the following repository run reported 109 passed / 154 SKIPPED instead of 261 passed. A skipped suite is not a failing suite, so that run still printed PASS — which is exactly how this becomes false evidence.",
+  workaround:
+    "Gate ORDER is part of the procedure: run the cloud gate FIRST (db:validate, db:reset, db:seed, db:test, test:rls), then rebuild the Hub (hub:db:reset, hub:db:seed, hub:db:test), then the repository gate. Every DB-backed Hub suite already skips VISIBLY when the database is unreachable, so the condition is announced rather than hidden.",
+  residual:
+    "Nothing prevents the two resets being run in the wrong order again. Any evidence citing Hub DB-backed suite counts MUST state the passed AND skipped counts, because a Hub-less run still reports PASS. Mitigations owed: host the Hub database in its own container or cluster, or make hub:db:reset a prerequisite of the repository test gate.",
+  severity: "medium",
+};
+
 export const HUB_RESIDUAL_RISKS: readonly HubResidualRisk[] = [
   RESIDUAL_RISK_GRANT_CURRENT_USER_CRASH,
   RESIDUAL_RISK_ROLE_ASSUMPTION_FALLBACK,
   RESIDUAL_RISK_BACKUP_RESTORE_GRADE,
+  RESIDUAL_RISK_CLOUD_RESET_DESTROYS_HUB_DB,
 ];
 
 // ---------------------------------------------------------------------------
