@@ -434,6 +434,156 @@ export async function terminateBackend(p: pg.Pool, pid: number): Promise<void> {
   await p.query(`select pg_terminate_backend($1::int)`, [pid]);
 }
 
+// ---------------------------------------------------------------------------
+// WS-10 sync fixtures.
+//
+// Every WS-10 suite gets its OWN `assignment_generation`. Ordering, leasing and
+// cursor recovery are all scoped to (location_id, assignment_generation)
+// (offline contract §5.1), so a private generation gives each suite a private
+// stream: suites cannot block one another's head-of-line, and a stray row from
+// an earlier run cannot make a later run pass or fail.
+//
+// These insert the event/outbox pair DIRECTLY rather than driving a command.
+// That is the correct seam: WS-10 CONSUMES the outbox, it never produces it,
+// and WS-09 already proves the producing half in its own suites.
+// ---------------------------------------------------------------------------
+
+/** Generations 900+ are reserved for WS-10 suites; real Hubs start at 1. */
+export const SYNC_TEST_GENERATION_BASE = 900;
+
+export interface SeededOutboxEvent {
+  readonly eventId: string;
+  readonly hubSequence: bigint;
+}
+
+export interface SeedOutboxOptions {
+  readonly generation: number;
+  readonly count: number;
+  readonly terminalDeviceId: string;
+  /** Distinguishes concurrent suites inside one generation-scoped stream. */
+  readonly suite: string;
+  readonly eventType?: string;
+  readonly aggregateType?: string;
+}
+
+/**
+ * Seed `count` immutable events with their outbox rows, contiguous in
+ * `hub_sequence` within the given generation, all `delivery_state = 'pending'`.
+ */
+export async function seedOutboxStream(
+  p: pg.Pool,
+  options: SeedOutboxOptions,
+): Promise<readonly SeededOutboxEvent[]> {
+  const eventType = options.eventType ?? "laundry.booking_confirmed";
+  const aggregateType = options.aggregateType ?? "booking";
+  const seeded: SeededOutboxEvent[] = [];
+
+  const client = await p.connect();
+  try {
+    await client.query("begin");
+    for (let i = 0; i < options.count; i += 1) {
+      const eventId = uuidv7();
+      const aggregateId = uuidv7();
+      const sequence = await client.query<{ allocate_hub_sequence: bigint }>(
+        `select edge_sync.allocate_hub_sequence()`,
+      );
+      const hubSequence = sequence.rows[0]!.allocate_hub_sequence;
+      const clientSequence = BigInt(Date.now()) * 1000n + BigInt(i);
+      const payload = { suite: options.suite, index: i };
+      await client.query(
+        `insert into edge_sync.local_event
+           (id, tenant_id, digital_store_id, location_id, hub_device_id, origin_device_id,
+            actor_id, aggregate_type, aggregate_id, aggregate_version, event_type,
+            schema_version, business_date, occurred_at, hub_sequence, origin_sequence,
+            assignment_generation, idempotency_key, payload_sha256, payload, created_at)
+         values ($1, $2, $3, $4, $5, $6, null, $7, $8, 1, $9, 1, current_date, now(),
+                 $10, $11, $12, $13,
+                 encode(sha256(convert_to($14::text, 'UTF8')), 'hex'), $14::jsonb, now())`,
+        [
+          eventId,
+          TENANT,
+          STORE,
+          LOCATION,
+          HUB_DEVICE,
+          options.terminalDeviceId,
+          aggregateType,
+          aggregateId,
+          eventType,
+          hubSequence.toString(),
+          clientSequence.toString(),
+          options.generation,
+          `kl1.${options.terminalDeviceId}.${clientSequence}`,
+          JSON.stringify(payload),
+        ],
+      );
+      await client.query(
+        `insert into edge_sync.outbox
+           (event_id, tenant_id, digital_store_id, location_id, hub_sequence,
+            assignment_generation, delivery_state, attempt_count, next_attempt_at)
+         values ($1, $2, $3, $4, $5, $6, 'pending', 0, now())`,
+        [eventId, TENANT, STORE, LOCATION, hubSequence.toString(), options.generation],
+      );
+      seeded.push({ eventId, hubSequence });
+    }
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+  return seeded;
+}
+
+/** Read one outbox row plus THE shared external projection (amendment §4). */
+export async function outboxRow(
+  p: pg.Pool,
+  eventId: string,
+): Promise<{
+  delivery_state: string;
+  reconciliation_state: string;
+  external_status: string;
+  attempt_count: number;
+  last_error_code: string | null;
+  cloud_ack_id: string | null;
+  acknowledged_at: Date | null;
+  rejected_at: Date | null;
+  dead_letter_reason: string | null;
+  lease_owner: string | null;
+  lease_id: string | null;
+  next_attempt_at: Date;
+  reconciliation_conflict_id: string | null;
+}> {
+  const result = await p.query(
+    `select o.delivery_state, o.reconciliation_state,
+            edge_sync.external_sync_status(o.delivery_state, o.reconciliation_state) as external_status,
+            o.attempt_count, o.last_error_code, o.cloud_ack_id, o.acknowledged_at,
+            o.rejected_at, o.dead_letter_reason, o.lease_owner, o.lease_id,
+            o.next_attempt_at, o.reconciliation_conflict_id
+       from edge_sync.outbox o where o.event_id = $1`,
+    [eventId],
+  );
+  const row = result.rows[0];
+  if (!row) throw new Error(`no outbox row for ${eventId}`);
+  return row;
+}
+
+/** Record a `sync_conflict` so a reconciliation can name its divergence. */
+export async function seedSyncConflict(
+  p: pg.Pool,
+  input: { readonly localEventId?: string; readonly dataClass?: string } = {},
+): Promise<string> {
+  const id = uuidv7();
+  await p.query(
+    `insert into edge_sync.sync_conflict
+       (id, tenant_id, digital_store_id, location_id, conflict_type, data_class,
+        local_event_id, detected_at, state, severity)
+     values ($1, $2, $3, $4, 'cloud_effect_divergence', $5, $6, now(), 'operator_required', 'high')`,
+    [id, TENANT, STORE, LOCATION, input.dataClass ?? "finance_payment", input.localEventId ?? null],
+  );
+  return id;
+}
+
 /** Every `edge_*` relation's row count — the backup/restore fingerprint body. */
 export async function relationFingerprint(p: pg.Pool): Promise<ReadonlyMap<string, number>> {
   const result = await p.query<{ relation: string; rows: string }>(
