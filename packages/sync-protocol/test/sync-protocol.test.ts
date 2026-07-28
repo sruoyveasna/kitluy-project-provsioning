@@ -169,15 +169,18 @@ describe("state vocabularies (amendment KLD-2026-07-28-001-A01)", () => {
     }
   });
 
-  it("reports the truth for each delivery state when no conflict is raised", () => {
+  it("reproduces the amendment §3 table exactly when no conflict is raised", () => {
+    // Verbatim from KLD-2026-07-28-001-A01 §3. An earlier version collapsed
+    // in_flight and retry_wait into pending_cloud_sync and mapped dead_letter to
+    // reconciliation_required, on the mistaken ground that the five-value COMMAND
+    // sync-state registry applied here — a different subject entirely.
     const cases: ReadonlyArray<[DeliveryState, string]> = [
       ["pending", "pending_cloud_sync"],
-      ["in_flight", "pending_cloud_sync"],
-      ["retry_wait", "pending_cloud_sync"],
+      ["in_flight", "sync_in_progress"],
+      ["retry_wait", "retry_scheduled"],
       ["acknowledged", "cloud_acknowledged"],
       ["rejected", "cloud_rejected"],
-      // Not "pending": a dead letter will not progress without governed repair.
-      ["dead_letter", "reconciliation_required"],
+      ["dead_letter", "delivery_failed"],
     ];
     for (const [delivery, expected] of cases) {
       for (const reconciliation of ["none", "cleared"] as ReconciliationState[]) {

@@ -177,12 +177,23 @@ export type DeliveryState = (typeof DELIVERY_STATES)[number];
 export const RECONCILIATION_STATES = ["none", "required", "cleared"] as const;
 export type ReconciliationState = (typeof RECONCILIATION_STATES)[number];
 
-/** The approved external/wire vocabulary. No sixth value is invented. */
+/**
+ * The external/operator-facing status vocabulary, verbatim from amendment
+ * KLD-2026-07-28-001-A01 §3.
+ *
+ * A DIFFERENT SUBJECT from the five-value COMMAND sync-state registry on
+ * `edge_sync.command_result.sync_state`, which describes a COMMAND outcome.
+ * Conflating the two is what produced the original wrong mapping: three of the
+ * six rows below were collapsed on the mistaken ground that a sixth value would
+ * be "invented".
+ */
 export const EXTERNAL_SYNC_STATUSES = [
-  "committed_locally",
   "pending_cloud_sync",
+  "sync_in_progress",
+  "retry_scheduled",
   "cloud_acknowledged",
   "cloud_rejected",
+  "delivery_failed",
   "reconciliation_required",
 ] as const;
 export type ExternalSyncStatus = (typeof EXTERNAL_SYNC_STATUSES)[number];
@@ -199,25 +210,33 @@ export type ExternalSyncStatus = (typeof EXTERNAL_SYNC_STATUSES)[number];
  * delivery x reconciliation cross product, so changing one without the other
  * fails the build instead of drifting silently.
  *
- * `dead_letter` maps to `reconciliation_required` rather than to a transport
- * status: an undeliverable item will NOT progress without governed operator
- * repair, so `pending_cloud_sync` would claim progress that is not coming and
- * `cloud_rejected` would fabricate a cloud verdict that never arrived.
+ * CORRECTION. An earlier version collapsed `in_flight` and `retry_wait` into
+ * `pending_cloud_sync` and mapped `dead_letter` to `reconciliation_required`,
+ * reasoning that the five-value COMMAND registry forbade a sixth value. That
+ * confused two subjects — the command registry describes a COMMAND outcome, §3
+ * describes an OUTBOX ROW — and it also made `dead_letter + none`, a state §2
+ * names explicitly, impossible to report.
  */
 export function projectExternalSyncStatus(
   deliveryState: DeliveryState,
   reconciliationState: ReconciliationState,
 ): ExternalSyncStatus {
+  // §3 "First: conflict override".
   if (reconciliationState === "required") return "reconciliation_required";
+  // §3 "Otherwise: delivery-state mapping", verbatim.
   switch (deliveryState) {
-    case "dead_letter":
-      return "reconciliation_required";
+    case "pending":
+      return "pending_cloud_sync";
+    case "in_flight":
+      return "sync_in_progress";
+    case "retry_wait":
+      return "retry_scheduled";
     case "acknowledged":
       return "cloud_acknowledged";
     case "rejected":
       return "cloud_rejected";
-    default:
-      return "pending_cloud_sync";
+    case "dead_letter":
+      return "delivery_failed";
   }
 }
 

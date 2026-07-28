@@ -300,7 +300,8 @@ describe.skipIf(!available)("WS-10-T004 delivery outcomes against the Hub databa
     expect(row.last_error_code).toBe("EDGE_TRANSPORT_TIMEOUT");
     expect(row.cloud_ack_id).toBeNull();
     expect(row.rejected_at).toBeNull();
-    expect(row.external_status).toBe("pending_cloud_sync");
+    // Amendment §3: retry_wait projects to retry_scheduled, not pending_cloud_sync.
+    expect(row.external_status).toBe("retry_scheduled");
     expect(row.next_attempt_at.getTime()).toBeGreaterThan(Date.now());
   });
 
@@ -348,17 +349,34 @@ describe.skipIf(!available)("WS-10-T004 delivery outcomes against the Hub databa
     expect(Number(dead.rows[0]!.n)).toBe(1);
   });
 
-  it("refuses to dead-letter without a conflict record naming the divergence", async () => {
-    const { events, lease } = await leased(1, "dead-letter-guard");
-    await expect(
-      withHubTransaction(p, (client) =>
-        applyOutcome(client, {
-          eventId: events[0]!.eventId,
-          leaseId: lease.leaseId,
-          routing: { kind: "dead_letter", code: "EDGE_TRANSPORT_TIMEOUT", reason: "exhausted" },
-        }),
-      ),
-    ).rejects.toThrow(/silent discard/);
+  it("dead-letters WITHOUT a conflict when delivery simply failed (amendment §2)", async () => {
+    // §2 names `dead_letter + none` as a valid state: "delivery failed
+    // repeatedly, but no authoritative business conflict has yet been
+    // established". An earlier version REQUIRED a conflict and so made this
+    // state unreachable.
+    const { events, lease } = await leased(1, "dead-letter-no-conflict");
+    const eventId = events[0]!.eventId;
+    await withHubTransaction(p, (client) =>
+      applyOutcome(client, {
+        eventId,
+        leaseId: lease.leaseId,
+        routing: { kind: "dead_letter", code: "EDGE_TRANSPORT_TIMEOUT", reason: "exhausted" },
+      }),
+    );
+
+    const row = await outboxRow(p, eventId);
+    expect(row.delivery_state).toBe("dead_letter");
+    expect(row.reconciliation_state).toBe("none");
+    // §3: dead_letter + none reports delivery_failed, NOT reconciliation_required.
+    expect(row.external_status).toBe("delivery_failed");
+    // The operator obligation is carried by the dead-letter record, which is
+    // written either way.
+    const dead = await p.query<{ n: string }>(
+      `select count(*)::text as n from edge_sync.dead_letter_item
+        where source_id = $1 and operator_action_required`,
+      [eventId],
+    );
+    expect(Number(dead.rows[0]!.n)).toBe(1);
   });
 
   it("advances the cursor only to the CONTIGUOUSLY acknowledged sequence", async () => {

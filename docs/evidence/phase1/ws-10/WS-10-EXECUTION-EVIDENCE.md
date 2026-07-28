@@ -26,10 +26,10 @@ prints PASS while silently skipping 154 Hub-backed tests.
 | 2   | Cloud from zero  | `pnpm db:reset` → `pnpm db:seed`         | **PASS** — group 0110 applied                                         |
 | 3   | Cloud assertions | `pnpm db:test`                           | **PASS** — **124** `NOTICE: PASS` (121 before + 3 new in section 27)  |
 | 4   | Cloud RLS        | `pnpm test:rls`                          | **PASS** — **94** cases (23 baseline, WS5 14, WS6 19, WS7 19, WS8 19) |
-| 5   | Hub static       | `pnpm hub:db:validate`                   | **PASS** — 26 Hub migration files                                     |
-| 6   | Hub from zero    | `pnpm hub:db:reset` → `pnpm hub:db:seed` | **PASS** — 26 migrations applied, fixtures seeded                     |
-| 7   | Hub assertions   | `pnpm hub:db:test`                       | **PASS** — **33** `NOTICE: PASS` (29 at WS-09 close + 4 new)          |
-| 8   | Hub journal      | `pnpm hub:db:status`                     | **PASS** — 26 applied, 0 pending, 0 checksum drift, 0 missing         |
+| 5   | Hub static       | `pnpm hub:db:validate`                   | **PASS** — 27 Hub migration files                                     |
+| 6   | Hub from zero    | `pnpm hub:db:reset` → `pnpm hub:db:seed` | **PASS** — 27 migrations applied, fixtures seeded                     |
+| 7   | Hub assertions   | `pnpm hub:db:test`                       | **PASS** — **35** `NOTICE: PASS` (29 at WS-09 close + 6 new)          |
+| 8   | Hub journal      | `pnpm hub:db:status`                     | **PASS** — 27 applied, 0 pending, 0 checksum drift, 0 missing         |
 | 9   | Repository       | `pnpm verify`                            | **PASS — 11/11**                                                      |
 
 Counting command for gate 7, pinned in code as `HUB_DB_ASSERTION_CONTRACT`:
@@ -184,6 +184,26 @@ document is supposed to prevent.
 Non-blocking findings (RV-003, RV-004, RV-007 and advisories) are recorded in
 §5 and in the decision register; **RV-004 in particular is the honest statement
 that WS-10 ships no wired production path** — see §7.
+
+---
+
+## 5b. Divergence from the owner amendment, found and corrected
+
+Found by re-reading KLD-2026-07-28-001-A01 against the running database AFTER
+the review had closed. Not found by the reviewer, and not found by the gates —
+because the wrong values had been written into the assertions too.
+
+| Ref     | Divergence                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Correction                                                                                                                                                                      |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **C34** | §3 publishes an explicit SIX-value external-status table. The implementation collapsed `in_flight` and `retry_wait` into `pending_cloud_sync` and mapped `dead_letter` to `reconciliation_required` — **three of six rows wrong**. The reasoning was that the approved five-value COMMAND sync-state registry forbade a sixth value; that confused two subjects, since `edge_sync.command_result.sync_state` describes a COMMAND outcome while §3 describes an OUTBOX ROW | `0026` implements §3 verbatim in both the SQL function and `@kitluy/sync-protocol`. `command_result.sync_state` is UNCHANGED. Assertion 29e reproduces the table row by row     |
+| **C35** | §2 gives `delivery_state = dead_letter, conflict_state = none` as an explicit valid combination. It was UNREACHABLE: the projection could not return `delivery_failed`, and `dead_letter_outbox_event` REQUIRED a conflict id, forcing the conflict dimension up on every dead letter                                                                                                                                                                                     | `0026` makes the conflict OPTIONAL. The `dead_letter_item` record is still always written, and that — not the conflict dimension — carries the operator obligation §1 describes |
+| **C36** | §6 requires a specific set of invalid transitions to fail closed. None were refused; `pending -> acknowledged` succeeded, recording an acknowledgement for a row never transmitted                                                                                                                                                                                                                                                                                        | `0026` adds `enforce_delivery_transition`. `acknowledged` and `rejected` are terminal. Assertion 29e proves the §6 set fails closed                                             |
+
+**How this got past the gates.** The projection assertion checked the output
+against the five-value COMMAND registry rather than against §3, so it validated
+the implementation against the same mistake the implementation made. An
+assertion derived from the code rather than from the ruling cannot catch the
+code disagreeing with the ruling. 29e now reproduces the §3 table literally.
 
 ---
 

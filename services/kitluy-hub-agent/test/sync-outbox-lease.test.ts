@@ -166,13 +166,13 @@ describe.skipIf(!available)("WS-10-T001 outbox leasing", () => {
   it("steps over rows the cloud can never acknowledge", async () => {
     const { generation: gen, events } = await stream(3, "terminal-skip");
     // A durable cloud rejection on the head: the cloud has answered, and the
-    // stream must not stall forever waiting for a second answer.
+    // stream must not stall forever waiting for a second answer. It is reached
+    // through a LEGAL transition — 0026's §6 guard refuses pending -> rejected,
+    // because a rejection requires a transmission attempt to have happened.
+    const head = await lease(gen, { maxItems: 1, leaseSeconds: 300 });
     await p.query(
-      `update edge_sync.outbox
-          set delivery_state = 'rejected', last_error_code = 'EDGE_CLOUD_REJECTED_SCHEMA',
-              rejected_at = now()
-        where event_id = $1`,
-      [events[0]!.eventId],
+      `select edge_sync.reject_outbox_event($1::uuid, $2::uuid, 'EDGE_CLOUD_REJECTED_SCHEMA', 'no')`,
+      [events[0]!.eventId, head.leaseId],
     );
 
     const claimed = await lease(gen);

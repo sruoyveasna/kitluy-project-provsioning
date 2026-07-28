@@ -246,14 +246,20 @@ describe.skipIf(!available)("Append-only ledgers reject mutation as the applicat
         [bookingId],
       ),
     ).rejects.toThrow(/KLUY-EDGE-NO-HARD-DELETE|permission denied/);
-    // WS-09 never fabricates a cloud acknowledgement; the CHECK enforces it.
+    // WS-09 never fabricates a cloud acknowledgement. TWO independent guards now
+    // refuse this, and which one fires first depends on the row's state:
+    //   - amendment §6 (0026): `pending -> acknowledged` is not a legal
+    //     transition, because an acknowledgement requires a transmission attempt;
+    //   - 0009 `outbox_ack_ck`: `acknowledged` requires a real cloud ack id.
+    // The §6 guard is the stronger of the two and fires earlier, so the accepted
+    // pattern names both rather than pinning the test to whichever wins today.
     await expect(
       asRuntimeRole(
         `update edge_sync.outbox set delivery_state = 'acknowledged'
           where event_id in (select id from edge_sync.local_event where aggregate_id = $1)`,
         [bookingId],
       ),
-    ).rejects.toThrow(/outbox_ack_ck|permission denied/);
+    ).rejects.toThrow(/outbox_ack_ck|INVALID-DELIVERY-TRANSITION|permission denied/);
   });
 
   it("rejects UPDATE and DELETE on the audit journal", async () => {

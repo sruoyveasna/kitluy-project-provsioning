@@ -1405,10 +1405,19 @@ begin
   --     outcome. Those deeper branches stay in the trigger as defence-in-depth
   --     against a future governed procedure that misbehaves, and are no longer
   --     reachable from outside one — which is why nothing here exercises them.
+  -- The row is first moved onto a LEGAL delivery path (0026 §6 guard), so the
+  -- probe below fails on the GOVERNED check rather than on transition legality.
+  update edge_sync.outbox
+     set delivery_state = 'in_flight', lease_id = gen_random_uuid(), lease_owner = 'assert',
+         leased_at = now(), lease_expires_at = now() + interval '5 minutes'
+   where event_id = v_event;
+
   begin
     perform set_config('kitluy.reconciliation_governed', 'on', true);
     update edge_sync.outbox
-       set delivery_state = 'retry_wait', reconciliation_raised_reason = 'smuggled'
+       set delivery_state = 'retry_wait', lease_id = null, lease_owner = null,
+           leased_at = null, lease_expires_at = null,
+           reconciliation_raised_reason = 'smuggled'
      where event_id = v_event;
     raise exception 'ASSERT FAIL: a self-set marker still moved both state dimensions';
   exception when others then
@@ -1474,9 +1483,18 @@ begin
      or v_row.reconciliation_clearing_event_id is null then
     raise exception 'ASSERT FAIL: a cleared reconciliation is missing its evidence';
   end if;
+  -- After clearance the projection follows the DELIVERY dimension again. The row
+  -- is in_flight at this point, so §3 maps it to sync_in_progress — the value is
+  -- read from the shared projection rather than hard-coded, so this assertion
+  -- checks the HANDOVER between dimensions rather than restating the §3 table
+  -- (29e owns that).
   select external_status into v_status from edge_sync.outbox_status where event_id = v_event;
-  if v_status <> 'pending_cloud_sync' then
+  if v_status <> edge_sync.external_sync_status(
+       (select delivery_state from edge_sync.outbox where event_id = v_event), 'none') then
     raise exception 'ASSERT FAIL: after clearance the projection should follow delivery state, got %', v_status;
+  end if;
+  if v_status = 'reconciliation_required' then
+    raise exception 'ASSERT FAIL: a cleared reconciliation still reports reconciliation_required';
   end if;
 
   -- (i) Re-raising after clearance needs a NEW conflict record, not the
@@ -1509,7 +1527,8 @@ begin
   --     that pairing has its own coverage in the leasing suite.
   update edge_sync.outbox
      set delivery_state = 'retry_wait', attempt_count = attempt_count + 1,
-         last_attempt_at = now(), next_attempt_at = now() + interval '1 minute'
+         last_attempt_at = now(), next_attempt_at = now() + interval '1 minute',
+         lease_id = null, lease_owner = null, leased_at = null, lease_expires_at = null
    where event_id = v_event;
   select * into v_row from edge_sync.outbox where event_id = v_event;
   if v_row.reconciliation_state <> 'required' then
@@ -1751,19 +1770,110 @@ begin
     raise exception 'ASSERT FAIL: conflict override does not win for every delivery state (§4)';
   end if;
 
-  -- No sixth vocabulary value is invented anywhere in the projection.
+  -- The projection emits ONLY the amendment §3 vocabulary. An earlier version of
+  -- this assertion listed the five-value COMMAND sync-state registry instead,
+  -- which is a DIFFERENT subject (edge_sync.command_result.sync_state describes a
+  -- COMMAND outcome). Enforcing the wrong list here is what let the §3 mapping
+  -- ship collapsed.
   if exists (
     select 1
     from unnest(enum_range(null::edge_sync.delivery_state)) d,
          unnest(enum_range(null::edge_sync.reconciliation_state)) r
     where edge_sync.external_sync_status(d, r) not in
-          ('pending_cloud_sync', 'cloud_acknowledged', 'cloud_rejected', 'reconciliation_required')
+          ('pending_cloud_sync', 'sync_in_progress', 'retry_scheduled',
+           'cloud_acknowledged', 'cloud_rejected', 'delivery_failed',
+           'reconciliation_required')
   ) then
-    raise exception 'ASSERT FAIL: the projection emitted a value outside the approved registry vocabulary';
+    raise exception 'ASSERT FAIL: the projection emitted a value outside the amendment §3 vocabulary';
   end if;
 
-  raise notice 'PASS external-projection: reconciliation_required stays out of delivery_state, ONE shared mapping exists, conflict override wins for every delivery state, and no sixth vocabulary value is invented';
+  raise notice 'PASS external-projection: reconciliation_required stays out of delivery_state, ONE shared mapping exists, conflict override wins for every delivery state, and every output is inside the amendment §3 vocabulary';
 end $$;
+
+-- ---------------------------------------------------------------------------
+-- 29e. Amendment §3 projection and §6 transition legality.
+--
+--      The §3 table is reproduced VERBATIM here. An earlier implementation
+--      collapsed in_flight/retry_wait into pending_cloud_sync and mapped
+--      dead_letter to reconciliation_required; this assertion exists so that
+--      divergence cannot recur silently.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  r record;
+  v_checked int := 0;
+begin
+  for r in
+    select * from (values
+      ('pending', 'pending_cloud_sync'),
+      ('in_flight', 'sync_in_progress'),
+      ('retry_wait', 'retry_scheduled'),
+      ('acknowledged', 'cloud_acknowledged'),
+      ('rejected', 'cloud_rejected'),
+      ('dead_letter', 'delivery_failed')
+    ) as x(delivery, expected)
+  loop
+    if edge_sync.external_sync_status(r.delivery::edge_sync.delivery_state, 'none') <> r.expected then
+      raise exception 'ASSERT FAIL: §3 maps % to %, but the projection returned %',
+        r.delivery, r.expected,
+        edge_sync.external_sync_status(r.delivery::edge_sync.delivery_state, 'none');
+    end if;
+    -- §3 "First: conflict override" — for EVERY delivery state.
+    if edge_sync.external_sync_status(r.delivery::edge_sync.delivery_state, 'required')
+       <> 'reconciliation_required' then
+      raise exception 'ASSERT FAIL: conflict override did not win for delivery state %', r.delivery;
+    end if;
+    v_checked := v_checked + 1;
+  end loop;
+  if v_checked <> 6 then
+    raise exception 'ASSERT FAIL: expected the 6 §3 rows, checked %', v_checked;
+  end if;
+
+  -- §2 names `dead_letter + none` as a VALID combination. It must be reachable
+  -- and must report delivery_failed, not reconciliation_required.
+  if edge_sync.external_sync_status('dead_letter', 'none') <> 'delivery_failed' then
+    raise exception 'ASSERT FAIL: dead_letter + none must report delivery_failed (§2, §3)';
+  end if;
+
+  raise notice 'PASS external-projection-table: the §3 six-value mapping is exact, conflict override wins for every delivery state, and dead_letter + none reports delivery_failed';
+end $$;
+
+begin;
+
+do $$
+declare
+  v_event uuid := 'e0000000-0000-4000-8000-0000000000d2';
+  v_blocked int := 0;
+  r record;
+begin
+  -- §6 INVALID transitions must fail closed. Each is attempted for real.
+  for r in
+    select * from (values
+      ('pending', 'acknowledged'),   -- no transmission attempt ever happened
+      ('pending', 'rejected'),
+      ('retry_wait', 'acknowledged') -- no NEW attempt; must pass through in_flight
+    ) as x(from_state, to_state)
+  loop
+    begin
+      update edge_sync.outbox set delivery_state = r.from_state::edge_sync.delivery_state,
+             lease_id = null, lease_owner = null, leased_at = null, lease_expires_at = null
+       where event_id = v_event;
+      update edge_sync.outbox set delivery_state = r.to_state::edge_sync.delivery_state
+       where event_id = v_event;
+      raise exception 'ASSERT FAIL: % -> % was accepted', r.from_state, r.to_state;
+    exception when others then
+      if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+      v_blocked := v_blocked + 1;
+    end;
+  end loop;
+
+  if v_blocked <> 3 then
+    raise exception 'ASSERT FAIL: expected 3 refused §6 transitions, got %', v_blocked;
+  end if;
+  raise notice 'PASS delivery-transitions: pending/retry_wait cannot reach acknowledged or rejected without a transmission attempt, and acknowledged/rejected are terminal (§6)';
+end $$;
+
+rollback;
 
 -- ---------------------------------------------------------------------------
 -- 29. Final tally.

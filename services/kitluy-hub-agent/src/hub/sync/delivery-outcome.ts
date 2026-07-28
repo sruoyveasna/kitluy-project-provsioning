@@ -107,10 +107,11 @@ export interface OutcomeApplication {
 /**
  * Apply one routed outcome to the outbox.
  *
- * `conflictFactory` is only invoked on the dead-letter path, and it must create
- * the `edge_sync.sync_conflict` row that NAMES the divergence — the dead-letter
- * procedure refuses to raise reconciliation against a conflict that does not
- * exist, so an item can never be dead-lettered into silence.
+ * `conflictFactory` is OPTIONAL and only consulted on the dead-letter path.
+ * Supply it when a BUSINESS conflict exists; omit it when delivery simply
+ * failed. Amendment §2 names `dead_letter + none` as a valid state, and the
+ * dead_letter_item record — always written — is what carries the operator
+ * obligation.
  */
 export async function applyOutcome(
   client: HubClient,
@@ -161,14 +162,15 @@ export async function applyOutcome(
       };
     }
     case "dead_letter": {
-      if (!input.conflictFactory) {
-        throw new SyncDeliveryError(
-          "EDGE_REPAIR_NOT_AUTHORIZED",
-          "Dead-lettering requires a conflict record naming the divergence; a dead letter with nothing to act on is a silent discard (§6.8).",
-          { eventId: input.eventId },
-        );
-      }
-      const conflictId = await input.conflictFactory(input.eventId, routing.reason);
+      // Amendment §2 names `dead_letter + none` as a VALID state — "delivery
+      // failed repeatedly, but no authoritative business conflict has yet been
+      // established". An earlier version REQUIRED a conflict here and so made
+      // that state unreachable. The operator obligation is carried by the
+      // dead_letter state itself and by the dead_letter_item record, which is
+      // always written; the conflict dimension is for BUSINESS conflicts.
+      const conflictId = input.conflictFactory
+        ? await input.conflictFactory(input.eventId, routing.reason)
+        : null;
       const result = await client.query<{ dead_letter_outbox_event: boolean }>(
         `select edge_sync.dead_letter_outbox_event($1::uuid, $2::uuid, $3::text, $4::text, $5::uuid)`,
         [input.eventId, input.leaseId, routing.reason, routing.code, conflictId],
