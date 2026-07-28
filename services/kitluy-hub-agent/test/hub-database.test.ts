@@ -94,7 +94,10 @@ describe("canonical idempotency key (offline contract §2, gap G1)", () => {
       .filter((f) => f.endsWith(".sql"))
       .map((f) => readFileSync(join(MIGRATIONS_DIR, f), "utf8"))
       .join("\n");
-    const columnCount = (withKeys.match(/^\s+idempotency_key\s+text/gm) ?? []).length;
+    // `not null` restricts the match to TABLE columns: 0016's
+    // `edge_sync.outbox_lease_item` COMPOSITE TYPE also declares an
+    // `idempotency_key text` field, and a type carries no CHECK constraints.
+    const columnCount = (withKeys.match(/^\s+idempotency_key\s+text\s+not null/gm) ?? []).length;
     const checkCount = (withKeys.match(/is_canonical_idempotency_key\(idempotency_key\)/g) ?? [])
       .length;
     expect(columnCount).toBeGreaterThanOrEqual(5);

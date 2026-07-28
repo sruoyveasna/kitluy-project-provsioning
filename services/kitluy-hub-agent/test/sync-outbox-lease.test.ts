@@ -25,13 +25,13 @@ import { SyncDeliveryError } from "../src/hub/sync/errors.js";
 import {
   ACTOR_CASHIER,
   LOCATION,
-  SYNC_TEST_GENERATION_BASE,
   T1,
   ensureRuntimeRoleMembership,
   hubReachable,
   outboxRow,
   pool,
   provisionTerminal,
+  reserveSyncGenerationBlock,
   seedOutboxStream,
   seedSyncConflict,
   type ProvisionedTerminal,
@@ -47,12 +47,16 @@ if (!available) {
 describe.skipIf(!available)("WS-10-T001 outbox leasing", () => {
   let p: pg.Pool;
   let terminal: ProvisionedTerminal;
-  let generation = SYNC_TEST_GENERATION_BASE;
+  // Reserved at run time, ABOVE every generation already in the database: the
+  // Hub database is not reset between runs, so a fixed base would meet the
+  // previous run's leftovers.
+  let generation = 0;
 
   beforeAll(async () => {
     p = pool();
     await ensureRuntimeRoleMembership(p);
     terminal = await provisionTerminal(p, "lease", T1, ACTOR_CASHIER);
+    generation = await reserveSyncGenerationBlock(p);
   });
 
   afterAll(async () => {

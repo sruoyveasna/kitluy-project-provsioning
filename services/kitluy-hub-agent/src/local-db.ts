@@ -7,12 +7,19 @@
  * outbox events through the transaction it runs in.
  *
  * The production adapter targets local PostgreSQL on the Store Hub
- * (KL-HUB-P1-003, OWNER-LOCKED). The in-memory adapter below powers the
- * simulated Store Hub development mode and the offline test harness — it is
- * NOT a production store.
+ * (KL-HUB-P1-003, OWNER-LOCKED) and is implemented by the WS-09 command layer
+ * in `src/hub/**`. The in-memory adapter below powers the simulated Store Hub
+ * development mode and the offline test harness — it is NOT a production store
+ * and is NOT the source of any WS-09/WS-10 evidence.
+ *
+ * KLREQ-020 correction (Cycle 9). This adapter used to MINT the idempotency
+ * key from the Location and Hub ids. The canonical key is TERMINAL-issued
+ * (KLD-2026-07-28-001 Group 1), so the caller now supplies it exactly as a real
+ * terminal command does; the adapter assigns only what the Hub actually owns,
+ * the `hub_sequence` (offline contract §5).
  */
 import type { OutboxEvent } from "@kitluy/sync-protocol";
-import { buildIdempotencyKey } from "@kitluy/sync-protocol";
+import { isValidTerminalIdempotencyKey } from "@kitluy/sync-protocol";
 
 export interface OperationalRecord {
   readonly aggregateType: string;
@@ -24,11 +31,13 @@ export interface LocalTransaction {
   /** Persist an operational record inside this transaction. */
   put(record: OperationalRecord): void;
   /**
-   * Enqueue an outbox event atomically with the mutation. Sequence and
-   * idempotency key are assigned by the adapter, never by callers.
+   * Enqueue an outbox event atomically with the mutation. The Hub assigns the
+   * `hubSequence`; the TERMINAL supplies the idempotency key (offline contract
+   * §2, KLD-2026-07-28-001 Group 1) — the Hub never mints one on a terminal's
+   * behalf.
    */
   appendOutbox(
-    event: Omit<OutboxEvent, "localSequence" | "idempotencyKey" | "payloadSha256">,
+    event: Omit<OutboxEvent, "hubSequence" | "payloadSha256">,
     payload: Readonly<Record<string, unknown>>,
   ): void;
 }
@@ -59,7 +68,7 @@ interface StoredOutboxItem {
 export class InMemoryLocalDatabase implements LocalDatabaseAdapter {
   private readonly records = new Map<string, OperationalRecord>();
   private readonly outbox: StoredOutboxItem[] = [];
-  private sequence = 0;
+  private sequence = 0n;
 
   constructor(
     private readonly locationId: string,
@@ -75,11 +84,19 @@ export class InMemoryLocalDatabase implements LocalDatabaseAdapter {
         stagedRecords.push(record);
       },
       appendOutbox: (event, payload) => {
-        staged += 1;
+        // A key the Hub cannot recognise is refused rather than replaced: a
+        // silently regenerated key would break the terminal's own replay
+        // protection (offline contract §4).
+        if (!isValidTerminalIdempotencyKey(event.idempotencyKey)) {
+          throw new Error(
+            `Idempotency key '${event.idempotencyKey}' is not the canonical ` +
+              "kl1.{terminal_device_uuid}.{client_sequence} shape (offline contract §2).",
+          );
+        }
+        staged += 1n;
         stagedOutbox.push({
           ...event,
-          localSequence: staged,
-          idempotencyKey: buildIdempotencyKey(this.locationId, this.hubId, staged),
+          hubSequence: staged,
           payloadSha256: simulatedPayloadHash(payload),
         });
       },

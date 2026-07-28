@@ -1,14 +1,41 @@
 /**
- * @kitluy/sync-protocol — edge sync envelopes, sequencing and conflict policy.
+ * @kitluy/sync-protocol — edge sync vocabulary, key namespaces, delivery-state
+ * mapping and batch ordering.
  *
- * Source authority: Store Hub spec v1.0.0 §8.5 (event envelope and idempotency
- * key format), §11.2 (outbox in the same local transaction), §11.4
- * (per-data-class conflict policy — no generic last-write-wins for payment,
- * inventory, finance, custody or audit truth).
+ * Source authority:
+ *   - Store Hub spec §11.2 (outbox in the same local transaction), §11.4
+ *     (per-data-class conflict policy — no generic last-write-wins for
+ *     payment, inventory, finance, custody or audit truth), §11.5 (push
+ *     ordering).
+ *   - `kitluy-offline-idempotency-and-sequencing-v1.0.0.md` §2 (terminal
+ *     idempotency key), §5/§5.1 (Hub sequence and ordering namespace).
+ *   - Owner decision **KLD-2026-07-28-001** Group 1 (KLREQ-020): the canonical
+ *     terminal key is `kl1.{terminal_device_uuid}.{terminal_client_sequence}`;
+ *     Group 6 (KLREQ-026): Hub-issued multi-event effects use
+ *     `kh1.{command_result_uuid}.{event_ordinal}`.
+ *   - Owner amendment **KLD-2026-07-28-001-A01** §2/§3/§4: the aligned
+ *     delivery states, the orthogonal conflict dimension, and ONE shared
+ *     external-status mapping with conflict override first.
  *
- * STATUS: BUILT + TESTED (test/sync-protocol.test.ts). Wire transport and
- * durable storage are service implementations.
+ * CORRECTION RECORD (KLREQ-020, executed in Cycle 9 / WS-10-T002 as the
+ * governed task the decision required). This module previously emitted
+ * `location:{location_id}:hub:{hub_id}:seq:{n}` and mis-cited the Hub spec as
+ * its source. That form is REJECTED: it is Hub-issued, so two terminals could
+ * not be told apart and a Hub replacement would restart the namespace. The
+ * canonical key is TERMINAL-issued. No runtime alias for the old shape is
+ * provided — no production or pilot deployment exists, so an alias would only
+ * preserve the mistake. The Hub database CHECKs the canonical shape on every
+ * relation that stores a key, so the old form cannot be persisted either.
+ *
+ * `OutboxItemState` is likewise RETIRED (KLD-2026-07-28-001 Group 2): its
+ * values `dispatching` and `retrying` never existed in the persisted
+ * `edge_sync.delivery_state` enum, so it was a third vocabulary for a subject
+ * that already had two.
  */
+
+// ---------------------------------------------------------------------------
+// Conflict policy (Hub spec §11.4).
+// ---------------------------------------------------------------------------
 
 /** Data classes with their locked conflict-resolution policy (Hub §11.4). */
 export const CONFLICT_POLICIES = {
@@ -26,6 +53,178 @@ export function allowsLastWriteWins(dataClass: SyncDataClass): boolean {
   return CONFLICT_POLICIES[dataClass] === "audited_lww_where_approved";
 }
 
+// ---------------------------------------------------------------------------
+// Key namespaces.
+//
+// The two namespaces are DISJOINT BY PREFIX and must stay that way: a
+// Hub-generated effect must never be able to claim it was a terminal command
+// (KLREQ-026), and Hub jobs, cloud deliveries and provider events use their own
+// namespaces rather than impersonating `kl1.*` (KLREQ-020).
+// ---------------------------------------------------------------------------
+
+const UUID_PATTERN =
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+/** Offline contract §2: `kl1.{terminal_device_uuid}.{terminal_client_sequence}`. */
+export const TERMINAL_KEY_PATTERN =
+  /^kl1\.[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\.[0-9]{1,20}$/;
+
+/** KLREQ-026: `kh1.{command_result_uuid}.{event_ordinal}`. */
+export const HUB_EFFECT_KEY_PATTERN =
+  /^kh1\.[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\.[0-9]{1,10}$/;
+
+/** Unsigned 64-bit ceiling for the terminal client sequence (offline §2). */
+export const MAX_CLIENT_SEQUENCE = 18446744073709551615n;
+
+/**
+ * Build the canonical TERMINAL-issued idempotency key.
+ *
+ * The sequence is `bigint`, not `number`: it is an unsigned 64-bit counter, and
+ * silently losing precision past 2^53 would let two distinct commands share a
+ * key — which is the one failure this key exists to prevent.
+ */
+export function buildTerminalIdempotencyKey(
+  terminalDeviceId: string,
+  clientSequence: bigint,
+): string {
+  if (!UUID_PATTERN.test(terminalDeviceId)) {
+    throw new Error(
+      `Terminal device id must be a UUID (offline contract §2); received '${terminalDeviceId}'.`,
+    );
+  }
+  if (clientSequence < 0n || clientSequence > MAX_CLIENT_SEQUENCE) {
+    throw new Error("Client sequence must be an unsigned 64-bit integer (offline contract §2).");
+  }
+  return `kl1.${terminalDeviceId}.${clientSequence}`;
+}
+
+export function isValidTerminalIdempotencyKey(key: string): boolean {
+  return TERMINAL_KEY_PATTERN.test(key);
+}
+
+/**
+ * Build the Hub-issued business-effect key for one event of a multi-event
+ * command (KLREQ-026).
+ *
+ * `eventOrdinal` is defined by the COMMAND CONTRACT, not by insertion order, so
+ * a replay produces the same key for the same business effect. An ordinal the
+ * command contract does not register must FAIL rather than emit — see
+ * {@link assertRegisteredEffectOrdinal}.
+ */
+export function buildHubEffectKey(commandResultId: string, eventOrdinal: number): string {
+  if (!UUID_PATTERN.test(commandResultId)) {
+    throw new Error(`Command result id must be a UUID (KLREQ-026); received '${commandResultId}'.`);
+  }
+  if (!Number.isSafeInteger(eventOrdinal) || eventOrdinal < 0 || eventOrdinal > 4294967295) {
+    throw new Error("Event ordinal must be a non-negative 32-bit integer (KLREQ-026).");
+  }
+  return `kh1.${commandResultId}.${eventOrdinal}`;
+}
+
+export function isValidHubEffectKey(key: string): boolean {
+  return HUB_EFFECT_KEY_PATTERN.test(key);
+}
+
+/**
+ * Which namespace a key belongs to. `unknown` is a REFUSAL, not a default: a
+ * key that fits neither shape is never treated as either.
+ */
+export function keyNamespace(key: string): "terminal" | "hub_effect" | "unknown" {
+  if (isValidTerminalIdempotencyKey(key)) return "terminal";
+  if (isValidHubEffectKey(key)) return "hub_effect";
+  return "unknown";
+}
+
+/**
+ * KLREQ-026: "an unregistered ambiguous ordinal must fail rather than emit."
+ * The command contract declares the ordinals it produces; anything else would
+ * silently mint a new business-effect identity.
+ */
+export function assertRegisteredEffectOrdinal(
+  commandType: string,
+  eventOrdinal: number,
+  registeredOrdinals: readonly number[],
+): void {
+  if (!registeredOrdinals.includes(eventOrdinal)) {
+    throw new Error(
+      `Event ordinal ${eventOrdinal} is not registered for command '${commandType}' ` +
+        `(registered: ${registeredOrdinals.join(", ") || "none"}). ` +
+        "An unregistered ordinal fails rather than emits (KLREQ-026).",
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// State vocabularies (amendment KLD-2026-07-28-001-A01 §2, §3, §4).
+// ---------------------------------------------------------------------------
+
+/**
+ * Persisted per-event delivery state — the TRANSPORT AND CLOUD-PROCESSING
+ * lifecycle. Mirrors `edge_sync.delivery_state`. `rejected` means a DURABLE
+ * cloud rejection, never a transport failure.
+ */
+export const DELIVERY_STATES = [
+  "pending",
+  "in_flight",
+  "retry_wait",
+  "acknowledged",
+  "rejected",
+  "dead_letter",
+] as const;
+export type DeliveryState = (typeof DELIVERY_STATES)[number];
+
+/** The ORTHOGONAL conflict dimension. Mirrors `edge_sync.reconciliation_state`. */
+export const RECONCILIATION_STATES = ["none", "required", "cleared"] as const;
+export type ReconciliationState = (typeof RECONCILIATION_STATES)[number];
+
+/** The approved external/wire vocabulary. No sixth value is invented. */
+export const EXTERNAL_SYNC_STATUSES = [
+  "committed_locally",
+  "pending_cloud_sync",
+  "cloud_acknowledged",
+  "cloud_rejected",
+  "reconciliation_required",
+] as const;
+export type ExternalSyncStatus = (typeof EXTERNAL_SYNC_STATUSES)[number];
+
+/**
+ * THE shared external-status mapping (amendment §4), with CONFLICT OVERRIDE
+ * FIRST.
+ *
+ * It lives in the shared package because BOTH sides need it and neither may
+ * keep its own: the Hub reports status to terminals, the cloud reports it to
+ * management surfaces. The Hub database expresses the SAME mapping as
+ * `edge_sync.external_sync_status(...)` so it is usable inside SQL; the two are
+ * held equivalent by an executable conformance test over the entire
+ * delivery x reconciliation cross product, so changing one without the other
+ * fails the build instead of drifting silently.
+ *
+ * `dead_letter` maps to `reconciliation_required` rather than to a transport
+ * status: an undeliverable item will NOT progress without governed operator
+ * repair, so `pending_cloud_sync` would claim progress that is not coming and
+ * `cloud_rejected` would fabricate a cloud verdict that never arrived.
+ */
+export function projectExternalSyncStatus(
+  deliveryState: DeliveryState,
+  reconciliationState: ReconciliationState,
+): ExternalSyncStatus {
+  if (reconciliationState === "required") return "reconciliation_required";
+  switch (deliveryState) {
+    case "dead_letter":
+      return "reconciliation_required";
+    case "acknowledged":
+      return "cloud_acknowledged";
+    case "rejected":
+      return "cloud_rejected";
+    default:
+      return "pending_cloud_sync";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Wire shapes.
+// ---------------------------------------------------------------------------
+
 /**
  * Outbox event envelope (Hub §8.5). Every local mutation produces one of these
  * in the SAME local database transaction as the mutation itself (§11.2).
@@ -36,57 +235,96 @@ export interface OutboxEvent {
   readonly digitalStoreId: string;
   readonly storeLocationId: string;
   readonly hubId: string;
-  readonly terminalId?: string;
+  /** The terminal that ISSUED the command, and therefore the idempotency key. */
+  readonly terminalDeviceId: string;
   readonly aggregateType: string;
   readonly aggregateId: string;
   readonly eventType: string;
   readonly aggregateVersion: number;
-  /** Strictly increasing per-location local ordering. */
-  readonly localSequence: number;
+  /**
+   * Hub ordering. The COMPLETE namespace is
+   * `(storeLocationId, assignmentGeneration, hubSequence)` (offline §5.1): a
+   * replacement Hub receives a NEW generation, so its sequence can never
+   * collide with the failed Hub's.
+   */
+  readonly hubSequence: bigint;
+  readonly assignmentGeneration: number;
+  /** Canonical `kl1.*` terminal key, or `kh1.*` for a Hub-issued effect. */
   readonly idempotencyKey: string;
-  readonly schemaVersion: string;
+  readonly schemaVersion: number;
   readonly payloadSha256: string;
   readonly occurredAt: string;
 }
-
-/**
- * Canonical idempotency key format (Hub §8.5, verbatim):
- * `location:{location_id}:hub:{hub_id}:seq:{n}`
- */
-export function buildIdempotencyKey(locationId: string, hubId: string, sequence: number): string {
-  if (!Number.isSafeInteger(sequence) || sequence < 0) {
-    throw new Error("Sequence must be a non-negative integer.");
-  }
-  return `location:${locationId}:hub:${hubId}:seq:${sequence}`;
-}
-
-const IDEMPOTENCY_KEY_PATTERN = /^location:[^:]+:hub:[^:]+:seq:\d+$/;
-export function isValidIdempotencyKey(key: string): boolean {
-  return IDEMPOTENCY_KEY_PATTERN.test(key);
-}
-
-export type OutboxItemState =
-  "pending" | "dispatching" | "acknowledged" | "retrying" | "dead_letter";
 
 /** Per-event push result returned by the cloud (Hub §11.5). */
 export interface SyncPushResult {
   readonly eventId: string;
   readonly outcome: "applied" | "duplicate_ignored" | "rejected";
+  /**
+   * REQUIRED for `applied` and `duplicate_ignored`: the cloud's OWN
+   * acknowledgement identity. The Hub refuses to record an acknowledgement
+   * without it, so none can be fabricated locally.
+   */
+  readonly cloudAckId?: string;
+  /** REQUIRED for `rejected`: a DURABLE reason, never a transport error. */
+  readonly rejectionCode?: string;
   readonly rejectionReason?: string;
 }
 
 /**
- * Validate ordering: events must be pushed oldest-unacknowledged first with
- * strictly increasing local sequence numbers (Hub §11.5).
+ * Validate ordering: events are pushed oldest-unacknowledged first with
+ * strictly increasing `(assignmentGeneration, hubSequence)` (Hub §11.5,
+ * offline §5.1).
  */
 export function validateBatchOrdering(batch: readonly OutboxEvent[]): void {
-  for (let i = 1; i < batch.length; i++) {
-    const prev = batch[i - 1]!;
-    const cur = batch[i]!;
-    if (cur.localSequence <= prev.localSequence) {
+  for (let i = 1; i < batch.length; i += 1) {
+    const previous = batch[i - 1]!;
+    const current = batch[i]!;
+    if (current.assignmentGeneration < previous.assignmentGeneration) {
       throw new Error(
-        `Outbox batch ordering violation: sequence ${cur.localSequence} after ${prev.localSequence}.`,
+        `Outbox batch ordering violation: generation ${current.assignmentGeneration} after ${previous.assignmentGeneration}.`,
+      );
+    }
+    if (
+      current.assignmentGeneration === previous.assignmentGeneration &&
+      current.hubSequence <= previous.hubSequence
+    ) {
+      throw new Error(
+        `Outbox batch ordering violation: hub_sequence ${current.hubSequence} after ${previous.hubSequence}.`,
       );
     }
   }
+}
+
+/**
+ * A batch declares its first and last ACTUAL `hub_sequence`. Values journalled
+ * in the Hub's sequence-gap ledger are KNOWN gaps and are never treated as
+ * missing events (offline contract §5).
+ */
+export interface BatchSequenceRange {
+  readonly assignmentGeneration: number;
+  readonly firstHubSequence: bigint;
+  readonly lastHubSequence: bigint;
+  /** Journalled burnt values inside the range. DECLARED, never inferred. */
+  readonly knownGaps: readonly bigint[];
+}
+
+/**
+ * Distinguish "this sequence is genuinely missing" from "this sequence was
+ * burnt by a rolled-back transaction". Anything inside the declared range that
+ * is neither present nor a declared gap is genuinely missing, and the cloud is
+ * entitled to say so.
+ */
+export function missingSequences(
+  range: BatchSequenceRange,
+  presentSequences: readonly bigint[],
+): readonly bigint[] {
+  const present = new Set(presentSequences.map(String));
+  const gaps = new Set(range.knownGaps.map(String));
+  const missing: bigint[] = [];
+  for (let s = range.firstHubSequence; s <= range.lastHubSequence; s += 1n) {
+    const key = String(s);
+    if (!present.has(key) && !gaps.has(key)) missing.push(s);
+  }
+  return missing;
 }

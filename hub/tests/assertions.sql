@@ -232,6 +232,11 @@ declare
     'edge_sync.local_event', 'edge_sync.outbox', 'edge_sync.inbox',
     'edge_sync.sync_conflict', 'edge_sync.dead_letter_item',
     'edge_sync.sequence_gap', 'edge_sync.command_result',
+    -- WS-10 additive extension G9. transmission_batch_item is deliberately
+    -- ABSENT: it inherits scope from its parent batch, exactly as
+    -- configuration_section inherits from its snapshot. Duplicating the scope
+    -- columns there would let a child disagree with its parent.
+    'edge_sync.transmission_batch',
     'edge_hardware.peripheral_observation', 'edge_hardware.device_heartbeat',
     'edge_audit.audit_event', 'edge_audit.support_session'
   ];
@@ -1453,9 +1458,12 @@ begin
   end;
 
   -- (k) A pure delivery-state move still works and leaves the conflict
-  --     dimension exactly where it was.
+  --     dimension exactly where it was. `retry_wait` is used rather than
+  --     `in_flight` because 0016 makes in_flight inseparable from a lease —
+  --     that pairing has its own coverage in the leasing suite.
   update edge_sync.outbox
-     set delivery_state = 'in_flight', attempt_count = attempt_count + 1, last_attempt_at = now()
+     set delivery_state = 'retry_wait', attempt_count = attempt_count + 1,
+         last_attempt_at = now(), next_attempt_at = now() + interval '1 minute'
    where event_id = v_event;
   select * into v_row from edge_sync.outbox where event_id = v_event;
   if v_row.reconciliation_state <> 'required' then
@@ -1534,9 +1542,11 @@ begin
   select count(*) into v_triggers from pg_trigger t
   join pg_class c on c.oid = t.tgrelid join pg_namespace n on n.oid = c.relnamespace
   where not t.tgisinternal and n.nspname like 'edge\_%';
-  if v_tables <> 53 then
-    raise exception 'ASSERT FAIL: expected 53 relations (51 canonical §6 + 2 additive), found %', v_tables;
+  if v_tables <> 55 then
+    raise exception
+      'ASSERT FAIL: expected 55 relations (51 canonical §6 + 2 additive G3 + 2 additive G9), found %',
+      v_tables;
   end if;
-  raise notice 'PASS tally: % relations (51 canonical §6 + 2 additive G3 extensions), % indexes, % triggers',
+  raise notice 'PASS tally: % relations (51 canonical §6 + 2 additive G3 + 2 additive G9 WS-10 extensions), % indexes, % triggers',
     v_tables, v_indexes, v_triggers;
 end $$;

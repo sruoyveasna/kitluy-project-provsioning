@@ -167,11 +167,22 @@ describe("confirmed boundaries — finance and sync", () => {
   it.skipIf(!available)("has no non-pending outbox row that WS-09 could have written", async () => {
     const p = pool(1);
     try {
-      // The shipped fixtures deliberately seed WS-10-shaped rows. Every OTHER
-      // non-pending row would mean WS-09 wrote a state it does not own.
+      // SCOPE OF THIS CHECK (narrowed in Cycle 9). WS-10 now legitimately writes
+      // in_flight / retry_wait / acknowledged / rejected / dead_letter, so a
+      // database-wide "everything is pending" assertion is no longer a true
+      // statement about the system and would only be testing that WS-10 has not
+      // run yet.
+      //
+      // The invariant that still holds and still matters: rows produced by the
+      // WS-09 COMMAND-LAYER suites — which all run in assignment_generation 1 —
+      // are only ever written as 'pending'. WS-10's own suites reserve their own
+      // generations (see hub-fixtures reserveSyncGenerationBlock), so anything
+      // non-pending in generation 1 outside the shipped WS-10-shaped fixtures
+      // would mean WS-09 wrote a delivery state it does not own.
       const rows = await p.query<{ event_id: string; delivery_state: string }>(
         `select o.event_id, o.delivery_state from edge_sync.outbox o
            where o.delivery_state <> 'pending'
+             and o.assignment_generation = 1
              and o.event_id not in (
                'e0000000-0000-4000-8000-0000000000d1',
                'e0000000-0000-4000-8000-0000000000d3')`,

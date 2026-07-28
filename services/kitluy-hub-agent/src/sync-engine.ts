@@ -48,8 +48,16 @@ export async function runSyncCycle(
     }
     throw e;
   }
+  // A result may only acknowledge if the cloud supplied its OWN ack identity
+  // (amendment KLD-2026-07-28-001-A01 §2). A response without one is not an
+  // acknowledgement and must not clear the outbox row.
   const acknowledged = results
-    .filter((r) => r.outcome === "applied" || r.outcome === "duplicate_ignored")
+    .filter(
+      (r) =>
+        (r.outcome === "applied" || r.outcome === "duplicate_ignored") &&
+        typeof r.cloudAckId === "string" &&
+        r.cloudAckId.length > 0,
+    )
     .map((r) => r.eventId);
   db.markAcknowledged(acknowledged);
   return {
@@ -67,19 +75,27 @@ export async function runSyncCycle(
  */
 export class SimulatedCloud implements CloudSyncTransport {
   readonly appliedEvents: OutboxEvent[] = [];
-  private readonly seenKeys = new Set<string>();
+  private readonly ackByKey = new Map<string, string>();
   online = true;
 
   push(batch: readonly OutboxEvent[]): Promise<readonly SyncPushResult[]> {
     if (!this.online) return Promise.reject(new OfflineError());
     return Promise.resolve(
       batch.map((event) => {
-        if (this.seenKeys.has(event.idempotencyKey)) {
-          return { eventId: event.eventId, outcome: "duplicate_ignored" as const };
+        // A replay returns the ORIGINAL acknowledgement identity, so the Hub
+        // records the same cloud fact it would have recorded the first time.
+        const existing = this.ackByKey.get(event.idempotencyKey);
+        if (existing !== undefined) {
+          return {
+            eventId: event.eventId,
+            outcome: "duplicate_ignored" as const,
+            cloudAckId: existing,
+          };
         }
-        this.seenKeys.add(event.idempotencyKey);
+        const cloudAckId = `sim-ack-${this.ackByKey.size + 1}`;
+        this.ackByKey.set(event.idempotencyKey, cloudAckId);
         this.appliedEvents.push(event);
-        return { eventId: event.eventId, outcome: "applied" as const };
+        return { eventId: event.eventId, outcome: "applied" as const, cloudAckId };
       }),
     );
   }

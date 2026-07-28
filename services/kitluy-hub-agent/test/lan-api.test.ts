@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { buildTerminalIdempotencyKey } from "@kitluy/sync-protocol";
 import { TERMINAL_PROFILES } from "../src/index.js";
 import { handleLanRequest } from "../src/lan-api.js";
 import { InMemoryLocalDatabase } from "../src/local-db.js";
+
+/** KLREQ-020: the idempotency key is TERMINAL-issued, so the harness supplies one. */
+const LAN_TEST_TERMINAL = "0198d4f0-6f4a-7e6e-bd3d-9f3c9153e1c1";
 
 const identity = {
   hubId: "hub-1",
@@ -39,11 +43,14 @@ describe("Store Hub LAN API kernel (/edge/v1)", () => {
           digitalStoreId: "ds-1",
           storeLocationId: "loc-1",
           hubId: "hub-1",
+          terminalDeviceId: LAN_TEST_TERMINAL,
           aggregateType: "operational_record",
           aggregateId: "a",
           eventType: "operational_record.created",
           aggregateVersion: 1,
-          schemaVersion: "1",
+          assignmentGeneration: 1,
+          idempotencyKey: buildTerminalIdempotencyKey(LAN_TEST_TERMINAL, 1n),
+          schemaVersion: 1,
           occurredAt: "2026-07-26T10:00:00+07:00",
         },
         {},

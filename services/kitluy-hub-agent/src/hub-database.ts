@@ -111,14 +111,19 @@ export type HubCommandSyncState = (typeof HUB_COMMAND_SYNC_STATES)[number];
 /**
  * Amendment KLD-2026-07-28-001-A01 §4: "External status is derived by ONE
  * shared mapping function or view ... Services must not maintain divergent
- * mappings." That single mapping is the SQL function
- * `edge_sync.external_sync_status(delivery_state, reconciliation_state)` added
- * by hub migration 0015, with CONFLICT OVERRIDE FIRST.
+ * mappings."
  *
- * This constant names it so that no TypeScript module reimplements the mapping:
- * callers read `edge_sync.outbox_status.external_status` or invoke the function.
- * Deliberately NOT a TS reimplementation — a second copy is exactly what §4
- * forbids.
+ * The mapping is owned by `@kitluy/sync-protocol.projectExternalSyncStatus`,
+ * the shared package BOTH sides can reach — the Hub reports status to
+ * terminals and the cloud reports it to management surfaces. The Hub database
+ * expresses the same mapping as this SQL function so it is usable inside views;
+ * the two are held equal over the entire delivery x reconciliation cross
+ * product by `test/sync-transmission.test.ts`, so changing one without the
+ * other fails the build instead of drifting silently.
+ *
+ * This constant NAMES the SQL side. No module reimplements the mapping a third
+ * time — callers read `edge_sync.outbox_status.external_status`, invoke this
+ * function, or call the shared TypeScript one.
  */
 export const EXTERNAL_SYNC_STATUS_FUNCTION = "edge_sync.external_sync_status" as const;
 
@@ -299,6 +304,8 @@ export const HUB_MIGRATION_ORDER = [
   // WS-10 (Cycle 9): the ADDITIVE forward migration mandated by owner amendment
   // KLD-2026-07-28-001-A01. 0001 keeps its bytes and its journalled sha256.
   "0015_sync_delivery_state_alignment.sql",
+  "0016_sync_outbox_leasing.sql",
+  "0017_sync_transmission_batches.sql",
 ] as const;
 
 /**

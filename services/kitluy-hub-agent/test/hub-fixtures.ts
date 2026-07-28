@@ -16,6 +16,7 @@ import type { PermissionGrant } from "@kitluy/rbac";
 import { buildIdempotencyKey } from "../src/hub-database.js";
 import { createHubPool, isHubDatabaseReachable, withHubTransaction } from "../src/hub/db.js";
 import type { HubApprovalEvidence, HubDeviceContext } from "../src/hub/authorization.js";
+import { payloadChecksum } from "../src/hub/outbox.js";
 import { readAppliedMigrations } from "../src/hub/safety-mode.js";
 import type { HubMigrationEntry, HubSafetyObservations } from "../src/hub/safety-mode.js";
 import { uuidv7 } from "../src/hub/uuid.js";
@@ -451,6 +452,32 @@ export async function terminateBackend(p: pg.Pool, pid: number): Promise<void> {
 /** Generations 900+ are reserved for WS-10 suites; real Hubs start at 1. */
 export const SYNC_TEST_GENERATION_BASE = 900;
 
+/** How many generations one suite may consume from its reserved block. */
+export const SYNC_TEST_GENERATION_BLOCK = 100;
+
+/**
+ * Reserve a generation block ABOVE everything already in the database.
+ *
+ * The Hub database is long-lived in development: it is not reset between test
+ * runs, so rows from earlier runs stay. A suite that always started at a fixed
+ * generation would meet its own leftovers on the second run and see a stream it
+ * did not seed — which is exactly how a suite starts passing or failing for
+ * reasons that have nothing to do with the code under test.
+ *
+ * Reading the current maximum guarantees a block above every previous run; the
+ * small random offset keeps two suites that reserve concurrently from landing
+ * on the same block.
+ */
+export async function reserveSyncGenerationBlock(p: pg.Pool): Promise<number> {
+  const result = await p.query<{ next: number }>(
+    `select greatest(coalesce(max(assignment_generation), 0), $1)::int as next
+       from edge_sync.outbox`,
+    [SYNC_TEST_GENERATION_BASE],
+  );
+  const floor = result.rows[0]?.next ?? SYNC_TEST_GENERATION_BASE;
+  return floor + 1 + Math.floor(Math.random() * 8) * SYNC_TEST_GENERATION_BLOCK;
+}
+
 export interface SeededOutboxEvent {
   readonly eventId: string;
   readonly hubSequence: bigint;
@@ -490,6 +517,10 @@ export async function seedOutboxStream(
       const hubSequence = sequence.rows[0]!.allocate_hub_sequence;
       const clientSequence = BigInt(Date.now()) * 1000n + BigInt(i);
       const payload = { suite: options.suite, index: i };
+      // The digest is computed with the SAME helper the command layer uses, so
+      // a WS-10 digest check exercises the real contract rather than agreeing
+      // with a second hasher invented for the fixture.
+      const digest = payloadChecksum(payload);
       await client.query(
         `insert into edge_sync.local_event
            (id, tenant_id, digital_store_id, location_id, hub_device_id, origin_device_id,
@@ -497,8 +528,7 @@ export async function seedOutboxStream(
             schema_version, business_date, occurred_at, hub_sequence, origin_sequence,
             assignment_generation, idempotency_key, payload_sha256, payload, created_at)
          values ($1, $2, $3, $4, $5, $6, null, $7, $8, 1, $9, 1, current_date, now(),
-                 $10, $11, $12, $13,
-                 encode(sha256(convert_to($14::text, 'UTF8')), 'hex'), $14::jsonb, now())`,
+                 $10, $11, $12, $13, $14, $15::jsonb, now())`,
         [
           eventId,
           TENANT,
@@ -513,6 +543,7 @@ export async function seedOutboxStream(
           clientSequence.toString(),
           options.generation,
           `kl1.${options.terminalDeviceId}.${clientSequence}`,
+          digest,
           JSON.stringify(payload),
         ],
       );
