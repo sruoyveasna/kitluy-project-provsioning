@@ -218,10 +218,15 @@ describe("migration set (schema contract §4)", () => {
   });
 
   it("uses no floating-point or `money` column type (repository rule 12)", () => {
+    // COMMENTS ARE STRIPPED FIRST, matching scripts/hub/hub-validate.mjs. A
+    // comment that EXPLAINS why a construct avoids double precision is exactly
+    // the documentation this rule wants; tripping on the prose would make the
+    // rule punish saying so.
     const all = readdirSync(MIGRATIONS_DIR)
       .filter((f) => f.endsWith(".sql"))
       .map((f) => readFileSync(join(MIGRATIONS_DIR, f), "utf8"))
-      .join("\n");
+      .join("\n")
+      .replace(/--[^\n]*/g, "");
     expect(all).not.toMatch(/\b(float4|float8|double\s+precision)\b/i);
     expect(all).not.toMatch(/^\s+\w+\s+money\b/im);
   });
