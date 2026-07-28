@@ -29,7 +29,15 @@ import {
   resolveGrant,
   type PublishedGrant,
 } from "../src/hub/sync/grants.js";
-import { STORE, TENANT, ensureRuntimeRoleMembership, hubReachable, pool } from "./hub-fixtures.js";
+import {
+  ATTACKER_STORE,
+  ATTACKER_TENANT,
+  STORE,
+  TENANT,
+  ensureRuntimeRoleMembership,
+  hubReachable,
+  pool,
+} from "./hub-fixtures.js";
 
 const signer = new DevelopmentHmacBatchSigner(
   "cloud-config-key-1",
@@ -592,6 +600,147 @@ describe.skipIf(!available)("RV-002 regression — deny wins across the scope ch
     );
     expect(await withHubTransaction(p, (client) => resolveGrant(client, ask(actorId)))).toBe(
       "unknown",
+    );
+  });
+});
+
+/**
+ * Regression tests for review findings RV-013 and RV-014 (re-verification pass).
+ *
+ * The reviewer classed both as non-blocking because the resolver has no
+ * production caller. They are covered anyway: both were fail-open defects in an
+ * AUTHORIZATION path, and "no caller yet" describes today, not the cycle that
+ * adds one.
+ */
+describe.skipIf(!available)("RV-013 / RV-014 regression — scope isolation", () => {
+  let p: pg.Pool;
+  let snapshotId = "";
+  let foreignSnapshotId = "";
+
+  beforeAll(async () => {
+    p = pool();
+    await ensureRuntimeRoleMembership(p);
+    const own = publish();
+    await withHubTransaction(p, async (client) => {
+      await recordDownloadedSnapshot(client, own);
+      await verifySnapshotOrThrow(client, own, signer);
+    });
+    snapshotId = own.snapshotId;
+
+    // A snapshot belonging to the ATTACKER tenant persona.
+    const foreign = publish({
+      tenantId: ATTACKER_TENANT,
+      digitalStoreId: ATTACKER_STORE,
+    });
+    await withHubTransaction(p, (client) => recordDownloadedSnapshot(client, foreign));
+    foreignSnapshotId = foreign.snapshotId;
+  });
+
+  afterAll(async () => {
+    await p.end().catch(() => undefined);
+  });
+
+  const ask = (actorId: string) => ({
+    tenantId: TENANT,
+    digitalStoreId: STORE,
+    locationId: CONFIG_LOCATION,
+    actorId,
+    permissionKey: "payments.refund.request",
+    scopeType: "store_location",
+    scopeId: CONFIG_LOCATION,
+    online: true,
+  });
+
+  function grantRow(
+    overrides: Partial<PublishedGrant> & Pick<PublishedGrant, "actorId" | "effect">,
+  ): PublishedGrant {
+    return {
+      id: uuidv7(),
+      tenantId: TENANT,
+      digitalStoreId: STORE,
+      locationId: CONFIG_LOCATION,
+      sourceSnapshotId: snapshotId,
+      projectionVersion: 1n,
+      permissionKey: "payments.refund.request",
+      resourceType: "payment",
+      scopeType: "store_location",
+      scopeId: CONFIG_LOCATION,
+      environment: "all",
+      requiresReauthentication: false,
+      requiresApproval: true,
+      requiresReason: true,
+      grantedAt: new Date(),
+      notBefore: new Date(Date.now() - 60_000),
+      expiresAt: null,
+      offlineValiditySeconds: null,
+      offlinePolicyReference: null,
+      signature: Buffer.from("beef", "hex"),
+      signatureAlgorithm: "hmac-sha256-development",
+      signingKeyId: "cloud-config-key-1",
+      ...overrides,
+    };
+  }
+
+  it("RV-013: a platform-scoped ALLOW from ANOTHER TENANT permits nothing here", async () => {
+    const actorId = uuidv7();
+    await withHubTransaction(p, (client) =>
+      projectGrant(
+        client,
+        grantRow({
+          actorId,
+          effect: "allow",
+          tenantId: ATTACKER_TENANT,
+          digitalStoreId: ATTACKER_STORE,
+          sourceSnapshotId: foreignSnapshotId,
+          scopeType: "platform",
+          scopeId: null,
+        }),
+      ),
+    );
+    expect(await withHubTransaction(p, (client) => resolveGrant(client, ask(actorId)))).toBe(
+      "unknown",
+    );
+  });
+
+  it("RV-013: a grant for another Digital Store in the same tenant permits nothing", async () => {
+    const actorId = uuidv7();
+    await withHubTransaction(p, (client) =>
+      projectGrant(
+        client,
+        grantRow({
+          actorId,
+          effect: "allow",
+          digitalStoreId: ATTACKER_STORE,
+          sourceSnapshotId: foreignSnapshotId,
+        }),
+      ),
+    );
+    expect(await withHubTransaction(p, (client) => resolveGrant(client, ask(actorId)))).toBe(
+      "unknown",
+    );
+  });
+
+  it("RV-014: a non-platform grant with a NULL scope_id cannot be stored at all", async () => {
+    await expect(
+      withHubTransaction(p, (client) =>
+        projectGrant(
+          client,
+          grantRow({ actorId: uuidv7(), effect: "deny", scopeType: "tenant", scopeId: null }),
+        ),
+      ),
+    ).rejects.toThrow(/permission_grant_projection_scope_id_ck/);
+  });
+
+  it("RV-014: a platform grant may still omit its scope_id", async () => {
+    const actorId = uuidv7();
+    await withHubTransaction(p, (client) =>
+      projectGrant(
+        client,
+        grantRow({ actorId, effect: "allow", scopeType: "platform", scopeId: null }),
+      ),
+    );
+    expect(await withHubTransaction(p, (client) => resolveGrant(client, ask(actorId)))).toBe(
+      "allow",
     );
   });
 });

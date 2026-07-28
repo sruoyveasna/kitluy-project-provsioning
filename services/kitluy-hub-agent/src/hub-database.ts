@@ -313,6 +313,7 @@ export const HUB_MIGRATION_ORDER = [
   "0022_signed_grants_and_activation.sql",
   "0023_operator_repair_and_recovery.sql",
   "0024_governed_marker_and_scope_hierarchy.sql",
+  "0025_grant_scope_isolation.sql",
 ] as const;
 
 /**

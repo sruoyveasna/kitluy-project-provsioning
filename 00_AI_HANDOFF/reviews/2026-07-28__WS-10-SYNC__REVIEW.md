@@ -365,3 +365,241 @@ Hub-backed suite silently skipped — the 261/2 split was observed directly. I w
 this record; `git status --short` is empty. Where a claim reproduced, I said so; where it did not
 (RV-005), I said so; and where I attacked something and failed to break it (probes 9–23), I recorded
 the failure as evidence rather than omitting it.
+
+---
+
+---
+
+# PART II — Re-verification of the RV-001 / RV-002 fixes
+
+**Appended 2026-07-28 by the same independent reviewer. Part I above is unchanged.**
+
+| Field                | Value                                                                                                                                                                                 |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Fix commit           | `1b54759` — `fix(storehub-sync): close review findings RV-001 and RV-002`                                                                                                             |
+| HEAD at re-review    | `1b54759`, clean tree before and after                                                                                                                                                |
+| Fix migration        | `hub/migrations/0024_governed_marker_and_scope_hierarchy.sql` sha256 `a512615b8e55bf8bb4e497ca4357e8fa45bd82846c3662e434e8e0e3c0d369b0` (APPLIED, 0 drift)                            |
+| **Revised decision** | **APPROVED-WITH-CONDITIONS — blocking conditions C1 and C2 are DISCHARGED.** No finding now blocks the IMPLEMENTED-IN-DEV promotion. Seven new non-blocking findings, RV-011..RV-017. |
+
+I re-attacked both mechanisms rather than reading the fix and agreeing with it. Every probe below ran
+inside `BEGIN … ROLLBACK`; nothing committed. Where a probe escalated privileges, the grantee was
+written as an explicit literal, never `TO current_user` (KLRISK-HUB-001 segfault hazard).
+
+## II.1 RV-001 re-attacked — the governed marker
+
+Environment first. `kitluy_reconciliation_governor` is NOLOGIN, not superuser, and has **zero rows in
+`pg_auth_members`** — the migrator's borrowed membership was genuinely handed back. Both governed
+procedures are `prosecdef = true`, owned by the governor, with `proconfig` =
+`search_path=pg_catalog, edge_sync, public`. `pg_catalog` is first, so the `now()` / `btrim()` calls
+in the bodies cannot be shadowed, and every table reference in both bodies is schema-qualified.
+
+| #    | Attack                                                                      | Result                                                                                                                                      |
+| ---- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| A1   | `kitluy_sync_worker` bare UPDATE of `reconciliation_state`                  | **REFUSED** — `Current identity: kitluy_sync_worker`                                                                                        |
+| A2   | **The original Part I bypass**: worker sets the old GUC, then UPDATEs       | **REFUSED** — the GUC is inert. The bypass is dead.                                                                                         |
+| A3   | `kitluy_hub_runtime` bare UPDATE                                            | **REFUSED**                                                                                                                                 |
+| A4   | Database **owner** (`postgres`) bare UPDATE                                 | **REFUSED** — `Current identity: postgres`                                                                                                  |
+| A5   | Worker `SET ROLE kitluy_reconciliation_governor`                            | **REFUSED** — `permission denied to set role`                                                                                               |
+| A6   | Owner `SET ROLE kitluy_reconciliation_governor` (holds no membership)       | **REFUSED** — `permission denied to set role`                                                                                               |
+| A8   | Worker UPDATEs through the auto-updatable view `outbox_status`              | **REFUSED** — the view is SELECT-only to the worker                                                                                         |
+| A9   | Owner UPDATEs through `outbox_status` — does the base trigger still fire?   | **REFUSED** — the view rewrites to the base table, so the trigger fires                                                                     |
+| A10b | Worker `INSERT … ON CONFLICT DO UPDATE` (the trigger is BEFORE UPDATE only) | **REFUSED** — the DO UPDATE path fires the BEFORE UPDATE trigger                                                                            |
+| A11  | Worker `ALTER TABLE … DISABLE TRIGGER`                                      | **REFUSED** — `must be owner of table outbox`                                                                                               |
+| A13  | Worker INSERTs a _new_ row already in `cleared` (INSERT is untriggered)     | **BLOCKED** — FK `outbox_event_id_fkey` to `local_event`; with WS-09's outbox atomicity invariant there is no orphan event to attach one to |
+
+**Verdict: the RV-001 fix holds against every role the amendment names.** The marker is unforgeable
+by `kitluy_sync_worker` and `kitluy_hub_runtime`, and — unlike the GUC — even the table owner cannot
+forge it with a bare UPDATE. Assertion 29c now also guards the _mechanism_ rather than only the
+grants: role existence, NOLOGIN, **memberlessness**, `SECURITY DEFINER`, and governor ownership of
+both procedures. A future migration that forgot to hand the membership back would fail that gate.
+
+### RV-011 — `clear_reconciliation` still forces no audit row — MEDIUM, non-blocking
+
+Probe A14, running as `kitluy_hub_runtime`:
+
+```sql
+SELECT edge_sync.clear_reconciliation(<event>, NULL, 'any-string-at-all', 'any reason', <event>);
+-- reconciliation_state = cleared, authority = 'any-string-at-all'
+-- audit_rows_written  = 0
+```
+
+Amendment §5 requires _"an authorized actor or governed automated reconciliation, a reason, prior and
+resulting states, immutable audit, and correlation to the repair"_. The procedure enforces a non-empty
+authority, a non-empty reason and a non-null correlation id — but it accepts **any** string as the
+authority, accepts `p_cleared_by = NULL`, and writes **no audit row**. The audit remains the
+TypeScript wrapper's job (`src/hub/sync/reconciliation.ts:216`), so a caller reaching the procedure
+directly over SQL satisfies every CHECK constraint and leaves no trail.
+
+This is strictly narrower than RV-001 — the delivery worker, which is who §5 names, is now excluded,
+and the runtime role _is_ the authorization pipeline, so this sits inside KLRISK-HUB-003's accepted
+trust boundary. It is recorded because evidence §3's row _"§5 authority, reason, correlation, audit …
+writing the immutable audit row in the same transaction"_ describes a **caller convention**, not an
+enforced guarantee.
+
+### RV-012 — the owner can still produce the identity via CREATEROLE, or bypass via DISABLE TRIGGER — MEDIUM, non-blocking
+
+`postgres` has `rolcreaterole = t`. On PostgreSQL 15 a CREATEROLE role may grant itself membership in
+any non-superuser role. Probe A7, with an explicit literal grantee:
+
+```sql
+GRANT kitluy_reconciliation_governor TO postgres;
+SET ROLE kitluy_reconciliation_governor;          -- current_user = kitluy_reconciliation_governor
+UPDATE edge_sync.outbox SET reconciliation_state='cleared', … ;   -- UPDATE 1
+```
+
+Probe A12: the owner can equally `ALTER TABLE edge_sync.outbox DISABLE TRIGGER
+outbox_state_dimension_independence` and then clear freely.
+
+Both are owner-level escalations inherent to PostgreSQL 15 (tightened in PG 16, which requires
+`ADMIN OPTION` to grant membership) and to table ownership. Both fall inside KLRISK-HUB-003
+("database credentials are a TRUST BOUNDARY"), and neither is a regression or a bare UPDATE. I record
+them because the Hub agent connects as exactly this identity today, so the status row's _"the forge
+now fails for the sync worker and for the database owner"_ — accurate about the bare-UPDATE forge —
+must not be read as "the owner cannot forge". Dropping `CREATEROLE` from the agent's connection role
+would be worth considering once the agent stops connecting as the owner.
+
+## II.2 RV-002 re-attacked — the scope-chain resolver
+
+The defective signature is genuinely gone: `pg_proc` shows exactly one
+`edge_config.resolve_permission_grant`, the 9-argument form. `grants.ts` passes the full chain, and
+still has **no production caller** — RV-004 is unchanged.
+
+| #   | Attack                                                                            | Result                                                                                              |
+| --- | --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| B1  | **The original Part I attack**: `digital_store` DENY vs `store_location` ALLOW    | **`deny`** — fixed                                                                                  |
+| B2  | `platform` DENY (NULL scope_id) vs a location ALLOW                               | **`deny`**                                                                                          |
+| B3  | `tenant` DENY vs a location ALLOW                                                 | **`deny`**                                                                                          |
+| B7  | Out-of-hierarchy `terminal` DENY, resolved at that terminal                       | **`deny`** — exact match works                                                                      |
+| B8  | Broad DENY vs a location ALLOW with valid signed offline validity, `online=false` | **`deny`** — deny is evaluated before the offline branch, so the offline path cannot launder a deny |
+
+**Verdict: the RV-002 fix holds for the scope hierarchy.** Four further probes found residual gaps.
+
+### RV-013 — the resolver ignores the grant's own tenant and Digital Store — MEDIUM, non-blocking
+
+Probe B4: a `platform`-scoped **ALLOW** whose `tenant_id` and `digital_store_id` belong to a
+_different_ tenant and store returned **`allow`** for our tenant's request. The `WHERE` clause never
+filters on `g.tenant_id` or `g.digital_store_id`, and the `platform` branch (`0024:323`) matches
+unconditionally with no `scope_id` test at all. Probe B6 confirms the same branch honours a `platform`
+grant carrying a bogus non-null `scope_id`.
+
+Exploiting it requires a projection row carrying this Hub's `location_id` beside a foreign tenant, so
+this is a defence-in-depth failure rather than a reachable exploit. It is still worth closing: the
+resolver is the authorization decision point, and it trusts the projection's scope columns without
+cross-checking the identity columns sitting next to them. A `platform` allow is the broadest grant the
+table can hold and is the one row shape subject to no validation whatsoever.
+
+### RV-014 — a hierarchy-scoped DENY with a NULL `scope_id` fails OPEN — MEDIUM, non-blocking
+
+Probe B5: a DENY at `scope_type='tenant'` with `scope_id = NULL`, against a location ALLOW, resolved
+to **`allow`**. The chain predicate is `g.scope_id is not distinct from p_tenant_id`, which is false
+for NULL, so the deny is never loaded. Because `platform` grants legitimately carry a NULL `scope_id`,
+no CHECK constraint forces `tenant` / `digital_store` / `store_location` rows to supply one.
+
+A malformed deny therefore fails in the **permissive** direction — the opposite of the fail-closed
+posture maintained everywhere else in this cycle. `CHECK (scope_type = 'platform' OR scope_id IS NOT
+NULL)` would close it at the storage layer.
+
+### RV-015 — `location_id` is ANDed with the chain, so a broad grant filed elsewhere is dropped — LOW-MEDIUM, non-blocking
+
+Probe B9: a `platform`-scoped DENY stored under a different `location_id` was dropped by the hard
+`g.location_id = p_location_id` predicate (`0024:313`), and the request resolved **`allow`**. In a
+single-Location Hub every projected row carries that Location, so this is largely theoretical — but it
+means "platform scope" in this resolver denotes _a platform-scoped row filed under this Location_, not
+platform-wide. Worth stating in the function comment so a future multi-Location Hub does not inherit
+the assumption silently.
+
+### RV-016 — a DENY can never be retired — LOW, non-blocking
+
+Probe B10: `UPDATE … SET revoked_at = now()` is refused by
+`enforce_grant_projection_immutability` (`0022:97`), which rejects **all** UPDATE and DELETE. The
+resolver's `g.revoked_at is null` filter is therefore unreachable — no row can ever be revoked in
+place. And because the loop returns `deny` on the first matching deny regardless of
+`projection_version`, a newer signed projection cannot supersede an older deny either. A DENY is
+permanent.
+
+This is fail-closed and so not dangerous, but 0022's _"revocation arrives as a new signed projection"_
+does not actually work for lifting a deny, and the `order by g.projection_version desc`
+"newer supersedes older" comment is decorative.
+
+## II.3 Corrected numbers — confirmed or contradicted
+
+| Claim                                | Reviewer observed                                                                | Verdict                           |
+| ------------------------------------ | -------------------------------------------------------------------------------- | --------------------------------- |
+| Hub assertions **33**                | **33** `NOTICE:  PASS`, zero ASSERT FAIL                                         | **CONFIRMED**                     |
+| Hub migrations **25**                | 25 files, 25 applied, 0 pending, **0 checksum drift**, 0 missing                 | **CONFIRMED**                     |
+| `test:rls` **94**                    | **94** (23 baseline + 14 + 19 + 19 + 19); the itemization is now self-consistent | **CONFIRMED — RV-005 discharged** |
+| hub-agent **270 passed / 2 skipped** | **270 passed / 2 skipped**, 21 files passed / 1 skipped — on 6 of 7 runs         | **CONFIRMED, with RV-017**        |
+| 29c procedure count                  | the assertion reports **30**, not 22                                             | RV-006 still uncorrected in §6    |
+
+### RV-017 — one unreproducible hub-agent suite failure — LOW, evidence integrity
+
+My first re-run of the hub-agent suite exited **non-zero**
+(`ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL … Exit status 1`). I then ran it six more times — four in
+isolation, one plain re-run, and one exact replay of the failing sequence (`hub:db:test` twice, then
+the suite) — and every one reported `270 passed | 2 skipped`, exit 0.
+
+I could not reproduce it and I could not identify it, because my own command truncated the output with
+`tail -6` and discarded the failing test name. That is a defect in my probe, not in the code, and I
+record it rather than quietly dropping it. Assertion 29d rolls back cleanly and leaves no residue —
+I checked for leftover snapshots and grant rows and found 0 and 0 — so contamination from the
+assertion run does not explain it. **A roughly 1-in-7 intermittent failure in the gate that produces
+the headline 270/2 figure deserves a deliberate reproduction attempt before that number is relied on
+again.**
+
+## II.4 Did the fixes overstate anything?
+
+Mostly **no**. The documentation changes are accurate and in places commendably self-critical.
+Verified as **not** overstated:
+
+- The status row and evidence §7 both record **RV-004** ("WS-10 ships no wired production path …
+  Anyone reading 'IMPLEMENTED-IN-DEV' as 'the Hub is syncing' would be wrong") and the
+  **structural-only §5 separation**. Both match what I found, and §7's wording is more candid than it
+  needed to be.
+- Evidence §1 gate 4 now reads **94**, with an itemization that actually sums to 94.
+- C30 and C31 describe the findings and the fixes accurately, and correctly note that C27's "CLOSED"
+  was true only of the PUBLIC EXECUTE hole.
+- The claim that both findings were "reproduced before being fixed" is consistent with 0024's header,
+  which restates both attacks correctly.
+
+Three things **were not corrected** and should be:
+
+1. **Evidence §3 line 91** — the `§5 worker may not clear` row still credits *"governed-marker trigger
+   - `0020` revoking PUBLIC EXECUTE"*, with no mention of 0024. It credits the mechanism this review
+     proved broken. §5 of the same document now describes RV-001 correctly, so the document contradicts
+     itself.
+2. **Evidence §3 line 92** — the `§5 authority, reason, correlation, audit` row still presents the
+   audit as enforced. Per RV-011 it is a caller convention.
+3. **Evidence §6** — still says assertion 29c _"locks it shut for all 22 `edge_*` procedures"_. The
+   assertion reports **30**. This was RV-006 in Part I and was not picked up.
+
+## II.5 Revised verdict
+
+**APPROVED-WITH-CONDITIONS. Both blocking conditions are discharged.**
+
+| Condition                           | Status                                                                                                                                                                                                                                                        |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **C1** (RV-001, §5 made structural) | **DISCHARGED.** Re-attacked from 11 angles including the original bypass, role escalation, the auto-updatable view, upsert, INSERT and trigger-disabling. The marker is unforgeable by both roles the amendment names, and an assertion guards the mechanism. |
+| **C2** (RV-002, deny across scopes) | **DISCHARGED.** The original attack now returns `deny`, as do platform-, tenant- and out-of-hierarchy-scoped denies and the offline path. The defective signature is dropped, not shadowed.                                                                   |
+| **C5** (test:rls 94)                | **PARTIALLY DISCHARGED** — the count is corrected; the "22 `edge_*` procedures" half is not.                                                                                                                                                                  |
+| C3, C4, C6, C7                      | Unchanged from Part I. C4 is discharged in substance — RV-004 is now recorded in both documents.                                                                                                                                                              |
+
+**No finding blocks the IMPLEMENTED-IN-DEV promotion.** New non-blocking conditions:
+
+| #   | Condition                                                                                                                                                                | Finding    |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------- |
+| C8  | Either write the audit row inside `clear_reconciliation`, or correct evidence §3 line 92 to state that the audit is a caller convention.                                 | RV-011     |
+| C9  | Record the owner-level escalations (CREATEROLE self-grant, DISABLE TRIGGER) against KLRISK-HUB-003, and consider removing `CREATEROLE` from the agent's connection role. | RV-012     |
+| C10 | Filter the resolver on the grant's own `tenant_id` / `digital_store_id`, and validate `platform`-scoped rows.                                                            | RV-013     |
+| C11 | Add `CHECK (scope_type = 'platform' OR scope_id IS NOT NULL)` so a malformed deny cannot fail open.                                                                      | RV-014     |
+| C12 | Fix evidence §3 line 91 (credit 0024, not the broken trigger) and §6 ("22" to 30).                                                                                       | RV-006     |
+| C13 | Attempt a deliberate reproduction of the intermittent hub-agent failure before relying on 270/2 again.                                                                   | RV-017     |
+| C14 | Document that `location_id` bounds the scope chain, and that a DENY is currently unliftable.                                                                             | RV-015/016 |
+
+## II.6 Reviewer truth statement (Part II)
+
+Every result in Part II was produced in my own terminal against `1b54759`. All probes ran inside
+transactions I rolled back; `pg_auth_members` was re-checked as empty after the CREATEROLE probe, and
+`pnpm hub:db:test` still reports 33 assertions afterwards. I did not run `pnpm db:reset`. I attacked
+both fixes before accepting them, and the exact attacks from Part I now fail. I also report one
+failure of my own — RV-017, where my probe design destroyed the evidence I needed. The residual
+findings are new ground rather than restatements, and none of them re-opens RV-001 or RV-002.

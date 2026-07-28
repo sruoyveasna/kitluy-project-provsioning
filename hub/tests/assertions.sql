@@ -1665,7 +1665,53 @@ begin
     raise exception 'ASSERT FAIL: an ungranted actor resolved to % instead of unknown', v_decision;
   end if;
 
-  raise notice 'PASS grant-scope-chain: a DENY at a broader scope beats a narrow ALLOW, and an ungranted actor still fails closed';
+  -- RV-013: a grant belonging to ANOTHER TENANT must not permit this one. The
+  -- platform branch used to match unconditionally, so a platform-scoped allow
+  -- carrying the attacker tenant's scope columns resolved to `allow` here.
+  insert into edge_config.configuration_snapshot
+    (id, tenant_id, digital_store_id, location_id, snapshot_version, schema_version, created_at,
+     not_before, minimum_hub_version, manifest_sha256, signature_algorithm, signature,
+     signing_key_id, state, downloaded_at)
+  values ('e0000000-0000-4000-8000-0000000000f5', 'e0000000-0000-4000-8000-0000000000a1',
+          'e0000000-0000-4000-8000-0000000000a2', v_location, 999998, 1, now(),
+          now() - interval '1 hour', '0.1.0', repeat('a', 64), 'assert', decode('beef', 'hex'),
+          'assert-key', 'verified', now());
+  insert into edge_config.permission_grant_projection
+    (id, tenant_id, digital_store_id, location_id, source_snapshot_id, projection_version, actor_id,
+     permission_key, effect, resource_type, scope_type, scope_id, environment,
+     requires_reauthentication, requires_approval, requires_reason, granted_at, not_before,
+     signature, signature_algorithm, signing_key_id, received_at)
+  values (gen_random_uuid(), 'e0000000-0000-4000-8000-0000000000a1',
+          'e0000000-0000-4000-8000-0000000000a2', v_location,
+          'e0000000-0000-4000-8000-0000000000f5', 1, 'e0000000-0000-4000-8000-0000000000f9',
+          'payments.refund.request', 'allow', 'payment', 'platform', null, 'all',
+          false, true, true, now(), now() - interval '1 hour', decode('be', 'hex'), 'a', 'k', now());
+
+  v_decision := edge_config.resolve_permission_grant(
+    v_tenant, v_store, v_location, 'e0000000-0000-4000-8000-0000000000f9',
+    'payments.refund.request', 'store_location', v_location, true, now());
+  if v_decision <> 'unknown' then
+    raise exception
+      'ASSERT FAIL: a grant belonging to ANOTHER TENANT resolved to % here (RV-013)', v_decision;
+  end if;
+
+  -- RV-014: a non-platform grant with no scope_id was silently unmatchable, so
+  -- a DENY carrying one failed OPEN. It must now be unstorable.
+  begin
+    insert into edge_config.permission_grant_projection
+      (id, tenant_id, digital_store_id, location_id, source_snapshot_id, projection_version,
+       actor_id, permission_key, effect, resource_type, scope_type, scope_id, environment,
+       requires_reauthentication, requires_approval, requires_reason, granted_at, not_before,
+       signature, signature_algorithm, signing_key_id, received_at)
+    values (gen_random_uuid(), v_tenant, v_store, v_location, v_snapshot, 9, v_actor,
+            'payments.refund.request', 'deny', 'payment', 'tenant', null, 'all',
+            false, true, true, now(), now() - interval '1 hour', decode('be', 'hex'), 'a', 'k', now());
+    raise exception 'ASSERT FAIL: a non-platform grant with a NULL scope_id was accepted (RV-014)';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+  end;
+
+  raise notice 'PASS grant-scope-chain: a DENY at a broader scope beats a narrow ALLOW; a grant from another tenant permits nothing; a non-platform grant with no scope_id is unstorable; an ungranted actor still fails closed';
 end $$;
 
 rollback;

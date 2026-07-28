@@ -344,11 +344,47 @@ export const RESIDUAL_RISK_CLOUD_RESET_DESTROYS_HUB_DB: HubResidualRisk = {
   severity: "medium",
 };
 
+/**
+ * KLRISK-HUB-007 — the §5 "immutable audit" is a CALLER convention, not a
+ * database guarantee. Independent review RV-011.
+ */
+export const RESIDUAL_RISK_CLEARANCE_AUDIT_IS_CALLER_SIDE: HubResidualRisk = {
+  id: "KLRISK-HUB-007",
+  hazard:
+    "Amendment KLD-2026-07-28-001-A01 §5 requires an immutable audit for every reconciliation clearance. edge_sync.clear_reconciliation enforces the AUTHORITY, the REASON and the CORRELATION at the database, but writes NO audit row itself — the row comes from src/hub/sync/reconciliation.ts. It also accepts any authority STRING with a NULL cleared_by, so the database cannot tell a real authorized actor from a plausible-looking label.",
+  observedImpact:
+    "Found by independent review, not by a live incident. A caller holding EXECUTE on the procedure — today only kitluy_hub_runtime — could clear a reconciliation without leaving an audit row. The only implemented caller does write one, and its content is asserted, so nothing in the tree exercises the gap.",
+  workaround:
+    "The single code path writes the audit row in the SAME transaction as the clearance, and the test asserts both dimensions' prior and resulting states appear in it. EXECUTE is granted to one role.",
+  residual:
+    "The guarantee is only as strong as the caller. Mitigation owed: have the procedure write the audit row itself, or require a verified actor reference rather than a free-text authority. Until then, evidence must say 'the caller writes the audit', never 'the database enforces the audit'.",
+  severity: "medium",
+};
+
+/**
+ * KLRISK-HUB-008 — the database owner can still forge the §5 identity.
+ * Independent review RV-012.
+ */
+export const RESIDUAL_RISK_OWNER_CAN_FORGE_GOVERNOR: HubResidualRisk = {
+  id: "KLRISK-HUB-008",
+  hazard:
+    "The development database owner holds CREATEROLE, so it can grant itself membership in kitluy_reconciliation_governor and SET ROLE to it — producing the exact identity the 0024 gate recognises — or simply ALTER TABLE ... DISABLE TRIGGER.",
+  observedImpact:
+    "Demonstrated by the independent reviewer as a successful UPDATE. It is inherent to PostgreSQL ownership rather than a defect in 0024: no in-database mechanism constrains a role that may rewrite the mechanism. It matters here because the Hub agent currently CONNECTS as that identity (see KLRISK-HUB-002).",
+  workaround:
+    "0024 makes the forge require a deliberate, auditable privilege escalation instead of a single set_config() call, and the migrator hands back its borrowed membership so no residual member exists. Assertion 29c fails if the role ever gains a member.",
+  residual:
+    "Within the standing KLRISK-HUB-003 trust boundary: database credentials are trusted infrastructure. Mitigation owed with WS-11: connect the Hub agent as kitluy_hub_runtime rather than the owner, and keep CREATEROLE away from the runtime identity. Evidence must never claim the §5 gate constrains a database superuser.",
+  severity: "medium",
+};
+
 export const HUB_RESIDUAL_RISKS: readonly HubResidualRisk[] = [
   RESIDUAL_RISK_GRANT_CURRENT_USER_CRASH,
   RESIDUAL_RISK_ROLE_ASSUMPTION_FALLBACK,
   RESIDUAL_RISK_BACKUP_RESTORE_GRADE,
   RESIDUAL_RISK_CLOUD_RESET_DESTROYS_HUB_DB,
+  RESIDUAL_RISK_CLEARANCE_AUDIT_IS_CALLER_SIDE,
+  RESIDUAL_RISK_OWNER_CAN_FORGE_GOVERNOR,
 ];
 
 // ---------------------------------------------------------------------------
