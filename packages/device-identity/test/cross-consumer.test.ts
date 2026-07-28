@@ -321,7 +321,6 @@ describe("RV-TT-001 regression: uninitialized is not trusted", () => {
     source: "none",
     floorAdvanced: false,
     anomalyType: null,
-    restricted: false,
     detail: "never established",
   };
 
@@ -340,7 +339,6 @@ describe("RV-TT-001 regression: uninitialized is not trusted", () => {
       ...uninitialized,
       status: "restricted_clock_rollback",
       anomalyType: "forged",
-      restricted: false,
     };
     const r = runAll(lying);
     expect(r.certificate.valid).toBe(false);

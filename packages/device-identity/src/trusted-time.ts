@@ -565,7 +565,12 @@ export interface TrustedTimeEvaluation {
   readonly source: TrustedTimeSource;
   readonly floorAdvanced: boolean;
   readonly anomalyType: string | null;
-  readonly restricted: boolean;
+  /**
+   * NOTE: there is deliberately NO `restricted` boolean here (review condition
+   * C1). Restriction is derived from `status` via isRestricted(). Carrying both
+   * gave two sources of truth for one fact, and RV-TT-001 — a fail-open on
+   * `uninitialized` — lived in the gap between them.
+   */
   readonly detail: string;
 }
 
@@ -717,7 +722,6 @@ export async function evaluateTrustedTime(
     source: selected?.source ?? (committed.floor !== null ? "persisted_floor" : "none"),
     floorAdvanced,
     anomalyType,
-    restricted: isRestricted(status),
     detail: status === "trusted" ? "trusted time established" : (anomalyType ?? "restricted"),
   };
 }
@@ -730,7 +734,7 @@ export function canActivateOffline(evaluation: TrustedTimeEvaluation): {
   permitted: boolean;
   reason: string;
 } {
-  if (evaluation.restricted) {
+  if (isRestricted(evaluation.status)) {
     return { permitted: false, reason: evaluation.anomalyType ?? "restricted trust mode" };
   }
   if (evaluation.source === "persisted_floor" || evaluation.source === "none") {

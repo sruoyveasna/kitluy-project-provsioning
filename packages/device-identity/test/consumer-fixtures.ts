@@ -57,7 +57,6 @@ export const trusted = (
   source: "rtc",
   floorAdvanced: false,
   anomalyType: status === "trusted" ? null : "probe anomaly",
-  restricted: status !== "trusted",
   detail: status,
 });
 

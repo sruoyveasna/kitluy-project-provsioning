@@ -784,3 +784,5 @@ export * from "./certificate-validity.js";
 export * from "./certificate-renewal.js";
 export * from "./revocation-snapshot.js";
 export * from "./configuration-validity.js";
+export * from "./dev-crypto.js";
+export * from "./certificate-issuance.js";

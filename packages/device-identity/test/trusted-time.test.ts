@@ -284,7 +284,7 @@ describe("source selection", () => {
     });
     expect(result.trustedTime?.toISOString()).toBe(T0.toISOString());
     expect(result.source).toBe("persisted_floor");
-    expect(result.restricted).toBe(true);
+    expect(isRestricted(result.status)).toBe(true);
   });
 
   it("keeps the floor monotonic under concurrent evaluations", async () => {
@@ -342,7 +342,7 @@ describe("rollback and forward-jump", () => {
       { deviceRecordId: DEVICE, environment: "development" },
     );
     expect(result.status).toBe("restricted_clock_rollback");
-    expect(result.restricted).toBe(true);
+    expect(isRestricted(result.status)).toBe(true);
   });
 
   it("refuses a forward jump beyond the signed policy", async () => {
@@ -613,7 +613,6 @@ describe("first boot", () => {
       source: "persisted_floor",
       floorAdvanced: false,
       anomalyType: null,
-      restricted: false,
       detail: "hand-built",
     });
     expect(verdict.permitted).toBe(false);
