@@ -3648,8 +3648,12 @@ begin
     raise exception 'ASSERT FAIL: a credential was issued with no verified proof of possession';
   exception when others then
     if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    -- After the governor membership was handed back, the GRANT layer refuses
+    -- before the trigger is ever reached. That is stronger, not weaker: the
+    -- migrator has no table privilege at all. Any of the three is a pass.
     if sqlerrm not like 'KLUY-CRED-UNAUTHORIZED-ISSUE%'
-       and sqlerrm not like 'KLUY-CRED-NO-PROOF-OF-POSSESSION%' then
+       and sqlerrm not like 'KLUY-CRED-NO-PROOF-OF-POSSESSION%'
+       and sqlerrm not like 'permission denied%' then
       raise exception 'ASSERT FAIL: refused for the wrong reason: %', sqlerrm;
     end if;
     v_blocked := v_blocked + 1;
@@ -3712,7 +3716,8 @@ begin
     raise exception 'ASSERT FAIL: a generation head was written outside the governed path';
   exception when others then
     if sqlerrm like 'ASSERT FAIL%' then raise; end if;
-    if sqlerrm not like 'KLUY-CRED-UNAUTHORIZED-HEAD%' then
+    if sqlerrm not like 'KLUY-CRED-UNAUTHORIZED-HEAD%'
+       and sqlerrm not like 'permission denied%' then
       raise exception 'ASSERT FAIL: head write refused for the wrong reason: %', sqlerrm;
     end if;
     v_blocked := v_blocked + 1;
@@ -3802,95 +3807,39 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------
--- 31c — the overlap window and head monotonicity, exercised as the governor.
+-- 31c — the governor role cannot be assumed, by anyone that can log in.
+-- ---------------------------------------------------------------------------
+-- This block previously ran `set local role kitluy_credential_issuer` to
+-- exercise the overlap and head-version invariants directly. Containment now
+-- REFUSES that, which is the point — so the block tests the refusal instead.
+--
+-- OWED, and not claimed as tested: the overlap-window, head-version and
+-- head-rollback invariants are still enforced by triggers in group 0125, but
+-- they are now only reachable through the governed issuance functions, which do
+-- not exist yet. Their behavioural tests move to the issuance-adapter unit.
 -- ---------------------------------------------------------------------------
 do $$
 declare
-  v_profile uuid;
-  v_device uuid;
-  v_blocked int := 0;
+  v_refused boolean := false;
 begin
-  select id into v_profile from kitluy_devices.hardware_profiles
-   where profile_key = 'WS11-T001-HUB-PROBE';
-  v_device := kitluy_devices.enroll_device_v1(
-    'WS11-T004-HEAD-' || gen_random_uuid(), v_profile, now(),
-    repeat('e3', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
-    jsonb_build_array(
-      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'da:03:' || substr(md5(random()::text),1,6) || ':03'),
-      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-head-' || gen_random_uuid()),
-      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-head-' || gen_random_uuid())));
-
-  set local role kitluy_credential_issuer;
-
-  insert into kitluy_devices.device_credential_heads
-    (device_record_id, environment, purpose, current_generation)
-  values (v_device, 'development', 'device_identity', 1);
-
-  -- An overlap beyond the 3-day development maximum.
   begin
-    update kitluy_devices.device_credential_heads
-    set current_generation = 2, previous_generation = 1,
-        overlap_ends_at = now() + interval '10 days',
-        version = version + 1, updated_at = now()
-    where device_record_id = v_device;
-    raise exception 'ASSERT FAIL: a 10-day overlap was accepted';
+    execute 'set local role kitluy_credential_issuer';
+    -- If this succeeded, a login-capable role can become the governor and write
+    -- issued credentials directly. That is the hole NOLOGIN does not close.
+    execute 'reset role';
+    raise exception 'ASSERT FAIL: the current login-capable role can SET ROLE kitluy_credential_issuer';
   exception when others then
     if sqlerrm like 'ASSERT FAIL%' then raise; end if;
-    if sqlerrm not like 'KLUY-CRED-OVERLAP-EXCEEDED%' then
-      raise exception 'ASSERT FAIL: overlap refused for the wrong reason: %', sqlerrm;
-    end if;
-    v_blocked := v_blocked + 1;
+    v_refused := true;
   end;
 
-  -- A version that does not advance by exactly one: a stale compare-and-swap.
-  begin
-    update kitluy_devices.device_credential_heads
-    set current_generation = 2, version = version + 5, updated_at = now()
-    where device_record_id = v_device;
-    raise exception 'ASSERT FAIL: a head update skipped versions';
-  exception when others then
-    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
-    if sqlerrm not like 'KLUY-CRED-HEAD-VERSION%' then
-      raise exception 'ASSERT FAIL: version refused for the wrong reason: %', sqlerrm;
-    end if;
-    v_blocked := v_blocked + 1;
-  end;
-
-  -- A head rollback.
-  update kitluy_devices.device_credential_heads
-  set current_generation = 3, version = version + 1, updated_at = now()
-  where device_record_id = v_device;
-  begin
-    update kitluy_devices.device_credential_heads
-    set current_generation = 2, version = version + 1, updated_at = now()
-    where device_record_id = v_device;
-    raise exception 'ASSERT FAIL: a generation head moved backwards';
-  exception when others then
-    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
-    if sqlerrm not like 'KLUY-CRED-HEAD-ROLLBACK%' then
-      raise exception 'ASSERT FAIL: rollback refused for the wrong reason: %', sqlerrm;
-    end if;
-    v_blocked := v_blocked + 1;
-  end;
-
-  -- A head is never deleted.
-  begin
-    delete from kitluy_devices.device_credential_heads where device_record_id = v_device;
-    raise exception 'ASSERT FAIL: a generation head was deleted';
-  exception when others then
-    if sqlerrm like 'ASSERT FAIL%' then raise; end if; v_blocked := v_blocked + 1;
-  end;
-
-  reset role;
-
-  if v_blocked <> 4 then
-    raise exception 'ASSERT FAIL: expected 4 head refusals, got %', v_blocked;
+  if not v_refused then
+    raise exception 'ASSERT FAIL: SET ROLE kitluy_credential_issuer was not refused';
   end if;
 
-  raise notice 'PASS ws11-credential-heads: an overlap beyond the 3-day development maximum, a version that skips (a stale compare-and-swap), a backwards generation and a head deletion are all refused — even for the GOVERNOR role, which is the only identity allowed to touch the head at all';
+  raise notice 'PASS ws11-governor-unassumable: the migrating login-capable role CANNOT SET ROLE kitluy_credential_issuer — the membership it needed to transfer ownership is handed back before the migration commits. Found by the owner-requested assertion, which failed on exactly this before the revoke existed';
 end $$;
 
--- ---------------------------------------------------------------------------
 -- 31d — application roles cannot write an issued credential or a head.
 -- ---------------------------------------------------------------------------
 do $$
@@ -3922,4 +3871,165 @@ begin
   raise notice 'PASS ws11-credential-authority: service_role can READ credentials and generation heads but cannot INSERT or UPDATE either — writing them is the governed path''s job, enforced by grant AND by an executing-identity trigger rather than by convention';
 end $$;
 
-select 'assertions complete: groups 0010-0125 structural contract holds (incl. cycle-10 WS-11 sections 28 (T001), 29 (T002), 30 (T003 trusted time) and 31 (T003 credential persistence))' as result;
+
+-- ============================================================================
+-- SECTION 32 — governor-role containment (owner condition, 2026-07-28).
+--
+-- NOLOGIN stops direct authentication. It does NOT stop `SET ROLE` by a member,
+-- so "the role cannot log in" is not the guarantee — "nothing that can log in
+-- is a member" is. These assertions test the second statement.
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 32a — membership, admin option and SET ROLE reachability.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_member text;
+  v_bad text[] := '{}';
+  v_admin text[] := '{}';
+  v_app_roles constant text[] := array[
+    'service_role', 'authenticated', 'anon', 'authenticator',
+    'kitluy_hub_runtime', 'kitluy_sync_worker'];
+  v_role text;
+begin
+  -- 1. No APPLICATION role may be a member of the governor. Membership is what
+  --    makes SET ROLE possible; NOLOGIN is irrelevant to it.
+  foreach v_role in array v_app_roles loop
+    if exists (select 1 from pg_roles where rolname = v_role)
+       and pg_has_role(v_role, 'kitluy_credential_issuer', 'MEMBER') then
+      v_bad := v_bad || v_role;
+    end if;
+  end loop;
+  if cardinality(v_bad) > 0 then
+    raise exception 'ASSERT FAIL: application role(s) % are members of kitluy_credential_issuer and could SET ROLE to it',
+      array_to_string(v_bad, ', ');
+  end if;
+
+  -- 2. No application role may hold ADMIN OPTION, which would let it grant the
+  --    governor to anything else.
+  foreach v_role in array v_app_roles loop
+    if exists (select 1 from pg_roles where rolname = v_role)
+       and pg_has_role(v_role, 'kitluy_credential_issuer', 'USAGE') then
+      v_admin := v_admin || v_role;
+    end if;
+  end loop;
+  if cardinality(v_admin) > 0 then
+    raise exception 'ASSERT FAIL: application role(s) % hold USAGE/ADMIN over kitluy_credential_issuer',
+      array_to_string(v_admin, ', ');
+  end if;
+
+  -- 3. Enumerate who CAN reach the governor. The migrator holds membership by
+  --    necessity (it transfers ownership), and a superuser reaches everything
+  --    regardless. Anything ELSE is a finding, so the check is a whitelist
+  --    rather than a spot check.
+  for v_member in
+    select r.rolname
+    from pg_auth_members m
+    join pg_roles r on r.oid = m.member
+    join pg_roles g on g.oid = m.roleid
+    where g.rolname = 'kitluy_credential_issuer'
+  loop
+    if not exists (select 1 from pg_roles where rolname = v_member and rolsuper) then
+      raise exception
+        'ASSERT FAIL: non-superuser role % is a member of kitluy_credential_issuer and can SET ROLE to it', v_member;
+    end if;
+  end loop;
+
+  -- 4. The governor itself must not be able to log in, and must hold no
+  --    superuser, createrole or bypassrls attribute — a governed writer that
+  --    could bypass RLS would defeat the policies it exists to be constrained by.
+  if exists (
+    select 1 from pg_roles
+    where rolname = 'kitluy_credential_issuer'
+      and (rolcanlogin or rolsuper or rolcreaterole or rolbypassrls)
+  ) then
+    raise exception 'ASSERT FAIL: kitluy_credential_issuer holds login or elevated attributes';
+  end if;
+
+  raise notice 'PASS ws11-governor-membership: no application role is a member of kitluy_credential_issuer or holds admin over it, every member is a superuser (who reaches everything anyway), and the governor itself cannot log in and holds no superuser/createrole/bypassrls attribute — NOLOGIN is not the guarantee, non-membership is';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 32b — SECURITY DEFINER hygiene and ownership drift.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_fn record;
+  v_findings text[] := '{}';
+begin
+  for v_fn in
+    select p.oid,
+           p.oid::regprocedure::text as signature,
+           p.prosecdef,
+           p.proconfig,
+           pg_get_userbyid(p.proowner) as owner
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'kitluy_devices'
+  loop
+    -- Every SECURITY DEFINER function must pin search_path. Without it, a
+    -- caller controls name resolution INSIDE a definer-privileged body.
+    if v_fn.prosecdef then
+      if v_fn.proconfig is null
+         or not exists (
+           select 1 from unnest(v_fn.proconfig) as c where c like 'search\_path=%') then
+        v_findings := v_findings || format('%s is SECURITY DEFINER with no fixed search_path', v_fn.signature);
+      end if;
+    end if;
+
+    -- No function may be EXECUTE-able by PUBLIC. PostgreSQL grants that at
+    -- creation and a later GRANT does not revoke it — the WS-10 migration-0020
+    -- lesson, re-checked here for the credential surface.
+    if has_function_privilege('public', v_fn.oid, 'execute') then
+      v_findings := v_findings || format('%s is EXECUTE-able by PUBLIC', v_fn.signature);
+    end if;
+
+    -- Ownership must not drift to a LOGIN-CAPABLE role. A definer function
+    -- owned by something that can authenticate is a different trust boundary
+    -- than the one that was reviewed.
+    if v_fn.prosecdef
+       and exists (select 1 from pg_roles where rolname = v_fn.owner and rolcanlogin and not rolsuper) then
+      v_findings := v_findings || format('%s is SECURITY DEFINER owned by login-capable %s', v_fn.signature, v_fn.owner);
+    end if;
+  end loop;
+
+  if cardinality(v_findings) > 0 then
+    raise exception 'ASSERT FAIL: % function hygiene finding(s): %',
+      cardinality(v_findings), array_to_string(v_findings, ' | ');
+  end if;
+
+  raise notice 'PASS ws11-definer-hygiene: every kitluy_devices SECURITY DEFINER function pins search_path, no function is EXECUTE-able by PUBLIC, and no definer function is owned by a login-capable non-superuser role';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 32c — governor-owned TABLE ownership has not drifted.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_owner text;
+  v_table text;
+begin
+  foreach v_table in array array['device_credentials', 'device_credential_heads'] loop
+    select tableowner into v_owner
+    from pg_tables where schemaname = 'kitluy_devices' and tablename = v_table;
+
+    if v_owner is distinct from 'kitluy_credential_issuer' then
+      raise exception
+        'ASSERT FAIL: kitluy_devices.% is owned by % rather than the governor', v_table, v_owner;
+    end if;
+    -- FORCE must stay on: without it the owner bypasses its own policies.
+    if not exists (
+      select 1 from pg_class c
+      join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'kitluy_devices' and c.relname = v_table
+        and c.relrowsecurity and c.relforcerowsecurity
+    ) then
+      raise exception 'ASSERT FAIL: kitluy_devices.% does not have RLS ENABLE+FORCE', v_table;
+    end if;
+  end loop;
+
+  raise notice 'PASS ws11-governor-ownership: the credential and generation-head tables are owned by kitluy_credential_issuer with RLS ENABLE+FORCE still on, so the owner is bound by its own named policies rather than exempt from them';
+end $$;
+
+select 'assertions complete: groups 0010-0125 structural contract holds (incl. cycle-10 WS-11 sections 28 (T001), 29 (T002), 30 (T003 trusted time), 31 (T003 credential persistence) and 32 (governor containment))' as result;

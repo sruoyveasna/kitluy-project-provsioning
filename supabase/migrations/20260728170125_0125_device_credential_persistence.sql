@@ -599,4 +599,21 @@ end $$;
 revoke all on function
   kitluy_devices.activate_device_v1(uuid, text, text) from public, service_role;
 
+-- ---------------------------------------------------------------------------
+-- HAND THE MEMBERSHIP BACK. This is the last statement that touches it.
+-- ---------------------------------------------------------------------------
+-- The migrator needed membership to transfer ownership and create the policies
+-- above. Keeping it would leave a LOGIN-CAPABLE role able to `SET ROLE
+-- kitluy_credential_issuer` and write issued credentials directly — and in this
+-- stack `postgres` is not a superuser, it merely has BYPASSRLS, so that would
+-- have been a real path rather than a theoretical one.
+--
+-- NOLOGIN was never the guarantee. Non-membership is. Found by the assertion
+-- the owner asked for, which failed on exactly this before the revoke existed.
+do $revoke_membership$
+begin
+  execute format('revoke kitluy_credential_issuer from %I', current_user);
+end
+$revoke_membership$;
+
 commit;
