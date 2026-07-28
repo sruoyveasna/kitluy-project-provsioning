@@ -185,12 +185,47 @@ export interface AuthenticatedNetworkTimeProvider {
 // Signed bootstrap token
 // ---------------------------------------------------------------------------
 
+/**
+ * A device-specific, single-use activation challenge.
+ *
+ * WHY THIS EXISTS. A signature plus a declared lifetime does NOT establish
+ * freshness: without a trusted comparison source, an old but correctly signed
+ * token could bootstrap a wrong floor. Binding the token to a challenge the Hub
+ * generated for THIS boot proves REQUEST freshness instead — an old token from
+ * another boot or another activation attempt cannot be replayed, even though
+ * conventional wall-clock freshness remains unprovable offline.
+ */
+export interface ActivationChallenge {
+  readonly challengeId: string;
+  readonly nonce: string;
+  readonly deviceRecordId: string;
+  readonly environment: TrustEnvironment;
+  readonly assignmentGeneration: number;
+  /** Boot counter or activation attempt id — whichever the Hub can advance. */
+  readonly activationAttemptId: string;
+  readonly consumed: boolean;
+}
+
+export interface ActivationChallengeStore {
+  load(challengeId: string): Promise<ActivationChallenge | null>;
+  /**
+   * Marks the challenge and its nonce consumed. Called ONLY after the trusted
+   * floor and its audit have committed — a challenge burned before the commit
+   * would be lost if the commit failed, stranding the device.
+   */
+  markConsumed(challengeId: string): Promise<void>;
+}
+
 export interface SignedTimeToken {
   readonly tokenId: string;
   readonly schemaVersion: number;
   readonly purpose: string;
   readonly environment: string;
   readonly deviceRecordId: string;
+  /** Binds the token to the challenge this Hub issued for this boot. */
+  readonly challengeId: string;
+  readonly assignmentGeneration: number;
+  readonly activationAttemptId: string;
   readonly issuedAt: Date;
   readonly trustedTime: Date;
   readonly notBefore: Date;
@@ -214,7 +249,11 @@ export type TokenRejectionCode =
   | "TOKEN_LIFETIME_EXCEEDS_POLICY"
   | "TOKEN_NOT_YET_VALID"
   | "TOKEN_EXPIRED"
-  | "TOKEN_TIME_BELOW_FLOOR";
+  | "TOKEN_TIME_BELOW_FLOOR"
+  | "TOKEN_NO_CHALLENGE"
+  | "TOKEN_CHALLENGE_UNKNOWN"
+  | "TOKEN_CHALLENGE_CONSUMED"
+  | "TOKEN_CHALLENGE_MISMATCH";
 
 export interface VerifiedTimeToken {
   readonly valid: boolean;
@@ -234,10 +273,18 @@ export interface SignedTimeTokenInput {
    * NULL on genuine first boot, where expiry is unknowable and is not guessed.
    */
   readonly comparisonTime: Date | null;
+  /** The outstanding local challenge, if the Hub issued one for this boot. */
+  readonly challenge: ActivationChallenge | null;
 }
 
 export interface SignedTimeTokenVerifier {
   verify(input: SignedTimeTokenInput): Promise<VerifiedTimeToken>;
+  /**
+   * Records the token and its challenge as used. Deliberately SEPARATE from
+   * verify: the owner requires the nonce to be marked consumed only after the
+   * trusted-time floor and audit commit successfully.
+   */
+  consume(input: SignedTimeTokenInput): Promise<void>;
 }
 
 /** A registered bootstrap-token signing key. Public metadata only. */
@@ -276,6 +323,9 @@ export function timeTokenPreimage(token: SignedTimeToken): Uint8Array {
       token.purpose,
       token.environment,
       token.deviceRecordId,
+      token.challengeId,
+      String(token.assignmentGeneration),
+      token.activationAttemptId,
       token.issuedAt.toISOString(),
       token.trustedTime.toISOString(),
       token.notBefore.toISOString(),
@@ -301,7 +351,15 @@ export class DefaultSignedTimeTokenVerifier implements SignedTimeTokenVerifier {
     private readonly signers: readonly TokenSignerRegistration[],
     private readonly signatures: TokenSignatureVerifier,
     private readonly replay: TokenReplayStore,
+    private readonly challenges: ActivationChallengeStore,
   ) {}
+
+  async consume(input: SignedTimeTokenInput): Promise<void> {
+    await this.replay.remember(input.deviceRecordId, input.token.tokenId, input.token.nonce);
+    if (input.challenge !== null) {
+      await this.challenges.markConsumed(input.challenge.challengeId);
+    }
+  }
 
   async verify(input: SignedTimeTokenInput): Promise<VerifiedTimeToken> {
     const { token, policy } = input;
@@ -329,6 +387,33 @@ export class DefaultSignedTimeTokenVerifier implements SignedTimeTokenVerifier {
       return reject(
         "TOKEN_WRONG_ENVIRONMENT",
         `token is for ${token.environment}, this device is ${input.environment}`,
+      );
+    }
+
+    // REQUEST FRESHNESS. Without this, a correctly signed token from an earlier
+    // boot would still verify on a device that cannot judge expiry.
+    if (input.challenge === null) {
+      return reject(
+        "TOKEN_NO_CHALLENGE",
+        "no outstanding activation challenge; a bootstrap token is accepted only in answer to one",
+      );
+    }
+    if (input.challenge.challengeId !== token.challengeId) {
+      return reject("TOKEN_CHALLENGE_UNKNOWN", "token answers a different challenge");
+    }
+    if (input.challenge.consumed) {
+      return reject("TOKEN_CHALLENGE_CONSUMED", "this challenge was already answered");
+    }
+    if (
+      input.challenge.nonce !== token.nonce ||
+      input.challenge.deviceRecordId !== token.deviceRecordId ||
+      input.challenge.environment !== token.environment ||
+      input.challenge.assignmentGeneration !== token.assignmentGeneration ||
+      input.challenge.activationAttemptId !== token.activationAttemptId
+    ) {
+      return reject(
+        "TOKEN_CHALLENGE_MISMATCH",
+        "token does not match the outstanding challenge on nonce, device, environment, assignment generation or activation attempt",
       );
     }
 
@@ -411,7 +496,7 @@ export class DefaultSignedTimeTokenVerifier implements SignedTimeTokenVerifier {
       }
     }
 
-    await this.replay.remember(input.deviceRecordId, token.tokenId, token.nonce);
+    // NOT consumed here. The caller consumes after the floor and audit commit.
     return { valid: true, trustedTime: token.trustedTime };
   }
 }
@@ -473,6 +558,8 @@ export interface TrustedTimeEvaluationInput {
   readonly correlationId?: string;
   /** Supplied only when the device is presenting a bootstrap token. */
   readonly token?: SignedTimeToken;
+  /** The outstanding challenge this Hub issued for this boot. */
+  readonly challenge?: ActivationChallenge;
 }
 
 export interface TrustedTimeDependencies {
@@ -523,17 +610,21 @@ export async function evaluateTrustedTime(
     candidates.length === 0 ? null : new Date(Math.max(...candidates.map((c) => c.time.getTime())));
 
   let tokenRejection: string | null = null;
+  let acceptedTokenInput: SignedTimeTokenInput | null = null;
   if (input.token !== undefined) {
-    const verdict = await deps.tokens.verify({
+    const tokenInput: SignedTimeTokenInput = {
       token: input.token,
       deviceRecordId: input.deviceRecordId,
       environment: input.environment,
       persistedFloor: floor,
       policy,
       comparisonTime,
-    });
+      challenge: input.challenge ?? null,
+    };
+    const verdict = await deps.tokens.verify(tokenInput);
     if (verdict.valid && verdict.trustedTime !== undefined) {
       candidates.push({ source: "signed_cloud_token", time: verdict.trustedTime });
+      acceptedTokenInput = tokenInput;
     } else {
       tokenRejection = verdict.rejectionCode ?? "TOKEN_SIGNATURE_INVALID";
     }
@@ -589,6 +680,14 @@ export async function evaluateTrustedTime(
     policyVersion: policy.policyVersion,
     correlationId: input.correlationId ?? null,
   });
+
+  // The nonce and challenge are consumed ONLY after the floor and its audit
+  // have committed. Burning them earlier would strand a device whose commit
+  // failed: it would hold a token it can no longer present and a challenge it
+  // can no longer answer.
+  if (acceptedTokenInput !== null && selected?.source === "signed_cloud_token") {
+    await deps.tokens.consume(acceptedTokenInput);
+  }
 
   const reported =
     committed.floor !== null && selected !== null

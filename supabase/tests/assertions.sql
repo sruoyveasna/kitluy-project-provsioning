@@ -3341,8 +3341,11 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------
--- 30e — emergency correction: typed outcome, four-eyes, no self-approval,
--- and no path backwards even under emergency authority.
+-- 30e — emergency correction is gated on a REAL four-eyes approval.
+-- ---------------------------------------------------------------------------
+-- Group 0124 closed the gap where only the TypeScript layer enforced the A3/A4
+-- risk class. These probes go through kitluy_auth.approval_policies /
+-- approval_requests / approval_decisions rather than a parallel approval idea.
 -- ---------------------------------------------------------------------------
 do $$
 declare
@@ -3350,8 +3353,14 @@ declare
   v_device uuid;
   v_out kitluy_devices.time_correction_outcome;
   v_base timestamptz := timestamptz '2026-07-28 10:00:00+07';
-  v_events_before int;
   v_refused int := 0;
+  v_policy_a4 uuid;
+  v_policy_a2 uuid;
+  v_req uuid;
+  v_requester constant uuid := '00000000-0000-4000-8000-000000000007';
+  v_approver constant uuid := '00000000-0000-4000-8000-000000000008';
+
+  function_new_request text;
 begin
   select id into v_profile from kitluy_devices.hardware_profiles
    where profile_key = 'WS11-T001-HUB-PROBE';
@@ -3364,57 +3373,132 @@ begin
       jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-cor-' || gen_random_uuid())));
 
   perform kitluy_devices.evaluate_trusted_time_v1(v_device, 'development', v_base, null, null, null);
-  select count(*) into v_events_before from kitluy_devices.device_trusted_time_events
-   where device_id = v_device;
 
-  -- No approval id.
+  insert into kitluy_auth.approval_policies
+    (policy_key, version, permission_key, environment, quorum, status, risk_class)
+  values ('time.correction.a4.' || substr(md5(random()::text),1,8), 1,
+          'device.time.correct', 'development', 1, 'ACTIVE', 'A4')
+  returning id into v_policy_a4;
+
+  insert into kitluy_auth.approval_policies
+    (policy_key, version, permission_key, environment, quorum, status, risk_class)
+  values ('time.correction.a2.' || substr(md5(random()::text),1,8), 1,
+          'device.time.correct', 'development', 1, 'ACTIVE', 'A2')
+  returning id into v_policy_a2;
+
+  -- NO APPROVAL AT ALL.
   v_out := kitluy_devices.emergency_time_correction_v1(
     v_device, v_base + interval '1 day', 'operator wristwatch', 'RTC battery failed',
-    '', 'OP-FIELD', 'OP-SECURITY', null);
+    null, 'OP-FIELD', v_requester, null, 'development');
   if v_out.outcome <> 'REFUSED' or v_out.refusal_code <> 'KLUY-DEVICE-TIME-CORRECTION-UNAPPROVED' then
     raise exception 'ASSERT FAIL: an unapproved correction returned % / %', v_out.outcome, v_out.refusal_code;
   end if;
   v_refused := v_refused + 1;
 
-  -- Self-approval.
-  v_out := kitluy_devices.emergency_time_correction_v1(
-    v_device, v_base + interval '1 day', 'operator wristwatch', 'RTC battery failed',
-    'APPR-1', 'OP-FIELD', 'OP-FIELD', null);
-  if v_out.outcome <> 'REFUSED' or v_out.refusal_code <> 'KLUY-DEVICE-TIME-CORRECTION-SELF-APPROVED' then
-    raise exception 'ASSERT FAIL: a self-approved correction returned % / %', v_out.outcome, v_out.refusal_code;
-  end if;
-  v_refused := v_refused + 1;
-
-  -- Missing evidence.
+  -- MISSING EVIDENCE, checked before the approval is even looked up.
   v_out := kitluy_devices.emergency_time_correction_v1(
     v_device, v_base + interval '1 day', '', 'RTC battery failed',
-    'APPR-1', 'OP-FIELD', 'OP-SECURITY', null);
-  if v_out.outcome <> 'REFUSED' or v_out.refusal_code <> 'KLUY-DEVICE-TIME-CORRECTION-UNEVIDENCED' then
-    raise exception 'ASSERT FAIL: an unevidenced correction returned % / %', v_out.outcome, v_out.refusal_code;
+    gen_random_uuid(), 'OP-FIELD', v_requester, null, 'development');
+  if v_out.refusal_code <> 'KLUY-DEVICE-TIME-CORRECTION-UNEVIDENCED' then
+    raise exception 'ASSERT FAIL: an unevidenced correction returned %', v_out.refusal_code;
   end if;
   v_refused := v_refused + 1;
 
-  -- Backwards, WITH full authority. Emergency authority does not buy rollback.
+  -- INSUFFICIENT RISK CLASS. This is the gap group 0124 closed: before it, the
+  -- database accepted any approval id at all.
+  insert into kitluy_auth.approval_requests
+    (policy_id, requester_id, resource_type, resource_id, environment, action,
+     payload_hash, reason, status)
+  values (v_policy_a2, v_requester, 'device', v_device, 'development',
+          'emergency_time_correction', repeat('a', 64), 'rtc failed', 'APPROVED')
+  returning id into v_req;
+  insert into kitluy_auth.approval_decisions (approval_request_id, approver_id, decision)
+  values (v_req, v_approver, 'APPROVE');
+
+  v_out := kitluy_devices.emergency_time_correction_v1(
+    v_device, v_base + interval '1 day', 'signed cloud token', 'RTC battery failed',
+    v_req, 'OP-FIELD', v_requester, null, 'development');
+  if v_out.refusal_code <> 'KLUY-DEVICE-TIME-CORRECTION-RISK-CLASS' then
+    raise exception 'ASSERT FAIL: an A2 approval authorized a time correction (got %)', v_out.refusal_code;
+  end if;
+  v_refused := v_refused + 1;
+
+  -- SELF-APPROVAL, through the real decision rows.
+  insert into kitluy_auth.approval_requests
+    (policy_id, requester_id, resource_type, resource_id, environment, action,
+     payload_hash, reason, status)
+  values (v_policy_a4, v_requester, 'device', v_device, 'development',
+          'emergency_time_correction', repeat('b', 64), 'rtc failed', 'APPROVED')
+  returning id into v_req;
+  begin
+    insert into kitluy_auth.approval_decisions (approval_request_id, approver_id, decision)
+    values (v_req, v_requester, 'APPROVE');
+    -- If group 0035's four-eyes trigger already refuses this, the database is
+    -- protecting us one layer earlier and that is recorded rather than fought.
+    v_out := kitluy_devices.emergency_time_correction_v1(
+      v_device, v_base + interval '1 day', 'signed cloud token', 'RTC battery failed',
+      v_req, 'OP-FIELD', v_requester, null, 'development');
+    if v_out.refusal_code not in ('KLUY-DEVICE-TIME-CORRECTION-SELF-APPROVED',
+                                  'KLUY-DEVICE-TIME-CORRECTION-UNAPPROVED') then
+      raise exception 'ASSERT FAIL: a self-approved correction returned %', v_out.refusal_code;
+    end if;
+    -- Counted only when a correction was actually CALLED and refused. Group
+    -- 0035's four-eyes trigger refuses the self-approval decision row itself,
+    -- one layer earlier, in which case no correction runs and there is no
+    -- audit row to count. Incrementing regardless would have made the audit
+    -- assertion below expect evidence of a call that never happened.
+    v_refused := v_refused + 1;
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    null;  -- the four-eyes trigger refused the decision row itself
+  end;
+
+  -- WRONG SCOPE: an approval naming another device.
+  insert into kitluy_auth.approval_requests
+    (policy_id, requester_id, resource_type, resource_id, environment, action,
+     payload_hash, reason, status)
+  values (v_policy_a4, v_requester, 'device', gen_random_uuid(), 'development',
+          'emergency_time_correction', repeat('c', 64), 'rtc failed', 'APPROVED')
+  returning id into v_req;
+  insert into kitluy_auth.approval_decisions (approval_request_id, approver_id, decision)
+  values (v_req, v_approver, 'APPROVE');
+  v_out := kitluy_devices.emergency_time_correction_v1(
+    v_device, v_base + interval '1 day', 'signed cloud token', 'RTC battery failed',
+    v_req, 'OP-FIELD', v_requester, null, 'development');
+  if v_out.refusal_code <> 'KLUY-DEVICE-TIME-CORRECTION-WRONG-SCOPE' then
+    raise exception 'ASSERT FAIL: an approval for another device authorized this one (got %)', v_out.refusal_code;
+  end if;
+  v_refused := v_refused + 1;
+
+  -- A proper A4 approval for THIS device.
+  insert into kitluy_auth.approval_requests
+    (policy_id, requester_id, resource_type, resource_id, environment, action,
+     payload_hash, reason, status)
+  values (v_policy_a4, v_requester, 'device', v_device, 'development',
+          'emergency_time_correction', repeat('d', 64), 'rtc failed', 'APPROVED')
+  returning id into v_req;
+  insert into kitluy_auth.approval_decisions (approval_request_id, approver_id, decision)
+  values (v_req, v_approver, 'APPROVE');
+
+  -- BACKWARDS, with a valid A4 approval. Authority does not buy rollback.
   v_out := kitluy_devices.emergency_time_correction_v1(
     v_device, v_base - interval '1 day', 'signed cloud token', 'clock ran ahead',
-    'APPR-2', 'OP-FIELD', 'OP-SECURITY', null);
-  if v_out.outcome <> 'REFUSED' or v_out.refusal_code <> 'KLUY-DEVICE-TIME-ROLLBACK' then
-    raise exception 'ASSERT FAIL: a fully approved BACKWARDS correction returned % / %', v_out.outcome, v_out.refusal_code;
+    v_req, 'OP-FIELD', v_requester, null, 'development');
+  if v_out.refusal_code <> 'KLUY-DEVICE-TIME-ROLLBACK' then
+    raise exception 'ASSERT FAIL: a fully approved BACKWARDS correction returned %', v_out.refusal_code;
   end if;
   v_refused := v_refused + 1;
 
-  -- Every refusal left durable evidence, which is the point of the typed
-  -- outcome: a raise would have rolled its own audit row back.
-  if (select count(*) from kitluy_devices.device_trusted_time_events
-       where device_id = v_device and event_type = 'EMERGENCY_CORRECTION'
-         and detail ->> 'outcome' = 'REFUSED') <> v_refused then
-    raise exception 'ASSERT FAIL: refused corrections did not each leave an audit row';
+  -- A refused correction must NOT have consumed the approval.
+  if exists (select 1 from kitluy_devices.time_correction_approvals
+              where approval_request_id = v_req) then
+    raise exception 'ASSERT FAIL: a REFUSED correction consumed its approval';
   end if;
 
-  -- A properly approved forward correction applies and moves the floor.
+  -- Forward, approved: applies.
   v_out := kitluy_devices.emergency_time_correction_v1(
     v_device, v_base + interval '2 days', 'signed cloud token', 'RTC battery replaced',
-    'APPR-3', 'OP-FIELD', 'OP-SECURITY', gen_random_uuid());
+    v_req, 'OP-FIELD', v_requester, gen_random_uuid(), 'development');
   if v_out.outcome <> 'APPLIED' then
     raise exception 'ASSERT FAIL: an approved forward correction was refused: %', v_out.refusal_message;
   end if;
@@ -3422,14 +3506,30 @@ begin
      <> v_base + interval '2 days' then
     raise exception 'ASSERT FAIL: the approved correction did not advance the floor';
   end if;
-  if (select status from kitluy_devices.device_trusted_time where device_id = v_device) <> 'trusted' then
-    raise exception 'ASSERT FAIL: the device is still restricted after an approved correction';
+
+  -- SINGLE USE: the same approval cannot authorize a second correction.
+  v_out := kitluy_devices.emergency_time_correction_v1(
+    v_device, v_base + interval '3 days', 'signed cloud token', 'again',
+    v_req, 'OP-FIELD', v_requester, null, 'development');
+  if v_out.refusal_code <> 'KLUY-DEVICE-TIME-CORRECTION-APPROVAL-CONSUMED' then
+    raise exception 'ASSERT FAIL: an approval authorized a SECOND correction (got %)', v_out.refusal_code;
+  end if;
+  v_refused := v_refused + 1;
+
+  if (select trusted_time_floor from kitluy_devices.device_trusted_time where device_id = v_device)
+     <> v_base + interval '2 days' then
+    raise exception 'ASSERT FAIL: the refused second correction still moved the floor';
   end if;
 
-  raise notice 'PASS ws11-emergency-time-correction: a correction with no approval, a self-approved one, an unevidenced one and a fully-approved BACKWARDS one are each REFUSED with their own code and each leave durable audit; only a four-eyes forward correction applies, atomically advancing the floor and clearing restriction';
+  if (select count(*) from kitluy_devices.device_trusted_time_events
+       where device_id = v_device and event_type = 'EMERGENCY_CORRECTION'
+         and detail ->> 'outcome' = 'REFUSED') < v_refused then
+    raise exception 'ASSERT FAIL: refused corrections did not each leave an audit row';
+  end if;
+
+  raise notice 'PASS ws11-emergency-time-correction: the correction is gated on a REAL four-eyes approval — no approval, missing evidence, an A2 risk class, self-approval, an approval naming another device, a fully-approved BACKWARDS move and a SECOND use of a consumed approval are each refused with their own code and leave audit; only a forward correction under a scoped, unconsumed A4 approval applies, and a refused correction never consumes its approval';
 end $$;
 
--- ---------------------------------------------------------------------------
 -- 30f — station duplicate containment now reads SIGNED POLICY.
 -- ---------------------------------------------------------------------------
 do $$

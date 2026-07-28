@@ -13,6 +13,8 @@ import {
   type AuthenticatedNetworkTimeProvider,
   type RtcTimeProvider,
   type SignedTimeToken,
+  type ActivationChallenge,
+  type ActivationChallengeStore,
   type TokenReplayStore,
   type TokenSignatureVerifier,
   type TokenSignerRegistration,
@@ -113,6 +115,31 @@ class MemoryReplay implements TokenReplayStore {
   }
 }
 
+const CHALLENGE_ID = "chal-1";
+const ATTEMPT = "boot-7";
+
+const challenge = (over: Partial<ActivationChallenge> = {}): ActivationChallenge => ({
+  challengeId: CHALLENGE_ID,
+  nonce: "nonce-1",
+  deviceRecordId: DEVICE,
+  environment: "development",
+  assignmentGeneration: 3,
+  activationAttemptId: ATTEMPT,
+  consumed: false,
+  ...over,
+});
+
+class MemoryChallenges implements ActivationChallengeStore {
+  public consumedIds: string[] = [];
+  constructor(private readonly current: ActivationChallenge | null = challenge()) {}
+  async load(challengeId: string) {
+    return this.current?.challengeId === challengeId ? this.current : null;
+  }
+  async markConsumed(challengeId: string) {
+    this.consumedIds.push(challengeId);
+  }
+}
+
 const GOOD_KEY = "dev-device-identity-key-1";
 const SIGNERS: TokenSignerRegistration[] = [
   {
@@ -160,6 +187,9 @@ const token = (over: Partial<SignedTimeToken> = {}): SignedTimeToken => {
     purpose: TRUSTED_TIME_TOKEN_PURPOSE,
     environment: "development",
     deviceRecordId: DEVICE,
+    challengeId: CHALLENGE_ID,
+    assignmentGeneration: 3,
+    activationAttemptId: ATTEMPT,
     issuedAt: at(-60),
     trustedTime: T0,
     notBefore: at(-60),
@@ -172,8 +202,8 @@ const token = (over: Partial<SignedTimeToken> = {}): SignedTimeToken => {
   return { ...base, signature: over.signature ?? timeTokenPreimage(base) };
 };
 
-const verifier = (replay = new MemoryReplay()) =>
-  new DefaultSignedTimeTokenVerifier(SIGNERS, new PreimageSignatures(), replay);
+const verifier = (replay = new MemoryReplay(), challenges = new MemoryChallenges()) =>
+  new DefaultSignedTimeTokenVerifier(SIGNERS, new PreimageSignatures(), replay, challenges);
 
 const deps = (over: Partial<TrustedTimeDependencies> = {}): TrustedTimeDependencies => ({
   rtc: new FixedRtc(null),
@@ -211,6 +241,7 @@ describe("source selection", () => {
       deviceRecordId: DEVICE,
       environment: "development",
       token: token(),
+      challenge: challenge(),
     });
     expect(result.status).toBe("trusted");
     expect(result.source).toBe("signed_cloud_token");
@@ -219,7 +250,12 @@ describe("source selection", () => {
   it("chooses the maximum when several sources are valid", async () => {
     const result = await evaluateTrustedTime(
       deps({ rtc: new FixedRtc(at(10)), network: new FixedNetwork(at(90)) }),
-      { deviceRecordId: DEVICE, environment: "development", token: token() },
+      {
+        deviceRecordId: DEVICE,
+        environment: "development",
+        token: token(),
+        challenge: challenge(),
+      },
     );
     expect(result.source).toBe("authenticated_network");
     expect(result.trustedTime?.toISOString()).toBe(at(90).toISOString());
@@ -388,7 +424,12 @@ describe("policy fails closed", () => {
 describe("signed time-token attacks", () => {
   const verifyToken = async (
     over: Partial<SignedTimeToken>,
-    extra: { floor?: Date | null; comparison?: Date | null; policy?: TrustedTimePolicy } = {},
+    extra: {
+      floor?: Date | null;
+      comparison?: Date | null;
+      policy?: TrustedTimePolicy;
+      challenge?: ActivationChallenge | null;
+    } = {},
   ) =>
     verifier().verify({
       token: token(over),
@@ -400,6 +441,7 @@ describe("signed time-token attacks", () => {
       // comparison source" and `??` would silently replace it with T0 — the
       // test would then pass while never exercising the first-boot path.
       comparisonTime: "comparison" in extra ? (extra.comparison ?? null) : T0,
+      challenge: extra.challenge === undefined ? challenge() : extra.challenge,
     });
 
   it("accepts a well-formed token", async () => {
@@ -478,6 +520,7 @@ describe("signed time-token attacks", () => {
       persistedFloor: null,
       policy: devPolicy(),
       comparisonTime: T0,
+      challenge: challenge(),
     });
     expect(v.rejectionCode).toBe("TOKEN_SIGNATURE_INVALID");
   });
@@ -492,8 +535,13 @@ describe("signed time-token attacks", () => {
       persistedFloor: null,
       policy: devPolicy(),
       comparisonTime: T0,
+      challenge: challenge(),
     };
     expect((await v.verify(input)).valid).toBe(true);
+    // Consumption is the CALLER step now, taken after the floor commits. A
+    // token that verified but whose commit never happened is still presentable,
+    // which is exactly the point.
+    await v.consume(input);
     expect((await v.verify(input)).rejectionCode).toBe("TOKEN_REPLAYED");
   });
 
@@ -529,6 +577,7 @@ describe("signed time-token attacks", () => {
       persistedFloor: null,
       policy: devPolicy(),
       comparisonTime: T0,
+      challenge: challenge(),
     });
     expect(await replay.hasSeen(DEVICE, "tok-1", "nonce-1")).toBe(false);
   });
@@ -576,6 +625,7 @@ describe("first boot", () => {
       deviceRecordId: DEVICE,
       environment: "development",
       token: token(),
+      challenge: challenge(),
     });
     expect(canActivateOffline(result).permitted).toBe(true);
   });
@@ -585,6 +635,7 @@ describe("first boot", () => {
       deviceRecordId: DEVICE,
       environment: "development",
       token: token({ issuerKeyId: "who-is-this" }),
+      challenge: challenge(),
     });
     expect(result.status).toBe("restricted_no_trusted_source");
     expect(result.anomalyType).toContain("TOKEN_UNKNOWN_SIGNER");
@@ -676,5 +727,108 @@ describe("status vocabulary", () => {
     expect(isRestricted("restricted_clock_rollback")).toBe(true);
     expect(isRestricted("restricted_forward_jump")).toBe(true);
     expect(isRestricted("restricted_no_trusted_source")).toBe(true);
+  });
+});
+
+describe("first-boot challenge binding", () => {
+  const verifyWith = async (
+    tokenOver: Partial<SignedTimeToken>,
+    chal: ActivationChallenge | null,
+  ) =>
+    new DefaultSignedTimeTokenVerifier(
+      SIGNERS,
+      new PreimageSignatures(),
+      new MemoryReplay(),
+      new MemoryChallenges(chal),
+    ).verify({
+      token: token(tokenOver),
+      deviceRecordId: DEVICE,
+      environment: "development",
+      persistedFloor: null,
+      policy: devPolicy(),
+      comparisonTime: null,
+      challenge: chal,
+    });
+
+  it("refuses a token with no outstanding challenge", async () => {
+    // This is the case signature-plus-lifetime alone could not catch: a
+    // correctly signed token from an earlier boot, on a device that cannot
+    // judge expiry.
+    const v = await verifyWith({}, null);
+    expect(v.rejectionCode).toBe("TOKEN_NO_CHALLENGE");
+  });
+
+  it("refuses a token answering a different challenge", async () => {
+    const v = await verifyWith({ challengeId: "chal-other" }, challenge());
+    expect(v.rejectionCode).toBe("TOKEN_CHALLENGE_UNKNOWN");
+  });
+
+  it("refuses an already-answered challenge", async () => {
+    const v = await verifyWith({}, challenge({ consumed: true }));
+    expect(v.rejectionCode).toBe("TOKEN_CHALLENGE_CONSUMED");
+  });
+
+  it("refuses a stale assignment generation or activation attempt", async () => {
+    expect((await verifyWith({ assignmentGeneration: 2 }, challenge())).rejectionCode).toBe(
+      "TOKEN_CHALLENGE_MISMATCH",
+    );
+    expect((await verifyWith({ activationAttemptId: "boot-6" }, challenge())).rejectionCode).toBe(
+      "TOKEN_CHALLENGE_MISMATCH",
+    );
+  });
+
+  it("accepts a token that answers the outstanding challenge", async () => {
+    const v = await verifyWith({}, challenge());
+    expect(v.valid).toBe(true);
+  });
+
+  it("consumes the nonce and challenge only AFTER the floor commits", async () => {
+    const replay = new MemoryReplay();
+    const challenges = new MemoryChallenges();
+    const store = new MemoryStore();
+    const tokens = new DefaultSignedTimeTokenVerifier(
+      SIGNERS,
+      new PreimageSignatures(),
+      replay,
+      challenges,
+    );
+    const result = await evaluateTrustedTime(deps({ tokens, store }), {
+      deviceRecordId: DEVICE,
+      environment: "development",
+      token: token(),
+      challenge: challenge(),
+    });
+    expect(result.status).toBe("trusted");
+    expect(challenges.consumedIds).toEqual([CHALLENGE_ID]);
+    expect(await replay.hasSeen(DEVICE, "tok-1", "nonce-1")).toBe(true);
+  });
+
+  it("does NOT consume when the commit never happens", async () => {
+    // A challenge burned before the commit would strand the device: it could
+    // neither re-present the token nor answer the challenge again.
+    const replay = new MemoryReplay();
+    const challenges = new MemoryChallenges();
+    const tokens = new DefaultSignedTimeTokenVerifier(
+      SIGNERS,
+      new PreimageSignatures(),
+      replay,
+      challenges,
+    );
+    const failing: TrustedTimeStore = {
+      load: async () => null,
+      commitEvaluation: async () => {
+        throw new Error("store unavailable");
+      },
+    };
+    await expect(
+      evaluateTrustedTime(deps({ tokens, store: failing }), {
+        deviceRecordId: DEVICE,
+        environment: "development",
+        token: token(),
+        challenge: challenge(),
+      }),
+    ).rejects.toThrow("store unavailable");
+    expect(challenges.consumedIds).toEqual([]);
+    expect(await replay.hasSeen(DEVICE, "tok-1", "nonce-1")).toBe(false);
   });
 });

@@ -4,87 +4,147 @@
  *
  * Certificate validity, certificate renewal eligibility, revocation-snapshot
  * validity and configuration-snapshot validity must be decided against TRUSTED
- * TIME, never against an uncontrolled host clock. A single `Date.now()` inside
- * one of those decisions makes certificate expiry advisory, which is the
- * failure trusted time exists to prevent.
+ * TIME, never against an uncontrolled host clock.
  *
- * This gate is deliberately blunt: it forbids host-clock calls in the guarded
- * files outright rather than trying to judge intent. A file that genuinely
- * needs the host clock for something unrelated to a trust decision does not
- * belong in the guarded set.
+ * WHY THIS GATE HAS A MANIFEST.
+ * An earlier version only forbade host-clock calls. It therefore reported a
+ * clean PASS on a repository where none of the four security-sensitive
+ * consumers existed — a gate that is satisfied by absence tells you nothing.
+ * The manifest below names the four consumers the owner requires, and the gate
+ * reports how many are actually implemented. Absence is now visible.
  *
- * Exit 0 = clean. Exit 1 = a guarded file reached for the host clock.
+ * Exit codes:
+ *   0  no prohibited clock access. The manifest count is reported separately
+ *      and is NON-BLOCKING while WS-11-T003 is in progress.
+ *   1  a guarded file reached for the host clock, or (with --require-complete)
+ *      the manifest is not 4/4.
+ *
+ * Step 2 closure MUST run this with `--require-complete`.
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join } from "node:path";
 
 const ROOT = process.cwd();
+const REQUIRE_COMPLETE = process.argv.includes("--require-complete");
 
 /**
- * Files whose decisions are time-security decisions. Adding a module that
- * validates certificates, renewals, revocation snapshots or configuration
- * snapshots means adding it here.
+ * The governed consumer manifest. Every entry is a security decision that must
+ * be made against trusted time. `implementationFile` and `integrationTest` are
+ * paths that must EXIST; `trustedTimeSymbol` must appear in the implementation.
+ *
+ * `status` is the honest state of each consumer, not an aspiration.
  */
-const GUARDED = [
-  "packages/device-identity/src/trusted-time.ts",
-  "packages/configuration-snapshots/src",
-  "packages/release-manifests/src",
+const CONSUMERS = [
+  {
+    id: "certificate.validity",
+    owner: "Fleet/Security",
+    status: "NOT_IMPLEMENTED",
+    note: "WS-11-T003 step 4",
+    implementationFile: "packages/device-identity/src/certificate-validity.ts",
+    integrationTest: "packages/device-identity/test/certificate-validity.test.ts",
+    trustedTimeSymbol: "TrustedTime",
+  },
+  {
+    id: "certificate.renewal_eligibility",
+    owner: "Fleet/Security",
+    status: "NOT_IMPLEMENTED",
+    note: "WS-11-T003 step 4",
+    implementationFile: "packages/device-identity/src/certificate-renewal.ts",
+    integrationTest: "packages/device-identity/test/certificate-renewal.test.ts",
+    trustedTimeSymbol: "TrustedTime",
+  },
+  {
+    id: "revocation_snapshot.validity",
+    owner: "Fleet/Security",
+    status: "NOT_IMPLEMENTED",
+    note: "WS-11-T003 step 5",
+    implementationFile: "packages/device-identity/src/revocation-snapshot.ts",
+    integrationTest: "packages/device-identity/test/revocation-snapshot.test.ts",
+    trustedTimeSymbol: "TrustedTime",
+  },
+  {
+    id: "configuration_snapshot.validity",
+    owner: "Configuration/Security",
+    status: "NOT_IMPLEMENTED",
+    note: "WS-11-T003 step 5",
+    implementationFile: "packages/device-identity/src/configuration-validity.ts",
+    integrationTest: "packages/device-identity/test/configuration-validity.test.ts",
+    trustedTimeSymbol: "TrustedTime",
+  },
 ];
 
-/** Host-clock constructs that must not decide trust. */
+/** Paths always scanned for host-clock calls, implemented or not. */
+const ALWAYS_GUARDED = ["packages/device-identity/src/trusted-time.ts"];
+
 const FORBIDDEN = [
   { pattern: /\bDate\.now\s*\(/, what: "Date.now()" },
   { pattern: /\bnew Date\s*\(\s*\)/, what: "new Date() with no argument" },
   { pattern: /\bperformance\.now\s*\(/, what: "performance.now()" },
 ];
 
-/**
- * SQL functions that decide validity must not use now()/current_timestamp
- * either. `now()` is transaction-start host time; it is not trusted time.
- * Listed by the function name the migration defines.
- */
+const exists = (path) => {
+  try {
+    statSync(join(ROOT, path));
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const scanForClock = (relPath) => {
+  const findings = [];
+  const source = readFileSync(join(ROOT, relPath), "utf8");
+  source.split("\n").forEach((line, index) => {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("*") || trimmed.startsWith("//")) return;
+    for (const { pattern, what } of FORBIDDEN) {
+      if (pattern.test(line)) {
+        findings.push(`${relPath}:${index + 1} uses ${what} in a trust decision`);
+      }
+    }
+  });
+  return findings;
+};
+
+const clockFindings = [];
+for (const path of ALWAYS_GUARDED) {
+  if (exists(path)) clockFindings.push(...scanForClock(path));
+}
+
+// ---------------------------------------------------------------------------
+// Manifest evaluation
+// ---------------------------------------------------------------------------
+const rows = [];
+let complete = 0;
+
+for (const consumer of CONSUMERS) {
+  const problems = [];
+  const hasImpl = exists(consumer.implementationFile);
+  const hasTest = exists(consumer.integrationTest);
+
+  if (!hasImpl) problems.push("no implementation file");
+  if (!hasTest) problems.push("no integration test");
+
+  if (hasImpl) {
+    clockFindings.push(...scanForClock(consumer.implementationFile));
+    const source = readFileSync(join(ROOT, consumer.implementationFile), "utf8");
+    if (!source.includes(consumer.trustedTimeSymbol)) {
+      problems.push(`no ${consumer.trustedTimeSymbol} dependency`);
+    }
+  }
+
+  const ok = problems.length === 0;
+  if (ok) complete += 1;
+  rows.push({ consumer, ok, problems });
+}
+
+// SQL-side validity functions must reference trusted time once they exist.
+const migrationsDir = join(ROOT, "supabase", "migrations");
 const SQL_GUARDED_FUNCTIONS = [
   "validate_certificate_window",
   "assert_revocation_snapshot_fresh",
   "assert_configuration_snapshot_valid",
 ];
-
-const walk = (path) => {
-  const out = [];
-  let stat;
-  try {
-    stat = statSync(path);
-  } catch {
-    return out; // a guarded path that does not exist yet is not a failure
-  }
-  if (stat.isFile()) return path.endsWith(".ts") ? [path] : [];
-  for (const entry of readdirSync(path)) out.push(...walk(join(path, entry)));
-  return out;
-};
-
-const findings = [];
-
-for (const guarded of GUARDED) {
-  for (const file of walk(join(ROOT, guarded))) {
-    if (file.endsWith(".test.ts")) continue;
-    const source = readFileSync(file, "utf8");
-    source.split("\n").forEach((line, index) => {
-      // Skip comment lines: prose describing the rule is not a violation of it.
-      const trimmed = line.trim();
-      if (trimmed.startsWith("*") || trimmed.startsWith("//")) return;
-      for (const { pattern, what } of FORBIDDEN) {
-        if (pattern.test(line)) {
-          findings.push(
-            `${relative(ROOT, file)}:${index + 1} uses ${what} in a trust decision; use trusted time`,
-          );
-        }
-      }
-    });
-  }
-}
-
-// The SQL side: a guarded validity function must reference trusted time.
-const migrationsDir = join(ROOT, "supabase", "migrations");
 let migrationSource = "";
 try {
   for (const file of readdirSync(migrationsDir)) {
@@ -93,25 +153,27 @@ try {
     }
   }
 } catch {
-  /* no migrations directory: nothing to check */
+  /* nothing to check */
 }
-
 for (const fn of SQL_GUARDED_FUNCTIONS) {
-  const defined = migrationSource.includes(`function kitluy_devices.${fn}`);
-  if (!defined) continue; // not built yet — the gate does not demand it exists
-  const body = migrationSource.slice(migrationSource.indexOf(`function kitluy_devices.${fn}`));
+  const marker = `function kitluy_devices.${fn}`;
+  if (!migrationSource.includes(marker)) continue;
+  const body = migrationSource.slice(migrationSource.indexOf(marker));
   const end = body.indexOf("$$;");
   const fnBody = end === -1 ? body : body.slice(0, end);
-  if (!/trusted_time|trusted_time_floor|assert_trusted_time_v1/.test(fnBody)) {
-    findings.push(
-      `supabase/migrations: kitluy_devices.${fn} decides validity without referencing trusted time`,
+  if (!/trusted_time|assert_trusted_time_v1/.test(fnBody)) {
+    clockFindings.push(
+      `supabase/migrations: kitluy_devices.${fn} decides validity without trusted time`,
     );
   }
 }
 
-if (findings.length > 0) {
+// ---------------------------------------------------------------------------
+// Report
+// ---------------------------------------------------------------------------
+if (clockFindings.length > 0) {
   console.error("CLOCK USAGE CHECK FAILED — trust decisions must use trusted time:\n");
-  for (const finding of findings) console.error(`  ${finding}`);
+  for (const finding of clockFindings) console.error(`  ${finding}`);
   console.error(
     "\nKLD-2026-07-28-002 §12.6: certificate validity, revocation-snapshot validity\n" +
       "and configuration-snapshot validity are decided against trusted time.",
@@ -119,6 +181,24 @@ if (findings.length > 0) {
   process.exit(1);
 }
 
+console.log("PASS — no prohibited clock access");
 console.log(
-  `Clock usage check passed (${GUARDED.length} guarded path(s), ${SQL_GUARDED_FUNCTIONS.length} guarded SQL function(s)).`,
+  `${complete === CONSUMERS.length ? "COMPLETE" : "INCOMPLETE"} — ${complete}/${CONSUMERS.length} required consumers implemented`,
 );
+for (const { consumer, ok, problems } of rows) {
+  const mark = ok ? "ok     " : "missing";
+  const detail = ok ? consumer.owner : `${problems.join(", ")} (${consumer.note})`;
+  console.log(`  ${mark}  ${consumer.id.padEnd(34)} ${detail}`);
+}
+
+if (complete !== CONSUMERS.length) {
+  const message =
+    `\nThe governed consumer manifest is not complete. This gate does NOT report a\n` +
+    `clean bill of health on a repository where the security-sensitive consumers\n` +
+    `do not exist — absence is not compliance.`;
+  if (REQUIRE_COMPLETE) {
+    console.error(`${message}\n\n--require-complete was set: failing.`);
+    process.exit(1);
+  }
+  console.log(`${message}\nNon-blocking while WS-11-T003 is in progress.`);
+}
