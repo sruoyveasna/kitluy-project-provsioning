@@ -8,7 +8,7 @@
 | Authority      | `KLD-2026-07-28-001` (Groups 1–7) + amendment `KLD-2026-07-28-001-A01` |
 | Scope fence    | `00_AI_HANDOFF/000_ACTIVE_PHASE.md` §8 — WS-10 only                    |
 | Base commit    | `ea2f7ce`                                                              |
-| Head commit    | `b52e569` (+ evidence/register commit)                                 |
+| Head commit    | `1a9c6af` (8 commits: `6cf713c`..`1a9c6af`)                            |
 | Status reached | WS-10 **IMPLEMENTED-IN-DEV** — not INTEGRATION-VERIFIED                |
 | Evidence       | `docs/evidence/phase1/ws-10/WS-10-EXECUTION-EVIDENCE.md`               |
 | Review         | `00_AI_HANDOFF/reviews/2026-07-28__WS-10-SYNC__REVIEW.md`              |
@@ -21,7 +21,8 @@
 `0019_sync_delivery_outcomes.sql`, `0020_revoke_public_execute.sql`,
 `0021_cloud_inbox_and_provider_outcomes.sql`,
 `0022_signed_grants_and_activation.sql`,
-`0023_operator_repair_and_recovery.sql`.
+`0023_operator_repair_and_recovery.sql`, `0024_governed_marker_and_scope_hierarchy.sql`,
+`0025_grant_scope_isolation.sql`, `0026_amendment_projection_and_transitions.sql`.
 
 **Cloud migration:** `supabase/migrations/20260728100110_0110_sync_ingestion.sql`
 (creates `kitluy_sync`, already named in DD v1.0.0 — no dictionary amendment
@@ -52,22 +53,22 @@ row zero rather than only for future rows.
 
 **Gate order matters** — see KLRISK-HUB-006 below.
 
-| Command                | Result                                           |
-| ---------------------- | ------------------------------------------------ |
-| `pnpm db:validate`     | PASS — 18 migration files                        |
-| `pnpm db:reset/seed`   | PASS — group 0110 applied                        |
-| `pnpm db:test`         | PASS — **124** assertions (121 + 3 new)          |
-| `pnpm test:rls`        | PASS — 95 cases                                  |
-| `pnpm hub:db:validate` | PASS — 24 Hub migration files                    |
-| `pnpm hub:db:reset`    | PASS — 24 migrations from zero                   |
-| `pnpm hub:db:seed`     | PASS — fixtures seeded                           |
-| `pnpm hub:db:test`     | PASS — **32** assertions                         |
-| `pnpm hub:db:status`   | PASS — 24 applied, 0 pending, 0 drift, 0 missing |
-| `pnpm verify`          | **PASS 11/11**                                   |
+| Command                | Result                                                  |
+| ---------------------- | ------------------------------------------------------- |
+| `pnpm db:validate`     | PASS — 18 migration files                               |
+| `pnpm db:reset/seed`   | PASS — group 0110 applied                               |
+| `pnpm db:test`         | PASS — **124** assertions (121 + 3 new)                 |
+| `pnpm test:rls`        | PASS — **94** cases (95 was a miscount carried forward) |
+| `pnpm hub:db:validate` | PASS — 27 Hub migration files                           |
+| `pnpm hub:db:reset`    | PASS — 27 migrations from zero                          |
+| `pnpm hub:db:seed`     | PASS — fixtures seeded                                  |
+| `pnpm hub:db:test`     | PASS — **35** assertions                                |
+| `pnpm hub:db:status`   | PASS — 27 applied, 0 pending, 0 drift, 0 missing        |
+| `pnpm verify`          | **PASS 11/11**                                          |
 
 ## Tests: passed / failed / not run
 
-- `@kitluy-services/kitluy-hub-agent` — **261 passed, 2 skipped** (opt-in
+- `@kitluy-services/kitluy-hub-agent` — **274 passed, 2 skipped** (opt-in
   destructive backup/restore, unchanged from WS-09)
 - `@kitluy/sync-protocol` — 21 passed
 - `@kitluy-services/kitluy-sync-service` — 18 passed
@@ -81,6 +82,22 @@ ruling was not reproducible verbatim (KLREQ-025's 21-field enumeration), the
 gap was recorded rather than filled with a guess.
 
 ## Conflicts discovered
+
+- **C34 / C35 / C36 — IMPLEMENTER DIVERGENCE FROM THE OWNER AMENDMENT**, found
+  by re-reading KLD-2026-07-28-001-A01 against the running database AFTER the
+  independent review had closed. The §3 external-status table was wrong on three
+  of six rows; `dead_letter + none` — a state §2 names explicitly — was
+  unreachable; and the §6 invalid transitions were not refused. All three CLOSED
+  by `0026` and asserted by section 29e. The gates had stayed green because the
+  wrong five-value list had been written into the assertion too, so it validated
+  the code against the same mistake the code made.
+- **Test-environment fragility (corrected).** `pnpm db:reset` recreates the whole
+  cluster and so wipes ROLE MEMBERSHIPS. The Hub assertions called the governed
+  conflict procedures on a membership an earlier run had left behind; from a
+  clean cluster they failed with `permission denied for function
+raise_reconciliation` and the suite dropped to 28 — a partial run, not an
+  obvious failure. The harness now takes the membership explicitly and section
+  29a runs as `kitluy_hub_runtime`.
 
 - **C27** — every Hub stored procedure was EXECUTE-able by PUBLIC (a PostgreSQL
   creation default a later GRANT does not revoke). Amendment §5 was, for one
@@ -107,7 +124,7 @@ gap was recorded rather than filled with a guess.
 
 ## Security findings
 
-1. **PUBLIC EXECUTE on all 22 Hub procedures** (C27) — fixed in 0020, covering
+1. **PUBLIC EXECUTE on all Hub procedures** (C27; 30 by the assertion's own count) — fixed in 0020, covering
    the WS-09 procedures too, and asserted.
 2. The development batch signer has **no default key**, demands ≥32 bytes, and
    refuses to run outside `KITLUY_ENV=local|development`. No key material is
@@ -126,6 +143,12 @@ gap was recorded rather than filled with a guess.
 - **KLRISK-HUB-006 (new)** — `pnpm db:reset` destroys `kitluy_hub_local`. A
   wrong-order gate run reported 109 passed / 154 SKIPPED while still printing
   PASS. Evidence citing Hub-backed counts must state passed AND skipped.
+- **KLRISK-HUB-007 / KLRISK-HUB-008 (new, from the review)** — the §5 immutable
+  audit is a CALLER convention rather than a database guarantee, and the
+  database owner can still forge the §5 identity (inside the KLRISK-HUB-003
+  trust boundary).
+- **No wired production path** (review RV-004): the delivery functions have no
+  production callers and the ports have no implementations.
 - Carried unchanged: KLRISK-HUB-001..005.
 
 ## Current implementation status (evidence register delta)
