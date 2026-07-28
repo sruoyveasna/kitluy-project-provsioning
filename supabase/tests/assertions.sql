@@ -1435,4 +1435,775 @@ begin
   raise notice 'PASS sync-ingestion-negatives: a malformed effect key and a fabricated acknowledgement are both refused by the database';
 end $$;
 
-select 'assertions complete: groups 0010-0110 structural contract holds (incl. cycle-6 WS-07/WS-08 sections 17-26 and cycle-9 WS-10 section 27)' as result;
+
+-- ============================================================================
+-- SECTION 28 — WS-11-T001 device enrollment and identity (migration 0120).
+-- Authority: docs/source/security/kitluy-device-certificate-and-trust-policy-v1.0.0.md
+--   and the Cycle 10 T001 owner instruction (2026-07-28).
+-- These sections create real device rows with run-unique asset tags, so the
+-- file stays re-runnable: device history is append-only and nothing here may be
+-- cleaned up by a DELETE.
+-- ============================================================================
+
+-- Shared fixture: one certified hardware profile for WS-11-T001 assertions.
+insert into kitluy_devices.hardware_profiles
+  (profile_key, display_name, device_class, manufacturer, model_identifier,
+   required_signal_types, certification_status)
+values
+  ('WS11-T001-HUB-PROBE', 'WS-11-T001 assertion Store Hub profile', 'store_hub',
+   'ASSERTION-FIXTURE', 'PROBE-1',
+   array['mac_address', 'board_serial', 'storage_serial']::kitluy_devices.hardware_signal_type[],
+   'CERTIFIED')
+on conflict (profile_key) do nothing;
+
+-- ---------------------------------------------------------------------------
+-- 28a — the device_record_id is opaque and is NOT derived from hardware.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_profile uuid;
+  v_dev_a uuid;
+  v_dev_b uuid;
+  v_mac text := 'aa:bb:cc:00:' || substr(md5(random()::text), 1, 2) || ':01';
+  v_board text := 'board-' || substr(md5(random()::text), 1, 12);
+  v_derived text;
+begin
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+
+  v_dev_a := kitluy_devices.enroll_device_v1(
+    'WS11-T001-A-' || gen_random_uuid(), v_profile, now() - interval '30 days',
+    repeat('a1', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', v_mac),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', v_board),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-' || gen_random_uuid())));
+
+  v_dev_b := kitluy_devices.enroll_device_v1(
+    'WS11-T001-B-' || gen_random_uuid(), v_profile, now() - interval '30 days',
+    repeat('b2', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'aa:bb:cc:11:' || substr(md5(random()::text), 1, 2) || ':33'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', v_board || '-other'),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-' || gen_random_uuid())));
+
+  if v_dev_a = v_dev_b then
+    raise exception 'ASSERT FAIL: two enrollments produced the same device identity';
+  end if;
+
+  -- The forbidden construction, computed here only to prove nothing uses it.
+  v_derived := encode(sha256(convert_to(v_mac || v_board, 'UTF8')), 'hex');
+  if exists (select 1 from kitluy_devices.devices
+              where replace(id::text, '-', '') = substr(v_derived, 1, 32)) then
+    raise exception 'ASSERT FAIL: a device identity is derivable from hashed hardware values';
+  end if;
+
+  -- The hardware values ARE recorded, as signals.
+  if not exists (
+    select 1 from kitluy_devices.manufacturing_enrollments e
+    join kitluy_devices.hardware_manifest_signals s on s.manifest_id = e.hardware_manifest_id
+    where e.device_id = v_dev_a and s.signal_type = 'mac_address' and s.signal_value = v_mac
+  ) then
+    raise exception 'ASSERT FAIL: the MAC address was not recorded as a binding signal';
+  end if;
+
+  raise notice 'PASS ws11-identity-not-derived: device_record_id is opaque, unrelated between devices and not reproducible from hashed MAC/board values, while the hardware values are still recorded as binding signals';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 28b — THE BLK-005 GATE. Activation and certificate issuance fail closed with
+-- an explicit required-value error while no approved PKI configuration exists.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_profile uuid;
+  v_device uuid;
+  v_blocked int := 0;
+  v_msg text;
+  v_env text;
+begin
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+
+  v_device := kitluy_devices.enroll_device_v1(
+    'WS11-T001-GATE-' || gen_random_uuid(), v_profile, now(),
+    repeat('c3', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'aa:bb:cc:' || substr(md5(random()::text),1,2) || ':00:02'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-' || gen_random_uuid())));
+
+  if (select lifecycle_state from kitluy_devices.devices where id = v_device) <> 'enrolled' then
+    raise exception 'ASSERT FAIL: a freshly enrolled device is not in the enrolled state';
+  end if;
+
+  -- The table the gate reads must be EMPTY. A seeded row would silently open it.
+  if exists (select 1 from kitluy_devices.pki_trust_configuration) then
+    raise exception 'ASSERT FAIL: pki_trust_configuration is not empty; BLK-005 is open and no migration or fixture may populate it';
+  end if;
+
+  foreach v_env in array array['development', 'pilot', 'production'] loop
+    begin
+      perform kitluy_devices.activate_device_v1(v_device, v_env, 'OP-PROBE');
+      raise exception 'ASSERT FAIL: device activation succeeded in % with no approved PKI configuration', v_env;
+    exception when others then
+      if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+      v_msg := sqlerrm;
+      if v_msg not like 'KLUY-DEVICE-PKI-UNCONFIGURED%' then
+        raise exception 'ASSERT FAIL: activation in % failed for the wrong reason: %', v_env, v_msg;
+      end if;
+      if v_msg not like '%[REQUIRED:%' or v_msg not like '%BLK-005%' then
+        raise exception 'ASSERT FAIL: the activation refusal is not an explicit required-value error: %', v_msg;
+      end if;
+      v_blocked := v_blocked + 1;
+      -- The caller records the refusal, because the raise above rolled back
+      -- everything activate_device_v1 did.
+      perform kitluy_devices.record_activation_refusal_v1(
+        v_device, v_env, 'OP-PROBE', 'KLUY-DEVICE-PKI-UNCONFIGURED', v_msg);
+    end;
+
+    begin
+      perform kitluy_devices.issue_device_certificate_v1(
+        v_device, v_env, 'SERIAL-PROBE-' || v_env, repeat('c3', 32), 'OP-PROBE');
+      raise exception 'ASSERT FAIL: certificate issuance succeeded in % with no approved PKI configuration', v_env;
+    exception when others then
+      if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+      if sqlerrm not like 'KLUY-DEVICE-PKI-UNCONFIGURED%' then
+        raise exception 'ASSERT FAIL: certificate issuance in % failed for the wrong reason: %', v_env, sqlerrm;
+      end if;
+      v_blocked := v_blocked + 1;
+    end;
+  end loop;
+
+  if v_blocked <> 6 then
+    raise exception 'ASSERT FAIL: expected 6 fail-closed refusals, got %', v_blocked;
+  end if;
+
+  if (select lifecycle_state from kitluy_devices.devices where id = v_device) <> 'enrolled' then
+    raise exception 'ASSERT FAIL: a device changed state during a refused activation';
+  end if;
+  if (select count(*) from kitluy_devices.device_lifecycle_events
+       where device_id = v_device and reason_code = 'ACTIVATION_REFUSED') <> 3 then
+    raise exception 'ASSERT FAIL: refused activations were not durably recorded as evidence';
+  end if;
+  if (select count(*) from kitluy_devices.device_certificates where device_id = v_device) <> 0 then
+    raise exception 'ASSERT FAIL: a certificate row was created despite the gate';
+  end if;
+  -- The blocker is visible on the device, not just in an error the operator
+  -- saw once. Exactly one open record, not one per attempt.
+  if (select count(*) from kitluy_devices.device_trust_incidents
+       where device_id = v_device and incident_type = 'activation_blocked'
+         and cleared_at is null) <> 1 then
+    raise exception 'ASSERT FAIL: the BLK-005 activation blocker is not recorded exactly once as an open incident';
+  end if;
+  -- Being blocked by the platform is not evidence that the DEVICE is suspect.
+  if (select lifecycle_state from kitluy_devices.devices where id = v_device) = 'quarantined' then
+    raise exception 'ASSERT FAIL: a device was quarantined merely because the platform PKI is unconfigured';
+  end if;
+
+  raise notice 'PASS ws11-blk005-gate: activation and certificate issuance fail closed in all three environments with an explicit [REQUIRED: ...] BLK-005 error, with no state drift, no certificate row, a durable caller-recorded refusal per attempt, and exactly one open activation_blocked incident';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 28c — a changed hardware signal QUARANTINES the existing device. It does not
+-- create an unrelated identity and it does not rewrite the sealed manifest.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_profile uuid;
+  v_device uuid;
+  v_before int;
+  v_after int;
+  v_manifest_before text;
+  v_manifest_after text;
+  v_storage text;
+  v_obs uuid;
+begin
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+
+  v_device := kitluy_devices.enroll_device_v1(
+    'WS11-T001-TAMPER-' || gen_random_uuid(), v_profile, now(),
+    repeat('d4', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'aa:bb:cc:dd:' || substr(md5(random()::text),1,2) || ':01'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-tamper-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-tamper-' || gen_random_uuid())));
+
+  select m.manifest_sha256 into v_manifest_before
+  from kitluy_devices.devices d
+  join kitluy_devices.manufacturing_enrollments e on e.id = d.current_enrollment_id
+  join kitluy_devices.hardware_manifests m on m.id = e.hardware_manifest_id
+  where d.id = v_device;
+
+  select s.signal_value into v_storage
+  from kitluy_devices.hardware_manifest_signals s
+  join kitluy_devices.manufacturing_enrollments e on e.hardware_manifest_id = s.manifest_id
+  where e.device_id = v_device and s.signal_type = 'storage_serial';
+
+  select count(*) into v_before from kitluy_devices.devices;
+
+  -- The board serial changed. That is a tamper signal, not a new device.
+  v_obs := kitluy_devices.record_hardware_observation_v1(
+    v_device,
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value',
+        (select signal_value from kitluy_devices.hardware_manifest_signals s2
+         join kitluy_devices.manufacturing_enrollments e2 on e2.hardware_manifest_id = s2.manifest_id
+         where e2.device_id = v_device and s2.signal_type = 'mac_address')),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-swapped'),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', v_storage)),
+    'hub_agent');
+
+  select count(*) into v_after from kitluy_devices.devices;
+  if v_after <> v_before then
+    raise exception 'ASSERT FAIL: a changed hardware signal created % new device record(s)', v_after - v_before;
+  end if;
+
+  if (select lifecycle_state from kitluy_devices.devices where id = v_device) <> 'quarantined' then
+    raise exception 'ASSERT FAIL: a changed hardware signal did not quarantine the device';
+  end if;
+
+  if not exists (
+    select 1 from kitluy_devices.device_trust_incidents
+    where device_id = v_device and incident_type = 'hardware_signal_mismatch'
+      and severity = 'CRITICAL' and cleared_at is null) then
+    raise exception 'ASSERT FAIL: no open hardware_signal_mismatch incident was raised';
+  end if;
+
+  select m.manifest_sha256 into v_manifest_after
+  from kitluy_devices.devices d
+  join kitluy_devices.manufacturing_enrollments e on e.id = d.current_enrollment_id
+  join kitluy_devices.hardware_manifests m on m.id = e.hardware_manifest_id
+  where d.id = v_device;
+  if v_manifest_after is distinct from v_manifest_before then
+    raise exception 'ASSERT FAIL: the sealed manifest was rewritten to absorb the mismatch';
+  end if;
+
+  if (select storage_module_only_change from kitluy_devices.device_hardware_observations where id = v_obs) then
+    raise exception 'ASSERT FAIL: a board-serial change was misclassified as a storage-module change';
+  end if;
+
+  raise notice 'PASS ws11-tamper-quarantines: a changed board serial quarantines the SAME device_record_id, raises an open CRITICAL incident, creates no new identity and leaves the sealed manifest untouched';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 28d — an NVMe swap is classified as a storage-module change and still
+-- quarantines; it is never silently accepted.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_profile uuid;
+  v_device uuid;
+  v_obs uuid;
+  v_mac text := 'aa:bb:cc:dd:' || substr(md5(random()::text),1,2) || ':02';
+  v_board text;
+begin
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+  v_board := 'board-nvme-' || gen_random_uuid();
+
+  v_device := kitluy_devices.enroll_device_v1(
+    'WS11-T001-NVME-' || gen_random_uuid(), v_profile, now(),
+    repeat('e5', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', v_mac),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', v_board),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-old-' || gen_random_uuid())));
+
+  v_obs := kitluy_devices.record_hardware_observation_v1(
+    v_device,
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', v_mac),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', v_board),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-new-' || gen_random_uuid())),
+    'hub_agent');
+
+  if not (select storage_module_only_change from kitluy_devices.device_hardware_observations where id = v_obs) then
+    raise exception 'ASSERT FAIL: an NVMe-only change was not recognised as a storage-module change';
+  end if;
+  if (select lifecycle_state from kitluy_devices.devices where id = v_device) <> 'quarantined' then
+    raise exception 'ASSERT FAIL: an NVMe swap was silently accepted instead of quarantined';
+  end if;
+  if not exists (select 1 from kitluy_devices.device_trust_incidents
+                  where device_id = v_device and incident_type = 'storage_module_changed') then
+    raise exception 'ASSERT FAIL: no storage_module_changed incident was raised';
+  end if;
+
+  raise notice 'PASS ws11-nvme-quarantines: a storage-module-only change is classified as the NVMe-replacement signature and STILL quarantines — unregistered NVMe replacement never reactivates silently (trust policy 11)';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 28e — governed re-enrollment: a new key pair is mandatory, the prior
+-- enrollment is superseded (not edited), and clearance names an operator.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_profile uuid;
+  v_device uuid;
+  v_new_enrollment uuid;
+  v_prior uuid;
+  v_signals jsonb;
+begin
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+
+  v_signals := jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'aa:bb:cc:dd:' || substr(md5(random()::text),1,2) || ':03'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-re-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-re-' || gen_random_uuid()));
+
+  v_device := kitluy_devices.enroll_device_v1(
+    'WS11-T001-REENROLL-' || gen_random_uuid(), v_profile, now(),
+    repeat('f6', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE', v_signals);
+  select current_enrollment_id into v_prior from kitluy_devices.devices where id = v_device;
+
+  perform kitluy_devices.quarantine_device_v1(
+    v_device, 'manual_quarantine', 'WARNING', 'OP-PROBE', 'assertion probe');
+
+  -- Presenting the SAME public key is the signature of a copied key, not a
+  -- new key pair. It must be refused.
+  begin
+    perform kitluy_devices.reenroll_device_v1(
+      v_device, repeat('f6', 32), 'ed25519', 'software',
+      'STATION-PROBE', 'OP-PROBE', v_signals, 'REPAIR');
+    raise exception 'ASSERT FAIL: re-enrollment accepted the prior public-key fingerprint';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-DEVICE-KEY-REUSE%' then
+      raise exception 'ASSERT FAIL: key reuse refused for the wrong reason: %', sqlerrm;
+    end if;
+  end;
+
+  v_new_enrollment := kitluy_devices.reenroll_device_v1(
+    v_device, repeat('07', 32), 'ed25519', 'software',
+    'STATION-PROBE', 'OP-REPAIR-01', v_signals, 'REPAIR_AFTER_QUARANTINE');
+
+  if (select state from kitluy_devices.manufacturing_enrollments where id = v_prior) <> 'superseded' then
+    raise exception 'ASSERT FAIL: the prior enrollment was not superseded';
+  end if;
+  if (select enrollment_sequence from kitluy_devices.manufacturing_enrollments where id = v_new_enrollment) <> 2 then
+    raise exception 'ASSERT FAIL: the re-enrollment sequence did not advance';
+  end if;
+  if (select lifecycle_state from kitluy_devices.devices where id = v_device) <> 'enrolled' then
+    raise exception 'ASSERT FAIL: re-enrollment did not return the device to enrolled';
+  end if;
+  if exists (select 1 from kitluy_devices.device_trust_incidents
+              where device_id = v_device and cleared_at is null) then
+    raise exception 'ASSERT FAIL: an incident remained open after governed re-enrollment';
+  end if;
+  if exists (select 1 from kitluy_devices.device_trust_incidents
+              where device_id = v_device
+                and (cleared_by_operator_ref is null or clearing_enrollment_id is null)) then
+    raise exception 'ASSERT FAIL: an incident was cleared without naming the operator and enrollment';
+  end if;
+
+  raise notice 'PASS ws11-governed-reenrollment: re-enrollment refuses a reused public key, supersedes rather than edits the prior enrollment, returns the device to enrolled (never straight to active) and records who cleared each incident under which enrollment';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 28f — replacement: the owner-required order is recorded as fact, and
+-- carrying a private key across is structurally impossible.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_profile uuid;
+  v_device uuid;
+  v_replacement uuid;
+  v_signals jsonb;
+begin
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+
+  v_signals := jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'aa:bb:cc:dd:' || substr(md5(random()::text),1,2) || ':04'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-rep-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-rep-' || gen_random_uuid()));
+
+  v_device := kitluy_devices.enroll_device_v1(
+    'WS11-T001-REPLACE-' || gen_random_uuid(), v_profile, now(),
+    repeat('18', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE', v_signals);
+
+  update kitluy_devices.devices set assignment_generation = 7 where id = v_device;
+
+  v_replacement := kitluy_devices.record_device_replacement_v1(
+    v_device, 'storage_module', 'NVME_FAILURE', 'OP-RMA-01', 'RMA-PROBE-1');
+
+  if (select assignment_generation from kitluy_devices.devices where id = v_device) <> 0 then
+    raise exception 'ASSERT FAIL: the old assignment generation was not invalidated';
+  end if;
+  if (select lifecycle_state from kitluy_devices.devices where id = v_device) <> 'quarantined' then
+    raise exception 'ASSERT FAIL: a replaced device was not held pending governed re-enrollment';
+  end if;
+  if not (select prior_certificate_revoked and prior_assignment_invalidated
+          from kitluy_devices.device_replacements where id = v_replacement) then
+    raise exception 'ASSERT FAIL: the replacement did not record certificate revocation and assignment invalidation';
+  end if;
+  if (select prior_assignment_generation from kitluy_devices.device_replacements where id = v_replacement) <> 7 then
+    raise exception 'ASSERT FAIL: the replacement did not record which assignment generation it invalidated';
+  end if;
+  if (select completed_at from kitluy_devices.device_replacements where id = v_replacement) is not null then
+    raise exception 'ASSERT FAIL: a replacement was complete before re-enrollment happened';
+  end if;
+
+  -- Carrying a private key across is refused by the database, not by policy.
+  begin
+    update kitluy_devices.device_replacements
+    set private_key_carried_over = true where id = v_replacement;
+    raise exception 'ASSERT FAIL: a replacement recorded a private key carried over from the damaged storage device';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+  end;
+
+  -- Completion requires the new enrollment to actually exist.
+  begin
+    update kitluy_devices.device_replacements
+    set completed_at = now() where id = v_replacement;
+    raise exception 'ASSERT FAIL: a replacement completed with no new enrollment';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+  end;
+
+  perform kitluy_devices.reenroll_device_v1(
+    v_device, repeat('29', 32), 'ed25519', 'software',
+    'STATION-PROBE', 'OP-RMA-01', v_signals, 'NVME_REPLACEMENT', v_replacement);
+
+  if (select completed_at from kitluy_devices.device_replacements where id = v_replacement) is null then
+    raise exception 'ASSERT FAIL: the replacement did not complete after governed re-enrollment';
+  end if;
+  if (select lifecycle_state from kitluy_devices.devices where id = v_device) <> 'enrolled' then
+    raise exception 'ASSERT FAIL: the replaced device did not return to enrolled through the normal flow';
+  end if;
+
+  raise notice 'PASS ws11-replacement-order: replacement revokes the certificate, zeroes the assignment generation, records the authorizing operator, holds the device in quarantine, refuses private-key carry-over structurally, and completes only through a new-key re-enrollment';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 28g — immutability of captured evidence and enrollment history.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_profile uuid;
+  v_device uuid;
+  v_manifest uuid;
+  v_enrollment uuid;
+  v_blocked int := 0;
+begin
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+
+  v_device := kitluy_devices.enroll_device_v1(
+    'WS11-T001-IMMUT-' || gen_random_uuid(), v_profile, now(),
+    repeat('3a', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'aa:bb:cc:dd:' || substr(md5(random()::text),1,2) || ':05'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-im-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-im-' || gen_random_uuid())));
+
+  select e.id, e.hardware_manifest_id into v_enrollment, v_manifest
+  from kitluy_devices.manufacturing_enrollments e where e.device_id = v_device;
+
+  begin
+    update kitluy_devices.hardware_manifests set manifest_sha256 = repeat('0', 64) where id = v_manifest;
+    raise exception 'ASSERT FAIL: a sealed manifest digest was edited';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if; v_blocked := v_blocked + 1;
+  end;
+
+  begin
+    insert into kitluy_devices.hardware_manifest_signals (manifest_id, signal_type, signal_value, is_storage_module)
+    values (v_manifest, 'os_image_digest', 'added-after-sealing', false);
+    raise exception 'ASSERT FAIL: evidence was added to a sealed manifest';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if; v_blocked := v_blocked + 1;
+  end;
+
+  begin
+    delete from kitluy_devices.hardware_manifest_signals where manifest_id = v_manifest;
+    raise exception 'ASSERT FAIL: evidence was deleted from a sealed manifest';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if; v_blocked := v_blocked + 1;
+  end;
+
+  begin
+    update kitluy_devices.manufacturing_enrollments
+    set device_public_key_fingerprint = repeat('ff', 32) where id = v_enrollment;
+    raise exception 'ASSERT FAIL: an enrollment public-key fingerprint was rewritten';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if; v_blocked := v_blocked + 1;
+  end;
+
+  begin
+    delete from kitluy_devices.manufacturing_enrollments where id = v_enrollment;
+    raise exception 'ASSERT FAIL: enrollment history was deleted';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if; v_blocked := v_blocked + 1;
+  end;
+
+  begin
+    update kitluy_devices.devices set manufactured_at = now() - interval '1 year'
+    where id = v_device;
+    raise exception 'ASSERT FAIL: device manufacturing facts were rewritten';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if; v_blocked := v_blocked + 1;
+  end;
+
+  begin
+    delete from kitluy_devices.devices where id = v_device;
+    raise exception 'ASSERT FAIL: a device record was deleted';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if; v_blocked := v_blocked + 1;
+  end;
+
+  if v_blocked <> 7 then
+    raise exception 'ASSERT FAIL: expected 7 blocked mutations, got %', v_blocked;
+  end if;
+  raise notice 'PASS ws11-evidence-immutable: sealed manifests, their signals, enrollment history and device manufacturing facts all refuse edit and delete (7 mutations blocked)';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 28h — the lifecycle state machine refuses illegal transitions, and terminal
+-- states are frozen.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_profile uuid;
+  v_device uuid;
+  v_blocked int := 0;
+begin
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+
+  v_device := kitluy_devices.enroll_device_v1(
+    'WS11-T001-FSM-' || gen_random_uuid(), v_profile, now(),
+    repeat('4b', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'aa:bb:cc:dd:' || substr(md5(random()::text),1,2) || ':06'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-fsm-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-fsm-' || gen_random_uuid())));
+
+  -- enrolled -> manufactured is backwards.
+  begin
+    update kitluy_devices.devices set lifecycle_state = 'manufactured' where id = v_device;
+    raise exception 'ASSERT FAIL: enrolled -> manufactured was accepted';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-DEVICE-TRANSITION-ILLEGAL%' then
+      raise exception 'ASSERT FAIL: wrong refusal for enrolled -> manufactured: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  perform kitluy_devices.retire_device_v1(v_device, 'DECOMMISSION', 'OP-PROBE');
+  if (select lifecycle_state from kitluy_devices.devices where id = v_device) <> 'retired' then
+    raise exception 'ASSERT FAIL: retirement did not take effect';
+  end if;
+  if (select state from kitluy_devices.manufacturing_enrollments where device_id = v_device) <> 'revoked' then
+    raise exception 'ASSERT FAIL: retirement did not revoke the sealed enrollment';
+  end if;
+
+  -- retired is terminal, in both directions.
+  begin
+    update kitluy_devices.devices set lifecycle_state = 'enrolled', retired_at = null where id = v_device;
+    raise exception 'ASSERT FAIL: a retired device was revived';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if; v_blocked := v_blocked + 1;
+  end;
+
+  begin
+    update kitluy_devices.devices set asset_tag = 'WS11-T001-FSM-RENAMED' where id = v_device;
+    raise exception 'ASSERT FAIL: a retired device record was edited';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if; v_blocked := v_blocked + 1;
+  end;
+
+  begin
+    perform kitluy_devices.quarantine_device_v1(
+      v_device, 'manual_quarantine', 'INFO', 'OP-PROBE', 'probe');
+    raise exception 'ASSERT FAIL: a retired device was quarantined';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if; v_blocked := v_blocked + 1;
+  end;
+
+  if v_blocked <> 4 then
+    raise exception 'ASSERT FAIL: expected 4 blocked lifecycle operations, got %', v_blocked;
+  end if;
+  raise notice 'PASS ws11-lifecycle-fsm: backwards transitions are refused, retirement revokes the enrollment, and a retired device record is frozen against revival, edit and quarantine';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 28i — PKI configuration governance. This is what stops the BLK-005 gate from
+-- being faked open by a fixture or an agent.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_blocked int := 0;
+begin
+  -- A placeholder decision reference is not an approval.
+  begin
+    insert into kitluy_devices.pki_trust_configuration
+      (environment, root_ca_reference, device_issuing_ca_reference, manufacturing_ca_reference,
+       required_key_storage_class, certificate_lifetime_days, renewal_window_days,
+       overlap_window_days, revocation_mechanism, offline_grace_hours,
+       configuration_signing_key_reference, release_signing_key_reference,
+       transport_signing_key_reference, approved_by_decision_ref, approved_at, is_active)
+    values
+      ('production', 'root', 'issuing', 'mfg', 'hsm', 365, 30, 7, 'CRL', 72,
+       'cfg-key', 'rel-key', 'tx-key', 'TBD', now(), true);
+    raise exception 'ASSERT FAIL: a PKI configuration was approved with a placeholder decision reference';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-DEVICE-PKI-UNAPPROVED%' then
+      raise exception 'ASSERT FAIL: placeholder approval refused for the wrong reason: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  begin
+    insert into kitluy_devices.pki_trust_configuration
+      (environment, root_ca_reference, device_issuing_ca_reference, manufacturing_ca_reference,
+       required_key_storage_class, certificate_lifetime_days, renewal_window_days,
+       overlap_window_days, revocation_mechanism, offline_grace_hours,
+       configuration_signing_key_reference, release_signing_key_reference,
+       transport_signing_key_reference, approved_by_decision_ref, approved_at, is_active)
+    values
+      ('production', 'root', 'issuing', 'mfg', 'hsm', 365, 30, 7, 'CRL', 72,
+       'cfg-key', 'rel-key', 'tx-key', '[REQUIRED: owner PKI decision]', now(), true);
+    raise exception 'ASSERT FAIL: a PKI configuration was approved by an unresolved [REQUIRED: ...] marker';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if; v_blocked := v_blocked + 1;
+  end;
+
+  -- One key reused across two purposes is refused structurally.
+  begin
+    insert into kitluy_devices.pki_trust_configuration
+      (environment, root_ca_reference, device_issuing_ca_reference, manufacturing_ca_reference,
+       required_key_storage_class, certificate_lifetime_days, renewal_window_days,
+       overlap_window_days, revocation_mechanism, offline_grace_hours,
+       configuration_signing_key_reference, release_signing_key_reference,
+       transport_signing_key_reference, approved_by_decision_ref, approved_at, is_active)
+    values
+      ('production', 'root', 'issuing', 'mfg', 'hsm', 365, 30, 7, 'CRL', 72,
+       'one-key-for-everything', 'one-key-for-everything', 'one-key-for-everything',
+       'KLD-PROBE-001', now(), true);
+    raise exception 'ASSERT FAIL: one signing key was accepted for configuration, release and transport';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if; v_blocked := v_blocked + 1;
+  end;
+
+  -- A device-issuing CA that is also the root is refused.
+  begin
+    insert into kitluy_devices.pki_trust_configuration
+      (environment, root_ca_reference, device_issuing_ca_reference, manufacturing_ca_reference,
+       required_key_storage_class, certificate_lifetime_days, renewal_window_days,
+       overlap_window_days, revocation_mechanism, offline_grace_hours,
+       configuration_signing_key_reference, release_signing_key_reference,
+       transport_signing_key_reference, approved_by_decision_ref, approved_at, is_active)
+    values
+      ('production', 'the-root', 'the-root', 'mfg', 'hsm', 365, 30, 7, 'CRL', 72,
+       'cfg-key', 'rel-key', 'tx-key', 'KLD-PROBE-001', now(), true);
+    raise exception 'ASSERT FAIL: the offline root was accepted as the device-issuing CA';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if; v_blocked := v_blocked + 1;
+  end;
+
+  -- A renewal window that is not inside the certificate lifetime is refused.
+  begin
+    insert into kitluy_devices.pki_trust_configuration
+      (environment, root_ca_reference, device_issuing_ca_reference, manufacturing_ca_reference,
+       required_key_storage_class, certificate_lifetime_days, renewal_window_days,
+       overlap_window_days, revocation_mechanism, offline_grace_hours,
+       configuration_signing_key_reference, release_signing_key_reference,
+       transport_signing_key_reference, approved_by_decision_ref, approved_at, is_active)
+    values
+      ('production', 'root', 'issuing', 'mfg', 'hsm', 30, 90, 7, 'CRL', 72,
+       'cfg-key', 'rel-key', 'tx-key', 'KLD-PROBE-001', now(), true);
+    raise exception 'ASSERT FAIL: a renewal window longer than the certificate lifetime was accepted';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if; v_blocked := v_blocked + 1;
+  end;
+
+  if v_blocked <> 5 then
+    raise exception 'ASSERT FAIL: expected 5 blocked PKI configurations, got %', v_blocked;
+  end if;
+  if exists (select 1 from kitluy_devices.pki_trust_configuration) then
+    raise exception 'ASSERT FAIL: a PKI configuration row survived the governance probes';
+  end if;
+
+  raise notice 'PASS ws11-pki-governance: placeholder and [REQUIRED: ...] approvals, one signing key shared across purposes, root-as-issuing-CA and out-of-range renewal windows are all refused, and the gate table remains empty';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 28j — duplicate hardware signals are DETECTED and leave evidence, rather
+-- than being silently rejected by a constraint.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_profile uuid;
+  v_original uuid;
+  v_clone uuid;
+  v_mac text := 'aa:bb:cc:c1:' || substr(md5(random()::text), 1, 2) || ':07';
+  v_board text := 'board-clone-' || gen_random_uuid();
+begin
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+
+  v_original := kitluy_devices.enroll_device_v1(
+    'WS11-T001-ORIG-' || gen_random_uuid(), v_profile, now(),
+    repeat('5c', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', v_mac),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', v_board),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-o-' || gen_random_uuid())));
+
+  -- A second unit presenting the same non-storage hardware evidence.
+  v_clone := kitluy_devices.enroll_device_v1(
+    'WS11-T001-CLONE-' || gen_random_uuid(), v_profile, now(),
+    repeat('6d', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', v_mac),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', v_board),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-c-' || gen_random_uuid())));
+
+  if v_clone = v_original then
+    raise exception 'ASSERT FAIL: duplicate hardware evidence collapsed two units into one identity';
+  end if;
+  if (select lifecycle_state from kitluy_devices.devices where id = v_clone) <> 'quarantined' then
+    raise exception 'ASSERT FAIL: a duplicate-hardware unit was enrolled without quarantine';
+  end if;
+  if not exists (select 1 from kitluy_devices.device_trust_incidents
+                  where device_id = v_clone and incident_type = 'duplicate_hardware_signal'
+                    and severity = 'CRITICAL') then
+    raise exception 'ASSERT FAIL: no duplicate_hardware_signal incident recorded';
+  end if;
+
+  raise notice 'PASS ws11-duplicate-detected: a second unit presenting the same non-storage hardware evidence receives its OWN identity, is quarantined, and leaves a CRITICAL duplicate_hardware_signal incident — the clone becomes evidence, not a silent constraint failure';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 28k — the fleet view reports the blocker instead of hiding it.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_blocked_count int;
+  v_active_count int;
+begin
+  select count(*) into v_blocked_count from kitluy_devices.device_fleet_status
+   where fleet_status = 'BLOCKED_PKI_UNCONFIGURED';
+  select count(*) into v_active_count from kitluy_devices.device_fleet_status
+   where fleet_status = 'ACTIVE';
+
+  if v_blocked_count = 0 then
+    raise exception 'ASSERT FAIL: no device reports BLOCKED_PKI_UNCONFIGURED while BLK-005 is open';
+  end if;
+  if v_active_count > 0 then
+    raise exception 'ASSERT FAIL: % device(s) report ACTIVE while no PKI configuration is approved', v_active_count;
+  end if;
+  if exists (select 1 from kitluy_devices.device_fleet_status where certificate_status is not null) then
+    raise exception 'ASSERT FAIL: a device reports a certificate status with no issuing CA approved';
+  end if;
+
+  raise notice 'PASS ws11-fleet-honest: the fleet view reports BLOCKED_PKI_UNCONFIGURED for enrolled devices, zero devices are ACTIVE, and no device carries a certificate status while BLK-005 is open';
+end $$;
+
+select 'assertions complete: groups 0010-0120 structural contract holds (incl. cycle-6 WS-07/WS-08 sections 17-26, cycle-9 WS-10 section 27 and cycle-10 WS-11-T001 section 28)' as result;

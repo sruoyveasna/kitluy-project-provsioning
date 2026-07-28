@@ -148,6 +148,58 @@ without it. Those parts stay `[REQUIRED: ...]` and fail closed rather than
 being guessed — the same discipline that kept WS-10 from inventing a
 production batch signer.
 
+### The BLK-005 hard gate (owner-directed, 2026-07-28)
+
+Work proceeds around BLK-005, not through it. The gate is a single point:
+
+    kitluy_devices.pki_trust_configuration        -- created EMPTY, never seeded
+    kitluy_devices.assert_pki_configuration_approved(environment)
+      -> KLUY-DEVICE-PKI-UNCONFIGURED: [REQUIRED: ...] — BLK-005 is OPEN
+
+**Allowed before BLK-005:** manufacturing and internal-enrollment records;
+immutable KitLuy device identifiers; hardware-evidence inventory; enrollment,
+quarantine, retirement and replacement state machines; Digital Store and
+Location assignment models; assignment-generation issuance and revocation;
+terminal assignment; device health and fleet-status models; audit events,
+permissions and approval requirements; replacement and recovery workflows;
+abstract PKI, attestation and signing-provider interfaces; fail-closed tests.
+
+**Blocked by BLK-005 — not implemented, not claimed:** production root or
+intermediate CA; production certificate issuance; final certificate lifetimes
+and renewal windows; production revocation distribution; hardware-backed
+private-key custody; production configuration or release signer; production key
+rotation; production Store Hub activation; WS-10 production signer availability.
+
+**Owner-fixed identity model.** Immutable `device_record_id` + manufacturing
+enrollment record + device public-key fingerprint + hardware evidence +
+storage-module evidence + assignment generation + certificate status. The
+primary identity is **never** derived by hashing MAC address, storage serial and
+board identifiers. Those are binding and tamper signals; a changed signal
+quarantines the device and requires governed re-enrollment, and never silently
+creates an unrelated device identity.
+
+**Owner-fixed NVMe replacement order.** Old certificate revoked -> old
+assignment generation invalidated -> replacement recorded by an authorized
+internal operator -> new key pair generated -> new certificate issued -> new
+evidence captured -> device reactivated through the normal approval flow.
+Private keys are never copied from the damaged storage device.
+
+### Status boundary while BLK-005 is open
+
+    WS-11                 — SCAFFOLDED / IN PROGRESS
+    BLK-005               — OPEN (ballot: docs/decisions/kitluy-blk-005-pki-and-device-trust-owner-ballot-v1.0.0.md)
+    Production activation — BLOCKED
+    Production signer     — BLOCKED
+
+Individual tasks may be completed and committed with evidence. **WS-11 cannot
+become `IMPLEMENTED-IN-DEV` until the approved cryptographic design is
+implemented and independently tested.**
+
+**T001 complete 2026-07-28** — cloud migration group 0120 (`kitluy_devices`, 11
+relations), `@kitluy/device-identity`, 11 assertion sections, 5 RLS cases, 24
+package tests, and the BLK-005 ballot. Evidence
+`docs/evidence/phase1/ws-11/WS-11-T001-EXECUTION-EVIDENCE.md`.
+
 **Carried from Cycle 9.** KLREQ-029 and KLREQ-030 may remain open during core
 WS-11 work, but they MUST be resolved before any synchronization-repair action
 is exposed through Admin, Partner, Chain or support interfaces. KLREQ-024 and

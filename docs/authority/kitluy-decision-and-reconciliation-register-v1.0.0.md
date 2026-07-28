@@ -335,6 +335,76 @@ do:
 | G10 | `edge_sync.provider_outcome_delivery`                     | KLREQ-027 REQUIRES a dedupe on `provider_code + provider_account_reference + provider_event_id`, and a dedupe with nowhere to remember what it saw is not a dedupe. Stores no provider secret and verifies no provider signature |
 | G11 | `edge_config.permission_grant_projection`                 | KLREQ-025 REQUIRES a signed local grant projection; the §6 catalogue defines none                                                                             |
 
+### Cycle-10 execution findings — WS-11-T001 (2026-07-28)
+
+#### C37 — refusal evidence written inside the refusing transaction is erased by the refusal
+
+`activate_device_v1` originally recorded an `ACTIVATION_ATTEMPTED` lifecycle
+event before hitting the BLK-005 gate, so that a blocked activation would leave
+a trace. It did not. Raising rolls back everything the function did, including
+that row, so the evidence survived only in the case where it was not needed.
+Assertion 28b was written to fail if the evidence were absent, and it failed.
+
+This is the **same shape** as WS-10's `verifySnapshot`, where a throw erased the
+rejection it was reporting. Recording it as a named pattern rather than a
+one-off bug: **in PostgreSQL an audit row and the exception that makes it
+interesting cannot live in the same transaction.** Any future "record the
+refusal, then refuse" must split into a raising function and a caller-invoked
+recorder in a new transaction.
+
+RESOLVED in group 0120: `activate_device_v1` raises and writes nothing;
+`record_activation_refusal_v1` is called by the caller's exception handler and
+also opens one `activation_blocked` incident so the blocker is visible on the
+device rather than only in an error an operator saw once. That incident is
+excluded from the activation open-incident check — counting it would mean
+resolving BLK-005 left every device permanently un-activatable by the evidence of
+having been blocked — and is cleared by a successful activation.
+
+**Residual limitation:** the database cannot compel a caller to report its own
+failure. A caller that swallows the refusal writes no evidence.
+
+#### G12 — clock bootstrap and offline certificate validation (NEW GAP, unaddressed anywhere)
+
+Certificate validity is a time window. A Raspberry Pi without a battery-backed
+RTC boots with an untrusted clock; NTP is unauthenticated and may be unreachable
+during exactly the outage that matters. A Hub that trusts a wrong clock can
+accept an expired certificate or reject a valid one.
+
+Nothing in the repository, the DD, or
+`kitluy-device-certificate-and-trust-policy-v1.0.0.md` addresses how trusted time
+is established before certificate validation, or what happens when it cannot be.
+This is not a runbook detail: it decides whether certificate expiry is enforced
+or advisory, and it constrains the hardware bill of materials.
+
+**Recorded, not resolved.** Carried as item 11 of the BLK-005 ballot
+(`docs/decisions/kitluy-blk-005-pki-and-device-trust-owner-ballot-v1.0.0.md`).
+
+#### `kitluy_devices` relation-dictionary deviations (D1-D6)
+
+The schema name `kitluy_devices` is already in DD v1.0.0, so creating it needs no
+amendment. The RELATIONS deviate, and the DD **owes an amendment for D1-D5
+before WS-11 closes**:
+
+| ID  | Deviation                                                                                                                                                             |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1  | `hardware_manifest_signals` — in neither the DD nor trust policy §13. A manifest whose signals are not individually queryable cannot be compared field by field, which is the entire tamper mechanism |
+| D2  | `device_hardware_observations` — new. §13's `device_attestations` is a different concept (boot / secure-element proof) and is deliberately NOT created, being blocked on BLK-005 item 4 |
+| D3  | `pki_trust_configuration` — in neither list. §13's `trust_bundle_versions` is distribution, not approval. The gate needs a relation whose EMPTINESS is the refusal      |
+| D4  | `device_replacements` — new; the DD's `rma_cases` (reason / status / replacement_device_id) cannot record the owner's required precondition ORDER. `rma_cases` NOT created |
+| D5  | `device_lifecycle_events` — new; append-only audit of the state machine, including refused transitions                                                                  |
+| D6  | NOT created, deliberately: `device_assignments`, `device_capabilities`, `provisioning_sessions`, `device_actions`, `peripheral_tests`, `rma_cases` (DD); `certificate_revocations`, `device_attestations`, `trust_bundle_versions` (§13). They belong to T002+; creating them empty would imply capability that does not exist (repository rule 5, the same reasoning as WS-10's D3) |
+
+#### Evidence-metric correction — the `test:rls` 94-vs-95 question is closed
+
+The WS-10 evidence recorded RV-005 as "`test:rls` reports **94**, not 95; the 95
+carried in earlier rows is a miscount". That correction was applied in the wrong
+direction. Measured directly at the WS-10 close commit by stashing Cycle-10
+changes and re-running: the runtime figure is **95** `NOTICE:  PASS`.
+
+Both numbers were right under different metrics — **94 distinct case ids, 95 PASS
+notices**, because case `KLSEC-036` emits two. Nothing was miscounted; the metric
+was never stated. Every future evidence row states which it is using.
+
 ### Repository-operation risks (2026-07-28)
 
 | ID              | Risk | Status |

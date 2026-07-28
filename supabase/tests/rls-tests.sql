@@ -2420,4 +2420,207 @@ begin
 end $$;
 rollback;
 
-select 'rls-tests complete: 14+9 baseline cases; cycle-5 WS5 7 negative + 7 positive and WS6 10 negative + 9 positive; cycle-6 WS7 13 negative + 6 positive and WS8 13 negative + 6 positive cases executed' as result;
+
+-- ============================================================================
+-- CYCLE 10 / WS-11-T001 — kitluy_devices fail-closed cases (migration 0120).
+-- Device identity, hardware evidence and PKI configuration are platform-internal
+-- HET fleet data. There is no tenant-scoped read path and there is no client
+-- write path. Tenant-visible device status arrives with the assignment model in
+-- WS-11-T002, scoped by assignment.
+-- ============================================================================
+
+-- WS11-N1: anonymous access to device identity is denied with no leakage.
+begin;
+select set_config('request.jwt.claims', '{"role":"anon"}', true);
+set local role anon;
+do $$
+declare
+  v_denied int := 0;
+  v_probe int;
+begin
+  begin
+    select count(*) into v_probe from kitluy_devices.devices;
+    if v_probe > 0 then
+      raise exception 'FAIL WS11-N1: anon read % device rows', v_probe;
+    end if;
+    v_denied := v_denied + 1; -- zero rows is also fail-closed
+  exception when insufficient_privilege then
+    v_denied := v_denied + 1;
+  end;
+
+  begin
+    select count(*) into v_probe from kitluy_devices.hardware_manifest_signals;
+    if v_probe > 0 then
+      raise exception 'FAIL WS11-N1: anon read % hardware evidence rows', v_probe;
+    end if;
+    v_denied := v_denied + 1;
+  exception when insufficient_privilege then
+    v_denied := v_denied + 1;
+  end;
+
+  if v_denied <> 2 then
+    raise exception 'FAIL WS11-N1: expected 2 denied anon probes, got %', v_denied;
+  end if;
+  raise notice 'PASS WS11-N1: anonymous reads of device identity and hardware evidence are denied with no row leakage';
+end $$;
+rollback;
+
+-- WS11-N2: an authenticated tenant user cannot read device identity, hardware
+-- evidence, enrollment records or public-key fingerprints.
+begin;
+select set_config('request.jwt.claims',
+  '{"role":"authenticated","sub":"00000000-0000-4000-8000-000000000002"}', true);
+set local role authenticated;
+do $$
+declare
+  v_denied int := 0;
+  v_probe int;
+begin
+  begin
+    select count(*) into v_probe from kitluy_devices.devices;
+    if v_probe > 0 then raise exception 'FAIL WS11-N2: authenticated read % device rows', v_probe; end if;
+    v_denied := v_denied + 1;
+  exception when insufficient_privilege then v_denied := v_denied + 1;
+  end;
+
+  begin
+    select count(*) into v_probe from kitluy_devices.manufacturing_enrollments;
+    if v_probe > 0 then raise exception 'FAIL WS11-N2: authenticated read % enrollment rows', v_probe; end if;
+    v_denied := v_denied + 1;
+  exception when insufficient_privilege then v_denied := v_denied + 1;
+  end;
+
+  begin
+    select count(*) into v_probe from kitluy_devices.device_trust_incidents;
+    if v_probe > 0 then raise exception 'FAIL WS11-N2: authenticated read % trust incident rows', v_probe; end if;
+    v_denied := v_denied + 1;
+  exception when insufficient_privilege then v_denied := v_denied + 1;
+  end;
+
+  if v_denied <> 3 then
+    raise exception 'FAIL WS11-N2: expected 3 denied authenticated probes, got %', v_denied;
+  end if;
+  raise notice 'PASS WS11-N2: an authenticated tenant user reads no device identity, no enrollment record and no trust incident (frontend visibility is not authorization, RC-012)';
+end $$;
+rollback;
+
+-- WS11-N3: an authenticated user cannot read OR write the PKI trust
+-- configuration. This is the table the BLK-005 gate reads: a client able to
+-- insert a row here could activate devices with a cryptographic design nobody
+-- approved.
+begin;
+select set_config('request.jwt.claims',
+  '{"role":"authenticated","sub":"00000000-0000-4000-8000-000000000002"}', true);
+set local role authenticated;
+do $$
+declare
+  v_denied int := 0;
+  v_probe int;
+begin
+  begin
+    select count(*) into v_probe from kitluy_devices.pki_trust_configuration;
+    if v_probe > 0 then raise exception 'FAIL WS11-N3: authenticated read % PKI configuration rows', v_probe; end if;
+    v_denied := v_denied + 1;
+  exception when insufficient_privilege then v_denied := v_denied + 1;
+  end;
+
+  begin
+    insert into kitluy_devices.pki_trust_configuration
+      (environment, root_ca_reference, device_issuing_ca_reference, manufacturing_ca_reference,
+       required_key_storage_class, certificate_lifetime_days, renewal_window_days,
+       overlap_window_days, revocation_mechanism, offline_grace_hours,
+       configuration_signing_key_reference, release_signing_key_reference,
+       transport_signing_key_reference, approved_by_decision_ref, approved_at, is_active)
+    values
+      ('production', 'r', 'i', 'm', 'hsm', 365, 30, 7, 'CRL', 72,
+       'c', 'rel', 'tx', 'SELF-APPROVED', now(), true);
+    raise exception 'FAIL WS11-N3: an authenticated client inserted an approved PKI configuration';
+  exception when others then
+    if sqlerrm like 'FAIL WS11%' then raise; end if;
+    v_denied := v_denied + 1;
+  end;
+
+  if v_denied <> 2 then
+    raise exception 'FAIL WS11-N3: expected 2 denied PKI probes, got %', v_denied;
+  end if;
+  raise notice 'PASS WS11-N3: an authenticated client can neither read nor insert the PKI trust configuration, so the BLK-005 gate cannot be opened from a client session';
+end $$;
+rollback;
+
+-- WS11-N4: device governance procedures are not callable by clients.
+-- PostgreSQL grants EXECUTE to PUBLIC at creation; migration 0120 revokes it.
+begin;
+select set_config('request.jwt.claims',
+  '{"role":"authenticated","sub":"00000000-0000-4000-8000-000000000002"}', true);
+set local role authenticated;
+do $$
+declare
+  v_denied int := 0;
+begin
+  begin
+    perform kitluy_devices.activate_device_v1(gen_random_uuid(), 'production', 'CLIENT');
+    raise exception 'FAIL WS11-N4: a client executed activate_device_v1';
+  exception when others then
+    if sqlerrm like 'FAIL WS11%' then raise; end if;
+    if sqlerrm not like '%permission denied%' then
+      raise exception 'FAIL WS11-N4: activate_device_v1 was callable by a client (failed with: %)', sqlerrm;
+    end if;
+    v_denied := v_denied + 1;
+  end;
+
+  begin
+    perform kitluy_devices.enroll_device_v1(
+      'CLIENT-FORGED', gen_random_uuid(), now(), repeat('aa', 32), 'ed25519', 'software',
+      'CLIENT', 'CLIENT', '[]'::jsonb);
+    raise exception 'FAIL WS11-N4: a client executed enroll_device_v1';
+  exception when others then
+    if sqlerrm like 'FAIL WS11%' then raise; end if;
+    if sqlerrm not like '%permission denied%' then
+      raise exception 'FAIL WS11-N4: enroll_device_v1 was callable by a client (failed with: %)', sqlerrm;
+    end if;
+    v_denied := v_denied + 1;
+  end;
+
+  begin
+    perform kitluy_devices.assert_pki_configuration_approved('production');
+    raise exception 'FAIL WS11-N4: a client executed assert_pki_configuration_approved';
+  exception when others then
+    if sqlerrm like 'FAIL WS11%' then raise; end if;
+    if sqlerrm not like '%permission denied%' then
+      raise exception 'FAIL WS11-N4: assert_pki_configuration_approved was callable by a client (failed with: %)', sqlerrm;
+    end if;
+    v_denied := v_denied + 1;
+  end;
+
+  if v_denied <> 3 then
+    raise exception 'FAIL WS11-N4: expected 3 denied procedure calls, got %', v_denied;
+  end if;
+  raise notice 'PASS WS11-N4: enrollment, activation and the PKI gate function are not executable by a client session — PUBLIC EXECUTE is revoked, not merely re-granted (the WS-10 migration 0020 lesson)';
+end $$;
+rollback;
+
+-- WS11-P1 (control): the service path reads the fleet view, and while BLK-005
+-- is open no device is ACTIVE and no device holds a certificate.
+begin;
+set local role service_role;
+do $$
+declare
+  v_total int;
+  v_active int;
+  v_certs int;
+begin
+  select count(*) into v_total from kitluy_devices.device_fleet_status;
+  select count(*) into v_active from kitluy_devices.device_fleet_status where fleet_status = 'ACTIVE';
+  select count(*) into v_certs from kitluy_devices.device_certificates;
+
+  if v_active <> 0 then
+    raise exception 'FAIL WS11-P1: % device(s) are ACTIVE while BLK-005 is open', v_active;
+  end if;
+  if v_certs <> 0 then
+    raise exception 'FAIL WS11-P1: % certificate row(s) exist with no approved issuing CA', v_certs;
+  end if;
+  raise notice 'PASS WS11-P1: the service path reads the fleet view (% device rows); zero devices are ACTIVE and zero certificates exist while BLK-005 is open', v_total;
+end $$;
+rollback;
+
+select 'rls-tests complete: 14+9 baseline cases; cycle-5 WS5 7 negative + 7 positive and WS6 10 negative + 9 positive; cycle-6 WS7 13 negative + 6 positive and WS8 13 negative + 6 positive; cycle-10 WS11-T001 4 negative + 1 positive kitluy_devices cases executed' as result;
