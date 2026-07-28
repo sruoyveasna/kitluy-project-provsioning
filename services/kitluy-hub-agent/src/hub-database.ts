@@ -306,6 +306,7 @@ export const HUB_MIGRATION_ORDER = [
   "0015_sync_delivery_state_alignment.sql",
   "0016_sync_outbox_leasing.sql",
   "0017_sync_transmission_batches.sql",
+  "0018_hub_effect_keys.sql",
 ] as const;
 
 /**

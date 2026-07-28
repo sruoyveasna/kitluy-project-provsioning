@@ -574,23 +574,58 @@ begin
   for r in
     select c.table_schema, c.table_name
     from information_schema.columns c
+    join information_schema.tables t
+      on t.table_schema = c.table_schema and t.table_name = c.table_name
     where c.table_schema like 'edge\_%' and c.column_name = 'idempotency_key'
+      and t.table_type = 'BASE TABLE'
   loop
+    -- edge_sync.local_event accepts EITHER namespace after 0018
+    -- (KLD-2026-07-28-001 Group 6): an EVENT carries the Hub-issued kh1.* effect
+    -- key, while the shipped fixtures and pre-ruling rows carry kl1.*. Every
+    -- OTHER relation keeps the STRICT terminal check — in particular
+    -- command_result, because a command result always belongs to a terminal
+    -- command (terminal_device_id is NOT NULL).
     if not exists (
       select 1 from pg_constraint k
       where k.conrelid = format('%I.%I', r.table_schema, r.table_name)::regclass
         and k.contype = 'c'
-        and pg_get_constraintdef(k.oid) like '%is_canonical_idempotency_key%'
+        and (pg_get_constraintdef(k.oid) like '%is_canonical_idempotency_key%'
+             or pg_get_constraintdef(k.oid) like '%is_canonical_event_key%')
     ) then
-      raise exception 'ASSERT FAIL: %.% stores idempotency_key without the canonical CHECK (offline §2)',
+      raise exception 'ASSERT FAIL: %.% stores idempotency_key without a canonical CHECK (offline §2)',
         r.table_schema, r.table_name;
+    end if;
+    if r.table_schema || '.' || r.table_name <> 'edge_sync.local_event' then
+      if exists (
+        select 1 from pg_constraint k
+        where k.conrelid = format('%I.%I', r.table_schema, r.table_name)::regclass
+          and k.contype = 'c'
+          and pg_get_constraintdef(k.oid) like '%is_canonical_event_key%'
+      ) then
+        raise exception
+          'ASSERT FAIL: %.% accepts the Hub-issued kh1 namespace; only edge_sync.local_event may (KLREQ-026)',
+          r.table_schema, r.table_name;
+      end if;
     end if;
     v_count := v_count + 1;
   end loop;
   if v_count < 5 then
     raise exception 'ASSERT FAIL: expected at least 5 idempotency-key relations, found %', v_count;
   end if;
-  raise notice 'PASS idempotency-key-coverage: % relation(s) store an idempotency key and every one CHECKs the canonical kl1 shape', v_count;
+
+  -- The two namespaces must stay DISJOINT: a Hub-generated effect can never be
+  -- read as a terminal command (KLREQ-026).
+  if edge_sync.is_canonical_idempotency_key('kh1.e0000000-0000-4000-8000-000000000020.0')
+     or edge_sync.is_canonical_effect_key('kl1.e0000000-0000-4000-8000-000000000020.1') then
+    raise exception 'ASSERT FAIL: the kl1 and kh1 key namespaces overlap (KLREQ-026)';
+  end if;
+  if not edge_sync.is_canonical_event_key('kh1.e0000000-0000-4000-8000-000000000020.0')
+     or not edge_sync.is_canonical_event_key('kl1.e0000000-0000-4000-8000-000000000020.1')
+     or edge_sync.is_canonical_event_key('kx1.e0000000-0000-4000-8000-000000000020.1') then
+    raise exception 'ASSERT FAIL: the event-key check does not accept exactly the two canonical namespaces';
+  end if;
+
+  raise notice 'PASS idempotency-key-coverage: % relation(s) store an idempotency key; edge_sync.local_event accepts the kl1 and kh1 namespaces and every other relation stays strict-terminal; the namespaces are disjoint', v_count;
 end $$;
 
 -- ---------------------------------------------------------------------------

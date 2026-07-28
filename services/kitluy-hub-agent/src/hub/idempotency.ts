@@ -43,26 +43,28 @@ export {
 };
 
 /**
- * Hub-issued event key for the SECOND and later events of one command.
+ * RESOLVED — the Hub-issued event key namespace (KLREQ-026).
  *
- * RECORDED FINDING (WS-09 command layer). `edge_sync.local_event.idempotency_key`
- * is UNIQUE and CHECKed against the canonical §2 shape, while a single approved
- * command legitimately produces several events (confirm-intake writes a status
- * event, one custody event per unit and a payment event — each business row
- * carries its own UNIQUE `event_id` referencing a distinct `local_event`). The
- * offline contract §2 defines only TERMINAL-issued keys, so a second namespace
- * is unavoidable. It is derived from the HUB device UUID plus the never-reused
- * `hub_sequence` (offline §5), which:
- *   - satisfies the canonical shape byte for byte,
- *   - is unique by construction, and
- *   - is unambiguously distinguishable from a terminal key, because the Hub
- *     device id is never a `edge_identity.terminal_device` id.
- * The first event of a command keeps the terminal-issued command key, matching
- * the shipped fixtures. Amendment to the offline contract is OWED.
+ * WS-09 recorded a finding here: `edge_sync.local_event.idempotency_key` is
+ * UNIQUE and CHECKed against the canonical §2 shape, while one approved command
+ * legitimately produces several events, and offline contract §2 defines only
+ * TERMINAL-issued keys. The interim workaround derived a key from the HUB device
+ * UUID plus the never-reused `hub_sequence`, which satisfied the `kl1.*` shape
+ * byte for byte.
+ *
+ * The owner ruled it (KLD-2026-07-28-001 Group 6): the namespace is
+ * `kh1.{command_result_uuid}.{event_ordinal}`, ordinals come from the COMMAND
+ * CONTRACT rather than insertion order, and "a Hub-generated event must never
+ * claim to be a terminal command" — which the interim `kl1.*` form did. The
+ * workaround is therefore RETIRED rather than kept alongside the ruling; the
+ * derivation now lives in `hub/effect-contract.ts` and the widened CHECK is in
+ * hub migration 0018.
  */
-export function deriveHubEventKey(hubDeviceId: string, hubSequence: bigint): string {
-  return buildIdempotencyKey(hubDeviceId, hubSequence);
-}
+export const HUB_EVENT_KEY_NAMESPACE_RESOLUTION =
+  "KLREQ-026 RESOLVED by KLD-2026-07-28-001 Group 6: Hub-issued event effects use " +
+  "kh1.{command_result_uuid}.{event_ordinal}. See hub/effect-contract.ts. The interim " +
+  "kl1.{hub_device_uuid}.{hub_sequence} derivation is retired — a Hub-generated event " +
+  "must never claim to be a terminal command.";
 
 /** Commit status vocabulary of `edge_sync.command_result` (0009 CHECK). */
 export type CommandCommitStatus = "in_progress" | "committed" | "failed" | "rejected";

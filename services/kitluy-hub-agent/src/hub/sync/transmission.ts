@@ -232,21 +232,50 @@ export async function prepareSignedBatch(
 }
 
 /**
- * Sequences inside the declared range that are neither present nor declared as
- * known gaps. A non-empty result is REAL data loss and must never be treated as
- * a rounding detail.
+ * RECORDED FINDING (WS-10-T002): a batch CANNOT prove its own density.
+ *
+ * `edge_sync.hub_sequence_seq` is ONE allocator for the whole Hub (offline
+ * contract §5), while ordering is per `(location_id, assignment_generation)`
+ * (§5.1). A stream's sequences are therefore sparse by construction: values
+ * absent from a batch's range may belong to another stream, to a rolled-back
+ * transaction, or to nothing at all — and a batch has no way to tell those
+ * apart.
+ *
+ * So the manifest states what it CAN state truthfully: which sequences it
+ * carries, and which it knows were burnt. Missing-event detection belongs to
+ * the CLOUD, which compares the batch against its own acknowledged position for
+ * the stream; the Hub guarantees ORDER (strictly increasing, oldest
+ * unacknowledged first), not density. An earlier draft of this module asserted
+ * density and would have reported every other stream's sequences as data loss.
+ *
+ * What IS checkable locally is that the declarations are self-consistent.
  */
-export function unexplainedSequences(manifest: BatchManifest): readonly string[] {
-  const present = new Set(manifest.items.map((i) => i.hubSequence));
-  const gaps = new Set(manifest.knownGaps);
-  const missing: string[] = [];
+export function manifestDeclarationProblems(manifest: BatchManifest): readonly string[] {
+  const problems: string[] = [];
   const first = BigInt(manifest.firstHubSequence);
   const last = BigInt(manifest.lastHubSequence);
-  for (let s = first; s <= last; s += 1n) {
-    const key = s.toString();
-    if (!present.has(key) && !gaps.has(key)) missing.push(key);
+  if (last < first) {
+    problems.push(`declared range ends before it starts: ${first}..${last}`);
   }
-  return missing;
+  const sequences = manifest.items.map((i) => BigInt(i.hubSequence));
+  if (sequences.length !== manifest.itemCount) {
+    problems.push(`itemCount ${manifest.itemCount} does not match ${sequences.length} item(s)`);
+  }
+  for (const sequence of sequences) {
+    if (sequence < first || sequence > last) {
+      problems.push(`item ${sequence} lies outside the declared range ${first}..${last}`);
+    }
+  }
+  for (const gap of manifest.knownGaps) {
+    const value = BigInt(gap);
+    if (value < first || value > last) {
+      problems.push(`declared gap ${gap} lies outside the declared range ${first}..${last}`);
+    }
+    if (sequences.some((s) => s === value)) {
+      problems.push(`sequence ${gap} is declared as a gap but is also carried by the batch`);
+    }
+  }
+  return problems;
 }
 
 /**

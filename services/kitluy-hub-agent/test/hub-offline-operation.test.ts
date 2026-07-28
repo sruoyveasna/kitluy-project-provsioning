@@ -110,9 +110,14 @@ describe.skipIf(!available)("WAN unavailable, LAN and local database healthy", (
 
   /** Drive one complete Store day through the Hub with no WAN available. */
   async function runOfflineStoreDay(): Promise<OfflineDay> {
+    // Scoped to assignment_generation 1 — the stream the WS-09 command layer
+    // writes. WS-10's suites reserve their own generations and legitimately move
+    // rows off 'pending', so an unscoped count here would be asserting that
+    // WS-10 has not run rather than that the offline day acknowledged nothing.
     const ackedOutboxBefore = await countRows(
       p,
-      `select count(*)::text as count from edge_sync.outbox where delivery_state <> 'pending'`,
+      `select count(*)::text as count from edge_sync.outbox
+         where delivery_state <> 'pending' and assignment_generation = 1`,
     );
     const position = await provisionStoragePosition(p, SUITE, 4);
     const steps: Record<string, HubCommandResult> = {};
@@ -420,7 +425,8 @@ describe.skipIf(!available)("WAN unavailable, LAN and local database healthy", (
     // …and the offline day acknowledged nothing anywhere in the database.
     const ackedAfter = await countRows(
       p,
-      `select count(*)::text as count from edge_sync.outbox where delivery_state <> 'pending'`,
+      `select count(*)::text as count from edge_sync.outbox
+         where delivery_state <> 'pending' and assignment_generation = 1`,
     );
     expect(ackedAfter).toBe(day.ackedOutboxBefore);
   });

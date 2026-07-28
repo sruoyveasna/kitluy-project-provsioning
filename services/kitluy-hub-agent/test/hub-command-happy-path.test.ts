@@ -70,6 +70,7 @@ import {
   provisionTerminal,
   type ProvisionedTerminal,
 } from "./hub-fixtures.js";
+import { uuidv7 } from "../src/hub/uuid.js";
 
 const SUITE = "happy";
 const available = await hubReachable();
@@ -641,6 +642,13 @@ describe.skipIf(!available)("Hub command layer — happy paths", () => {
     });
     const paymentId = pending.result["payment_id"] as string;
 
+    // KLREQ-027: a provider outcome reaches the Hub only as a SIGNED CLOUD
+    // DELIVERY. `deliveryId` is that delivery's identity and, per KLREQ-026, the
+    // kh1.* namespace for the effects it produces — so a REDELIVERY of the same
+    // outcome must reuse it, which is what the third call below proves.
+    const unverifiedDelivery = uuidv7();
+    const verifiedDelivery = uuidv7();
+
     const quarantined = await applyProviderCallback(p, {
       paymentId,
       providerTransactionId: `TXN-${paymentId.slice(0, 8)}`,
@@ -649,6 +657,7 @@ describe.skipIf(!available)("Hub command layer — happy paths", () => {
       amountMinor: 2200n,
       signatureVerified: false,
       businessDate: today,
+      deliveryId: unverifiedDelivery,
     });
     expect(quarantined.engineState).toBe("QUARANTINED");
     expect(quarantined.paymentState).toBe("pending");
@@ -662,6 +671,7 @@ describe.skipIf(!available)("Hub command layer — happy paths", () => {
       amountMinor: 2200n,
       signatureVerified: true,
       businessDate: today,
+      deliveryId: verifiedDelivery,
     });
     expect(applied.engineState).toBe("APPLIED");
     expect(applied.duplicate).toBe(false);
@@ -675,6 +685,7 @@ describe.skipIf(!available)("Hub command layer — happy paths", () => {
       amountMinor: 2200n,
       signatureVerified: true,
       businessDate: today,
+      deliveryId: verifiedDelivery,
     });
     expect(redelivered.duplicate).toBe(true);
     expect(redelivered.eventIds).toHaveLength(0);

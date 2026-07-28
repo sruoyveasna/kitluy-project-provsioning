@@ -199,23 +199,27 @@ describe("batch ordering and declared sequence gaps", () => {
     expect(() => validateBatchOrdering([event(1n, 2), event(9n, 1)])).toThrow(/generation/);
   });
 
+  const range = {
+    assignmentGeneration: 1,
+    firstHubSequence: 1n,
+    lastHubSequence: 5n,
+    knownGaps: [3n],
+  };
+  const expected = [1n, 2n, 3n, 4n, 5n];
+
   it("treats a journalled burnt sequence as a KNOWN gap, not a missing event", () => {
-    const range = {
-      assignmentGeneration: 1,
-      firstHubSequence: 1n,
-      lastHubSequence: 5n,
-      knownGaps: [3n],
-    };
-    expect(missingSequences(range, [1n, 2n, 4n, 5n])).toEqual([]);
+    expect(missingSequences(range, [1n, 2n, 4n, 5n], expected)).toEqual([]);
   });
 
   it("still reports a genuinely missing sequence", () => {
-    const range = {
-      assignmentGeneration: 1,
-      firstHubSequence: 1n,
-      lastHubSequence: 5n,
-      knownGaps: [3n],
-    };
-    expect(missingSequences(range, [1n, 2n, 5n])).toEqual([4n]);
+    expect(missingSequences(range, [1n, 2n, 5n], expected)).toEqual([4n]);
+  });
+
+  it("never invents a missing sequence from the range alone", () => {
+    // The Hub sequence is ONE allocator for the whole Hub while ordering is per
+    // stream, so 2 and 4 may simply belong to another stream. Density is the
+    // caller's claim: with nothing expected, nothing is missing.
+    expect(missingSequences(range, [1n, 5n], [])).toEqual([]);
+    expect(missingSequences(range, [1n, 5n], [1n, 5n])).toEqual([]);
   });
 });

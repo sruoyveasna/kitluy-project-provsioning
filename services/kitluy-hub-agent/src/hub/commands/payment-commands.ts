@@ -240,7 +240,12 @@ async function recordCashPaymentHandler(
     actorId: auth.device.actorId,
     terminalDeviceId: auth.device.terminalDeviceId,
     eventId: paymentEvent.eventId,
-    idempotencyKey: paymentEvent.idempotencyKey,
+    // KLREQ-026: the payment ROW carries the TERMINAL COMMAND key, like
+    // ready_scan_session and pickup_session. The event it was recorded by
+    // carries its own Hub-issued kh1.* effect key; storing that here would
+    // make the payment ledger's dedupe key a per-effect identity instead of
+    // a per-command one.
+    idempotencyKey: execution.idempotencyKey,
   });
   await paymentsRepo.insertTenderLeg(client, {
     id: uuidv7(),
@@ -448,7 +453,12 @@ export async function createPendingPayment(
         actorId: auth.device.actorId,
         terminalDeviceId: auth.device.terminalDeviceId,
         eventId: event.eventId,
-        idempotencyKey: event.idempotencyKey,
+        // KLREQ-026: the payment ROW carries the TERMINAL COMMAND key, like
+        // ready_scan_session and pickup_session. The event it was recorded by
+        // carries its own Hub-issued kh1.* effect key; storing that here would
+        // make the payment ledger's dedupe key a per-effect identity instead of
+        // a per-command one.
+        idempotencyKey: execution.idempotencyKey,
       });
       await paymentsRepo.insertPaymentAttempt(client, {
         id: uuidv7(),
@@ -819,6 +829,17 @@ export async function requestVoid(
 // ---------------------------------------------------------------------------
 // Provider callback — SERVICE pipeline (no terminal actor)
 // ---------------------------------------------------------------------------
+
+/** Command type recorded against this service pipeline's effects (KLREQ-026). */
+export const PROVIDER_CALLBACK_COMMAND_TYPE = "payments.apply_provider_callback" as const;
+
+/**
+ * The effects this pipeline may emit, in contract order. It has no registered
+ * `auditEvent` to inherit because it has no Edge route (KLREQ-027), so the list
+ * is stated here in full.
+ */
+export const PROVIDER_CALLBACK_EFFECTS = ["payment.recorded"] as const;
+
 export interface ProviderCallbackInput {
   readonly paymentId: string;
   readonly providerTransactionId: string;
@@ -829,6 +850,17 @@ export interface ProviderCallbackInput {
   readonly signatureVerified: boolean;
   readonly businessDate: string;
   readonly correlationId?: string;
+  /**
+   * UUID of the SIGNED CLOUD DELIVERY that carried this outcome — in practice
+   * the `edge_sync.inbox.message_id` (KLREQ-027: the canonical path is
+   * provider -> cloud -> signed WS-10 delivery, never a direct
+   * provider-to-Hub callback).
+   *
+   * It is the `kh1.*` namespace for the effects this callback emits, so it must
+   * be STABLE across a redelivery of the same outcome; a fresh id per attempt
+   * would mint new business-effect identities for a fact that already happened.
+   */
+  readonly deliveryId: string;
 }
 
 export interface ProviderCallbackOutcome {
@@ -1005,9 +1037,16 @@ export async function applyProviderCallback(
       businessDate: input.businessDate,
       correlationId: input.correlationId ?? uuidv7(),
       originSequence: 0n,
-      // A service-originated event carries a HUB-issued key from the outset:
-      // there is no terminal client_sequence behind it.
-      commandIdempotencyKey: `kl1.${assignment.hub_device_id}.${Date.now()}`,
+      // KLREQ-026 CORRECTION. This used to fabricate
+      // `kl1.{hub_device_id}.{Date.now()}` — a Hub-generated effect wearing a
+      // TERMINAL key, and a non-deterministic one, so a redelivery of the same
+      // provider outcome would have minted a second business-effect identity for
+      // the same fact. The namespace is now the signed delivery that carried the
+      // outcome, and the key is `kh1.*` like every other Hub-issued effect.
+      commandIdempotencyKey: "",
+      commandResultId: input.deliveryId,
+      commandType: PROVIDER_CALLBACK_COMMAND_TYPE,
+      declaredEffects: PROVIDER_CALLBACK_EFFECTS,
     });
 
     let paymentState = payment.state;

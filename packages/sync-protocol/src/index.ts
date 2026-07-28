@@ -311,20 +311,29 @@ export interface BatchSequenceRange {
 
 /**
  * Distinguish "this sequence is genuinely missing" from "this sequence was
- * burnt by a rolled-back transaction". Anything inside the declared range that
- * is neither present nor a declared gap is genuinely missing, and the cloud is
- * entitled to say so.
+ * burnt by a rolled-back transaction", for a stream the caller KNOWS to be
+ * dense.
+ *
+ * DENSITY IS THE CALLER'S CLAIM, NOT THIS FUNCTION'S ASSUMPTION. The Hub
+ * sequence is a single allocator for the whole Hub (offline §5) while ordering
+ * is per `(location_id, assignment_generation)` (§5.1), so a stream's
+ * sequences are sparse in general and a value absent from a range may simply
+ * belong to another stream. Pass `expectedSequences` — the sequences the
+ * consumer independently knows should exist for this stream — rather than
+ * letting the range imply them.
  */
 export function missingSequences(
   range: BatchSequenceRange,
   presentSequences: readonly bigint[],
+  expectedSequences: readonly bigint[],
 ): readonly bigint[] {
   const present = new Set(presentSequences.map(String));
   const gaps = new Set(range.knownGaps.map(String));
   const missing: bigint[] = [];
-  for (let s = range.firstHubSequence; s <= range.lastHubSequence; s += 1n) {
-    const key = String(s);
-    if (!present.has(key) && !gaps.has(key)) missing.push(s);
+  for (const expected of expectedSequences) {
+    if (expected < range.firstHubSequence || expected > range.lastHubSequence) continue;
+    const key = String(expected);
+    if (!present.has(key) && !gaps.has(key)) missing.push(expected);
   }
   return missing;
 }

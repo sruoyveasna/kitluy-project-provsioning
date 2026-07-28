@@ -50,6 +50,7 @@ import {
   type HubDeviceContext,
 } from "./authorization.js";
 import { requireActiveHubCommand, type HubCommandDefinition } from "./command-registry.js";
+import { declaredEffects } from "./effect-contract.js";
 import { canonicalRequestHash, completeCommand, reserveOrLoadCommand } from "./idempotency.js";
 import { HubEventRecorder, payloadChecksum } from "./outbox.js";
 import { auditRepo, syncRepo } from "./repositories/index.js";
@@ -183,8 +184,12 @@ export async function executeHubCommand(
             : {}),
         });
 
+        // The reserved command-result id is also the `kh1.*` effect-key
+        // namespace for every event this command emits (KLREQ-026), so it is
+        // captured rather than inlined.
+        const commandResultId = uuidv7();
         const reservation = await reserveOrLoadCommand(client, {
-          commandResultId: uuidv7(),
+          commandResultId,
           tenantId: request.device.tenantId,
           digitalStoreId: request.device.digitalStoreId,
           locationId: request.device.locationId,
@@ -218,6 +223,9 @@ export async function executeHubCommand(
           correlationId,
           originSequence: request.clientSequence,
           commandIdempotencyKey: request.idempotencyKey,
+          commandResultId,
+          commandType: definition.commandType,
+          declaredEffects: declaredEffects(definition),
         });
         recorderRef = recorder;
 

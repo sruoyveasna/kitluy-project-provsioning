@@ -56,7 +56,7 @@ describe.skipIf(!available)("WS-10-T001 outbox leasing", () => {
     p = pool();
     await ensureRuntimeRoleMembership(p);
     terminal = await provisionTerminal(p, "lease", T1, ACTOR_CASHIER);
-    generation = await reserveSyncGenerationBlock(p);
+    generation = await reserveSyncGenerationBlock(p, "lease");
   });
 
   afterAll(async () => {

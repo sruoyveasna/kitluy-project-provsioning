@@ -1289,4 +1289,150 @@ begin
   raise notice 'PASS posting RPC: security definer, locked search_path, execute for service_role only';
 end $$;
 
-select 'assertions complete: groups 0010-0095 structural contract holds (incl. cycle-6 WS-07/WS-08 sections 17-26)' as result;
+-- ---------------------------------------------------------------------------
+-- 27. WS-10 sync ingestion (group 0110; Cycle 9).
+--     KLREQ-026: ingestion dedupes on the Hub-issued business-effect key.
+--     Amendment KLD-2026-07-28-001-A01 §2: no fabricated acknowledgement, and a
+--     transport failure is never a durable rejection.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  t text;
+  v_checked int := 0;
+begin
+  foreach t in array array['sync_batches', 'sync_inbox', 'sync_cursors', 'sync_conflicts'] loop
+    if not exists (
+      select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'kitluy_sync' and c.relname = t and c.relkind = 'r'
+    ) then
+      raise exception 'ASSERT FAIL: kitluy_sync.% is missing (group 0110)', t;
+    end if;
+    if not exists (
+      select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'kitluy_sync' and c.relname = t
+        and c.relrowsecurity and c.relforcerowsecurity
+    ) then
+      raise exception 'ASSERT FAIL: kitluy_sync.% is not RLS ENABLE+FORCE', t;
+    end if;
+    -- Fail closed: SELECT-only for clients, and never for anon.
+    if exists (
+      select 1 from pg_policies
+      where schemaname = 'kitluy_sync' and tablename = t and cmd <> 'SELECT'
+    ) then
+      raise exception 'ASSERT FAIL: kitluy_sync.% has a non-SELECT client policy', t;
+    end if;
+    if exists (
+      select 1 from pg_policies
+      where schemaname = 'kitluy_sync' and tablename = t and 'anon' = any (roles)
+    ) then
+      raise exception 'ASSERT FAIL: kitluy_sync.% exposes an anon policy', t;
+    end if;
+    v_checked := v_checked + 1;
+  end loop;
+  if v_checked <> 4 then
+    raise exception 'ASSERT FAIL: expected 4 kitluy_sync relations, checked %', v_checked;
+  end if;
+  raise notice 'PASS sync-ingestion-relations: 4 kitluy_sync relations exist, all RLS ENABLE+FORCE, SELECT-only for clients, zero anon policies';
+end $$;
+
+do $$
+begin
+  -- THE dedupe key: one business effect per Location, by owner ruling.
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'kitluy_sync.sync_inbox'::regclass and conname = 'sync_inbox_effect_key'
+      and contype = 'u'
+  ) then
+    raise exception
+      'ASSERT FAIL: sync_inbox has no unique (store_location_id, effect_key); ingestion would not be idempotent (KLREQ-026)';
+  end if;
+
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'kitluy_sync.sync_inbox'::regclass
+      and conname = 'sync_inbox_effect_key_check'
+  ) then
+    raise exception 'ASSERT FAIL: sync_inbox does not CHECK the effect-key shape';
+  end if;
+
+  -- No fabricated acknowledgement, no bare rejection (amendment §2).
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'kitluy_sync.sync_inbox'::regclass and conname = 'sync_inbox_applied_check'
+  ) or not exists (
+    select 1 from pg_constraint
+    where conrelid = 'kitluy_sync.sync_inbox'::regclass and conname = 'sync_inbox_rejected_check'
+  ) then
+    raise exception
+      'ASSERT FAIL: sync_inbox does not require an ack identity for APPLIED and a durable code for REJECTED';
+  end if;
+
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'kitluy_sync.sync_batches'::regclass and conname = 'sync_batches_verified_check'
+  ) then
+    raise exception 'ASSERT FAIL: an unverified batch could reach APPLIED';
+  end if;
+
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'kitluy_sync.sync_cursors'::regclass and conname = 'sync_cursors_order_check'
+  ) then
+    raise exception 'ASSERT FAIL: a sync cursor could acknowledge past what it ingested';
+  end if;
+
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'kitluy_sync.sync_conflicts'::regclass
+      and conname = 'sync_conflicts_resolution_check'
+  ) then
+    raise exception 'ASSERT FAIL: a sync conflict could be closed with no actor, reason or moment';
+  end if;
+
+  raise notice 'PASS sync-ingestion-invariants: dedupe is unique per (location, effect_key); APPLIED requires a cloud ack id and REJECTED a durable code; an unverified batch cannot be applied; a cursor cannot outrun ingestion; a conflict cannot be closed silently';
+end $$;
+
+do $$
+declare
+  v_effect text := 'kh1.e0000000-0000-4000-8000-000000000099.0';
+  v_blocked int := 0;
+begin
+  -- A malformed key cannot be persisted at all.
+  begin
+    insert into kitluy_sync.sync_inbox
+      (tenant_id, digital_store_id, store_location_id, batch_id, effect_key, event_id,
+       source_device_id, assignment_generation, hub_sequence, aggregate_type, aggregate_id,
+       event_type, schema_version, payload_sha256, payload, occurred_at)
+    select l.tenant_id, l.digital_store_id, l.id, gen_random_uuid(), 'not-a-key',
+           gen_random_uuid(), gen_random_uuid(), 1, 1, 'booking', gen_random_uuid(), 'x.y', 1,
+           repeat('0', 64), '{}'::jsonb, now()
+      from kitluy_core.store_locations l limit 1;
+    raise exception 'ASSERT FAIL: a malformed effect key was accepted';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- APPLIED without the cloud acknowledgement identity is refused.
+  begin
+    insert into kitluy_sync.sync_inbox
+      (tenant_id, digital_store_id, store_location_id, batch_id, effect_key, event_id,
+       source_device_id, assignment_generation, hub_sequence, aggregate_type, aggregate_id,
+       event_type, schema_version, payload_sha256, payload, occurred_at, status, processed_at)
+    select l.tenant_id, l.digital_store_id, l.id, gen_random_uuid(), v_effect,
+           gen_random_uuid(), gen_random_uuid(), 1, 1, 'booking', gen_random_uuid(), 'x.y', 1,
+           repeat('0', 64), '{}'::jsonb, now(), 'APPLIED', now()
+      from kitluy_core.store_locations l limit 1;
+    raise exception 'ASSERT FAIL: an APPLIED effect was accepted with no cloud ack id';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  if v_blocked <> 2 then
+    raise exception 'ASSERT FAIL: expected 2 blocked ingestion writes, got %', v_blocked;
+  end if;
+  raise notice 'PASS sync-ingestion-negatives: a malformed effect key and a fabricated acknowledgement are both refused by the database';
+end $$;
+
+select 'assertions complete: groups 0010-0110 structural contract holds (incl. cycle-6 WS-07/WS-08 sections 17-26 and cycle-9 WS-10 section 27)' as result;

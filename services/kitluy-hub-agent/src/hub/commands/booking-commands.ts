@@ -836,7 +836,12 @@ export async function confirmIntake(
           actorId: auth.device.actorId,
           terminalDeviceId: auth.device.terminalDeviceId,
           eventId: depositEvent.eventId,
-          idempotencyKey: depositEvent.idempotencyKey,
+          // KLREQ-026: the payment ROW carries the TERMINAL COMMAND key, like
+          // ready_scan_session and pickup_session. The event it was recorded by
+          // carries its own Hub-issued kh1.* effect key; storing that here would
+          // make the payment ledger's dedupe key a per-effect identity instead of
+          // a per-command one.
+          idempotencyKey: execution.idempotencyKey,
         });
         paid = booking.paid_minor + input.depositMinor;
         const afterDeposit = await laundryRepo.updateBookingProjection(client, {

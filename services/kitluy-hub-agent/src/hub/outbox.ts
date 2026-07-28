@@ -23,7 +23,7 @@ import { asId } from "@kitluy/shared-types";
 import { canonicalJson } from "../hub-database.js";
 import { SERVICE_NAME, SERVICE_VERSION } from "../index.js";
 import type { HubClient } from "./db.js";
-import { deriveHubEventKey } from "./idempotency.js";
+import { effectKey } from "./effect-contract.js";
 import { syncRepo } from "./repositories/index.js";
 import { uuidv7 } from "./uuid.js";
 
@@ -48,8 +48,17 @@ export interface HubEventContext {
   readonly businessDate: string;
   readonly correlationId: string;
   readonly originSequence: bigint;
-  /** Terminal-issued command key; carried by the FIRST event of the command. */
+  /**
+   * Terminal-issued command key. It identifies the COMMAND and is stored on
+   * `edge_sync.command_result`; it is NOT carried by any event (KLREQ-026 — a
+   * Hub-generated event must never claim to be a terminal command).
+   */
   readonly commandIdempotencyKey: string;
+  /** The reserved `edge_sync.command_result.id` — the `kh1.*` key's namespace. */
+  readonly commandResultId: string;
+  readonly commandType: string;
+  /** Declared effect names in contract order (see hub/effect-contract.ts). */
+  readonly declaredEffects: readonly string[];
 }
 
 export interface RecordEventInput {
@@ -78,6 +87,8 @@ export interface RecordedEvent {
 export class HubEventRecorder {
   private readonly recorded: RecordedEvent[] = [];
   private readonly allocated: bigint[] = [];
+  /** How many times each declared effect has been emitted by THIS command. */
+  private readonly occurrences = new Map<string, number>();
 
   constructor(
     private readonly client: HubClient,
@@ -114,13 +125,21 @@ export class HubEventRecorder {
     this.allocated.push(hubSequence);
 
     const eventId = uuidv7();
-    // The FIRST event of a command carries the terminal-issued command key;
-    // later events carry a Hub-issued key derived from the never-reused
-    // hub_sequence (see hub/idempotency.ts for the recorded finding).
-    const idempotencyKey =
-      this.recorded.length === 0
-        ? this.context.commandIdempotencyKey
-        : deriveHubEventKey(this.context.hubDeviceId, hubSequence);
+    // EVERY event carries a Hub-issued `kh1.*` business-effect key
+    // (KLREQ-026 / KLD-2026-07-28-001 Group 6). The ordinal comes from the
+    // command's declared effect contract and the occurrence index of this
+    // effect, so a replay of the same business command reproduces the same key
+    // for the same fact. The terminal-issued `kl1.*` key identifies the COMMAND
+    // and stays on `edge_sync.command_result`.
+    const occurrenceIndex = this.occurrences.get(input.eventName) ?? 0;
+    this.occurrences.set(input.eventName, occurrenceIndex + 1);
+    const idempotencyKey = effectKey({
+      commandResultId: this.context.commandResultId,
+      commandType: this.context.commandType,
+      effects: this.context.declaredEffects,
+      eventName: input.eventName,
+      occurrenceIndex,
+    });
 
     const payloadSha256 = payloadChecksum(input.payload);
     const occurredAt = new Date().toISOString();

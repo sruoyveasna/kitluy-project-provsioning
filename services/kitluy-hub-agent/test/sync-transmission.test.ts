@@ -23,7 +23,7 @@ import {
   prepareSignedBatch,
   recordTransmissionBatch,
   signBatch,
-  unexplainedSequences,
+  manifestDeclarationProblems,
   type SignedBatch,
 } from "../src/hub/sync/transmission.js";
 import {
@@ -145,20 +145,43 @@ describe("batch manifest (pure)", () => {
     expect(BigInt(manifest.lastHubSequence)).toBe(huge);
   });
 
-  it("distinguishes a declared gap from real data loss", () => {
+  it("accepts self-consistent declarations, including a burnt sequence in range", () => {
     const declared = buildBatchManifest({
       batchId: "22222222-2222-4222-8222-222222222222",
       lease: lease([1n, 3n]),
       knownGaps: [2n],
     });
-    expect(unexplainedSequences(declared)).toEqual([]);
+    expect(manifestDeclarationProblems(declared)).toEqual([]);
 
-    const undeclared = buildBatchManifest({
+    // A batch does NOT claim density: 2 may simply belong to another stream,
+    // because the Hub sequence is one allocator for the whole Hub while
+    // ordering is per stream. An undeclared 2 is therefore NOT an error here.
+    const sparse = buildBatchManifest({
       batchId: "22222222-2222-4222-8222-222222222222",
       lease: lease([1n, 3n]),
       knownGaps: [],
     });
-    expect(unexplainedSequences(undeclared)).toEqual(["2"]);
+    expect(manifestDeclarationProblems(sparse)).toEqual([]);
+  });
+
+  it("rejects declarations that contradict themselves", () => {
+    const manifest = buildBatchManifest({
+      batchId: "22222222-2222-4222-8222-222222222222",
+      lease: lease([1n, 3n]),
+      knownGaps: [2n],
+    });
+    // A gap outside the declared range explains nothing.
+    expect(manifestDeclarationProblems({ ...manifest, knownGaps: ["99"] })).toEqual([
+      "declared gap 99 lies outside the declared range 1..3",
+    ]);
+    // A sequence cannot be both carried and burnt.
+    expect(manifestDeclarationProblems({ ...manifest, knownGaps: ["3"] })).toEqual([
+      "sequence 3 is declared as a gap but is also carried by the batch",
+    ]);
+    // The item count must match the items.
+    expect(manifestDeclarationProblems({ ...manifest, itemCount: 5 })).toContain(
+      "itemCount 5 does not match 2 item(s)",
+    );
   });
 
   it("refuses to transmit an empty batch", () => {
@@ -250,7 +273,7 @@ describe.skipIf(!available)("WS-10-T002 signed transmission against the Hub data
     p = pool();
     await ensureRuntimeRoleMembership(p);
     terminal = await provisionTerminal(p, "tx", T1, ACTOR_CASHIER);
-    generation = await reserveSyncGenerationBlock(p);
+    generation = await reserveSyncGenerationBlock(p, "transmission");
   });
 
   afterAll(async () => {
@@ -335,8 +358,9 @@ describe.skipIf(!available)("WS-10-T002 signed transmission against the Hub data
     expect(signed.manifest.firstHubSequence).toBe(before[0]!.hubSequence.toString());
     expect(signed.manifest.lastHubSequence).toBe(after[0]!.hubSequence.toString());
     expect(signed.manifest.knownGaps).toContain(burntSequence.toString());
-    // The burnt value is DECLARED, so nothing inside the range is unexplained.
-    expect(unexplainedSequences(signed.manifest)).toEqual([]);
+    // The declarations are self-consistent: the gap sits inside the declared
+    // range and is not also carried by the batch.
+    expect(manifestDeclarationProblems(signed.manifest)).toEqual([]);
   });
 
   it("records what was signed BEFORE it is sent, and can never rewrite it", async () => {

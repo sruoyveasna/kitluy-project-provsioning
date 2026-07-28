@@ -455,27 +455,51 @@ export const SYNC_TEST_GENERATION_BASE = 900;
 /** How many generations one suite may consume from its reserved block. */
 export const SYNC_TEST_GENERATION_BLOCK = 100;
 
+/** Generations per RUN, shared out among the suite slots below. */
+const SYNC_TEST_RUN_STRIDE = 10_000;
+
 /**
- * Reserve a generation block ABOVE everything already in the database.
+ * One slot per WS-10 suite, assigned explicitly.
  *
- * The Hub database is long-lived in development: it is not reset between test
- * runs, so rows from earlier runs stay. A suite that always started at a fixed
- * generation would meet its own leftovers on the second run and see a stream it
- * did not seed — which is exactly how a suite starts passing or failing for
- * reasons that have nothing to do with the code under test.
- *
- * Reading the current maximum guarantees a block above every previous run; the
- * small random offset keeps two suites that reserve concurrently from landing
- * on the same block.
+ * Explicit rather than hashed or random: two suites reserving concurrently must
+ * be unable to land on the same block, and "unable" is a property of a fixed
+ * table, not of a probability. Add a slot when adding a suite.
  */
-export async function reserveSyncGenerationBlock(p: pg.Pool): Promise<number> {
+export const SYNC_SUITE_SLOTS = {
+  lease: 0,
+  transmission: 1,
+  acknowledgement: 2,
+  inbox: 3,
+  configuration: 4,
+  cursor: 5,
+} as const;
+export type SyncSuiteSlot = keyof typeof SYNC_SUITE_SLOTS;
+
+/**
+ * Reserve this suite's generation block, ABOVE everything already in the
+ * database.
+ *
+ * TWO INDEPENDENT PROBLEMS, TWO INDEPENDENT MECHANISMS.
+ *
+ * ACROSS RUNS: the Hub database is long-lived in development and is not reset
+ * between test runs, so a suite that always started at a fixed generation would
+ * meet its own leftovers on the second run and lease a stream it did not seed.
+ * Rounding UP to the next run stride puts every run above every previous one.
+ *
+ * ACROSS SUITES IN ONE RUN: suites run in parallel workers and reserve at the
+ * same moment, so they read the same maximum and compute the same run base.
+ * The per-suite slot is what separates them, and it is a fixed assignment
+ * rather than a random draw so the separation is guaranteed rather than likely.
+ */
+export async function reserveSyncGenerationBlock(p: pg.Pool, slot: SyncSuiteSlot): Promise<number> {
   const result = await p.query<{ next: number }>(
     `select greatest(coalesce(max(assignment_generation), 0), $1)::int as next
        from edge_sync.outbox`,
     [SYNC_TEST_GENERATION_BASE],
   );
   const floor = result.rows[0]?.next ?? SYNC_TEST_GENERATION_BASE;
-  return floor + 1 + Math.floor(Math.random() * 8) * SYNC_TEST_GENERATION_BLOCK;
+  const runBase = Math.ceil((floor + 1) / SYNC_TEST_RUN_STRIDE) * SYNC_TEST_RUN_STRIDE;
+  return runBase + SYNC_SUITE_SLOTS[slot] * SYNC_TEST_GENERATION_BLOCK + 1;
 }
 
 export interface SeededOutboxEvent {
