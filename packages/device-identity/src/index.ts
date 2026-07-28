@@ -2,16 +2,19 @@
  * @kitluy/device-identity — device identity model, hardware-evidence contracts
  * and the ABSTRACT PKI / attestation / signing-provider interfaces.
  *
- * STATUS: WS-11-T001 (Cycle 10). The identity model, evidence contracts, state
- * machine and provider INTERFACES are implemented here. No production PKI is.
+ * STATUS: WS-11-T003 step 3 (Cycle 10). The identity model, evidence
+ * contracts, state machine and provider INTERFACES are implemented here.
+ * No CA, no key generation, no issuance and no signer are.
  *
  * Authority:
  *   docs/source/security/kitluy-device-certificate-and-trust-policy-v1.0.0.md
  *     §3 device identity layers, §4 manufacturing enrollment, §8 clone defense,
  *     §11 repair/NVMe/replacement.
- *   Cycle 10 T001 owner instruction (2026-07-28).
- *   Migration group 0120 (supabase/migrations/…_0120_device_enrollment_and_identity.sql)
- *     is the authoritative persistence contract; these types mirror it.
+ *   docs/decisions/kitluy-blk-005-pki-and-device-trust-owner-decision-v1.0.0.md
+ *     (KLD-2026-07-28-002) — hierarchy, custody, windows, revocation, the six
+ *     signing purposes, trusted time, replacement and compromise response.
+ *   Migration groups 0120-0122 are the authoritative persistence contract;
+ *     these types mirror them, and the tests assert they still agree.
  *
  * ---------------------------------------------------------------------------
  * THE IDENTITY RULE
@@ -26,15 +29,20 @@
  * requires governed re-enrollment — it never mints an unrelated identity.
  *
  * ---------------------------------------------------------------------------
- * BLK-005
+ * BLK-005 — RULED, NOT BUILT
  * ---------------------------------------------------------------------------
- * BLK-005 (PKI root/CA design, HSM/secure-element model, certificate windows)
- * is OPEN. This module therefore ships INTERFACES and a fail-closed default
- * implementation, and no CA, no key generation, no certificate issuance, no
- * revocation distribution and no signer. `UnconfiguredPkiProvider` refuses
- * every operation with an explicit required-value error, and it is the default
- * so that "nobody wired a provider" and "the design is not approved" produce
- * the same visible refusal rather than silent success.
+ * BLK-005's DECISION VALUES are resolved (KLD-2026-07-28-002); its
+ * IMPLEMENTATION is pending. Development trust is authorized; pilot activation,
+ * production activation and the production signer remain BLOCKED, and pilot /
+ * production HARDWARE certification additionally waits on a certified TPM 2.0
+ * or secure-element SKU.
+ *
+ * This module therefore ships INTERFACES and a fail-closed default. There is
+ * still no CA, no key generation, no certificate issuance, no revocation
+ * distribution and no signer. `UnconfiguredPkiProvider` refuses every operation
+ * with an explicit required-value error, and it is the DEFAULT so that "nobody
+ * wired a provider" and "this environment is not authorized" produce the same
+ * visible refusal rather than silent success.
  */
 
 export const PACKAGE_NAME = "@kitluy/device-identity" as const;
@@ -65,10 +73,22 @@ export type DeviceLifecycleState =
   | "enrolled"
   | "awaiting_trust"
   | "quarantined"
+  | "restricted_investigation"
   | "active"
   | "suspended"
   | "retired"
   | "replaced";
+
+/**
+ * Where a device key actually lives (KLD-2026-07-28-002 §4).
+ * `development_software` is permitted ONLY for local development, automated
+ * tests and non-production simulation, and is never production-eligible.
+ */
+export type HardwareTrustLevel = "development_software" | "tpm_2_0" | "secure_element";
+
+export function isHardwareBacked(level: HardwareTrustLevel): boolean {
+  return level !== "development_software";
+}
 
 export type ClaimState = "issued" | "redeemed" | "expired" | "revoked";
 
@@ -248,10 +268,51 @@ const LEGAL_TRANSITIONS: Readonly<Record<DeviceLifecycleState, readonly DeviceLi
   // through `awaiting_trust`, which means only through an accepted claim and a
   // bound assignment. The provisioning chain is a state-machine property, not a
   // convention a caller could route around.
-  enrolled: ["awaiting_trust", "quarantined", "suspended", "retired", "replaced"],
-  awaiting_trust: ["active", "enrolled", "quarantined", "suspended", "retired", "replaced"],
-  active: ["suspended", "quarantined", "enrolled", "retired", "replaced"],
-  suspended: ["awaiting_trust", "enrolled", "quarantined", "retired", "replaced"],
+  enrolled: [
+    "awaiting_trust",
+    "quarantined",
+    "restricted_investigation",
+    "suspended",
+    "retired",
+    "replaced",
+  ],
+  awaiting_trust: [
+    "active",
+    "enrolled",
+    "quarantined",
+    "restricted_investigation",
+    "suspended",
+    "retired",
+    "replaced",
+  ],
+  active: [
+    "suspended",
+    "quarantined",
+    "restricted_investigation",
+    "enrolled",
+    "retired",
+    "replaced",
+  ],
+  suspended: [
+    "awaiting_trust",
+    "enrolled",
+    "quarantined",
+    "restricted_investigation",
+    "retired",
+    "replaced",
+  ],
+  // KLD-2026-07-28-002 §10 lesser containment. Resolves UPWARD to whatever the
+  // device was doing (false-positive disposition) or DOWNWARD to full
+  // quarantine (§10 escalation). Containment never steps down, which is why
+  // `quarantined` has no edge back to here.
+  restricted_investigation: [
+    "active",
+    "awaiting_trust",
+    "enrolled",
+    "quarantined",
+    "retired",
+    "replaced",
+  ],
   quarantined: ["enrolled", "retired", "replaced"],
   retired: [],
   replaced: [],
@@ -334,6 +395,9 @@ export interface PkiTrustConfiguration {
   readonly configurationSigningKeyReference: string;
   readonly releaseSigningKeyReference: string;
   readonly transportSigningKeyReference: string;
+  /** KLD-2026-07-28-002 §1/§7 added these two as separate purposes. */
+  readonly manufacturingEnrollmentKeyReference: string;
+  readonly emergencyRecoveryKeyReference: string;
   readonly approvedByDecisionRef: string;
 }
 
@@ -342,14 +406,130 @@ export interface PkiTrustConfiguration {
  * key across two of them is a design error, not a configuration convenience.
  */
 export type SigningPurpose =
-  "device_identity" | "configuration_signing" | "release_signing" | "transport_signing";
+  | "device_identity"
+  | "configuration_signing"
+  | "release_signing"
+  | "transport_signing"
+  | "manufacturing_enrollment"
+  | "emergency_recovery";
 
+/**
+ * The SIX purposes KLD-2026-07-28-002 §1/§7 requires to stay separate. The
+ * ballot analysis named four; the decision added manufacturing enrollment and
+ * emergency recovery.
+ */
 export const SIGNING_PURPOSES: readonly SigningPurpose[] = [
   "device_identity",
   "configuration_signing",
   "release_signing",
   "transport_signing",
+  "manufacturing_enrollment",
+  "emergency_recovery",
 ] as const;
+
+/**
+ * A signed artifact carries the purpose its key was authorized for. §7: "A
+ * verifier must reject an otherwise valid signature when the signing key is not
+ * authorized for the artifact purpose." Binding the purpose INTO the signed
+ * material is what makes that check possible — a purpose carried only alongside
+ * the signature can be swapped by whoever relays it.
+ */
+export interface SignedArtifact {
+  readonly purpose: SigningPurpose;
+  readonly environment: TrustEnvironment;
+  readonly keyReference: string;
+  readonly payload: Uint8Array;
+  readonly signature: Uint8Array;
+}
+
+/**
+ * Canonical bytes a signature is computed over. The purpose and environment are
+ * prefixed, so a signature made for one purpose cannot verify as another even
+ * if the same key were somehow used for both.
+ */
+export function signingPreimage(
+  purpose: SigningPurpose,
+  environment: TrustEnvironment,
+  payload: Uint8Array,
+): Uint8Array {
+  const header = new TextEncoder().encode(`kitluy.sig.v1\n${purpose}\n${environment}\n`);
+  const out = new Uint8Array(header.length + payload.length);
+  out.set(header, 0);
+  out.set(payload, header.length);
+  return out;
+}
+
+/** Certificate windows, per environment (KLD-2026-07-28-002 §5). */
+export interface CertificateWindowPolicy {
+  readonly certificateLifetimeDays: number;
+  readonly renewalWindowDays: number;
+  readonly overlapWindowDays: number;
+}
+
+export const CERTIFICATE_WINDOWS: Readonly<Record<TrustEnvironment, CertificateWindowPolicy>> = {
+  development: { certificateLifetimeDays: 30, renewalWindowDays: 10, overlapWindowDays: 3 },
+  pilot: { certificateLifetimeDays: 180, renewalWindowDays: 60, overlapWindowDays: 14 },
+  production: { certificateLifetimeDays: 365, renewalWindowDays: 90, overlapWindowDays: 14 },
+};
+
+/** Maximum signed-revocation-snapshot age before restricted mode (§6). */
+export const MAX_REVOCATION_SNAPSHOT_AGE_HOURS: Readonly<Record<TrustEnvironment, number>> = {
+  development: 30 * 24,
+  pilot: 14 * 24,
+  production: 14 * 24,
+};
+
+/**
+ * Device key generation. §4: keys are generated ON the device and are never
+ * generated centrally and copied onto it — which is why this returns only a
+ * PUBLIC key fingerprint and metadata. There is no method here that yields
+ * private key material, deliberately.
+ */
+export interface DeviceKeyMetadata {
+  readonly publicKeyFingerprint: string;
+  readonly algorithm: string;
+  readonly hardwareTrustLevel: HardwareTrustLevel;
+  readonly exportable: boolean;
+  readonly generatedOnDevice: boolean;
+}
+
+export interface DeviceKeyProvider {
+  /** Generates a key pair ON the device and returns PUBLIC metadata only. */
+  generateDeviceKey(
+    deviceRecordId: DeviceRecordId,
+    environment: TrustEnvironment,
+  ): Promise<DeviceKeyMetadata>;
+
+  /** Metadata for the key already resident on the device. */
+  describeDeviceKey(deviceRecordId: DeviceRecordId): Promise<DeviceKeyMetadata>;
+}
+
+/**
+ * Rejects key metadata that contradicts §4. Used at the boundary so a provider
+ * that lies about its own properties is caught rather than trusted.
+ */
+export function assertDeviceKeyAcceptable(
+  metadata: DeviceKeyMetadata,
+  environment: TrustEnvironment,
+): void {
+  if (!metadata.generatedOnDevice) {
+    throw new RequiredCryptographicValueError(
+      "on-device key generation — KLD-2026-07-28-002 §4 forbids generating a device key centrally and copying it onto the Hub",
+      environment,
+    );
+  }
+  if (environment !== "development") {
+    if (!isHardwareBacked(metadata.hardwareTrustLevel)) {
+      throw new RequiredCryptographicValueError(
+        "hardware-backed device key (TPM 2.0 or approved secure element)",
+        environment,
+      );
+    }
+    if (metadata.exportable) {
+      throw new RequiredCryptographicValueError("non-exportable device private key", environment);
+    }
+  }
+}
 
 export interface CertificateRequest {
   readonly deviceRecordId: DeviceRecordId;
@@ -451,7 +631,9 @@ export interface SigningProvider {
  * one — the failure mode to avoid is a development stub that quietly succeeds
  * and makes a blocked programme look finished.
  */
-export class UnconfiguredPkiProvider implements PkiProvider, AttestationProvider, SigningProvider {
+export class UnconfiguredPkiProvider
+  implements PkiProvider, AttestationProvider, SigningProvider, DeviceKeyProvider
+{
   constructor(private readonly blockerRef: string = PKI_BLOCKER_REF) {}
 
   /**
@@ -513,6 +695,60 @@ export class UnconfiguredPkiProvider implements PkiProvider, AttestationProvider
   async keyReference(purpose: SigningPurpose, environment: TrustEnvironment): Promise<string> {
     this.refuse(`production ${purpose} key custody`, environment);
   }
+
+  async generateDeviceKey(
+    _deviceRecordId: DeviceRecordId,
+    environment: TrustEnvironment,
+  ): Promise<DeviceKeyMetadata> {
+    this.refuse(
+      "on-device key generation provider (TPM 2.0 or approved secure element)",
+      environment,
+    );
+  }
+
+  async describeDeviceKey(_deviceRecordId: DeviceRecordId): Promise<DeviceKeyMetadata> {
+    this.refuse("on-device key generation provider");
+  }
+}
+
+/**
+ * Raised when a signature is presented for a purpose its key is not authorized
+ * for. KLD-2026-07-28-002 §7: "A verifier must reject an otherwise valid
+ * signature when the signing key is not authorized for the artifact purpose."
+ *
+ * Deliberately NOT a subclass of {@link RequiredCryptographicValueError}: this
+ * is a REJECTED ARTIFACT, not a missing configuration, and conflating the two
+ * would let a cross-purpose attack read as "not configured yet".
+ */
+export class CrossPurposeSignatureError extends Error {
+  readonly code = "KLUY-DEVICE-CROSS-PURPOSE-SIGNATURE" as const;
+  readonly presentedPurpose: SigningPurpose;
+  readonly expectedPurpose: SigningPurpose;
+
+  constructor(presentedPurpose: SigningPurpose, expectedPurpose: SigningPurpose) {
+    super(
+      `KLUY-DEVICE-CROSS-PURPOSE-SIGNATURE: signature was made for ${presentedPurpose} ` +
+        `but is presented as ${expectedPurpose}; cross-purpose signing is prohibited ` +
+        `(KLD-2026-07-28-002 §7)`,
+    );
+    this.name = "CrossPurposeSignatureError";
+    this.presentedPurpose = presentedPurpose;
+    this.expectedPurpose = expectedPurpose;
+  }
+}
+
+/**
+ * Purpose check, run BEFORE any cryptography. A cross-purpose artifact is
+ * rejected on structure alone, so the guarantee does not depend on a signature
+ * verifier that has not been implemented yet.
+ */
+export function assertPurposeAuthorized(
+  artifact: SignedArtifact,
+  expectedPurpose: SigningPurpose,
+): void {
+  if (artifact.purpose !== expectedPurpose) {
+    throw new CrossPurposeSignatureError(artifact.purpose, expectedPurpose);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -552,6 +788,8 @@ export function validateTrustConfiguration(
     ["configurationSigningKeyReference", config.configurationSigningKeyReference],
     ["releaseSigningKeyReference", config.releaseSigningKeyReference],
     ["transportSigningKeyReference", config.transportSigningKeyReference],
+    ["manufacturingEnrollmentKeyReference", config.manufacturingEnrollmentKeyReference],
+    ["emergencyRecoveryKeyReference", config.emergencyRecoveryKeyReference],
   ];
   for (let i = 0; i < signingKeys.length; i += 1) {
     for (let j = i + 1; j < signingKeys.length; j += 1) {

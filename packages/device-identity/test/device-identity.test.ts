@@ -5,6 +5,7 @@ import {
   isLegalLifecycleTransition,
   isStorageModuleSignal,
   isTerminalLifecycleState,
+  isHardwareBacked,
   isValidTerminalProfileKey,
   normalizeHardwareSignal,
   PKI_BLOCKER_REF,
@@ -13,10 +14,17 @@ import {
   SIGNING_PURPOSES,
   TRUST_ENVIRONMENTS,
   UnconfiguredPkiProvider,
+  assertDeviceKeyAcceptable,
+  assertPurposeAuthorized,
+  CERTIFICATE_WINDOWS,
+  CrossPurposeSignatureError,
+  MAX_REVOCATION_SNAPSHOT_AGE_HOURS,
+  signingPreimage,
   validateTrustConfiguration,
   type DeviceRecordId,
   type HardwareSignal,
   type PkiTrustConfiguration,
+  type SignedArtifact,
 } from "../src/index.js";
 
 const signal = (signalType: HardwareSignal["signalType"], signalValue: string): HardwareSignal => ({
@@ -49,6 +57,8 @@ const baselineConfig = (): PkiTrustConfiguration => ({
   configurationSigningKeyReference: "custody://config-signing",
   releaseSigningKeyReference: "custody://release-signing",
   transportSigningKeyReference: "custody://transport-signing",
+  manufacturingEnrollmentKeyReference: "custody://manufacturing-enrollment-signing",
+  emergencyRecoveryKeyReference: "custody://emergency-recovery-signing",
   approvedByDecisionRef: "KLD-TEST-001",
 });
 
@@ -302,6 +312,23 @@ describe("trust configuration validation", () => {
     expect(problems.every((p) => p.problem.includes("separate keys"))).toBe(true);
   });
 
+  it("checks all SIX purposes for reuse, not the original four", () => {
+    // The decision added manufacturing enrollment and emergency recovery. A
+    // validator that still knew four would pass a configuration the DATABASE
+    // rejects — the exact SQL/TypeScript divergence WS-10 was bitten by.
+    const problems = validateTrustConfiguration({
+      ...baselineConfig(),
+      manufacturingEnrollmentKeyReference: "custody://device-issuing",
+    });
+    expect(problems.map((p) => p.field)).toContain("manufacturingEnrollmentKeyReference");
+
+    const recovery = validateTrustConfiguration({
+      ...baselineConfig(),
+      emergencyRecoveryKeyReference: "custody://release-signing",
+    });
+    expect(recovery.map((p) => p.field)).toContain("emergencyRecoveryKeyReference");
+  });
+
   it("refuses the offline root acting as the device-issuing CA", () => {
     const problems = validateTrustConfiguration({
       ...baselineConfig(),
@@ -338,5 +365,156 @@ describe("trust configuration validation", () => {
         requiredKeyStorageClass: "software",
       }),
     ).toEqual([]);
+  });
+});
+
+describe("KLD-2026-07-28-002 alignment", () => {
+  it("carries all six signing purposes", () => {
+    expect(SIGNING_PURPOSES).toHaveLength(6);
+    expect(SIGNING_PURPOSES).toContain("manufacturing_enrollment");
+    expect(SIGNING_PURPOSES).toContain("emergency_recovery");
+    expect(new Set(SIGNING_PURPOSES).size).toBe(SIGNING_PURPOSES.length);
+  });
+
+  it("treats restricted_investigation as lesser containment, not terminal", () => {
+    // §10: the incumbent keeps operating while trust-changing work stops, so
+    // the state must resolve BOTH upward and downward.
+    expect(isLegalLifecycleTransition("active", "restricted_investigation")).toBe(true);
+    expect(isLegalLifecycleTransition("restricted_investigation", "active")).toBe(true);
+    expect(isLegalLifecycleTransition("restricted_investigation", "quarantined")).toBe(true);
+    expect(isTerminalLifecycleState("restricted_investigation")).toBe(false);
+  });
+
+  it("never steps containment down from quarantine to restriction", () => {
+    expect(isLegalLifecycleTransition("quarantined", "restricted_investigation")).toBe(false);
+  });
+
+  it("classifies hardware trust levels", () => {
+    expect(isHardwareBacked("development_software")).toBe(false);
+    expect(isHardwareBacked("tpm_2_0")).toBe(true);
+    expect(isHardwareBacked("secure_element")).toBe(true);
+  });
+
+  it("carries the ruled certificate windows, with renewal inside lifetime", () => {
+    expect(CERTIFICATE_WINDOWS.development).toEqual({
+      certificateLifetimeDays: 30,
+      renewalWindowDays: 10,
+      overlapWindowDays: 3,
+    });
+    expect(CERTIFICATE_WINDOWS.production.certificateLifetimeDays).toBe(365);
+    for (const env of TRUST_ENVIRONMENTS) {
+      const w = CERTIFICATE_WINDOWS[env];
+      expect(w.renewalWindowDays).toBeLessThan(w.certificateLifetimeDays);
+      expect(w.overlapWindowDays).toBeLessThan(w.certificateLifetimeDays);
+      expect(MAX_REVOCATION_SNAPSHOT_AGE_HOURS[env]).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe("cross-purpose signatures are rejected (§7)", () => {
+  const artifact = (purpose: SignedArtifact["purpose"]): SignedArtifact => ({
+    purpose,
+    environment: "development",
+    keyReference: "kitluy-dev://signer/NON-PRODUCTION",
+    payload: new Uint8Array([1, 2, 3]),
+    signature: new Uint8Array([9, 9]),
+  });
+
+  it("accepts an artifact presented as its own purpose", () => {
+    expect(() =>
+      assertPurposeAuthorized(artifact("release_signing"), "release_signing"),
+    ).not.toThrow();
+  });
+
+  it("rejects a configuration signature presented as a release signature", () => {
+    try {
+      assertPurposeAuthorized(artifact("configuration_signing"), "release_signing");
+      throw new Error("expected a cross-purpose rejection");
+    } catch (e) {
+      expect(e).toBeInstanceOf(CrossPurposeSignatureError);
+      const err = e as CrossPurposeSignatureError;
+      expect(err.presentedPurpose).toBe("configuration_signing");
+      expect(err.expectedPurpose).toBe("release_signing");
+    }
+  });
+
+  it("does not report a cross-purpose artifact as an unconfigured system", () => {
+    // Conflating the two would let an attack read as "not built yet".
+    try {
+      assertPurposeAuthorized(artifact("emergency_recovery"), "transport_signing");
+    } catch (e) {
+      expect(e).not.toBeInstanceOf(RequiredCryptographicValueError);
+    }
+  });
+
+  it("binds purpose and environment into the signed preimage", () => {
+    const payload = new Uint8Array([7, 7, 7]);
+    const a = signingPreimage("release_signing", "development", payload);
+    const b = signingPreimage("configuration_signing", "development", payload);
+    const c = signingPreimage("release_signing", "production", payload);
+    expect(Buffer.from(a).equals(Buffer.from(b))).toBe(false);
+    expect(Buffer.from(a).equals(Buffer.from(c))).toBe(false);
+    expect(Buffer.from(a.slice(a.length - 3))).toEqual(Buffer.from(payload));
+  });
+});
+
+describe("device key acceptability (§4)", () => {
+  const key = (over: Partial<Parameters<typeof assertDeviceKeyAcceptable>[0]> = {}) => ({
+    publicKeyFingerprint: "a".repeat(64),
+    algorithm: "ed25519",
+    hardwareTrustLevel: "tpm_2_0" as const,
+    exportable: false,
+    generatedOnDevice: true,
+    ...over,
+  });
+
+  it("accepts an on-device non-exportable hardware key in production", () => {
+    expect(() => assertDeviceKeyAcceptable(key(), "production")).not.toThrow();
+  });
+
+  it("refuses a key that was not generated on the device, in every environment", () => {
+    for (const env of TRUST_ENVIRONMENTS) {
+      expect(() => assertDeviceKeyAcceptable(key({ generatedOnDevice: false }), env)).toThrow(
+        RequiredCryptographicValueError,
+      );
+    }
+  });
+
+  it("refuses a software key outside development but permits it inside", () => {
+    expect(() =>
+      assertDeviceKeyAcceptable(key({ hardwareTrustLevel: "development_software" }), "production"),
+    ).toThrow(RequiredCryptographicValueError);
+    expect(() =>
+      assertDeviceKeyAcceptable(key({ hardwareTrustLevel: "development_software" }), "development"),
+    ).not.toThrow();
+  });
+
+  it("refuses an exportable private key outside development", () => {
+    expect(() => assertDeviceKeyAcceptable(key({ exportable: true }), "pilot")).toThrow(
+      RequiredCryptographicValueError,
+    );
+  });
+});
+
+describe("the fail-closed provider covers device key generation too", () => {
+  const provider = new UnconfiguredPkiProvider();
+  const id = "22222222-2222-4222-8222-222222222222" as DeviceRecordId;
+
+  it("refuses to generate or describe a device key", async () => {
+    await expect(provider.generateDeviceKey(id, "production")).rejects.toBeInstanceOf(
+      RequiredCryptographicValueError,
+    );
+    await expect(provider.describeDeviceKey(id)).rejects.toBeInstanceOf(
+      RequiredCryptographicValueError,
+    );
+  });
+
+  it("refuses signing for the two purposes the decision added", async () => {
+    const payload = new Uint8Array([1]);
+    for (const purpose of ["manufacturing_enrollment", "emergency_recovery"] as const) {
+      await expect(provider.sign(purpose, "production", payload)).rejects.toBeInstanceOf(
+        RequiredCryptographicValueError,
+      );
+    }
   });
 });

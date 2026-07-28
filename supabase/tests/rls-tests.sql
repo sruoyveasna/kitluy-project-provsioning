@@ -2770,22 +2770,31 @@ declare
   v_active_assignments int;
   v_projections int;
 begin
+  -- Post KLD-2026-07-28-002 the most specific TRUE blocker is production
+  -- ineligibility: section 4 blocks hardware certification until a
+  -- TPM/secure-element SKU is certified, and certified_hardware_skus is empty.
   select count(*) into v_awaiting from kitluy_devices.device_fleet_status
-   where fleet_status = 'BLOCKED_PKI_UNCONFIGURED';
+   where fleet_status = 'BLOCKED_PRODUCTION_INELIGIBLE';
   select count(*) into v_active_assignments
    from kitluy_devices.device_assignments where state = 'active';
   select count(*) into v_projections from kitluy_devices.device_assignment_projections;
 
   if v_awaiting = 0 then
-    raise exception 'FAIL WS11-P2: no claimed device reports BLOCKED_PKI_UNCONFIGURED';
+    raise exception 'FAIL WS11-P2: no claimed device reports BLOCKED_PRODUCTION_INELIGIBLE';
   end if;
   if v_active_assignments <> 0 then
-    raise exception 'FAIL WS11-P2: % assignment(s) are active while BLK-005 is open', v_active_assignments;
+    raise exception 'FAIL WS11-P2: % assignment(s) are active though no device is production-eligible', v_active_assignments;
+  end if;
+  if exists (select 1 from kitluy_devices.certified_hardware_skus) then
+    raise exception 'FAIL WS11-P2: a certified hardware SKU exists; KLD-2026-07-28-002 section 4 leaves SKU certification to the owner and procurement';
+  end if;
+  if exists (select 1 from kitluy_devices.devices where production_eligible) then
+    raise exception 'FAIL WS11-P2: a device is production-eligible with no certified SKU';
   end if;
   if v_projections <> 0 then
     raise exception 'FAIL WS11-P2: % offline projection(s) exist though no activation has ever succeeded', v_projections;
   end if;
-  raise notice 'PASS WS11-P2: the service path reads the fleet view; % claimed device(s) report BLOCKED_PKI_UNCONFIGURED, zero assignments are active and zero offline projections exist', v_awaiting;
+  raise notice 'PASS WS11-P2: the service path reads the fleet view; % device(s) report BLOCKED_PRODUCTION_INELIGIBLE, zero assignments are active, zero offline projections exist, the certified-SKU table is empty and no device is production-eligible', v_awaiting;
 end $$;
 rollback;
 

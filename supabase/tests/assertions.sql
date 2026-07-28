@@ -1537,12 +1537,19 @@ begin
     raise exception 'ASSERT FAIL: a freshly enrolled device is not in the enrolled state';
   end if;
 
-  -- The table the gate reads must be EMPTY. A seeded row would silently open it.
-  if exists (select 1 from kitluy_devices.pki_trust_configuration) then
-    raise exception 'ASSERT FAIL: pki_trust_configuration is not empty; BLK-005 is open and no migration or fixture may populate it';
+  -- POST KLD-2026-07-28-002. The decision fixed the certificate windows and
+  -- AUTHORIZED development trust, so a development configuration now exists.
+  -- Pilot and production must still be absent: §14 leaves both BLOCKED.
+  if not exists (select 1 from kitluy_devices.pki_trust_configuration
+                  where environment = 'development' and is_active) then
+    raise exception 'ASSERT FAIL: no active development PKI configuration, though KLD-2026-07-28-002 authorized development trust';
+  end if;
+  if exists (select 1 from kitluy_devices.pki_trust_configuration
+              where environment in ('pilot', 'production')) then
+    raise exception 'ASSERT FAIL: a pilot or production PKI configuration exists; KLD-2026-07-28-002 §14 leaves both BLOCKED';
   end if;
 
-  foreach v_env in array array['development', 'pilot', 'production'] loop
+  foreach v_env in array array['pilot', 'production'] loop
     begin
       perform kitluy_devices.activate_device_v1(v_device, v_env, 'OP-PROBE');
       raise exception 'ASSERT FAIL: device activation succeeded in % with no approved PKI configuration', v_env;
@@ -1575,15 +1582,31 @@ begin
     end;
   end loop;
 
-  if v_blocked <> 6 then
-    raise exception 'ASSERT FAIL: expected 6 fail-closed refusals, got %', v_blocked;
+  if v_blocked <> 4 then
+    raise exception 'ASSERT FAIL: expected 4 fail-closed refusals across pilot and production, got %', v_blocked;
   end if;
+
+  -- Development passes the GATE and is then refused for a different, honest
+  -- reason: the device has no claim and no assignment. That distinction is the
+  -- point — the gate is no longer the thing stopping development.
+  begin
+    perform kitluy_devices.activate_device_v1(v_device, 'development', 'OP-PROBE');
+    raise exception 'ASSERT FAIL: a device with no assignment activated in development';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm like 'KLUY-DEVICE-PKI-UNCONFIGURED%' then
+      raise exception 'ASSERT FAIL: development still fails at the PKI gate though KLD-2026-07-28-002 authorized it';
+    end if;
+    if sqlerrm not like 'KLUY-DEVICE-ACTIVATION-STATE%' then
+      raise exception 'ASSERT FAIL: development activation refused unexpectedly: %', sqlerrm;
+    end if;
+  end;
 
   if (select lifecycle_state from kitluy_devices.devices where id = v_device) <> 'enrolled' then
     raise exception 'ASSERT FAIL: a device changed state during a refused activation';
   end if;
   if (select count(*) from kitluy_devices.device_lifecycle_events
-       where device_id = v_device and reason_code = 'ACTIVATION_REFUSED') <> 3 then
+       where device_id = v_device and reason_code = 'ACTIVATION_REFUSED') <> 2 then
     raise exception 'ASSERT FAIL: refused activations were not durably recorded as evidence';
   end if;
   if (select count(*) from kitluy_devices.device_certificates where device_id = v_device) <> 0 then
@@ -1601,7 +1624,7 @@ begin
     raise exception 'ASSERT FAIL: a device was quarantined merely because the platform PKI is unconfigured';
   end if;
 
-  raise notice 'PASS ws11-blk005-gate: activation and certificate issuance fail closed in all three environments with an explicit [REQUIRED: ...] BLK-005 error, with no state drift, no certificate row, a durable caller-recorded refusal per attempt, and exactly one open activation_blocked incident';
+  raise notice 'PASS ws11-blk005-gate: post-KLD-2026-07-28-002 the gate RESOLVES for development and still fails closed for pilot and production with an explicit [REQUIRED: ...] error naming section 14; development is then refused for a different and honest reason (no assignment), with no state drift, no certificate row, a durable caller-recorded refusal per attempt, and exactly one open activation_blocked incident';
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -1809,20 +1832,42 @@ do $$
 declare
   v_profile uuid;
   v_device uuid;
+  v_soft uuid;
   v_replacement uuid;
+  v_soft_replacement uuid;
   v_signals jsonb;
+  v_signals_after jsonb;
+  v_soft_signals jsonb;
+  v_mac text;
+  v_board text;
+  v_tpm text;
 begin
   select id into v_profile from kitluy_devices.hardware_profiles
    where profile_key = 'WS11-T001-HUB-PROBE';
 
+  -- KLD-2026-07-28-002 §11 retains the device_record_id across an NVMe swap
+  -- only when the board AND the TPM / secure-element identity are both
+  -- continuous, so this probe enrolls a TPM endorsement key. The signal set
+  -- after the swap keeps board and TPM and changes ONLY the storage serial,
+  -- which is exactly what a legitimate NVMe replacement looks like.
+  v_mac := 'aa:bb:cc:dd:' || substr(md5(random()::text),1,2) || ':04';
+  v_board := 'board-rep-' || gen_random_uuid();
+  v_tpm := 'tpm-ek-' || gen_random_uuid();
+
   v_signals := jsonb_build_array(
-      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'aa:bb:cc:dd:' || substr(md5(random()::text),1,2) || ':04'),
-      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-rep-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', v_mac),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', v_board),
+      jsonb_build_object('signal_type', 'tpm_ek_public', 'signal_value', v_tpm),
       jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-rep-' || gen_random_uuid()));
+  v_signals_after := jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', v_mac),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', v_board),
+      jsonb_build_object('signal_type', 'tpm_ek_public', 'signal_value', v_tpm),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-new-' || gen_random_uuid()));
 
   v_device := kitluy_devices.enroll_device_v1(
     'WS11-T001-REPLACE-' || gen_random_uuid(), v_profile, now(),
-    repeat('18', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE', v_signals);
+    repeat('18', 32), 'ed25519', 'tpm', 'STATION-PROBE', 'OP-PROBE', v_signals);
 
   update kitluy_devices.devices set assignment_generation = 7 where id = v_device;
 
@@ -1865,8 +1910,8 @@ begin
   end;
 
   perform kitluy_devices.reenroll_device_v1(
-    v_device, repeat('29', 32), 'ed25519', 'software',
-    'STATION-PROBE', 'OP-RMA-01', v_signals, 'NVME_REPLACEMENT', v_replacement);
+    v_device, repeat('29', 32), 'ed25519', 'tpm',
+    'STATION-PROBE', 'OP-RMA-01', v_signals_after, 'NVME_REPLACEMENT', v_replacement);
 
   if (select completed_at from kitluy_devices.device_replacements where id = v_replacement) is null then
     raise exception 'ASSERT FAIL: the replacement did not complete after governed re-enrollment';
@@ -1875,7 +1920,49 @@ begin
     raise exception 'ASSERT FAIL: the replaced device did not return to enrolled through the normal flow';
   end if;
 
-  raise notice 'PASS ws11-replacement-order: replacement revokes the certificate, zeroes the assignment generation, records the authorizing operator, holds the device in quarantine, refuses private-key carry-over structurally, and completes only through a new-key re-enrollment';
+  -- §11 DISCONTINUITY 1: a device with NO secure-element evidence cannot
+  -- prove continuity, so it cannot keep its identity across an NVMe swap. This
+  -- is the honest consequence of §4 — every software-backed development device
+  -- is discontinuous by construction, and that is not a bug.
+  v_soft_signals := jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'aa:bb:cc:5f:' || substr(md5(random()::text),1,2) || ':0a'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-soft-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-soft-' || gen_random_uuid()));
+  v_soft := kitluy_devices.enroll_device_v1(
+    'WS11-T001-SOFT-' || gen_random_uuid(), v_profile, now(),
+    repeat('4c', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE', v_soft_signals);
+  v_soft_replacement := kitluy_devices.record_device_replacement_v1(
+    v_soft, 'storage_module', 'NVME_FAILURE', 'OP-RMA-01', 'RMA-SOFT-1');
+  begin
+    perform kitluy_devices.reenroll_device_v1(
+      v_soft, repeat('5d', 32), 'ed25519', 'software',
+      'STATION-PROBE', 'OP-RMA-01', v_soft_signals, 'NVME_REPLACEMENT', v_soft_replacement);
+    raise exception 'ASSERT FAIL: a device with no secure-element evidence retained its identity across a replacement';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-DEVICE-IDENTITY-DISCONTINUOUS%' then
+      raise exception 'ASSERT FAIL: continuity refused for the wrong reason: %', sqlerrm;
+    end if;
+  end;
+
+  -- §11 DISCONTINUITY 2: a mainboard or secure-element replacement creates a
+  -- NEW device_record_id and is refused here outright, whatever the evidence
+  -- says.
+  begin
+    perform kitluy_devices.reenroll_device_v1(
+      v_soft, repeat('6e', 32), 'ed25519', 'software',
+      'STATION-PROBE', 'OP-RMA-01', v_soft_signals, 'BOARD_REPLACEMENT',
+      kitluy_devices.record_device_replacement_v1(
+        v_soft, 'mainboard', 'BOARD_FAILURE', 'OP-RMA-01', 'RMA-SOFT-2'));
+    raise exception 'ASSERT FAIL: a mainboard replacement retained the device_record_id';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-DEVICE-IDENTITY-DISCONTINUOUS%' then
+      raise exception 'ASSERT FAIL: board replacement refused for the wrong reason: %', sqlerrm;
+    end if;
+  end;
+
+  raise notice 'PASS ws11-replacement-order (KLD-2026-07-28-002 section 11): an NVMe swap with continuous board AND TPM identity retains the device_record_id through the owner-required order; a device with no secure-element evidence CANNOT prove continuity and is refused; and a mainboard or secure-element replacement is refused outright because it creates a new identity. Private-key carry-over stays structurally impossible';
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -2123,14 +2210,64 @@ begin
     if sqlerrm like 'ASSERT FAIL%' then raise; end if; v_blocked := v_blocked + 1;
   end;
 
-  if v_blocked <> 5 then
-    raise exception 'ASSERT FAIL: expected 5 blocked PKI configurations, got %', v_blocked;
-  end if;
-  if exists (select 1 from kitluy_devices.pki_trust_configuration) then
-    raise exception 'ASSERT FAIL: a PKI configuration row survived the governance probes';
+  -- The environment lock: KLD-2026-07-28-002 authorized DEVELOPMENT trust and
+  -- section 14 left pilot and production blocked. A pilot or production row
+  -- citing THAT decision is refused, so those environments cannot be smuggled
+  -- open under the decision that deliberately left them shut.
+  begin
+    insert into kitluy_devices.pki_trust_configuration
+      (environment, root_ca_reference, device_issuing_ca_reference, manufacturing_ca_reference,
+       required_key_storage_class, certificate_lifetime_days, renewal_window_days,
+       overlap_window_days, revocation_mechanism, offline_grace_hours,
+       configuration_signing_key_reference, release_signing_key_reference,
+       transport_signing_key_reference, manufacturing_enrollment_key_reference,
+       emergency_recovery_key_reference, approved_by_decision_ref, approved_at, is_active)
+    values
+      ('production', 'root', 'issuing', 'mfg', 'hsm', 365, 90, 14, 'CRL', 72,
+       'cfg-key', 'rel-key', 'tx-key', 'mfg-key', 'rec-key',
+       'KLD-2026-07-28-002', now(), true);
+    raise exception 'ASSERT FAIL: a production PKI configuration was opened under the decision that blocked production';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-DEVICE-PKI-ENVIRONMENT-BLOCKED%' then
+      raise exception 'ASSERT FAIL: the environment lock refused for the wrong reason: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- Six purposes, not four: a configuration missing the manufacturing or
+  -- emergency-recovery key reference is a separation failure, not a pass.
+  begin
+    insert into kitluy_devices.pki_trust_configuration
+      (environment, root_ca_reference, device_issuing_ca_reference, manufacturing_ca_reference,
+       required_key_storage_class, certificate_lifetime_days, renewal_window_days,
+       overlap_window_days, revocation_mechanism, offline_grace_hours,
+       configuration_signing_key_reference, release_signing_key_reference,
+       transport_signing_key_reference, approved_by_decision_ref, approved_at, is_active)
+    values
+      ('pilot', 'root-p', 'issuing-p', 'mfg-p', 'hsm', 180, 60, 14, 'CRL', 72,
+       'cfg-p', 'rel-p', 'tx-p', 'KLD-PROBE-002', now(), true);
+    raise exception 'ASSERT FAIL: a PKI configuration was accepted with only four signing purposes';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  if v_blocked <> 7 then
+    raise exception 'ASSERT FAIL: expected 7 blocked PKI configurations, got %', v_blocked;
   end if;
 
-  raise notice 'PASS ws11-pki-governance: placeholder and [REQUIRED: ...] approvals, one signing key shared across purposes, root-as-issuing-CA and out-of-range renewal windows are all refused, and the gate table remains empty';
+  -- The DEVELOPMENT row survives untouched; pilot and production stay absent.
+  if (select count(*) from kitluy_devices.pki_trust_configuration) <> 1 then
+    raise exception 'ASSERT FAIL: the gate table holds % rows; exactly the development row should exist',
+      (select count(*) from kitluy_devices.pki_trust_configuration);
+  end if;
+  if exists (select 1 from kitluy_devices.pki_trust_configuration
+              where environment <> 'development') then
+    raise exception 'ASSERT FAIL: a non-development PKI configuration survived the governance probes';
+  end if;
+
+  raise notice 'PASS ws11-pki-governance: placeholder and [REQUIRED: ...] approvals, one signing key shared across purposes, root-as-issuing-CA, out-of-range renewal windows, a four-purpose configuration and a production row citing the decision that BLOCKED production are all refused (7 probes); exactly the development row survives';
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -2182,8 +2319,16 @@ begin
   -- Group 0121: BOTH identities are held. Which unit is the clone is not
   -- knowable from the evidence, so trusting the incumbent would let an actor
   -- who reaches an enrollment station inherit a live identity.
-  if (select lifecycle_state from kitluy_devices.devices where id = v_original) <> 'quarantined' then
-    raise exception 'ASSERT FAIL: the incumbent device was left trusted while a duplicate of its evidence exists';
+  -- KLD-2026-07-28-002 section 10: the INCUMBENT gets the LESSER containment.
+  -- It is restricted, not quarantined, because somebody else submitted a
+  -- duplicate.
+  if (select lifecycle_state from kitluy_devices.devices where id = v_original)::text
+     <> 'restricted_investigation' then
+    raise exception 'ASSERT FAIL: the incumbent is % — section 10 requires restricted_investigation, not full quarantine and not left trusted',
+      (select lifecycle_state from kitluy_devices.devices where id = v_original);
+  end if;
+  if (select restricted_from_state from kitluy_devices.devices where id = v_original) is null then
+    raise exception 'ASSERT FAIL: the incumbent restriction did not record the state it came from, so a false-positive disposition could not restore it';
   end if;
   if not exists (select 1 from kitluy_devices.device_trust_incidents
                   where device_id = v_original and incident_type = 'duplicate_hardware_signal'
@@ -2211,7 +2356,7 @@ begin
     raise exception 'ASSERT FAIL: expected both identities held, got %', v_held;
   end if;
 
-  raise notice 'PASS ws11-duplicate-detected: a second unit presenting the same non-storage hardware evidence receives its OWN identity, BOTH identities are quarantined with open CRITICAL incidents, both report the collision, and neither can be claimed — the clone becomes evidence, not a silent constraint failure, and no unit is trusted by default';
+  raise notice 'PASS ws11-duplicate-detected (KLD-2026-07-28-002 section 10): the NEW identity is quarantined outright while the INCUMBENT gets the lesser restricted_investigation containment with its prior state recorded; both carry open CRITICAL incidents, both report the collision, and neither can be claimed';
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -2309,15 +2454,19 @@ begin
     raise exception 'ASSERT FAIL: a terminal assignment became live before activation';
   end if;
 
+  -- Post-decision the most specific TRUE blocker is production-ineligibility:
+  -- KLD-2026-07-28-002 section 4 blocks hardware certification until a
+  -- TPM/secure-element SKU is certified, and certified_hardware_skus is empty.
   if (select fleet_status from kitluy_devices.device_fleet_status where device_record_id = v_device)
-     <> 'BLOCKED_PKI_UNCONFIGURED' then
-    raise exception 'ASSERT FAIL: a claimed, assigned device does not report the PKI blocker';
+     <> 'BLOCKED_PRODUCTION_INELIGIBLE' then
+    raise exception 'ASSERT FAIL: a claimed, assigned device reports % rather than the production-eligibility blocker',
+      (select fleet_status from kitluy_devices.device_fleet_status where device_record_id = v_device);
   end if;
   if exists (select 1 from kitluy_devices.device_assignment_projections where device_id = v_device) then
     raise exception 'ASSERT FAIL: an offline projection was written without activation';
   end if;
 
-  raise notice 'PASS ws11-claim-boundary: claim accepted -> scope bound -> assignment created -> device rests at awaiting_trust with a PENDING terminal assignment, reports BLOCKED_PKI_UNCONFIGURED, and writes NO offline projection. The chain stops exactly where BLK-005 says it must';
+  raise notice 'PASS ws11-claim-boundary: claim accepted -> scope bound -> assignment created -> device rests at awaiting_trust with a PENDING terminal assignment, reports BLOCKED_PRODUCTION_INELIGIBLE (the most specific true blocker after KLD-2026-07-28-002), and writes NO offline projection';
 end $$;
 
 -- ---------------------------------------------------------------------------
