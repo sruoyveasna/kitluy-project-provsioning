@@ -460,6 +460,19 @@ function cmdSeed() {
 function cmdTest() {
   requireTooling();
   if (!existsSync(ASSERTIONS_FILE)) fail(`${ASSERTIONS_FILE} is missing.`);
+  // The assertions exercise the GOVERNED conflict procedures, which are granted
+  // to kitluy_hub_runtime and not to the connecting user. Membership is taken
+  // here so the harness runs that path as the role that runs it in production,
+  // instead of depending on a membership some other tool happened to leave
+  // behind — a cluster rebuild wipes those, and the suite then fails with
+  // "permission denied for function raise_reconciliation".
+  //
+  // HAZARD KLRISK-HUB-001: the grantee is resolved and quoted EXPLICITLY.
+  // `GRANT ... TO current_user` SEGFAULTS the PostgreSQL 15.8 development
+  // server and restarts the whole cluster into crash recovery.
+  const who = runSql("select current_user;", { capture: true });
+  const grantee = (who.stdout || "postgres").trim().replace(/"/g, '""');
+  runSql(`grant kitluy_hub_runtime, kitluy_sync_worker to "${grantee}";`, { quiet: true });
   const res = runSql(readFileSync(ASSERTIONS_FILE, "utf8"), { quiet: true });
   const output = (res.stdout ?? "") + (res.stderr ?? "");
   process.stdout.write(output);

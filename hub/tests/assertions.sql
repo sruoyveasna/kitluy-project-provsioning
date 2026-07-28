@@ -1325,6 +1325,11 @@ end $$;
 -- ---------------------------------------------------------------------------
 begin;
 
+-- The governed conflict procedures are granted to kitluy_hub_runtime, which is
+-- the role that calls them in production. The harness assumes it here so this
+-- section exercises the real grant surface rather than the connecting user's.
+set local role kitluy_hub_runtime;
+
 do $$
 declare
   v_conflict  uuid := 'e0000000-0000-4000-8000-00000000c001';

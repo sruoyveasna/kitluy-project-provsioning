@@ -207,6 +207,20 @@ code disagreeing with the ruling. 29e now reproduces the §3 table literally.
 
 ---
 
+### Harness fragility found by the full clean-cluster gate
+
+The cloud reset recreates the whole PostgreSQL CLUSTER, so it also wipes ROLE
+MEMBERSHIPS. The Hub assertions had been calling the governed conflict
+procedures as the connecting user, which only worked because an earlier test run
+had left a `kitluy_hub_runtime` membership behind. From a genuinely clean
+cluster the suite failed with `permission denied for function
+raise_reconciliation` and dropped to 28 assertions. The harness now takes the
+membership explicitly and section 29a runs `set local role kitluy_hub_runtime`,
+so it exercises the role that calls those procedures in production rather than
+whatever privileges happened to be lying around.
+
+---
+
 ## 6. Defects and hazards found during this cycle
 
 | Id             | Finding                                                                                                                                                                                                                                                                                                                                                                                                                                       | Disposition                                                                                                                                                                                                         |
