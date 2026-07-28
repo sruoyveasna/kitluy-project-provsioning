@@ -5,8 +5,10 @@ import {
   isLegalLifecycleTransition,
   isStorageModuleSignal,
   isTerminalLifecycleState,
+  isValidTerminalProfileKey,
   normalizeHardwareSignal,
   PKI_BLOCKER_REF,
+  PROVISIONING_CHAIN,
   RequiredCryptographicValueError,
   SIGNING_PURPOSES,
   TRUST_ENVIRONMENTS,
@@ -123,7 +125,8 @@ describe("device lifecycle state machine", () => {
     expect(isLegalLifecycleTransition("manufactured", "enrolled")).toBe(true);
     expect(isLegalLifecycleTransition("enrolled", "quarantined")).toBe(true);
     expect(isLegalLifecycleTransition("quarantined", "enrolled")).toBe(true);
-    expect(isLegalLifecycleTransition("enrolled", "active")).toBe(true);
+    expect(isLegalLifecycleTransition("enrolled", "awaiting_trust")).toBe(true);
+    expect(isLegalLifecycleTransition("awaiting_trust", "active")).toBe(true);
   });
 
   it("refuses backwards and terminal transitions", () => {
@@ -133,10 +136,60 @@ describe("device lifecycle state machine", () => {
     expect(isLegalLifecycleTransition("replaced", "active")).toBe(false);
   });
 
+  it("refuses activation that skips the claim and assignment step", () => {
+    // The whole point of `awaiting_trust`: a device cannot go straight from
+    // enrolled to active, so it cannot be activated without an accepted claim
+    // and a bound assignment. This mirrors migration 0121's trigger — if the
+    // two ever disagree, one of them is wrong and this test says so.
+    expect(isLegalLifecycleTransition("enrolled", "active")).toBe(false);
+    expect(isLegalLifecycleTransition("manufactured", "active")).toBe(false);
+  });
+
   it("treats retired and replaced as terminal", () => {
     expect(isTerminalLifecycleState("retired")).toBe(true);
     expect(isTerminalLifecycleState("replaced")).toBe(true);
     expect(isTerminalLifecycleState("quarantined")).toBe(false);
+    expect(isTerminalLifecycleState("awaiting_trust")).toBe(false);
+  });
+
+  it("keeps the provisioning chain in one ordered place", () => {
+    expect(PROVISIONING_CHAIN[0]).toBe("claim accepted");
+    expect(PROVISIONING_CHAIN).toContain("device remains awaiting_trust");
+    expect(PROVISIONING_CHAIN.indexOf("certificate issuance")).toBeLessThan(
+      PROVISIONING_CHAIN.indexOf("activation"),
+    );
+    expect(PROVISIONING_CHAIN[PROVISIONING_CHAIN.length - 1]).toBe("activation");
+  });
+});
+
+describe("terminal profile keys stay structural, not Laundry-specific", () => {
+  it("accepts the owner-locked T1-T4 shape", () => {
+    for (const key of [
+      "laundry.t1.intake_cashier",
+      "laundry.t2.customer_display",
+      "laundry.t3.ready_scan_in",
+      "laundry.t4.pickup_scan_out",
+    ]) {
+      expect(isValidTerminalProfileKey(key)).toBe(true);
+    }
+  });
+
+  it("accepts a future vertical without a code change", () => {
+    // Neutral Core must not need editing when a second vertical arrives.
+    expect(isValidTerminalProfileKey("cafe.t1.counter_cashier")).toBe(true);
+  });
+
+  it("refuses shapes that are not a terminal profile", () => {
+    for (const key of [
+      "laundry.intake_cashier",
+      "t1.intake_cashier",
+      "laundry.t0.intake_cashier",
+      "laundry.tx.intake_cashier",
+      "LAUNDRY.T1.INTAKE",
+      "",
+    ]) {
+      expect(isValidTerminalProfileKey(key)).toBe(false);
+    }
   });
 });
 

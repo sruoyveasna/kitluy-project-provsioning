@@ -394,6 +394,76 @@ before WS-11 closes**:
 | D5  | `device_lifecycle_events` — new; append-only audit of the state machine, including refused transitions                                                                  |
 | D6  | NOT created, deliberately: `device_assignments`, `device_capabilities`, `provisioning_sessions`, `device_actions`, `peripheral_tests`, `rma_cases` (DD); `certificate_revocations`, `device_attestations`, `trust_bundle_versions` (§13). They belong to T002+; creating them empty would imply capability that does not exist (repository rule 5, the same reasoning as WS-10's D3) |
 
+#### KLRISK-DEVICE-001 — activation-refusal evidence was caller-enforced
+
+**Raised by the owner 2026-07-28, before T002 was authorized.** T001's fix for
+C37 moved refusal evidence into a second, caller-managed transaction. That
+stopped the rollback loss, but it was not structural: a defective or malicious
+caller could invoke `activate_device_v1`, receive the refusal, and simply omit
+`record_activation_refusal_v1`.
+
+**CLOSED STRUCTURALLY in group 0121**, using the pattern the owner specified
+rather than deferring it. `attempt_activate_device_v1` writes the refusal or the
+activation result, commits, and RETURNS a typed `activation_outcome`; the API
+converts a `REFUSED` outcome into the external error. The raising form is then
+revoked from `public` and `service_role`, so **there is no path that produces a
+refusal without producing its evidence**. Asserted by section 29e, which queries
+`has_function_privilege` for both roles.
+
+**Residual:** `attempt_activate_device_v1` is SECURITY DEFINER with a locked
+`search_path`, owned by the migration role. That is the same trusted-
+infrastructure boundary as KLRISK-HUB-003 — a database superuser can still call
+anything.
+
+#### Duplicate hardware evidence now blocks activation, and holds BOTH identities
+
+**Owner requirement, 2026-07-28:** "ensure activation rejects any device whose
+hardware evidence collides with another non-retired device. Keeping duplicate
+evidence as rows is sound only if both identities remain quarantined and neither
+can activate."
+
+Implemented in group 0121: `colliding_evidence_device_ids()` compares CURRENT
+enrollments only (so a repaired device never collides with its own superseded
+manifest) and excludes storage-module signals (a refurbished NVMe legitimately
+carries a previously-reported serial). Activation, claim creation and claim
+redemption all refuse on a collision, and enrollment quarantines the incumbent
+as well as the newcomer.
+
+**RESIDUAL RISK, recorded rather than hidden.** Holding both identities means an
+actor with access to an approved enrollment station can quarantine a LIVE device
+by enrolling a unit that presents its evidence. This is the deliberate cost of
+not trusting the incumbent by default — which unit is the clone is not knowable
+from the evidence. Enrollment is a station-authorized internal operation, and
+trust policy §8 step 2 ("preserve Store offline operation when safe on the
+previously trusted Hub") is the runbook mitigation that is still OWED.
+
+#### Cycle-10 execution findings — WS-11-T002 (2026-07-28)
+
+Three defects found and fixed by tests written to catch them:
+
+| ID  | Defect                                                                                                                                                                                                                                                                                                              |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C38 | **Claim expiry was evaluated against transaction-start time.** The check used `now()`, which in PostgreSQL is transaction start, so a transaction opened before expiry would redeem an expired claim and never notice. Fixed to `clock_timestamp()`. Expiry is a wall-clock question, not a transaction-snapshot one |
+| C39 | **Assignment generation could be reused after revocation.** `redeem_device_claim_v1` computed the next generation from `devices.assignment_generation`, which a revocation sets to 0 — so a re-claim would re-issue generation 1, and a stale Hub presenting the old generation would have been accepted as current. Fixed to follow the highest generation EVER issued |
+| C40 | **A re-created view silently lost its service grant.** `device_fleet_status` had to be DROPped and re-CREATEd because its column order changed; PostgreSQL discards grants on drop. Caught by an RLS control case failing with `permission denied for view`, not by the migration succeeding. Re-granted explicitly |
+
+**Cross-Location is not a distinct hop in this data model.** A Location belongs
+to exactly one Digital Store, so a "cross-Store" and a "cross-Location" claim
+meet the SAME broken hop when the Location is under a sibling store. The
+distinct location-hop failure is a Location owned by another Tenant, which is
+what section 29c tests. Recorded plainly rather than manufacturing a third error
+code for one hop. A TEST defect was found here (the first version used fixture
+`loc02`, which belongs to the same store as `loc01`, so the scope was valid) —
+the code was right and the assertion was wrong.
+
+#### `kitluy_devices` T002 relation deviations (D7-D9)
+
+| ID  | Deviation                                                                                                                                                                                     |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D7  | `device_claims` implements the DD's `provisioning_sessions` (id, device_id, code_hash, intended assignment, expires_at, used_at, status) under a name that says what it is. `provisioning_sessions` is NOT separately created |
+| D8  | `device_assignment_projections` and `device_claim_events` are new; neither the DD nor trust policy §13 has an offline assignment projection or a claim audit                                    |
+| D9  | `device_terminal_assignments` splits terminal binding out of `device_assignments` so a terminal profile is bound to a GENERATION rather than to a device, which is what makes stale-generation rejection meaningful |
+
 #### Evidence-metric correction — the `test:rls` 94-vs-95 question is closed
 
 The WS-10 evidence recorded RV-005 as "`test:rls` reports **94**, not 95; the 95

@@ -56,8 +56,49 @@ export type DeviceRecordId = string & { readonly __brand: "DeviceRecordId" };
 
 export type DeviceClass = "store_hub" | "terminal" | "manufacturing_station" | "peripheral";
 
+/**
+ * `awaiting_trust` is where a claimed, scope-bound, assigned device WAITS.
+ * While BLK-005 is open it is where every correctly-provisioned device stops.
+ */
 export type DeviceLifecycleState =
-  "manufactured" | "enrolled" | "quarantined" | "active" | "suspended" | "retired" | "replaced";
+  | "manufactured"
+  | "enrolled"
+  | "awaiting_trust"
+  | "quarantined"
+  | "active"
+  | "suspended"
+  | "retired"
+  | "replaced";
+
+export type ClaimState = "issued" | "redeemed" | "expired" | "revoked";
+
+export type AssignmentState = "pending_trust" | "active" | "superseded" | "revoked";
+
+/**
+ * The provisioning chain, in order (KLD-2026-07-21-003, OWNER-LOCKED). Kept as
+ * data so a reader can see the whole boundary in one place, and so a future
+ * change has to edit the chain rather than quietly skip a link.
+ */
+export const PROVISIONING_CHAIN: readonly string[] = [
+  "claim accepted",
+  "identity and scope bound",
+  "assignment created",
+  "device remains awaiting_trust",
+  "BLK-005 configuration required",
+  "certificate issuance",
+  "activation",
+] as const;
+
+/**
+ * Terminal profile keys are validated STRUCTURALLY as `<vertical>.t<n>.<role>`.
+ * This enforces the owner-locked T1-T4 shape without importing Laundry
+ * vocabulary into neutral Core (repository rule 2).
+ */
+const TERMINAL_PROFILE_KEY_PATTERN = /^[a-z0-9_]+\.t[1-9][0-9]*\.[a-z0-9_]+$/;
+
+export function isValidTerminalProfileKey(key: string): boolean {
+  return TERMINAL_PROFILE_KEY_PATTERN.test(key);
+}
 
 export type EnrollmentState = "sealed" | "superseded" | "revoked";
 
@@ -203,9 +244,14 @@ export function compareHardwareEvidence(
 
 const LEGAL_TRANSITIONS: Readonly<Record<DeviceLifecycleState, readonly DeviceLifecycleState[]>> = {
   manufactured: ["enrolled", "quarantined", "retired"],
-  enrolled: ["active", "quarantined", "suspended", "retired", "replaced"],
-  active: ["suspended", "quarantined", "retired", "replaced"],
-  suspended: ["active", "enrolled", "quarantined", "retired", "replaced"],
+  // `enrolled -> active` is deliberately ABSENT. A device reaches `active` only
+  // through `awaiting_trust`, which means only through an accepted claim and a
+  // bound assignment. The provisioning chain is a state-machine property, not a
+  // convention a caller could route around.
+  enrolled: ["awaiting_trust", "quarantined", "suspended", "retired", "replaced"],
+  awaiting_trust: ["active", "enrolled", "quarantined", "suspended", "retired", "replaced"],
+  active: ["suspended", "quarantined", "enrolled", "retired", "replaced"],
+  suspended: ["awaiting_trust", "enrolled", "quarantined", "retired", "replaced"],
   quarantined: ["enrolled", "retired", "replaced"],
   retired: [],
   replaced: [],

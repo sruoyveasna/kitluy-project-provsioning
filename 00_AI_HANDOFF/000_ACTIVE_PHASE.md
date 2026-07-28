@@ -200,6 +200,40 @@ relations), `@kitluy/device-identity`, 11 assertion sections, 5 RLS cases, 24
 package tests, and the BLK-005 ballot. Evidence
 `docs/evidence/phase1/ws-11/WS-11-T001-EXECUTION-EVIDENCE.md`.
 
+**T002 complete 2026-07-28** — cloud migration group 0121 (claims, assignments,
+terminal assignments, offline projection, claim audit), the `awaiting_trust`
+lifecycle state, 5 assertion sections, 4 RLS cases, 29 package tests. The two
+owner-required residual controls are closed STRUCTURALLY: KLRISK-DEVICE-001 by
+`attempt_activate_device_v1` plus revocation of the raising form, and duplicate
+hardware evidence by refusing activation, claim creation and claim redemption
+while holding BOTH identities. Evidence
+`docs/evidence/phase1/ws-11/WS-11-T002-EXECUTION-EVIDENCE.md`.
+
+### The activation boundary is now a state machine, not a convention
+
+    claim accepted -> identity and scope bound -> assignment created
+      -> device remains awaiting_trust
+        -> BLK-005 configuration required -> certificate issuance -> activation
+
+`enrolled -> active` was REMOVED from the device lifecycle transition matrix in
+group 0121. `active` is reachable only from `awaiting_trust`, which is reachable
+only through an accepted claim and a bound assignment. A caller cannot route
+around the chain, and the TypeScript matrix in `@kitluy/device-identity` carries
+a test asserting the same thing so the two cannot drift apart silently.
+
+**BLK-005 must be ruled before T003.** Certificate issuance, signer custody and
+production activation do not begin until the twelve-item ballot is approved. The
+owner's most urgent items: PKI hierarchy and environment separation; root and
+intermediate CA custody; device key generation and secure storage; configuration
+/ release / WS-10 transport signer separation; trusted-time behaviour on offline
+Pi hardware; revocation during extended WAN outages; NVMe and complete-device
+replacement policy; production signer four-eyes access.
+
+**Trusted time (G12) is a hard security dependency, not an implementation
+detail.** Until an RTC, an authenticated time bootstrap and a rollback-resistant
+time floor are approved, an offline Hub cannot reliably prove that a certificate
+is currently valid.
+
 **Carried from Cycle 9.** KLREQ-029 and KLREQ-030 may remain open during core
 WS-11 work, but they MUST be resolved before any synchronization-repair action
 is exposed through Admin, Partner, Chain or support interfaces. KLREQ-024 and

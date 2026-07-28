@@ -6,6 +6,7 @@ subfolder (repository/ shared/ apps/ services/ data/ infrastructure/ reviews/).
 
 | Date       | Area          | Task                              | Handoff                                                                                                                                                       |
 | ---------- | ------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-07-28 | data          | WS-11-T002                        | [Cycle 10 — Hub claim, scope resolution and assignment (BLK-005 gated)](data/2026-07-28__DATA__WS-11-T002-CYCLE10__CLAIM-SCOPE-AND-ASSIGNMENT__AI-HANDOFF.md) |
 | 2026-07-28 | data          | WS-11-T001                        | [Cycle 10 — device enrollment and identity records (BLK-005 gated)](data/2026-07-28__DATA__WS-11-T001-CYCLE10__DEVICE-ENROLLMENT-AND-IDENTITY__AI-HANDOFF.md) |
 | 2026-07-28 | services      | WS-10-T000..T010                  | [Cycle 9 — synchronization and configuration publication](services/2026-07-28__SERVICES__WS-10-CYCLE9__SYNC-AND-CONFIGURATION-PUBLICATION__AI-HANDOFF.md)     |
 | 2026-07-27 | data          | WS-09-T001..T007                  | [Cycle 8/8B — Store Hub local runtime and persistence](data/2026-07-27__DATA__WS-09-CYCLE8B__STOREHUB-LOCAL-PERSISTENCE__AI-HANDOFF.md)                       |

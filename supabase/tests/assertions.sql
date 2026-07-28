@@ -2144,6 +2144,8 @@ declare
   v_clone uuid;
   v_mac text := 'aa:bb:cc:c1:' || substr(md5(random()::text), 1, 2) || ':07';
   v_board text := 'board-clone-' || gen_random_uuid();
+  v_probe uuid;
+  v_held int := 0;
 begin
   select id into v_profile from kitluy_devices.hardware_profiles
    where profile_key = 'WS11-T001-HUB-PROBE';
@@ -2177,7 +2179,39 @@ begin
     raise exception 'ASSERT FAIL: no duplicate_hardware_signal incident recorded';
   end if;
 
-  raise notice 'PASS ws11-duplicate-detected: a second unit presenting the same non-storage hardware evidence receives its OWN identity, is quarantined, and leaves a CRITICAL duplicate_hardware_signal incident — the clone becomes evidence, not a silent constraint failure';
+  -- Group 0121: BOTH identities are held. Which unit is the clone is not
+  -- knowable from the evidence, so trusting the incumbent would let an actor
+  -- who reaches an enrollment station inherit a live identity.
+  if (select lifecycle_state from kitluy_devices.devices where id = v_original) <> 'quarantined' then
+    raise exception 'ASSERT FAIL: the incumbent device was left trusted while a duplicate of its evidence exists';
+  end if;
+  if not exists (select 1 from kitluy_devices.device_trust_incidents
+                  where device_id = v_original and incident_type = 'duplicate_hardware_signal'
+                    and cleared_at is null) then
+    raise exception 'ASSERT FAIL: the incumbent device was quarantined with no incident record';
+  end if;
+
+  -- Keeping duplicate evidence as rows is sound only if neither identity can
+  -- proceed. Both must report the collision and neither may be claimed.
+  foreach v_probe in array array[v_original, v_clone] loop
+    if (select count(*) from kitluy_devices.colliding_evidence_device_ids(v_probe)) = 0 then
+      raise exception 'ASSERT FAIL: device % reports no evidence collision though a duplicate exists', v_probe;
+    end if;
+    begin
+      perform kitluy_devices.create_device_claim_v1(
+        v_probe, gen_random_uuid(), gen_random_uuid(), gen_random_uuid(),
+        repeat('ab', 32), repeat('cd', 32), 900, 'OP-PROBE');
+      raise exception 'ASSERT FAIL: device % with colliding evidence was claimable', v_probe;
+    exception when others then
+      if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+      v_held := v_held + 1;
+    end;
+  end loop;
+  if v_held <> 2 then
+    raise exception 'ASSERT FAIL: expected both identities held, got %', v_held;
+  end if;
+
+  raise notice 'PASS ws11-duplicate-detected: a second unit presenting the same non-storage hardware evidence receives its OWN identity, BOTH identities are quarantined with open CRITICAL incidents, both report the collision, and neither can be claimed — the clone becomes evidence, not a silent constraint failure, and no unit is trusted by default';
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -2188,13 +2222,16 @@ declare
   v_blocked_count int;
   v_active_count int;
 begin
+  -- Group 0121 made the blocker SPECIFIC: an enrolled device with no claim is
+  -- AWAITING_CLAIM, not BLOCKED_PKI_UNCONFIGURED. Reporting the PKI blocker on
+  -- a device that has not even been claimed would overstate how close it is.
   select count(*) into v_blocked_count from kitluy_devices.device_fleet_status
-   where fleet_status = 'BLOCKED_PKI_UNCONFIGURED';
+   where fleet_status = 'AWAITING_CLAIM';
   select count(*) into v_active_count from kitluy_devices.device_fleet_status
    where fleet_status = 'ACTIVE';
 
   if v_blocked_count = 0 then
-    raise exception 'ASSERT FAIL: no device reports BLOCKED_PKI_UNCONFIGURED while BLK-005 is open';
+    raise exception 'ASSERT FAIL: no enrolled unclaimed device reports AWAITING_CLAIM';
   end if;
   if v_active_count > 0 then
     raise exception 'ASSERT FAIL: % device(s) report ACTIVE while no PKI configuration is approved', v_active_count;
@@ -2202,8 +2239,617 @@ begin
   if exists (select 1 from kitluy_devices.device_fleet_status where certificate_status is not null) then
     raise exception 'ASSERT FAIL: a device reports a certificate status with no issuing CA approved';
   end if;
+  if exists (select 1 from kitluy_devices.device_assignment_projections) then
+    raise exception 'ASSERT FAIL: an offline assignment projection exists though no activation has ever succeeded';
+  end if;
 
-  raise notice 'PASS ws11-fleet-honest: the fleet view reports BLOCKED_PKI_UNCONFIGURED for enrolled devices, zero devices are ACTIVE, and no device carries a certificate status while BLK-005 is open';
+  raise notice 'PASS ws11-fleet-honest: the fleet view names the SPECIFIC blocker (AWAITING_CLAIM for an unclaimed device), zero devices are ACTIVE, no device carries a certificate status, and the offline projection table is empty because no activation has ever succeeded';
 end $$;
 
-select 'assertions complete: groups 0010-0120 structural contract holds (incl. cycle-6 WS-07/WS-08 sections 17-26, cycle-9 WS-10 section 27 and cycle-10 WS-11-T001 section 28)' as result;
+
+-- ============================================================================
+-- SECTION 29 — WS-11-T002 claim, scope and assignment (migration 0121).
+-- The seventeen adversarial cases the owner required (2026-07-28), plus the
+-- KLRISK-DEVICE-001 control and the activation boundary.
+-- Fixture scope from supabase/seed/dev-fixtures.sql:
+--   tenant A ..0011 | tenant B ..0012 | store ds01 ..0015 | ds02 ..0016
+--   loc01 ..0018 | loc02 ..0019
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 29a — the happy path stops at awaiting_trust, and NOT at active.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_profile uuid;
+  v_device uuid;
+  v_claim uuid;
+  v_assignment uuid;
+  v_terminal uuid;
+  v_token text := encode(sha256(convert_to('tok-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_payload text := encode(sha256(convert_to('pay-' || gen_random_uuid(), 'UTF8')), 'hex');
+begin
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+
+  v_device := kitluy_devices.enroll_device_v1(
+    'WS11-T002-OK-' || gen_random_uuid(), v_profile, now(),
+    repeat('a2', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'ba:01:' || substr(md5(random()::text),1,6) || ':01'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-t2ok-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-t2ok-' || gen_random_uuid())));
+
+  v_claim := kitluy_devices.create_device_claim_v1(
+    v_device,
+    '00000000-0000-4000-8000-000000000011',
+    '00000000-0000-4000-8000-000000000015',
+    '00000000-0000-4000-8000-000000000018',
+    v_token, v_payload, 900, 'OP-PROVISION');
+
+  v_assignment := kitluy_devices.redeem_device_claim_v1(v_token, v_payload, v_device, 'HUB-AGENT');
+
+  if (select lifecycle_state from kitluy_devices.devices where id = v_device) <> 'awaiting_trust' then
+    raise exception 'ASSERT FAIL: a redeemed claim did not leave the device awaiting_trust';
+  end if;
+  if (select state from kitluy_devices.device_assignments where id = v_assignment) <> 'pending_trust' then
+    raise exception 'ASSERT FAIL: the assignment is not pending_trust';
+  end if;
+  if (select assignment_generation from kitluy_devices.devices where id = v_device) <> 1 then
+    raise exception 'ASSERT FAIL: the first assignment generation is not 1';
+  end if;
+  if (select state from kitluy_devices.device_claims where id = v_claim) <> 'redeemed' then
+    raise exception 'ASSERT FAIL: the claim was not marked redeemed';
+  end if;
+
+  v_terminal := kitluy_devices.assign_terminal_profile_v1(
+    v_device, 1, 'laundry.t1.intake_cashier',
+    '00000000-0000-4000-8000-000000000018', 'OP-PROVISION');
+  if (select state from kitluy_devices.device_terminal_assignments where id = v_terminal) <> 'pending_trust' then
+    raise exception 'ASSERT FAIL: a terminal assignment became live before activation';
+  end if;
+
+  if (select fleet_status from kitluy_devices.device_fleet_status where device_record_id = v_device)
+     <> 'BLOCKED_PKI_UNCONFIGURED' then
+    raise exception 'ASSERT FAIL: a claimed, assigned device does not report the PKI blocker';
+  end if;
+  if exists (select 1 from kitluy_devices.device_assignment_projections where device_id = v_device) then
+    raise exception 'ASSERT FAIL: an offline projection was written without activation';
+  end if;
+
+  raise notice 'PASS ws11-claim-boundary: claim accepted -> scope bound -> assignment created -> device rests at awaiting_trust with a PENDING terminal assignment, reports BLOCKED_PKI_UNCONFIGURED, and writes NO offline projection. The chain stops exactly where BLK-005 says it must';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 29b — token reuse vs. recovery after response loss, already-claimed, and
+-- ownership-transfer refusal.
+-- ---------------------------------------------------------------------------
+-- Reuse and recovery are the same wire event seen from two sides. The rule:
+-- the SAME device re-presenting the SAME token recovers; a DIFFERENT device
+-- presenting it is reuse and is refused.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_profile uuid;
+  v_device uuid;
+  v_other uuid;
+  v_token text := encode(sha256(convert_to('reuse-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_payload text := encode(sha256(convert_to('reuse-p-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_assignment uuid;
+  v_replay uuid;
+  v_refused int := 0;
+  v_TENANT_A constant uuid := '00000000-0000-4000-8000-000000000011';
+  v_TENANT_B constant uuid := '00000000-0000-4000-8000-000000000012';
+  v_STORE_1 constant uuid := '00000000-0000-4000-8000-000000000015';
+  v_STORE_2 constant uuid := '00000000-0000-4000-8000-000000000016';
+  v_LOC_1 constant uuid := '00000000-0000-4000-8000-000000000018';
+  v_LOC_2 constant uuid := '00000000-0000-4000-8000-000000000019';
+begin
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+
+  v_device := kitluy_devices.enroll_device_v1(
+    'WS11-T002-ADV-' || gen_random_uuid(), v_profile, now(),
+    repeat('b3', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'ba:02:' || substr(md5(random()::text),1,6) || ':02'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-adv-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-adv-' || gen_random_uuid())));
+
+  v_other := kitluy_devices.enroll_device_v1(
+    'WS11-T002-OTHER-' || gen_random_uuid(), v_profile, now(),
+    repeat('c4', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'ba:03:' || substr(md5(random()::text),1,6) || ':03'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-oth-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-oth-' || gen_random_uuid())));
+
+  perform kitluy_devices.create_device_claim_v1(
+    v_device, v_TENANT_A, v_STORE_1, v_LOC_1, v_token, v_payload, 900, 'OP-PROVISION');
+  v_assignment := kitluy_devices.redeem_device_claim_v1(v_token, v_payload, v_device, 'HUB-A');
+
+  -- CASE 1: reused claim token, by a different device.
+  begin
+    perform kitluy_devices.redeem_device_claim_v1(v_token, v_payload, v_other, 'HUB-IMPOSTOR');
+    raise exception 'ASSERT FAIL: a redeemed claim token was accepted from a second device';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-DEVICE-CLAIM-REUSED%' then
+      raise exception 'ASSERT FAIL: token reuse refused for the wrong reason: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+
+  -- CASES 15 and 16: claim committed but response lost, then retried.
+  v_replay := kitluy_devices.redeem_device_claim_v1(v_token, v_payload, v_device, 'HUB-A');
+  if v_replay is distinct from v_assignment then
+    raise exception 'ASSERT FAIL: retry after response loss produced a different assignment (% vs %)',
+      v_replay, v_assignment;
+  end if;
+  if (select count(*) from kitluy_devices.device_assignments where device_id = v_device) <> 1 then
+    raise exception 'ASSERT FAIL: retry after response loss created a second assignment';
+  end if;
+  if not exists (select 1 from kitluy_devices.device_claim_events
+                  where device_id = v_device and event_type = 'CLAIM_REDEMPTION_REPLAYED') then
+    raise exception 'ASSERT FAIL: the idempotent replay was not recorded as such';
+  end if;
+
+  -- CASE 5: already-claimed device.
+  begin
+    perform kitluy_devices.create_device_claim_v1(
+      v_device, v_TENANT_A, v_STORE_1, v_LOC_1,
+      encode(sha256(convert_to('again-' || gen_random_uuid(), 'UTF8')), 'hex'),
+      encode(sha256(convert_to('again-p-' || gen_random_uuid(), 'UTF8')), 'hex'),
+      900, 'OP-PROVISION');
+    raise exception 'ASSERT FAIL: an already-assigned device accepted a second claim';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-DEVICE-ALREADY-CLAIMED%' then
+      raise exception 'ASSERT FAIL: second claim refused for the wrong reason: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+
+  -- CASE 7: Hub ownership transfer refusal.
+  begin
+    perform kitluy_devices.create_device_claim_v1(
+      v_device, v_TENANT_B, v_STORE_2, v_LOC_2,
+      encode(sha256(convert_to('xfer-' || gen_random_uuid(), 'UTF8')), 'hex'),
+      encode(sha256(convert_to('xfer-p-' || gen_random_uuid(), 'UTF8')), 'hex'),
+      900, 'OP-PROVISION');
+    raise exception 'ASSERT FAIL: a device changed owner through a new claim';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-DEVICE-OWNERSHIP-TRANSFER%' then
+      raise exception 'ASSERT FAIL: ownership transfer refused for the wrong reason: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+
+  if v_refused <> 3 then
+    raise exception 'ASSERT FAIL: expected 3 refusals here, got %', v_refused;
+  end if;
+
+  raise notice 'PASS ws11-token-reuse-vs-recovery: the SAME device re-presenting the SAME token recovers the SAME assignment and creates no second one (response-loss retry), while a DIFFERENT device presenting it is refused as reuse; a second claim and a disguised ownership transfer are each refused with their own code';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 29c — expiry, altered payload, concurrency, scope, device state, duplicate
+-- evidence, generation staleness and terminal Location.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_profile uuid;
+  v_device uuid;
+  v_expiring uuid;
+  v_quarantined uuid;
+  v_retired uuid;
+  v_dup_b uuid;
+  v_token text;
+  v_payload text;
+  v_assignment uuid;
+  v_gen2 uuid;
+  v_refused int := 0;
+  v_dup_mac text := 'ba:0d:' || substr(md5(random()::text),1,6) || ':0d';
+  v_dup_board text := 'board-dup-' || gen_random_uuid();
+  v_TENANT_A constant uuid := '00000000-0000-4000-8000-000000000011';
+  v_TENANT_B constant uuid := '00000000-0000-4000-8000-000000000012';
+  v_STORE_1 constant uuid := '00000000-0000-4000-8000-000000000015';
+  v_STORE_2 constant uuid := '00000000-0000-4000-8000-000000000016';
+  v_LOC_1 constant uuid := '00000000-0000-4000-8000-000000000018';
+  v_LOC_2 constant uuid := '00000000-0000-4000-8000-000000000019';
+  -- A Location owned by tenant B / store ds03. Fixture note: loc01 and loc02
+  -- BOTH belong to store ds01, so loc02 is a valid sibling Location, not a
+  -- cross-scope one — it is used for the legitimate reassignment below.
+  v_LOC_FOREIGN constant uuid := '00000000-0000-4000-8000-000000000450';
+begin
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+
+  -- CASE 2: expired claim token. Exercised with a real 1-second TTL, because
+  -- a claim's expiry cannot be back-dated by hand (the claim is immutable).
+  v_expiring := kitluy_devices.enroll_device_v1(
+    'WS11-T002-EXP-' || gen_random_uuid(), v_profile, now(),
+    repeat('e6', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'ba:05:' || substr(md5(random()::text),1,6) || ':05'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-exp-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-exp-' || gen_random_uuid())));
+  v_token := encode(sha256(convert_to('exp-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_payload := encode(sha256(convert_to('exp-p-' || gen_random_uuid(), 'UTF8')), 'hex');
+  perform kitluy_devices.create_device_claim_v1(
+    v_expiring, v_TENANT_A, v_STORE_1, v_LOC_1, v_token, v_payload, 1, 'OP-PROVISION');
+  perform pg_sleep(1.2);
+  begin
+    perform kitluy_devices.redeem_device_claim_v1(v_token, v_payload, v_expiring, 'HUB-LATE');
+    raise exception 'ASSERT FAIL: an expired claim token was redeemed';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-DEVICE-CLAIM-EXPIRED%' then
+      raise exception 'ASSERT FAIL: expiry refused for the wrong reason: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+
+  v_device := kitluy_devices.enroll_device_v1(
+    'WS11-T002-C-' || gen_random_uuid(), v_profile, now(),
+    repeat('d5', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'ba:04:' || substr(md5(random()::text),1,6) || ':04'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-c-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-c-' || gen_random_uuid())));
+
+  -- CASE 3: claim token with altered payload. The claim stays ISSUED, which is
+  -- what the concurrency case below then collides with.
+  v_token := encode(sha256(convert_to('alt-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_payload := encode(sha256(convert_to('alt-p-' || gen_random_uuid(), 'UTF8')), 'hex');
+  perform kitluy_devices.create_device_claim_v1(
+    v_device, v_TENANT_A, v_STORE_1, v_LOC_1, v_token, v_payload, 900, 'OP-PROVISION');
+  begin
+    perform kitluy_devices.redeem_device_claim_v1(
+      v_token, encode(sha256(convert_to('TAMPERED', 'UTF8')), 'hex'), v_device, 'HUB-C');
+    raise exception 'ASSERT FAIL: a claim with an altered payload was redeemed';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-DEVICE-CLAIM-PAYLOAD-ALTERED%' then
+      raise exception 'ASSERT FAIL: altered payload refused for the wrong reason: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+
+  -- CASE 14: concurrent claims for one device.
+  begin
+    perform kitluy_devices.create_device_claim_v1(
+      v_device, v_TENANT_A, v_STORE_1, v_LOC_1,
+      encode(sha256(convert_to('conc-' || gen_random_uuid(), 'UTF8')), 'hex'),
+      encode(sha256(convert_to('conc-p-' || gen_random_uuid(), 'UTF8')), 'hex'),
+      900, 'OP-PROVISION');
+    raise exception 'ASSERT FAIL: a second outstanding claim was created for one device';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    v_refused := v_refused + 1;
+  end;
+
+  -- CASES 4a/4b/4c: cross-Tenant, cross-Store, cross-Location.
+  begin
+    perform kitluy_devices.resolve_device_scope_v1(v_TENANT_B, v_STORE_1, v_LOC_1);
+    raise exception 'ASSERT FAIL: a cross-tenant scope resolved';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-DEVICE-SCOPE-CROSS-TENANT%' then
+      raise exception 'ASSERT FAIL: cross-tenant refused for the wrong reason: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+  begin
+    perform kitluy_devices.resolve_device_scope_v1(v_TENANT_A, v_STORE_2, v_LOC_1);
+    raise exception 'ASSERT FAIL: a cross-store scope resolved';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-DEVICE-SCOPE-CROSS-%' then
+      raise exception 'ASSERT FAIL: cross-store refused for the wrong reason: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+  -- Cross-Location, on the LOCATION hop rather than the store hop. In this
+  -- data model a Location belongs to exactly one Digital Store, so the
+  -- "cross-Store" and "cross-Location" attacks meet the SAME broken hop when
+  -- the Location is under a sibling store (checked above). The distinct
+  -- location-hop failure is a Location owned by another TENANT entirely.
+  -- Recorded plainly rather than manufacturing a third code for one hop.
+  begin
+    perform kitluy_devices.resolve_device_scope_v1(v_TENANT_A, v_STORE_1, v_LOC_FOREIGN);
+    raise exception 'ASSERT FAIL: a foreign-tenant location resolved into this scope';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-DEVICE-SCOPE-CROSS-%' then
+      raise exception 'ASSERT FAIL: cross-location refused for the wrong reason: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+
+  -- CASE 8: quarantined device.
+  v_quarantined := kitluy_devices.enroll_device_v1(
+    'WS11-T002-QUAR-' || gen_random_uuid(), v_profile, now(),
+    repeat('f7', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'ba:06:' || substr(md5(random()::text),1,6) || ':06'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-q-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-q-' || gen_random_uuid())));
+  perform kitluy_devices.quarantine_device_v1(
+    v_quarantined, 'manual_quarantine', 'CRITICAL', 'OP-PROBE', 'assertion probe');
+  begin
+    perform kitluy_devices.create_device_claim_v1(
+      v_quarantined, v_TENANT_A, v_STORE_1, v_LOC_1,
+      encode(sha256(convert_to('q-' || gen_random_uuid(), 'UTF8')), 'hex'),
+      encode(sha256(convert_to('q-p-' || gen_random_uuid(), 'UTF8')), 'hex'),
+      900, 'OP-PROVISION');
+    raise exception 'ASSERT FAIL: a quarantined device was claimed';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-DEVICE-QUARANTINED%' then
+      raise exception 'ASSERT FAIL: quarantined claim refused for the wrong reason: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+
+  -- CASE 9: retired device.
+  v_retired := kitluy_devices.enroll_device_v1(
+    'WS11-T002-RET-' || gen_random_uuid(), v_profile, now(),
+    repeat('08', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'ba:07:' || substr(md5(random()::text),1,6) || ':07'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-r-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-r-' || gen_random_uuid())));
+  perform kitluy_devices.retire_device_v1(v_retired, 'DECOMMISSION', 'OP-PROBE');
+  begin
+    perform kitluy_devices.create_device_claim_v1(
+      v_retired, v_TENANT_A, v_STORE_1, v_LOC_1,
+      encode(sha256(convert_to('r-' || gen_random_uuid(), 'UTF8')), 'hex'),
+      encode(sha256(convert_to('r-p-' || gen_random_uuid(), 'UTF8')), 'hex'),
+      900, 'OP-PROVISION');
+    raise exception 'ASSERT FAIL: a retired device was claimed';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-DEVICE-TERMINAL%' then
+      raise exception 'ASSERT FAIL: retired claim refused for the wrong reason: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+
+  -- CASE 10: duplicate hardware evidence. Two units, same non-storage evidence.
+  perform kitluy_devices.enroll_device_v1(
+    'WS11-T002-DUPA-' || gen_random_uuid(), v_profile, now(),
+    repeat('19', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', v_dup_mac),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', v_dup_board),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-da-' || gen_random_uuid())));
+  v_dup_b := kitluy_devices.enroll_device_v1(
+    'WS11-T002-DUPB-' || gen_random_uuid(), v_profile, now(),
+    repeat('2a', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', v_dup_mac),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', v_dup_board),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-db-' || gen_random_uuid())));
+  begin
+    perform kitluy_devices.create_device_claim_v1(
+      v_dup_b, v_TENANT_A, v_STORE_1, v_LOC_1,
+      encode(sha256(convert_to('d-' || gen_random_uuid(), 'UTF8')), 'hex'),
+      encode(sha256(convert_to('d-p-' || gen_random_uuid(), 'UTF8')), 'hex'),
+      900, 'OP-PROVISION');
+    raise exception 'ASSERT FAIL: a device with duplicate hardware evidence was claimed';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    v_refused := v_refused + 1;
+  end;
+
+  -- Back to v_device, whose altered-payload claim is still ISSUED. Redeem it
+  -- properly, then exercise the generation cases.
+  v_assignment := kitluy_devices.redeem_device_claim_v1(v_token, v_payload, v_device, 'HUB-C');
+  if (select assignment_generation from kitluy_devices.device_assignments where id = v_assignment) <> 1 then
+    raise exception 'ASSERT FAIL: the first generation is not 1';
+  end if;
+
+  -- Reassignment to a different Location under the SAME tenant/store.
+  v_gen2 := kitluy_devices.replace_device_assignment_v1(
+    v_device, v_TENANT_A, v_STORE_1, v_LOC_2, 'LOCATION_MOVE', 'OP-PROVISION');
+  if (select assignment_generation from kitluy_devices.device_assignments where id = v_gen2) <> 2 then
+    raise exception 'ASSERT FAIL: the replacement generation is not 2';
+  end if;
+
+  -- CASE 11: stale assignment generation.
+  begin
+    perform kitluy_devices.assert_assignment_generation_current_v1(v_device, 1);
+    raise exception 'ASSERT FAIL: a superseded assignment generation resolved as current';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-DEVICE-GENERATION-STALE%' then
+      raise exception 'ASSERT FAIL: stale generation refused for the wrong reason: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+
+  -- CASE 13: terminal assigned to the wrong Location.
+  begin
+    perform kitluy_devices.assign_terminal_profile_v1(
+      v_device, 2, 'laundry.t3.ready_scan_in', v_LOC_1, 'OP-PROVISION');
+    raise exception 'ASSERT FAIL: a terminal was assigned to a Location the assignment does not bind';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-DEVICE-TERMINAL-WRONG-LOCATION%' then
+      raise exception 'ASSERT FAIL: wrong-location terminal refused for the wrong reason: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+
+  -- CASE 12: revoked assignment generation.
+  perform kitluy_devices.revoke_device_assignment_v1(v_device, 'DEVICE_LOST', 'OP-SECURITY');
+  begin
+    perform kitluy_devices.assert_assignment_generation_current_v1(v_device, 2);
+    raise exception 'ASSERT FAIL: a revoked assignment generation resolved as current';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-DEVICE-GENERATION-REVOKED%' then
+      raise exception 'ASSERT FAIL: revoked generation refused for the wrong reason: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+
+  if (select assignment_generation from kitluy_devices.devices where id = v_device) <> 0 then
+    raise exception 'ASSERT FAIL: a revoked device still carries a live assignment generation';
+  end if;
+  if (select lifecycle_state from kitluy_devices.devices where id = v_device) <> 'enrolled' then
+    raise exception 'ASSERT FAIL: a revoked device did not return to enrolled';
+  end if;
+  if exists (select 1 from kitluy_devices.device_terminal_assignments
+              where device_id = v_device and state <> 'revoked') then
+    raise exception 'ASSERT FAIL: a terminal assignment survived the revocation of its assignment';
+  end if;
+
+  -- A re-claim after revocation must NOT reuse generation 1 or 2.
+  v_token := encode(sha256(convert_to('re-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_payload := encode(sha256(convert_to('re-p-' || gen_random_uuid(), 'UTF8')), 'hex');
+  perform kitluy_devices.create_device_claim_v1(
+    v_device, v_TENANT_A, v_STORE_1, v_LOC_1, v_token, v_payload, 900, 'OP-PROVISION');
+  perform kitluy_devices.redeem_device_claim_v1(v_token, v_payload, v_device, 'HUB-C');
+  if (select assignment_generation from kitluy_devices.devices where id = v_device) <> 3 then
+    raise exception 'ASSERT FAIL: a re-claim after revocation reused a generation number (got %)',
+      (select assignment_generation from kitluy_devices.devices where id = v_device);
+  end if;
+
+  if v_refused <> 12 then
+    raise exception 'ASSERT FAIL: expected 12 refusals in this section, got %', v_refused;
+  end if;
+
+  raise notice 'PASS ws11-adversarial: expired token, altered payload, concurrent claim, cross-Tenant, cross-Store, cross-Location, quarantined, retired, duplicate-evidence, stale generation, revoked generation and wrong-Location terminal are each refused with their own code; revocation returns the device to enrolled at generation 0 and revokes its terminal assignments; and a re-claim after revocation issues generation 3 rather than reusing 1 or 2';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 29d — case 17: attempted activation with BLK-005 open, through the ONLY
+-- reachable path, on a device that is otherwise completely ready.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_profile uuid;
+  v_device uuid;
+  v_token text;
+  v_payload text;
+  v_assignment uuid;
+  v_outcome kitluy_devices.activation_outcome;
+  v_refusals int;
+  v_TENANT_A constant uuid := '00000000-0000-4000-8000-000000000011';
+  v_STORE_1 constant uuid := '00000000-0000-4000-8000-000000000015';
+  v_LOC_1 constant uuid := '00000000-0000-4000-8000-000000000018';
+begin
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+
+  v_device := kitluy_devices.enroll_device_v1(
+    'WS11-T002-ACT-' || gen_random_uuid(), v_profile, now(),
+    repeat('3b', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'ba:08:' || substr(md5(random()::text),1,6) || ':08'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-act-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-act-' || gen_random_uuid())));
+
+  v_token := encode(sha256(convert_to('act-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_payload := encode(sha256(convert_to('act-p-' || gen_random_uuid(), 'UTF8')), 'hex');
+  perform kitluy_devices.create_device_claim_v1(
+    v_device, v_TENANT_A, v_STORE_1, v_LOC_1, v_token, v_payload, 900, 'OP-PROVISION');
+  v_assignment := kitluy_devices.redeem_device_claim_v1(v_token, v_payload, v_device, 'HUB-ACT');
+  perform kitluy_devices.assign_terminal_profile_v1(
+    v_device, 1, 'laundry.t4.pickup_scan_out', v_LOC_1, 'OP-PROVISION');
+
+  -- The device is now as ready as it can possibly be: enrolled, claimed,
+  -- scope-bound, assigned, terminal-assigned, no open incidents, no evidence
+  -- collision. The ONLY thing missing is BLK-005.
+  v_outcome := kitluy_devices.attempt_activate_device_v1(v_device, 'production', 'OP-ACTIVATE');
+
+  if v_outcome.outcome <> 'REFUSED' then
+    raise exception 'ASSERT FAIL: activation returned % while BLK-005 is open', v_outcome.outcome;
+  end if;
+  if v_outcome.refusal_code <> 'KLUY-DEVICE-PKI-UNCONFIGURED' then
+    raise exception 'ASSERT FAIL: the refusal code is %, not KLUY-DEVICE-PKI-UNCONFIGURED', v_outcome.refusal_code;
+  end if;
+  if v_outcome.refusal_message not like '%[REQUIRED:%' or v_outcome.refusal_message not like '%BLK-005%' then
+    raise exception 'ASSERT FAIL: the refusal is not an explicit required-value error: %', v_outcome.refusal_message;
+  end if;
+  if v_outcome.evidence_event_id is null then
+    raise exception 'ASSERT FAIL: the refusal returned no evidence event id';
+  end if;
+
+  -- No certificate, no active device, no assignment widening, no projection.
+  if (select count(*) from kitluy_devices.device_certificates where device_id = v_device) <> 0 then
+    raise exception 'ASSERT FAIL: a certificate row was created by a refused activation';
+  end if;
+  if (select lifecycle_state from kitluy_devices.devices where id = v_device) <> 'awaiting_trust' then
+    raise exception 'ASSERT FAIL: a refused activation moved the device out of awaiting_trust';
+  end if;
+  if (select state from kitluy_devices.device_assignments where id = v_assignment) <> 'pending_trust' then
+    raise exception 'ASSERT FAIL: a refused activation advanced the assignment state';
+  end if;
+  if (select store_location_id from kitluy_devices.device_assignments where id = v_assignment) <> v_LOC_1
+     or (select tenant_id from kitluy_devices.device_assignments where id = v_assignment) <> v_TENANT_A
+     or (select digital_store_id from kitluy_devices.device_assignments where id = v_assignment) <> v_STORE_1 then
+    raise exception 'ASSERT FAIL: the assignment scope changed during a refused activation';
+  end if;
+  if exists (select 1 from kitluy_devices.device_assignment_projections where device_id = v_device) then
+    raise exception 'ASSERT FAIL: a refused activation wrote an offline projection';
+  end if;
+  if exists (select 1 from kitluy_devices.device_terminal_assignments
+              where device_id = v_device and state = 'active') then
+    raise exception 'ASSERT FAIL: a refused activation made a terminal assignment live';
+  end if;
+
+  -- KLRISK-DEVICE-001: the evidence exists WITHOUT the caller choosing to
+  -- write it. attempt_activate_device_v1 was the only call made.
+  select count(*) into v_refusals
+  from kitluy_devices.device_lifecycle_events
+  where device_id = v_device and reason_code = 'ACTIVATION_REFUSED';
+  if v_refusals <> 1 then
+    raise exception 'ASSERT FAIL: the refusal was not durably recorded by the activation path itself (% events)', v_refusals;
+  end if;
+  if not exists (select 1 from kitluy_devices.device_trust_incidents
+                  where device_id = v_device and incident_type = 'activation_blocked'
+                    and cleared_at is null) then
+    raise exception 'ASSERT FAIL: the BLK-005 blocker is not visible on the device';
+  end if;
+
+  raise notice 'PASS ws11-activation-blocked: a fully-provisioned device — enrolled, claimed, scope-bound, assigned, terminal-assigned, no incidents, no collisions — is REFUSED with KLUY-DEVICE-PKI-UNCONFIGURED, and the refusal is recorded by the activation path ITSELF rather than by a caller that might forget. No certificate, no active device, no assignment widening, no offline projection, no live terminal';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 29e — KLRISK-DEVICE-001: the raising form is unreachable, so a refusal
+-- cannot be produced without its evidence.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_public_exec boolean;
+  v_service_exec boolean;
+  v_attempt_exec boolean;
+begin
+  select has_function_privilege('public', p.oid, 'execute'),
+         has_function_privilege('service_role', p.oid, 'execute')
+  into v_public_exec, v_service_exec
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'kitluy_devices' and p.proname = 'activate_device_v1';
+
+  if v_public_exec or v_service_exec then
+    raise exception 'ASSERT FAIL: the raising activation form is executable (public=%, service_role=%); a caller could take a refusal without recording it',
+      v_public_exec, v_service_exec;
+  end if;
+
+  select has_function_privilege('service_role', p.oid, 'execute')
+  into v_attempt_exec
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'kitluy_devices' and p.proname = 'attempt_activate_device_v1';
+
+  if not v_attempt_exec then
+    raise exception 'ASSERT FAIL: the evidence-recording activation path is not executable by the service role';
+  end if;
+
+  raise notice 'PASS ws11-klrisk-device-001: activate_device_v1 is executable by neither PUBLIC nor service_role, and attempt_activate_device_v1 — which records the refusal before returning it — is the only granted activation path';
+end $$;
+
+select 'assertions complete: groups 0010-0121 structural contract holds (incl. cycle-6 WS-07/WS-08 sections 17-26, cycle-9 WS-10 section 27 and cycle-10 WS-11 sections 28 (T001) and 29 (T002))' as result;

@@ -2623,4 +2623,170 @@ begin
 end $$;
 rollback;
 
-select 'rls-tests complete: 14+9 baseline cases; cycle-5 WS5 7 negative + 7 positive and WS6 10 negative + 9 positive; cycle-6 WS7 13 negative + 6 positive and WS8 13 negative + 6 positive; cycle-10 WS11-T001 4 negative + 1 positive kitluy_devices cases executed' as result;
+
+-- ============================================================================
+-- CYCLE 10 / WS-11-T002 — claim and assignment fail-closed cases (group 0121).
+-- ============================================================================
+
+-- WS11-N5: a client cannot read claims. The claim token hash and the intended
+-- scope together are the provisioning secret; a tenant user reading them could
+-- enumerate which hardware is about to be bound where.
+begin;
+select set_config('request.jwt.claims',
+  '{"role":"authenticated","sub":"00000000-0000-4000-8000-000000000002"}', true);
+set local role authenticated;
+do $$
+declare
+  v_denied int := 0;
+  v_probe int;
+begin
+  begin
+    select count(*) into v_probe from kitluy_devices.device_claims;
+    if v_probe > 0 then raise exception 'FAIL WS11-N5: authenticated read % claim rows', v_probe; end if;
+    v_denied := v_denied + 1;
+  exception when insufficient_privilege then v_denied := v_denied + 1;
+  end;
+
+  begin
+    select count(*) into v_probe from kitluy_devices.device_assignments;
+    if v_probe > 0 then raise exception 'FAIL WS11-N5: authenticated read % assignment rows', v_probe; end if;
+    v_denied := v_denied + 1;
+  exception when insufficient_privilege then v_denied := v_denied + 1;
+  end;
+
+  begin
+    select count(*) into v_probe from kitluy_devices.device_assignment_projections;
+    if v_probe > 0 then raise exception 'FAIL WS11-N5: authenticated read % projection rows', v_probe; end if;
+    v_denied := v_denied + 1;
+  exception when insufficient_privilege then v_denied := v_denied + 1;
+  end;
+
+  if v_denied <> 3 then
+    raise exception 'FAIL WS11-N5: expected 3 denied probes, got %', v_denied;
+  end if;
+  raise notice 'PASS WS11-N5: an authenticated tenant user reads no claim, no assignment and no offline projection — the claim token hash plus intended scope is provisioning-sensitive and is not tenant-readable';
+end $$;
+rollback;
+
+-- WS11-N6: a client cannot execute the claim, assignment or activation
+-- procedures. Self-service provisioning is not a thing.
+begin;
+select set_config('request.jwt.claims',
+  '{"role":"authenticated","sub":"00000000-0000-4000-8000-000000000002"}', true);
+set local role authenticated;
+do $$
+declare
+  v_denied int := 0;
+begin
+  begin
+    perform kitluy_devices.create_device_claim_v1(
+      gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), gen_random_uuid(),
+      repeat('ab', 32), repeat('cd', 32), 900, 'CLIENT');
+    raise exception 'FAIL WS11-N6: a client created a device claim';
+  exception when others then
+    if sqlerrm like 'FAIL WS11%' then raise; end if;
+    if sqlerrm not like '%permission denied%' then
+      raise exception 'FAIL WS11-N6: create_device_claim_v1 was callable by a client (%)', sqlerrm;
+    end if;
+    v_denied := v_denied + 1;
+  end;
+
+  begin
+    perform kitluy_devices.redeem_device_claim_v1(
+      repeat('ab', 32), repeat('cd', 32), gen_random_uuid(), 'CLIENT');
+    raise exception 'FAIL WS11-N6: a client redeemed a device claim';
+  exception when others then
+    if sqlerrm like 'FAIL WS11%' then raise; end if;
+    if sqlerrm not like '%permission denied%' then
+      raise exception 'FAIL WS11-N6: redeem_device_claim_v1 was callable by a client (%)', sqlerrm;
+    end if;
+    v_denied := v_denied + 1;
+  end;
+
+  begin
+    perform kitluy_devices.attempt_activate_device_v1(gen_random_uuid(), 'production', 'CLIENT');
+    raise exception 'FAIL WS11-N6: a client attempted device activation';
+  exception when others then
+    if sqlerrm like 'FAIL WS11%' then raise; end if;
+    if sqlerrm not like '%permission denied%' then
+      raise exception 'FAIL WS11-N6: attempt_activate_device_v1 was callable by a client (%)', sqlerrm;
+    end if;
+    v_denied := v_denied + 1;
+  end;
+
+  begin
+    perform kitluy_devices.revoke_device_assignment_v1(gen_random_uuid(), 'X', 'CLIENT');
+    raise exception 'FAIL WS11-N6: a client revoked a device assignment';
+  exception when others then
+    if sqlerrm like 'FAIL WS11%' then raise; end if;
+    if sqlerrm not like '%permission denied%' then
+      raise exception 'FAIL WS11-N6: revoke_device_assignment_v1 was callable by a client (%)', sqlerrm;
+    end if;
+    v_denied := v_denied + 1;
+  end;
+
+  if v_denied <> 4 then
+    raise exception 'FAIL WS11-N6: expected 4 denied procedure calls, got %', v_denied;
+  end if;
+  raise notice 'PASS WS11-N6: claim creation, claim redemption, activation and assignment revocation are all unexecutable from a client session — provisioning is a service-path operation, never self-service';
+end $$;
+rollback;
+
+-- WS11-N7: anonymous access to claims and assignments is denied.
+begin;
+select set_config('request.jwt.claims', '{"role":"anon"}', true);
+set local role anon;
+do $$
+declare
+  v_denied int := 0;
+  v_probe int;
+begin
+  begin
+    select count(*) into v_probe from kitluy_devices.device_claims;
+    if v_probe > 0 then raise exception 'FAIL WS11-N7: anon read % claim rows', v_probe; end if;
+    v_denied := v_denied + 1;
+  exception when insufficient_privilege then v_denied := v_denied + 1;
+  end;
+  begin
+    select count(*) into v_probe from kitluy_devices.device_assignments;
+    if v_probe > 0 then raise exception 'FAIL WS11-N7: anon read % assignment rows', v_probe; end if;
+    v_denied := v_denied + 1;
+  exception when insufficient_privilege then v_denied := v_denied + 1;
+  end;
+  if v_denied <> 2 then
+    raise exception 'FAIL WS11-N7: expected 2 denied anon probes, got %', v_denied;
+  end if;
+  raise notice 'PASS WS11-N7: anonymous reads of claims and assignments are denied with no row leakage';
+end $$;
+rollback;
+
+-- WS11-P2 (control): the service path reads the fleet view, and while BLK-005
+-- is open no assignment is active and no offline projection exists.
+begin;
+set local role service_role;
+do $$
+declare
+  v_awaiting int;
+  v_active_assignments int;
+  v_projections int;
+begin
+  select count(*) into v_awaiting from kitluy_devices.device_fleet_status
+   where fleet_status = 'BLOCKED_PKI_UNCONFIGURED';
+  select count(*) into v_active_assignments
+   from kitluy_devices.device_assignments where state = 'active';
+  select count(*) into v_projections from kitluy_devices.device_assignment_projections;
+
+  if v_awaiting = 0 then
+    raise exception 'FAIL WS11-P2: no claimed device reports BLOCKED_PKI_UNCONFIGURED';
+  end if;
+  if v_active_assignments <> 0 then
+    raise exception 'FAIL WS11-P2: % assignment(s) are active while BLK-005 is open', v_active_assignments;
+  end if;
+  if v_projections <> 0 then
+    raise exception 'FAIL WS11-P2: % offline projection(s) exist though no activation has ever succeeded', v_projections;
+  end if;
+  raise notice 'PASS WS11-P2: the service path reads the fleet view; % claimed device(s) report BLOCKED_PKI_UNCONFIGURED, zero assignments are active and zero offline projections exist', v_awaiting;
+end $$;
+rollback;
+
+select 'rls-tests complete: 14+9 baseline cases; cycle-5 WS5 7 negative + 7 positive and WS6 10 negative + 9 positive; cycle-6 WS7 13 negative + 6 positive and WS8 13 negative + 6 positive; cycle-10 WS11 T001 4 negative + 1 positive and T002 3 negative + 1 positive kitluy_devices cases executed' as result;
