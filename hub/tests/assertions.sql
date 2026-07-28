@@ -159,12 +159,20 @@ declare
 begin
   for r in
     select * from (values
+      -- ALIGNED by 0015 per owner amendment KLD-2026-07-28-001-A01 §2:
+      -- sending -> in_flight, blocked -> rejected. RENAME VALUE preserves the
+      -- member OIDs and therefore the enumsortorder, so the positions below are
+      -- the 0001 positions with the two amended labels.
       ('edge_sync', 'delivery_state',
-       array['pending','sending','acknowledged','retry_wait','blocked','dead_letter']),
+       array['pending','in_flight','acknowledged','retry_wait','rejected','dead_letter']),
       ('edge_sync', 'inbox_state',
        array['received','verified','applied','rejected','dead_letter']),
       ('edge_sync', 'conflict_state',
        array['open','auto_resolved','operator_required','resolved','waived']),
+      -- ADDED by 0015 (amendment §3): the orthogonal conflict dimension. It is
+      -- a SEPARATE type precisely so reconciliation_required can never become a
+      -- delivery_state member.
+      ('edge_sync', 'reconciliation_state', array['none','required','cleared']),
       ('edge_documents', 'print_state',
        array['queued','dispatching','printed','failed','retry_wait','dead_letter','cancelled']),
       ('edge_config', 'activation_state',
@@ -191,10 +199,11 @@ begin
     end if;
     v_checked := v_checked + 1;
   end loop;
-  if v_checked <> 7 then
-    raise exception 'ASSERT FAIL: expected 7 §5 enum types, checked %', v_checked;
+  if v_checked <> 8 then
+    raise exception 'ASSERT FAIL: expected 8 enum types (7 §5 shared + 1 amendment-added), checked %',
+      v_checked;
   end if;
-  raise notice 'PASS enum-types: all 7 §5 shared types exist with the exact declared value lists';
+  raise notice 'PASS enum-types: all 7 §5 shared types plus edge_sync.reconciliation_state exist with the exact declared value lists';
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -1259,6 +1268,255 @@ begin
     raise exception 'ASSERT FAIL: expected 2 blocked single-active violations, got %', v_blocked;
   end if;
   raise notice 'PASS single-active: one active assignment per Hub, one active snapshot per Location, and the active-configuration view exposes exactly one';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 29a. WS-10 delivery/conflict dimension governance (migration 0015; owner
+--      amendment KLD-2026-07-28-001-A01 §2-§5).
+--
+--      Runs inside an explicit transaction that is ROLLED BACK: unlike the
+--      negative probes above, these assertions must COMMIT real state changes
+--      to observe the governed transitions, and the assertion suite never
+--      leaves residue behind.
+-- ---------------------------------------------------------------------------
+begin;
+
+do $$
+declare
+  v_conflict  uuid := 'e0000000-0000-4000-8000-00000000c001';
+  v_conflict2 uuid := 'e0000000-0000-4000-8000-00000000c002';
+  v_event     uuid := 'e0000000-0000-4000-8000-0000000000d2';  -- seeded, pending
+  v_resolve   uuid := 'e0000000-0000-4000-8000-0000000000d1';  -- seeded local_event
+  v_tenant    uuid := 'e0000000-0000-4000-8000-000000000001';
+  v_store     uuid := 'e0000000-0000-4000-8000-000000000002';
+  v_location  uuid := 'e0000000-0000-4000-8000-000000000003';
+  v_blocked   int  := 0;
+  v_row       edge_sync.outbox%rowtype;
+  v_status    text;
+begin
+  insert into edge_sync.sync_conflict
+    (id, tenant_id, digital_store_id, location_id, conflict_type, data_class,
+     local_event_id, detected_at, state, severity)
+  values
+    (v_conflict, v_tenant, v_store, v_location, 'cloud_effect_divergence',
+     'finance_payment', v_event, now(), 'operator_required', 'high'),
+    (v_conflict2, v_tenant, v_store, v_location, 'cloud_effect_divergence',
+     'finance_payment', v_event, now(), 'operator_required', 'high');
+
+  -- (a) The conflict dimension is GOVERNED-ONLY: a bare UPDATE — exactly what
+  --     a delivery worker holds the grant to issue — is refused (§5).
+  begin
+    update edge_sync.outbox set reconciliation_state = 'required' where event_id = v_event;
+    raise exception 'ASSERT FAIL: a bare UPDATE moved the conflict dimension';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-EDGE-RECONCILIATION-GOVERNED%' then
+      raise exception 'ASSERT FAIL: expected KLUY-EDGE-RECONCILIATION-GOVERNED, got %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- (b) A flag without a named divergence is not evidence.
+  begin
+    perform edge_sync.raise_reconciliation(v_event, gen_random_uuid(), 'unknown conflict');
+    raise exception 'ASSERT FAIL: reconciliation was raised against a non-existent conflict';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  begin
+    perform edge_sync.raise_reconciliation(v_event, v_conflict, '   ');
+    raise exception 'ASSERT FAIL: reconciliation was raised without a reason';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- (c) The governed raise succeeds and leaves delivery_state UNTOUCHED (§3).
+  perform edge_sync.raise_reconciliation(v_event, v_conflict,
+    'cloud reported a different applied amount for this payment effect');
+  select * into v_row from edge_sync.outbox where event_id = v_event;
+  if v_row.reconciliation_state <> 'required' then
+    raise exception 'ASSERT FAIL: governed raise did not set reconciliation_state';
+  end if;
+  if v_row.delivery_state <> 'pending' then
+    raise exception 'ASSERT FAIL: raising a conflict changed delivery_state to %', v_row.delivery_state;
+  end if;
+
+  -- (d) CONFLICT OVERRIDE FIRST (§4): the external projection reports
+  --     reconciliation_required even though delivery_state is still pending.
+  select external_status into v_status from edge_sync.outbox_status where event_id = v_event;
+  if v_status <> 'reconciliation_required' then
+    raise exception 'ASSERT FAIL: conflict override did not win; external status is %', v_status;
+  end if;
+
+  -- (e) The two dimensions cannot move in ONE statement, even with the
+  --     governed marker set (§3).
+  begin
+    perform set_config('kitluy.reconciliation_governed', 'on', true);
+    update edge_sync.outbox
+       set delivery_state = 'retry_wait', reconciliation_raised_reason = 'smuggled'
+     where event_id = v_event;
+    raise exception 'ASSERT FAIL: one statement moved both state dimensions';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-EDGE-STATE-DIMENSIONS-INDEPENDENT%' then
+      raise exception 'ASSERT FAIL: expected KLUY-EDGE-STATE-DIMENSIONS-INDEPENDENT, got %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- (f) A raised reconciliation is never silently discarded.
+  begin
+    perform set_config('kitluy.reconciliation_governed', 'on', true);
+    update edge_sync.outbox
+       set reconciliation_state = 'none', reconciliation_conflict_id = null,
+           reconciliation_raised_at = null, reconciliation_raised_reason = null
+     where event_id = v_event;
+    raise exception 'ASSERT FAIL: a raised reconciliation was reset to none';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-EDGE-RECONCILIATION-NOT-DISCARDABLE%' then
+      raise exception 'ASSERT FAIL: expected KLUY-EDGE-RECONCILIATION-NOT-DISCARDABLE, got %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+  perform set_config('kitluy.reconciliation_governed', 'off', true);
+
+  -- (g) Clearing demands an authority, a reason AND correlation to the repair
+  --     or compensating action (§5). Each omission is refused separately.
+  begin
+    perform edge_sync.clear_reconciliation(v_event, null, null, 'reason', v_resolve);
+    raise exception 'ASSERT FAIL: reconciliation was cleared without an authority';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  begin
+    perform edge_sync.clear_reconciliation(v_event, null, 'operator:supervisor', '  ', v_resolve);
+    raise exception 'ASSERT FAIL: reconciliation was cleared without a reason';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  begin
+    perform edge_sync.clear_reconciliation(v_event, null, 'operator:supervisor', 'reason', null);
+    raise exception 'ASSERT FAIL: reconciliation was cleared without a correlated repair';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- (h) A governed clearance succeeds, records its evidence, and returns the
+  --     external projection to the delivery dimension.
+  perform edge_sync.clear_reconciliation(
+    v_event, v_tenant, 'operator:shift_supervisor',
+    'compensating payment adjustment recorded and matched to the cloud effect', v_resolve);
+  select * into v_row from edge_sync.outbox where event_id = v_event;
+  if v_row.reconciliation_state <> 'cleared'
+     or v_row.reconciliation_cleared_at is null
+     or v_row.reconciliation_cleared_authority is null
+     or v_row.reconciliation_clearing_reason is null
+     or v_row.reconciliation_clearing_event_id is null then
+    raise exception 'ASSERT FAIL: a cleared reconciliation is missing its evidence';
+  end if;
+  select external_status into v_status from edge_sync.outbox_status where event_id = v_event;
+  if v_status <> 'pending_cloud_sync' then
+    raise exception 'ASSERT FAIL: after clearance the projection should follow delivery state, got %', v_status;
+  end if;
+
+  -- (i) Re-raising after clearance needs a NEW conflict record, not the
+  --     already-resolved one.
+  begin
+    perform edge_sync.raise_reconciliation(v_event, v_conflict, 'same conflict again');
+    raise exception 'ASSERT FAIL: a resolved conflict was reused to re-raise';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-EDGE-RECONCILIATION-STALE-CONFLICT%' then
+      raise exception 'ASSERT FAIL: expected KLUY-EDGE-RECONCILIATION-STALE-CONFLICT, got %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+  perform edge_sync.raise_reconciliation(v_event, v_conflict2, 'a genuinely new divergence');
+
+  -- (j) `rejected` is a DURABLE CLOUD VERDICT (§2): it can never be recorded
+  --     without the cloud error code and the moment it was recorded.
+  begin
+    update edge_sync.outbox set delivery_state = 'rejected' where event_id = v_event;
+    raise exception 'ASSERT FAIL: delivery_state=rejected was accepted with no cloud error code';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- (k) A pure delivery-state move still works and leaves the conflict
+  --     dimension exactly where it was.
+  update edge_sync.outbox
+     set delivery_state = 'in_flight', attempt_count = attempt_count + 1, last_attempt_at = now()
+   where event_id = v_event;
+  select * into v_row from edge_sync.outbox where event_id = v_event;
+  if v_row.reconciliation_state <> 'required' then
+    raise exception 'ASSERT FAIL: a delivery-state move disturbed the conflict dimension';
+  end if;
+
+  if v_blocked <> 10 then
+    raise exception 'ASSERT FAIL: expected 10 blocked dimension violations, got %', v_blocked;
+  end if;
+  raise notice 'PASS state-dimensions: delivery and conflict states transition independently; a delivery worker cannot clear reconciliation_required; clearing demands authority, reason and correlation; conflict override wins the external projection';
+end $$;
+
+rollback;
+
+-- ---------------------------------------------------------------------------
+-- 29b. reconciliation_required is NOT a delivery state (amendment §3).
+-- ---------------------------------------------------------------------------
+do $$
+begin
+  if exists (
+    select 1 from pg_enum e
+    join pg_type t on t.oid = e.enumtypid
+    join pg_namespace n on n.oid = t.typnamespace
+    where n.nspname = 'edge_sync' and t.typname = 'delivery_state'
+      and e.enumlabel = 'reconciliation_required'
+  ) then
+    raise exception
+      'ASSERT FAIL: reconciliation_required leaked into edge_sync.delivery_state; amendment §3 keeps it orthogonal';
+  end if;
+
+  -- The shared projection exists and is the ONLY mapping (§4).
+  if not exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'edge_sync' and p.proname = 'external_sync_status'
+  ) then
+    raise exception 'ASSERT FAIL: the shared external-status projection is missing (§4)';
+  end if;
+
+  -- Conflict override, exhaustively, over the whole cross product.
+  if exists (
+    select 1
+    from unnest(enum_range(null::edge_sync.delivery_state)) d,
+         unnest(enum_range(null::edge_sync.reconciliation_state)) r
+    where r = 'required'
+      and edge_sync.external_sync_status(d, r) <> 'reconciliation_required'
+  ) then
+    raise exception 'ASSERT FAIL: conflict override does not win for every delivery state (§4)';
+  end if;
+
+  -- No sixth vocabulary value is invented anywhere in the projection.
+  if exists (
+    select 1
+    from unnest(enum_range(null::edge_sync.delivery_state)) d,
+         unnest(enum_range(null::edge_sync.reconciliation_state)) r
+    where edge_sync.external_sync_status(d, r) not in
+          ('pending_cloud_sync', 'cloud_acknowledged', 'cloud_rejected', 'reconciliation_required')
+  ) then
+    raise exception 'ASSERT FAIL: the projection emitted a value outside the approved registry vocabulary';
+  end if;
+
+  raise notice 'PASS external-projection: reconciliation_required stays out of delivery_state, ONE shared mapping exists, conflict override wins for every delivery state, and no sixth vocabulary value is invented';
 end $$;
 
 -- ---------------------------------------------------------------------------

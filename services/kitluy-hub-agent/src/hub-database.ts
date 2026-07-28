@@ -59,17 +59,38 @@ export const HUB_DATABASE_ROLES = [
 
 /**
  * Persisted per-event delivery state — the CANONICAL `edge_sync.delivery_state`
- * enum (§5). Recorded gap G2: this is the only PERSISTED sync vocabulary.
+ * enum, ALIGNED by hub migration 0015 per owner amendment
+ * KLD-2026-07-28-001-A01 §2 (`sending` -> `in_flight`, `blocked` -> `rejected`).
+ *
+ * TRANSPORT AND CLOUD-PROCESSING LIFECYCLE ONLY. `rejected` means a DURABLE
+ * cloud rejection and is never used for a temporary network error, rate
+ * limiting, a scheduled retry, an in-progress attempt, a local operator pause
+ * or an unverified timeout. `reconciliation_required` is deliberately ABSENT:
+ * it lives in the orthogonal conflict dimension below (§3).
+ *
+ * The array order mirrors the enum's `enumsortorder`; `RENAME VALUE` preserves
+ * member OIDs, so the two amended labels sit in their original 0001 positions.
  */
 export const EDGE_DELIVERY_STATES = [
   "pending",
-  "sending",
+  "in_flight",
   "acknowledged",
   "retry_wait",
-  "blocked",
+  "rejected",
   "dead_letter",
 ] as const;
 export type EdgeDeliveryState = (typeof EDGE_DELIVERY_STATES)[number];
+
+/**
+ * The ORTHOGONAL conflict/reconciliation dimension (`edge_sync.reconciliation_state`,
+ * added by 0015 per amendment §3). A SEPARATE type from
+ * {@link EDGE_DELIVERY_STATES} precisely so `reconciliation_required` can never
+ * become a delivery state. `cleared` is distinct from `none`: "reconciled by an
+ * authorized actor" and "never needed reconciliation" are different facts and
+ * only the first has an audit trail.
+ */
+export const EDGE_RECONCILIATION_STATES = ["none", "required", "cleared"] as const;
+export type EdgeReconciliationState = (typeof EDGE_RECONCILIATION_STATES)[number];
 
 /**
  * Command-level sync state (WS-09-T004 truthful-sync-state vocabulary).
@@ -86,6 +107,20 @@ export const HUB_COMMAND_SYNC_STATES = [
   "reconciliation_required",
 ] as const;
 export type HubCommandSyncState = (typeof HUB_COMMAND_SYNC_STATES)[number];
+
+/**
+ * Amendment KLD-2026-07-28-001-A01 §4: "External status is derived by ONE
+ * shared mapping function or view ... Services must not maintain divergent
+ * mappings." That single mapping is the SQL function
+ * `edge_sync.external_sync_status(delivery_state, reconciliation_state)` added
+ * by hub migration 0015, with CONFLICT OVERRIDE FIRST.
+ *
+ * This constant names it so that no TypeScript module reimplements the mapping:
+ * callers read `edge_sync.outbox_status.external_status` or invoke the function.
+ * Deliberately NOT a TS reimplementation — a second copy is exactly what §4
+ * forbids.
+ */
+export const EXTERNAL_SYNC_STATUS_FUNCTION = "edge_sync.external_sync_status" as const;
 
 /** Offline contract §19 error behaviour, as raised by the Hub procedures. */
 export const HUB_IDEMPOTENCY_ERRORS = {
@@ -261,6 +296,9 @@ export const HUB_MIGRATION_ORDER = [
   "0012_indexes_and_constraints.sql",
   "0013_views_and_procedures.sql",
   "0014_seed_reference_profiles.sql",
+  // WS-10 (Cycle 9): the ADDITIVE forward migration mandated by owner amendment
+  // KLD-2026-07-28-001-A01. 0001 keeps its bytes and its journalled sha256.
+  "0015_sync_delivery_state_alignment.sql",
 ] as const;
 
 /**

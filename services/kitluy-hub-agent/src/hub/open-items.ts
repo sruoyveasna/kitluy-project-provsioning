@@ -255,13 +255,15 @@ export const HUB_CONFIRMED_BOUNDARIES = {
 /**
  * The `pnpm hub:db:test` assertion count and the ONLY correct way to count it.
  *
- * `hub/tests/assertions.sql` emits exactly 29 `NOTICE:  PASS` lines. A naive
- * `grep -c PASS` also matches the runner's own summary line
- * ("assertions passed — 29 PASS notice(s)") and reports 30, which is wrong. A
- * count derived from the summary line must never be reported.
+ * `hub/tests/assertions.sql` emits exactly 31 `NOTICE:  PASS` lines — 29 from
+ * WS-09 plus sections 29a/29b added by WS-10 for the delivery/conflict state
+ * dimensions. A naive `grep -c PASS` also matches the runner's own summary line
+ * ("assertions passed — 31 PASS notice(s)") and reports one too many. A count
+ * derived from the summary line must never be reported.
  */
 export const HUB_DB_ASSERTION_CONTRACT = {
-  expectedPassNotices: 29,
+  expectedPassNotices: 31,
   countCommand: 'pnpm hub:db:test | grep -c "NOTICE:  PASS"',
-  wrongCountCommand: "pnpm hub:db:test | grep -c PASS   // reports 30 — matches the summary line",
+  wrongCountCommand:
+    "pnpm hub:db:test | grep -c PASS   // reports 32 — also matches the summary line",
 } as const;

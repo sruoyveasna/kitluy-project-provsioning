@@ -8,9 +8,14 @@
  * {@link insertLocalEventWithOutbox} writes both.
  *
  * AMENDMENT §2 (KLREQ-021): WS-09 writes ONLY `delivery_state = 'pending'`.
- * `sending`, `acknowledged`, `retry_wait`, `blocked` and `dead_letter` belong to
- * WS-10; a fabricated acknowledgement is refused here AND by the 0009
- * `outbox_ack_ck` CHECK.
+ * `in_flight`, `acknowledged`, `retry_wait`, `rejected` and `dead_letter` belong
+ * to WS-10; a fabricated acknowledgement is refused here AND by the 0009
+ * `outbox_ack_ck` CHECK. The two WS-10 labels were aligned from `sending` and
+ * `blocked` by hub migration 0015 under owner amendment KLD-2026-07-28-001-A01.
+ *
+ * The ORTHOGONAL conflict dimension (`reconciliation_state`) is never touched
+ * here: 0015 makes it governed-only, so WS-09's adapters could not move it even
+ * if they tried.
  */
 import type { HubClient } from "../db.js";
 import { HubCommandError } from "../errors.js";

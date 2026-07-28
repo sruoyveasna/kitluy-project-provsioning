@@ -13,6 +13,8 @@ import {
   CANONICAL_EDGE_SCHEMAS,
   DEFAULT_LOCAL_HUB_DB_URL,
   EDGE_DELIVERY_STATES,
+  EDGE_RECONCILIATION_STATES,
+  EXTERNAL_SYNC_STATUS_FUNCTION,
   HUB_COMMAND_SYNC_STATES,
   HUB_DATABASE_ROLES,
   HUB_DB_URL_ENV,
@@ -223,15 +225,64 @@ describe("migration set (schema contract §4)", () => {
 });
 
 describe("sync vocabularies (recorded gap G2)", () => {
-  it("keeps the persisted delivery state exactly as §5 declares it", () => {
+  it("keeps the persisted delivery state exactly as amendment A01 §2 aligns it", () => {
     expect([...EDGE_DELIVERY_STATES]).toEqual([
       "pending",
-      "sending",
+      "in_flight",
       "acknowledged",
       "retry_wait",
-      "blocked",
+      "rejected",
       "dead_letter",
     ]);
+  });
+
+  it("keeps reconciliation_required OUT of the delivery dimension (amendment §3)", () => {
+    expect(EDGE_DELIVERY_STATES as readonly string[]).not.toContain("reconciliation_required");
+    expect([...EDGE_RECONCILIATION_STATES]).toEqual(["none", "required", "cleared"]);
+    const overlap = EDGE_RECONCILIATION_STATES.filter((s) =>
+      (EDGE_DELIVERY_STATES as readonly string[]).includes(s),
+    );
+    expect(overlap).toEqual([]);
+  });
+
+  it("aligns the enum by an ADDITIVE forward migration, never by editing 0001", () => {
+    const applied = readFileSync(join(MIGRATIONS_DIR, "0001_types_and_helpers.sql"), "utf8");
+    // 0001 is APPLIED and checksum-registered (§4): its bytes still carry the
+    // pre-amendment labels, and that is the correct outcome.
+    expect(applied).toContain("'pending','sending','acknowledged','retry_wait','blocked'");
+    const alignment = readFileSync(
+      join(MIGRATIONS_DIR, "0015_sync_delivery_state_alignment.sql"),
+      "utf8",
+    );
+    expect(alignment).toContain("rename value 'sending' to 'in_flight'");
+    expect(alignment).toContain("rename value 'blocked' to 'rejected'");
+    expect(alignment).not.toMatch(/alter\s+type\s+edge_sync\.delivery_state\s+add\s+value/i);
+  });
+
+  it("keeps ONE shared external-status mapping with conflict override first", () => {
+    const alignment = readFileSync(
+      join(MIGRATIONS_DIR, "0015_sync_delivery_state_alignment.sql"),
+      "utf8",
+    );
+    expect(EXTERNAL_SYNC_STATUS_FUNCTION).toBe("edge_sync.external_sync_status");
+    expect(alignment).toContain("create function edge_sync.external_sync_status");
+    // Conflict override is evaluated BEFORE any delivery-state branch.
+    const body = alignment.slice(
+      alignment.indexOf("create function edge_sync.external_sync_status"),
+    );
+    const conflictBranch = body.indexOf("p_reconciliation_state = 'required'");
+    const firstDeliveryBranch = body.indexOf("p_delivery_state =");
+    expect(conflictBranch).toBeGreaterThan(-1);
+    expect(conflictBranch).toBeLessThan(firstDeliveryBranch);
+    // The projection reuses the approved five-value registry; no sixth value.
+    for (const status of [
+      "reconciliation_required",
+      "cloud_acknowledged",
+      "cloud_rejected",
+      "pending_cloud_sync",
+    ]) {
+      expect(HUB_COMMAND_SYNC_STATES as readonly string[]).toContain(status);
+    }
   });
 
   it("keeps the command sync state a DIFFERENT, non-overlapping subject", () => {
