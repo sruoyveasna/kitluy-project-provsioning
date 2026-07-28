@@ -25,11 +25,8 @@
  * values are `[REQUIRED]` rather than defaulted.
  */
 
-import {
-  RequiredCryptographicValueError,
-  type SigningPurpose,
-  type TrustEnvironment,
-} from "./index.js";
+import type { SigningPurpose, TrustEnvironment } from "./environments.js";
+import { RequiredCryptographicValueError } from "./errors.js";
 
 // ---------------------------------------------------------------------------
 // Vocabulary — held equal with migration 0123 by the conformance test
@@ -62,6 +59,26 @@ export const TRUSTED_TIME_SOURCES: readonly TrustedTimeSource[] = [
   "persisted_floor",
   "none",
 ] as const;
+
+/** Certificate windows, per environment (KLD-2026-07-28-002 §5). */
+export interface CertificateWindowPolicy {
+  readonly certificateLifetimeDays: number;
+  readonly renewalWindowDays: number;
+  readonly overlapWindowDays: number;
+}
+
+export const CERTIFICATE_WINDOWS: Readonly<Record<TrustEnvironment, CertificateWindowPolicy>> = {
+  development: { certificateLifetimeDays: 30, renewalWindowDays: 10, overlapWindowDays: 3 },
+  pilot: { certificateLifetimeDays: 180, renewalWindowDays: 60, overlapWindowDays: 14 },
+  production: { certificateLifetimeDays: 365, renewalWindowDays: 90, overlapWindowDays: 14 },
+};
+
+/** Maximum signed-revocation-snapshot age before restricted mode (§6). */
+export const MAX_REVOCATION_SNAPSHOT_AGE_HOURS: Readonly<Record<TrustEnvironment, number>> = {
+  development: 30 * 24,
+  pilot: 14 * 24,
+  production: 14 * 24,
+};
 
 export function isRestricted(status: TrustedTimeStatus): boolean {
   return status.startsWith("restricted");

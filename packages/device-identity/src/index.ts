@@ -47,8 +47,11 @@
 
 export const PACKAGE_NAME = "@kitluy/device-identity" as const;
 
-/** The open blocker every refusal in this module points at. */
-export const PKI_BLOCKER_REF = "BLK-005" as const;
+export * from "./environments.js";
+export * from "./errors.js";
+
+import type { SigningPurpose, TrustEnvironment } from "./environments.js";
+import { PKI_BLOCKER_REF, RequiredCryptographicValueError } from "./errors.js";
 
 // ---------------------------------------------------------------------------
 // Identity model
@@ -130,14 +133,6 @@ export type CertificateStatus = "requested" | "active" | "expired" | "revoked" |
  * `[REQUIRED: hardware-backed private-key custody]` pending BLK-005.
  */
 export type KeyStorageClass = "software" | "tpm" | "secure_element" | "hsm";
-
-export type TrustEnvironment = "development" | "pilot" | "production";
-
-export const TRUST_ENVIRONMENTS: readonly TrustEnvironment[] = [
-  "development",
-  "pilot",
-  "production",
-] as const;
 
 // ---------------------------------------------------------------------------
 // Hardware evidence — signals, never identity
@@ -338,37 +333,6 @@ export function isLegalLifecycleTransition(
 // Fail-closed error
 // ---------------------------------------------------------------------------
 
-/**
- * Thrown when cryptographic configuration required to proceed has not been
- * approved. Carries the unresolved value and the blocker, so a caller can log
- * or surface WHY without inventing a reason.
- */
-export class RequiredCryptographicValueError extends Error {
-  readonly code = "KLUY-DEVICE-PKI-UNCONFIGURED" as const;
-  readonly blockerRef: string;
-  readonly requiredValue: string;
-  readonly environment: TrustEnvironment | undefined;
-
-  constructor(
-    requiredValue: string,
-    environment?: TrustEnvironment,
-    blockerRef: string = PKI_BLOCKER_REF,
-  ) {
-    super(
-      `KLUY-DEVICE-PKI-UNCONFIGURED: [REQUIRED: ${requiredValue}]` +
-        (environment === undefined ? "" : ` for environment ${environment}`) +
-        ` — ${blockerRef} is OPEN. Certificate issuance, key custody, ` +
-        `activation and production signing are refused until the owner rules ` +
-        `${blockerRef} and the approved design is implemented, tested and ` +
-        `independently reviewed.`,
-    );
-    this.name = "RequiredCryptographicValueError";
-    this.blockerRef = blockerRef;
-    this.requiredValue = requiredValue;
-    this.environment = environment;
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Abstract provider interfaces
 // ---------------------------------------------------------------------------
@@ -405,27 +369,6 @@ export interface PkiTrustConfiguration {
  * The four signing purposes the owner requires to stay separate. Reusing one
  * key across two of them is a design error, not a configuration convenience.
  */
-export type SigningPurpose =
-  | "device_identity"
-  | "configuration_signing"
-  | "release_signing"
-  | "transport_signing"
-  | "manufacturing_enrollment"
-  | "emergency_recovery";
-
-/**
- * The SIX purposes KLD-2026-07-28-002 §1/§7 requires to stay separate. The
- * ballot analysis named four; the decision added manufacturing enrollment and
- * emergency recovery.
- */
-export const SIGNING_PURPOSES: readonly SigningPurpose[] = [
-  "device_identity",
-  "configuration_signing",
-  "release_signing",
-  "transport_signing",
-  "manufacturing_enrollment",
-  "emergency_recovery",
-] as const;
 
 /**
  * A signed artifact carries the purpose its key was authorized for. §7: "A
@@ -458,26 +401,6 @@ export function signingPreimage(
   out.set(payload, header.length);
   return out;
 }
-
-/** Certificate windows, per environment (KLD-2026-07-28-002 §5). */
-export interface CertificateWindowPolicy {
-  readonly certificateLifetimeDays: number;
-  readonly renewalWindowDays: number;
-  readonly overlapWindowDays: number;
-}
-
-export const CERTIFICATE_WINDOWS: Readonly<Record<TrustEnvironment, CertificateWindowPolicy>> = {
-  development: { certificateLifetimeDays: 30, renewalWindowDays: 10, overlapWindowDays: 3 },
-  pilot: { certificateLifetimeDays: 180, renewalWindowDays: 60, overlapWindowDays: 14 },
-  production: { certificateLifetimeDays: 365, renewalWindowDays: 90, overlapWindowDays: 14 },
-};
-
-/** Maximum signed-revocation-snapshot age before restricted mode (§6). */
-export const MAX_REVOCATION_SNAPSHOT_AGE_HOURS: Readonly<Record<TrustEnvironment, number>> = {
-  development: 30 * 24,
-  pilot: 14 * 24,
-  production: 14 * 24,
-};
 
 /**
  * Device key generation. §4: keys are generated ON the device and are never
@@ -857,3 +780,7 @@ export function validateTrustConfiguration(
   return problems;
 }
 export * from "./trusted-time.js";
+export * from "./certificate-validity.js";
+export * from "./certificate-renewal.js";
+export * from "./revocation-snapshot.js";
+export * from "./configuration-validity.js";
