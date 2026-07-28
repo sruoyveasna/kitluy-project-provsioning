@@ -3,66 +3,62 @@
  *
  * Authority: KLD-2026-07-28-002 §5, §6, §7, §12.6.
  *
- * Certificate validity is decided against TRUSTED TIME. No host clock, no SQL
- * `now()`, no `clock_timestamp()`. The trusted-time evaluation is an INPUT, so
- * this module cannot reach for a clock even by accident — there is nothing here
- * to reach with.
+ * ===========================================================================
+ * KITLUY DEVELOPMENT DEVICE CREDENTIAL
+ * ===========================================================================
+ * What this module validates is a **KitLuy development device credential**, not
+ * an X.509 certificate. It is a canonical to-be-signed structure with a
+ * detached Ed25519 signature.
  *
- * The separation the owner fixed, restated because it is easy to blur:
+ * A passing result here is NOT evidence of pilot or production mTLS
+ * compatibility and must never be cited as such. Real X.509 and mTLS are
+ * pilot/production concerns that KLD-2026-07-28-002 §14 leaves BLOCKED.
+ *
+ * ===========================================================================
+ * NO CALLER-SUPPLIED TRUST
+ * ===========================================================================
+ * There is no `signatureValid` input. The chain and every signature are
+ * verified INSIDE this module by the real Ed25519 verifier. A caller can hand
+ * this function a forged credential; it cannot hand it a verdict.
+ *
+ * Validity is decided against TRUSTED TIME. No host clock, no SQL `now()`.
+ *
+ * The separation the owner fixed:
  *   device trusted time  -> certificate, revocation and configuration validity
  *   server/database time -> human approval creation, expiry and consumption
- * Approval expiry stays outside this file entirely.
  */
 
 import type { SigningPurpose, TrustEnvironment } from "./environments.js";
 import { CERTIFICATE_WINDOWS, isRestricted, type TrustedTimeEvaluation } from "./trusted-time.js";
+import {
+  verifyCertificateChain,
+  type CertificateChain,
+  type TbsCertificate,
+} from "./dev-crypto.js";
 
-/** The purpose a device identity certificate is issued for. */
+/** Names the artifact so it cannot be mistaken for X.509 in a report. */
+export const CREDENTIAL_KIND = "kitluy.development-device-credential.v1" as const;
+
+/** A passing verdict is never evidence of mTLS compatibility. */
+export const CREDENTIAL_IS_NOT_X509 = true as const;
+
 export const DEVICE_CERTIFICATE_PURPOSE: SigningPurpose = "device_identity";
 
 export type CertificateRejectionCode =
   | "CERT_NO_TRUSTED_TIME"
   | "CERT_RESTRICTED_TRUST_MODE"
+  | "CERT_CHAIN_INVALID"
   | "CERT_WRONG_DEVICE"
   | "CERT_WRONG_ENVIRONMENT"
   | "CERT_WRONG_PURPOSE"
-  | "CERT_UNKNOWN_ISSUER"
-  | "CERT_CROSS_PURPOSE_ISSUER"
-  | "CERT_ISSUER_REVOKED"
-  | "CERT_SIGNATURE_INVALID"
+  | "CERT_KEY_FINGERPRINT_MISMATCH"
   | "CERT_WINDOW_MALFORMED"
   | "CERT_LIFETIME_EXCEEDS_POLICY"
   | "CERT_NOT_YET_VALID"
   | "CERT_EXPIRED"
   | "CERT_REVOKED"
-  | "CERT_STALE_KEY_GENERATION"
-  | "CERT_ASSIGNMENT_MISMATCH";
-
-export interface DeviceCertificate {
-  readonly certificateSerial: string;
-  readonly purpose: SigningPurpose;
-  readonly environment: string;
-  readonly deviceRecordId: string;
-  readonly publicKeyFingerprint: string;
-  /**
-   * Which device-key generation this certificate was issued against. A
-   * certificate that predates the current key is not merely old — it attests to
-   * a key the device no longer holds.
-   */
-  readonly deviceKeyGeneration: number;
-  readonly assignmentGeneration: number | null;
-  readonly notBefore: Date;
-  readonly notAfter: Date;
-  readonly issuerKeyId: string;
-  readonly signature: Uint8Array;
-}
-
-export interface CertificateIssuerRegistration {
-  readonly issuerKeyId: string;
-  readonly environment: TrustEnvironment;
-  readonly purpose: SigningPurpose;
-  readonly revoked: boolean;
-}
+  | "CERT_STALE_CERTIFICATE_GENERATION"
+  | "CERT_PRODUCTION_ELIGIBILITY_CLAIMED";
 
 /** Revocation facts the Hub holds locally. Supplied by consumer #3. */
 export interface RevocationLookup {
@@ -71,66 +67,90 @@ export interface RevocationLookup {
 }
 
 export interface CertificateVerificationContext {
-  readonly certificate: DeviceCertificate;
+  /** root -> intermediate -> device. Verified here, not asserted by the caller. */
+  readonly chain: CertificateChain;
   readonly trustedTime: TrustedTimeEvaluation;
   readonly environment: TrustEnvironment;
   readonly deviceRecordId: string;
-  /** The generation of the key the device currently holds. */
-  readonly currentDeviceKeyGeneration: number;
-  /** Null when the device holds no assignment yet. */
-  readonly currentAssignmentGeneration: number | null;
-  readonly issuers: readonly CertificateIssuerRegistration[];
+  /** Fingerprint of the key the device currently holds. */
+  readonly currentKeyFingerprint: string;
+  /** The device's current certificate generation. */
+  readonly currentCertificateGeneration: number;
   readonly revocations: RevocationLookup;
-  readonly signatureValid: boolean;
+  /** This verifier's trust anchors. A development root is absent in production. */
+  readonly trustedRootFingerprints: readonly string[];
 }
 
 export interface CertificateValidity {
   readonly valid: boolean;
   readonly rejectionCode?: CertificateRejectionCode;
   readonly detail?: string;
-  /** Present only when the certificate is valid. */
   readonly evaluatedAt?: Date;
   readonly expiresAt?: Date;
+  readonly credentialKind: typeof CREDENTIAL_KIND;
 }
 
 /**
- * Extracts the instant every validity decision is made against, or null when
- * there is none. Shared by all four consumers so they cannot disagree about
- * what "now" means.
+ * Extracts the instant every validity decision is made against, or null.
+ *
+ * ONLY `trusted` yields an instant (review finding RV-TT-001). `uninitialized`
+ * is not restricted but is not trusted either, and the gap between those two
+ * was a fail-open.
  */
 export function trustedInstant(evaluation: TrustedTimeEvaluation): Date | null {
-  // ONLY `trusted` yields an instant. Keying off !isRestricted() let
-  // `uninitialized` through — a device that has NEVER established trusted time
-  // was accepted as trusted, and the SQL layer already refused the same status
-  // (assert_trusted_time_v1 raises KLUY-DEVICE-TIME-UNTRUSTED). Review finding
-  // RV-TT-001: the two layers disagreed, which is the C34-C36 failure shape.
   if (evaluation.status !== "trusted") return null;
   return evaluation.trustedTime;
 }
 
+/** Read-only projection of the signed credential, for callers that need fields. */
+export interface CredentialView {
+  readonly certificateSerial: string;
+  readonly deviceRecordId: string;
+  readonly notBefore: Date;
+  readonly notAfter: Date;
+  readonly certificateGeneration: number;
+  readonly publicKeyFingerprint: string;
+}
+
+export function credentialView(tbs: TbsCertificate): CredentialView {
+  return {
+    certificateSerial: tbs.serialNumber,
+    deviceRecordId: tbs.deviceRecordId ?? "",
+    notBefore: new Date(tbs.notBefore),
+    notAfter: new Date(tbs.notAfter),
+    certificateGeneration: tbs.certificateGeneration ?? 0,
+    publicKeyFingerprint: tbs.subjectFingerprint,
+  };
+}
+
 /**
- * Decides whether a device identity certificate is valid RIGHT NOW, where "now"
- * is trusted time.
+ * Decides whether a KitLuy development device credential is valid RIGHT NOW,
+ * where "now" is trusted time.
  *
- * Checks are ordered cheapest-and-most-specific first, so the rejection names
- * the actual fault rather than a downstream symptom. Every path is fail-closed:
- * there is no branch that returns `valid: true` by omission.
+ * Order is the owner's: trusted time -> parse -> chain -> signature -> purpose
+ * -> environment -> device/key binding -> window -> revocation -> generation.
+ * Chain verification covers signature, purpose and environment at EVERY hop, so
+ * those hold before any field of the device credential is read.
  */
 export function evaluateCertificateValidity(
   context: CertificateVerificationContext,
 ): CertificateValidity {
-  const { certificate: cert } = context;
   const reject = (
     rejectionCode: CertificateRejectionCode,
     detail: string,
-  ): CertificateValidity => ({ valid: false, rejectionCode, detail });
+  ): CertificateValidity => ({
+    valid: false,
+    rejectionCode,
+    detail,
+    credentialKind: CREDENTIAL_KIND,
+  });
 
-  // 1. TRUSTED TIME FIRST. Without it there is no "now" to judge against, and
-  //    guessing one is the failure §12 exists to prevent.
+  // 1. TRUSTED TIME. Without it there is no "now", and guessing one is the
+  //    failure §12 exists to prevent.
   if (isRestricted(context.trustedTime.status)) {
     return reject(
       "CERT_RESTRICTED_TRUST_MODE",
-      `device is in restricted trust mode (${context.trustedTime.status}); certificate validity cannot be decided`,
+      `device is in restricted trust mode (${context.trustedTime.status})`,
     );
   }
   const now = trustedInstant(context.trustedTime);
@@ -138,49 +158,57 @@ export function evaluateCertificateValidity(
     return reject("CERT_NO_TRUSTED_TIME", "no trusted time is established");
   }
 
-  // 2. Binding.
-  if (cert.deviceRecordId !== context.deviceRecordId) {
-    return reject("CERT_WRONG_DEVICE", "certificate was issued for another device");
-  }
-  if (cert.environment !== context.environment) {
+  // 2. CHAIN + SIGNATURES + PURPOSE + ENVIRONMENT, verified here with real
+  //    cryptography. Nothing below this line runs on an unverified credential.
+  const chainVerdict = verifyCertificateChain(context.chain, {
+    environment: context.environment,
+    purpose: DEVICE_CERTIFICATE_PURPOSE,
+    trustedRootFingerprints: context.trustedRootFingerprints,
+  });
+  if (!chainVerdict.valid) {
     return reject(
-      "CERT_WRONG_ENVIRONMENT",
-      `certificate is for ${cert.environment}, this device is ${context.environment}`,
-    );
-  }
-  if (cert.purpose !== DEVICE_CERTIFICATE_PURPOSE) {
-    return reject("CERT_WRONG_PURPOSE", `certificate purpose is ${cert.purpose}`);
-  }
-
-  // 3. Issuer.
-  const issuer = context.issuers.find((i) => i.issuerKeyId === cert.issuerKeyId);
-  if (issuer === undefined) {
-    return reject("CERT_UNKNOWN_ISSUER", `unknown issuer key ${cert.issuerKeyId}`);
-  }
-  if (issuer.revoked) {
-    return reject("CERT_ISSUER_REVOKED", `issuer key ${cert.issuerKeyId} is revoked`);
-  }
-  if (issuer.environment !== context.environment) {
-    return reject(
-      "CERT_WRONG_ENVIRONMENT",
-      `issuer ${cert.issuerKeyId} belongs to ${issuer.environment}`,
-    );
-  }
-  // §7: an issuer authorized for another purpose is not authorized for this
-  // one, however well its signature verifies.
-  if (issuer.purpose !== DEVICE_CERTIFICATE_PURPOSE) {
-    return reject(
-      "CERT_CROSS_PURPOSE_ISSUER",
-      `issuer ${cert.issuerKeyId} is authorized for ${issuer.purpose}`,
+      "CERT_CHAIN_INVALID",
+      `${chainVerdict.rejectionCode}: ${chainVerdict.detail ?? "chain verification failed"}`,
     );
   }
 
-  // 4. Window shape, checkable without any clock.
-  if (cert.notBefore.getTime() >= cert.notAfter.getTime()) {
+  const tbs = context.chain.device.tbs;
+
+  // 3. §4: nothing from a development hierarchy is production-eligible. The
+  //    field is typed `false`, so this can only fire for a credential built
+  //    outside the type system — which is exactly when a check earns its keep.
+  if ((tbs.productionEligible as boolean) !== false) {
+    return reject(
+      "CERT_PRODUCTION_ELIGIBILITY_CLAIMED",
+      "the credential claims production eligibility; §4 refuses it",
+    );
+  }
+
+  if (tbs.purpose !== DEVICE_CERTIFICATE_PURPOSE) {
+    return reject("CERT_WRONG_PURPOSE", `credential purpose is ${tbs.purpose}`);
+  }
+  if (tbs.environment !== context.environment) {
+    return reject("CERT_WRONG_ENVIRONMENT", `credential is for ${tbs.environment}`);
+  }
+  if (tbs.deviceRecordId !== context.deviceRecordId) {
+    return reject("CERT_WRONG_DEVICE", "credential was issued for another device");
+  }
+  // The credential must attest to the key the device ACTUALLY holds. One for a
+  // superseded key is not merely stale — it vouches for a key that is gone.
+  if (tbs.subjectFingerprint !== context.currentKeyFingerprint) {
+    return reject(
+      "CERT_KEY_FINGERPRINT_MISMATCH",
+      "the credential attests to a key this device does not currently hold",
+    );
+  }
+
+  const notBefore = new Date(tbs.notBefore);
+  const notAfter = new Date(tbs.notAfter);
+  if (notBefore.getTime() >= notAfter.getTime()) {
     return reject("CERT_WINDOW_MALFORMED", "not_before is not before not_after");
   }
   const window = CERTIFICATE_WINDOWS[context.environment];
-  const lifetimeDays = (cert.notAfter.getTime() - cert.notBefore.getTime()) / (1000 * 60 * 60 * 24);
+  const lifetimeDays = (notAfter.getTime() - notBefore.getTime()) / 86_400_000;
   if (lifetimeDays > window.certificateLifetimeDays) {
     return reject(
       "CERT_LIFETIME_EXCEEDS_POLICY",
@@ -188,56 +216,45 @@ export function evaluateCertificateValidity(
     );
   }
 
-  // 5. Signature.
-  if (!context.signatureValid) {
-    return reject("CERT_SIGNATURE_INVALID", "certificate signature does not verify");
-  }
-
-  // 6. Key generation. A certificate issued before the device's current key
-  //    attests to a key the device no longer holds.
-  if (cert.deviceKeyGeneration < context.currentDeviceKeyGeneration) {
+  // 4. Generation. A credential from before the current generation attests to
+  //    a superseded identity state.
+  if ((tbs.certificateGeneration ?? 0) < context.currentCertificateGeneration) {
     return reject(
-      "CERT_STALE_KEY_GENERATION",
-      `certificate attests to key generation ${cert.deviceKeyGeneration}, device holds ${context.currentDeviceKeyGeneration}`,
+      "CERT_STALE_CERTIFICATE_GENERATION",
+      `credential generation ${tbs.certificateGeneration}, device is at ${context.currentCertificateGeneration}`,
     );
   }
 
-  // 7. Assignment, where the certificate binds one.
-  if (
-    cert.assignmentGeneration !== null &&
-    cert.assignmentGeneration !== context.currentAssignmentGeneration
-  ) {
-    return reject(
-      "CERT_ASSIGNMENT_MISMATCH",
-      `certificate binds assignment generation ${cert.assignmentGeneration}, device carries ${context.currentAssignmentGeneration ?? "none"}`,
-    );
-  }
-
-  // 8. Revocation BEFORE expiry. §5.4: a revoked certificate is invalid even
-  //    when its expiry has not passed, so reporting "expired" for a revoked
-  //    certificate would understate what happened.
-  if (context.revocations.isDeviceRevoked(cert.deviceRecordId)) {
+  // 5. REVOCATION BEFORE EXPIRY. §5.4: a revoked credential is invalid even
+  //    before expiry, so reporting "expired" for a revoked AND lapsed
+  //    credential would understate what happened.
+  if (context.revocations.isDeviceRevoked(tbs.deviceRecordId ?? "")) {
     return reject("CERT_REVOKED", "the device is revoked");
   }
-  if (context.revocations.isCertificateRevoked(cert.certificateSerial)) {
-    return reject("CERT_REVOKED", `certificate ${cert.certificateSerial} is revoked`);
+  if (context.revocations.isCertificateRevoked(tbs.serialNumber)) {
+    return reject("CERT_REVOKED", `credential ${tbs.serialNumber} is revoked`);
   }
 
-  // 9. The window, against TRUSTED time.
-  if (now.getTime() < cert.notBefore.getTime()) {
-    return reject("CERT_NOT_YET_VALID", `not valid until ${cert.notBefore.toISOString()}`);
+  // 6. The window, against TRUSTED time.
+  if (now.getTime() < notBefore.getTime()) {
+    return reject("CERT_NOT_YET_VALID", `not valid until ${tbs.notBefore}`);
   }
-  if (now.getTime() > cert.notAfter.getTime()) {
-    return reject("CERT_EXPIRED", `expired at ${cert.notAfter.toISOString()}`);
+  if (now.getTime() > notAfter.getTime()) {
+    return reject("CERT_EXPIRED", `expired at ${tbs.notAfter}`);
   }
 
-  return { valid: true, evaluatedAt: now, expiresAt: cert.notAfter };
+  return {
+    valid: true,
+    evaluatedAt: now,
+    expiresAt: notAfter,
+    credentialKind: CREDENTIAL_KIND,
+  };
 }
 
 /**
- * §4: no certificate makes a device production-eligible on its own. Stated as a
- * function so a caller cannot infer eligibility from a valid certificate — the
- * hardware SKU gate is a separate, still-closed decision.
+ * §4: no credential makes a device production-eligible on its own. A function
+ * rather than a constant, so a caller cannot infer eligibility from a valid
+ * result — the hardware SKU gate is a separate, still-closed decision.
  */
 export function certificateGrantsProductionEligibility(): false {
   return false;

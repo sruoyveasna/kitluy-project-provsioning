@@ -12,7 +12,7 @@
  */
 
 import type { TrustEnvironment } from "./environments.js";
-import type { DeviceCertificate, RevocationLookup } from "./certificate-validity.js";
+import type { CredentialView, RevocationLookup } from "./certificate-validity.js";
 import { trustedInstant } from "./certificate-validity.js";
 import { CERTIFICATE_WINDOWS, isRestricted, type TrustedTimeEvaluation } from "./trusted-time.js";
 
@@ -26,7 +26,7 @@ export type RenewalRefusalCode =
   | "RENEWAL_WRONG_DEVICE";
 
 export interface RenewalContext {
-  readonly certificate: DeviceCertificate;
+  readonly certificate: CredentialView;
   readonly trustedTime: TrustedTimeEvaluation;
   readonly environment: TrustEnvironment;
   readonly deviceRecordId: string;

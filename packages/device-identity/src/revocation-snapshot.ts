@@ -46,6 +46,16 @@ export interface RevocationSnapshot {
   readonly signerPurpose: SigningPurpose;
   readonly revokedCertificateSerials: readonly string[];
   readonly revokedDeviceRecordIds: readonly string[];
+  /**
+   * CALLER-SUPPLIED, and deliberately still so — review condition C4.
+   *
+   * The configuration signer does not exist until Step 6, so there is no
+   * verifier to route this through. Marking it verified internally would be a
+   * fabrication; taking it from the caller is at least honest about where the
+   * trust currently comes from. C4 closes for THIS purpose only when Step 6
+   * lands a real signer, and the certificate path (which no longer accepts a
+   * boolean) is the shape it must follow.
+   */
   readonly signatureValid: boolean;
 }
 

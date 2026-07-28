@@ -7,7 +7,7 @@
  * consumer CONSISTENTLY. If one consumer kept its own notion of "now", the
  * per-consumer suites would still pass and this would not.
  */
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 import {
   evaluateTrustedTime,
@@ -22,6 +22,19 @@ import {
   type TrustedTimeStore,
 } from "../src/trusted-time.js";
 import { evaluateCertificateValidity } from "../src/certificate-validity.js";
+import {
+  DevelopmentCertificateAuthority,
+  DevelopmentDeviceKeyProvider,
+  publicKeyFingerprint,
+  type CertificateChain,
+} from "../src/dev-crypto.js";
+import {
+  issueDevelopmentCertificate,
+  requestBytes,
+  type DeviceCertificateRequest,
+  type IssuanceStore,
+} from "../src/certificate-issuance.js";
+import type { DeviceRecordId } from "../src/index.js";
 import { evaluateRenewalEligibility } from "../src/certificate-renewal.js";
 import { evaluateRevocationSnapshot, type RevocationSnapshot } from "../src/revocation-snapshot.js";
 import {
@@ -29,7 +42,7 @@ import {
   type ConfigurationSnapshot,
   type DeviceScope,
 } from "../src/configuration-validity.js";
-import { DEVICE, ISSUERS, certificate, days, hours, noRevocations } from "./consumer-fixtures.js";
+import { DEVICE, days, hours, noRevocations } from "./consumer-fixtures.js";
 
 const T0 = new Date("2026-07-28T08:00:00.000Z");
 const at = (seconds: number) => new Date(T0.getTime() + seconds * 1000);
@@ -144,21 +157,94 @@ const configurationSnapshot: ConfigurationSnapshot = {
   signatureValid: true,
 };
 
+/**
+ * One genuinely issued credential, shared by every case below. Built once so
+ * the cross-consumer question stays "does one clock event move all four
+ * together" rather than "does issuance work" — that is proven elsewhere.
+ */
+class NullStore implements IssuanceStore {
+  async findByIdempotencyKey() {
+    return null;
+  }
+  async hasConflictingRequest() {
+    return false;
+  }
+  async persist() {}
+}
+
+const devCa = new DevelopmentCertificateAuthority({ notBefore: days(-1), notAfter: days(365) });
+const devKeys = new DevelopmentDeviceKeyProvider();
+let realChain: CertificateChain;
+let realFingerprint: string;
+
+beforeAll(async () => {
+  await devKeys.generateDeviceKey(DEVICE as DeviceRecordId, "development");
+  const pem = devKeys.publicKeyPem(DEVICE) as string;
+  realFingerprint = publicKeyFingerprint(pem);
+  const base: DeviceCertificateRequest = {
+    requestId: "cross-1",
+    deviceRecordId: DEVICE,
+    environment: "development",
+    devicePublicKeyPem: pem,
+    publicKeyFingerprint: realFingerprint,
+    hardwareTrustLevel: "development_software",
+    assignmentGeneration: 5,
+    requestedPurpose: "device_identity",
+    requestedAt: T0,
+    nonce: "cross-n",
+    correlationId: "cross-c",
+    proofOfPossession: new Uint8Array(),
+  };
+  const request: DeviceCertificateRequest = {
+    ...base,
+    proofOfPossession: devKeys.provePossession(DEVICE, requestBytes(base)),
+  };
+  const out = await issueDevelopmentCertificate(
+    {
+      request,
+      trustedTime: {
+        status: "trusted",
+        trustedTime: T0,
+        source: "rtc",
+        floorAdvanced: false,
+        anomalyType: null,
+        detail: "fixture",
+      },
+      environment: "development",
+      deviceRecordId: DEVICE,
+      deviceLifecycleState: "awaiting_trust",
+      currentAssignmentGeneration: 5,
+      openBlockingIncidentCount: 0,
+      pkiConfigurationActive: true,
+      nextCertificateGeneration: 1,
+    },
+    devCa,
+    new NullStore(),
+  );
+  realChain = out.issued!.chain;
+});
+
 /** Runs all four consumers against ONE trusted-time evaluation. */
 const runAll = (trustedTime: TrustedTimeEvaluation) => ({
   certificate: evaluateCertificateValidity({
-    certificate: certificate(),
+    chain: realChain,
     trustedTime,
     environment: "development",
     deviceRecordId: DEVICE,
-    currentDeviceKeyGeneration: 2,
-    currentAssignmentGeneration: 5,
-    issuers: ISSUERS,
+    currentKeyFingerprint: realFingerprint,
+    currentCertificateGeneration: 1,
     revocations: noRevocations,
-    signatureValid: true,
+    trustedRootFingerprints: [devCa.rootKeyId],
   }),
   renewal: evaluateRenewalEligibility({
-    certificate: certificate({ notBefore: days(-25), notAfter: days(5) }),
+    certificate: {
+      certificateSerial: "CROSS-1",
+      deviceRecordId: DEVICE,
+      notBefore: days(-25),
+      notAfter: days(5),
+      certificateGeneration: 1,
+      publicKeyFingerprint: "a".repeat(64),
+    },
     trustedTime,
     environment: "development",
     deviceRecordId: DEVICE,

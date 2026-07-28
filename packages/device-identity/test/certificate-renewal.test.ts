@@ -12,8 +12,17 @@ import {
   trusted,
 } from "./consumer-fixtures.js";
 
-/** A certificate expiring exactly `n` days after trusted NOW. */
-const expiringIn = (n: number) => certificate({ notBefore: days(n - 30), notAfter: days(n) });
+/**
+ * A credential VIEW expiring exactly `n` days after trusted NOW.
+ * Renewal reasons about windows, not signatures — the signature was already
+ * established by certificate.validity, and re-verifying it here would say
+ * nothing new while implying renewal is a second trust decision.
+ */
+const expiringIn = (n: number) => ({
+  ...certificate({ notBefore: days(n - 30), notAfter: days(n) }),
+  certificateGeneration: 1,
+  publicKeyFingerprint: "a".repeat(64),
+});
 
 const ctx = (over: Partial<RenewalContext> = {}): RenewalContext => ({
   certificate: expiringIn(20),
