@@ -352,6 +352,53 @@ containment state. The current behavior is MORE restrictive than the ruling, so
 it fails safe in the interim, but it is not the approved policy and must not be
 described as such.
 
+### Owner rulings 2026-07-28 (post-T003 step 1) — KLD-2026-07-28-002 addenda
+
+**Development NVMe replacement — ACCEPTED as implemented.** A software-backed
+development device has no hardware trust anchor proving continuity, so an NVMe
+replacement creates a NEW device_record_id. A production hardware-backed Hub may
+retain identity only when board identity AND TPM/secure-element identity both
+match. The owner directed: "Do not weaken this for development convenience."
+Recorded so a future agent does not read the development friction as a defect.
+
+**Enrollment-station duplicate threshold — NOT a code constant.** The owner
+refused the hardcoded 2 that T003 step 1 shipped with a [REQUIRED] marker, and
+ruled it a SIGNED TRUST-POLICY value alongside a window:
+
+    duplicate_incident_quarantine_threshold   development default: 2
+    duplicate_incident_window_seconds         development default: 86400
+
+Behavior: the first duplicate quarantines the NEW identity, creates a critical
+incident and raises station monitoring; a second inside the window quarantines
+the STATION. Immediate station quarantine regardless of count when the duplicate
+carries the same TPM/secure-element identity, the same private-key fingerprint,
+an invalid or revoked station certificate, or evidence of deliberate tampering.
+**Pilot and production values must come from signed configuration; no code
+default may silently authorize them.** These are owner-approved DEVELOPMENT
+defaults, not final pilot or production values.
+
+Implemented in group 0123 as `kitluy_devices.trust_policy`. The pilot and
+production rows do not exist, and the environment lock refuses one that is
+unsigned, cites the development decision, or omits the forward-jump threshold.
+
+### Cycle-10 execution findings — WS-11-T003 step 2 (2026-07-28)
+
+| ID  | Finding                                                                                                                                                                                                                    |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C41 | The trusted-time status CHECK read `(status = trusted) = (anomaly_type is null)`, which made the `uninitialized` starting state unrepresentable — the very first insert failed. Corrected to key the anomaly off `restricted%`: never having established time is a starting condition, not an anomaly |
+| C42 | A four-argument `record_station_duplicate_submission_v1` with DEFAULTS made every two-argument call ambiguous against the group-0122 overload. Defaults removed and a delegating wrapper added, so the environment is an explicit choice at each call site |
+
+**`trusted_time_max_forward_jump_seconds` is deliberately NULLABLE.** The owner
+refused to let a forward-jump threshold be invented, so an absent value makes
+trusted-time evaluation FAIL CLOSED. Development carries an explicit TEST value
+(3600s) that is marked as such and is not a ruled pilot or production value.
+
+**Signature verification is NOT claimed.** `trust_policy.signature_verified` is
+false everywhere, because the configuration signer does not exist until step 6.
+Recording an unverified signature as verified would be exactly the fabrication
+this programme keeps refusing, and pilot/production policies are refused on that
+basis alone.
+
 ### Cycle-9 reconciliation — decision vs implemented enum (2026-07-28)
 
 | ID  | Conflict                                                                                                                                                                                                                                                                                              | Disposition                                                                                                                                                                                                                                                     |

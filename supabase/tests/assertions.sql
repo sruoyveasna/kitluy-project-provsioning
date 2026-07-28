@@ -1597,7 +1597,11 @@ begin
     if sqlerrm like 'KLUY-DEVICE-PKI-UNCONFIGURED%' then
       raise exception 'ASSERT FAIL: development still fails at the PKI gate though KLD-2026-07-28-002 authorized it';
     end if;
-    if sqlerrm not like 'KLUY-DEVICE-ACTIVATION-STATE%' then
+    -- Group 0123 put the TRUSTED-TIME gate ahead of the state check, so the
+    -- refusal now names the deeper blocker: this device has never established
+    -- trusted time. That is the honest answer — a Hub that cannot tell the time
+    -- cannot check whether a certificate is valid.
+    if sqlerrm not like 'KLUY-DEVICE-TIME-UNTRUSTED%' then
       raise exception 'ASSERT FAIL: development activation refused unexpectedly: %', sqlerrm;
     end if;
   end;
@@ -3001,4 +3005,487 @@ begin
   raise notice 'PASS ws11-klrisk-device-001: activate_device_v1 is executable by neither PUBLIC nor service_role, and attempt_activate_device_v1 — which records the refusal before returning it — is the only granted activation path';
 end $$;
 
-select 'assertions complete: groups 0010-0121 structural contract holds (incl. cycle-6 WS-07/WS-08 sections 17-26, cycle-9 WS-10 section 27 and cycle-10 WS-11 sections 28 (T001) and 29 (T002))' as result;
+
+-- ============================================================================
+-- SECTION 30 — WS-11-T003 step 2, trusted time (migration 0123).
+-- KLD-2026-07-28-002 §12 and the owner's trusted-time instruction (2026-07-28).
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 30a — signed trust policy, and the values that must NOT be code constants.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_policy kitluy_devices.trust_policy;
+  v_blocked int := 0;
+begin
+  v_policy := kitluy_devices.resolve_trust_policy_v1('development');
+  if v_policy.duplicate_incident_quarantine_threshold <> 2
+     or v_policy.duplicate_incident_window_seconds <> 86400 then
+    raise exception 'ASSERT FAIL: the approved development duplicate defaults are not 2 / 86400 (got % / %)',
+      v_policy.duplicate_incident_quarantine_threshold, v_policy.duplicate_incident_window_seconds;
+  end if;
+  if v_policy.max_clock_lag_seconds <> 300 then
+    raise exception 'ASSERT FAIL: the ruled five-minute rollback tolerance is not 300 seconds';
+  end if;
+  if v_policy.signature_verified then
+    raise exception 'ASSERT FAIL: a trust policy is marked signature-verified though no configuration signer exists yet';
+  end if;
+
+  -- Pilot and production must have NO policy, so every evaluation there fails
+  -- closed rather than falling back to a development default.
+  foreach v_policy.environment in array array['pilot', 'production'] loop
+    begin
+      perform kitluy_devices.resolve_trust_policy_v1(v_policy.environment);
+      raise exception 'ASSERT FAIL: a % trust policy resolved though none is signed', v_policy.environment;
+    exception when others then
+      if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+      if sqlerrm not like 'KLUY-DEVICE-POLICY-UNCONFIGURED%' then
+        raise exception 'ASSERT FAIL: % policy refused for the wrong reason: %', v_policy.environment, sqlerrm;
+      end if;
+      v_blocked := v_blocked + 1;
+    end;
+  end loop;
+
+  -- A pilot/production policy citing the decision that approved DEVELOPMENT
+  -- defaults is refused; so is an unsigned one; so is one missing the
+  -- forward-jump threshold the owner refused to let anyone invent.
+  begin
+    insert into kitluy_devices.trust_policy
+      (environment, policy_version, duplicate_incident_quarantine_threshold,
+       duplicate_incident_window_seconds, trusted_time_max_forward_jump_seconds,
+       max_revocation_snapshot_age_seconds, policy_payload_sha256,
+       signature_verified, policy_signature, policy_signer_key_reference,
+       approved_by_decision_ref, approved_at, is_active)
+    values ('production', 1, 2, 86400, 3600, 1209600, repeat('a', 64),
+            true, 'sig', 'signer', 'KLD-2026-07-28-002', now(), true);
+    raise exception 'ASSERT FAIL: a production trust policy was opened under the decision that approved development defaults';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-DEVICE-POLICY-ENVIRONMENT-BLOCKED%' then
+      raise exception 'ASSERT FAIL: refused for the wrong reason: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  begin
+    insert into kitluy_devices.trust_policy
+      (environment, policy_version, duplicate_incident_quarantine_threshold,
+       duplicate_incident_window_seconds, trusted_time_max_forward_jump_seconds,
+       max_revocation_snapshot_age_seconds, policy_payload_sha256,
+       signature_verified, approved_by_decision_ref, approved_at, is_active)
+    values ('pilot', 1, 2, 86400, 3600, 1209600, repeat('b', 64),
+            false, 'KLD-PROBE-003', now(), true);
+    raise exception 'ASSERT FAIL: an UNSIGNED pilot trust policy was accepted';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-DEVICE-POLICY-UNSIGNED%' then
+      raise exception 'ASSERT FAIL: unsigned pilot policy refused for the wrong reason: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  begin
+    insert into kitluy_devices.trust_policy
+      (environment, policy_version, duplicate_incident_quarantine_threshold,
+       duplicate_incident_window_seconds, max_revocation_snapshot_age_seconds,
+       policy_payload_sha256, signature_verified, policy_signature,
+       policy_signer_key_reference, approved_by_decision_ref, approved_at, is_active)
+    values ('production', 1, 2, 86400, 1209600, repeat('c', 64),
+            true, 'sig', 'signer', 'KLD-PROBE-004', now(), true);
+    raise exception 'ASSERT FAIL: a production policy was accepted with no forward-jump threshold';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-DEVICE-POLICY-INCOMPLETE%' then
+      raise exception 'ASSERT FAIL: incomplete policy refused for the wrong reason: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  if v_blocked <> 5 then
+    raise exception 'ASSERT FAIL: expected 5 policy refusals, got %', v_blocked;
+  end if;
+
+  raise notice 'PASS ws11-trust-policy: the duplicate threshold (2) and window (86400s) are SIGNED POLICY carrying the owner-approved DEVELOPMENT defaults, the ruled 300-second rollback tolerance is present, no policy claims a verified signature while no signer exists, and pilot/production policies are refused when they cite the development decision, are unsigned, or omit the forward-jump threshold the owner refused to let anyone invent';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 30b — the §12 calculation and its adversarial cases.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_profile uuid;
+  v_device uuid;
+  v_out kitluy_devices.trusted_time_outcome;
+  v_base timestamptz := timestamptz '2026-07-28 08:00:00+07';
+  v_floor timestamptz;
+begin
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+
+  v_device := kitluy_devices.enroll_device_v1(
+    'WS11-T003-TIME-' || gen_random_uuid(), v_profile, now(),
+    repeat('7a', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'ca:01:' || substr(md5(random()::text),1,6) || ':11'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-time-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-time-' || gen_random_uuid())));
+
+  -- FIRST BOOT with NO trusted source. The floor alone is not a source.
+  v_out := kitluy_devices.evaluate_trusted_time_v1(v_device, 'development', null, null, null, gen_random_uuid());
+  if v_out.status <> 'restricted_no_trusted_source' or not v_out.restricted then
+    raise exception 'ASSERT FAIL: first boot with no source reported % rather than restricted_no_trusted_source', v_out.status;
+  end if;
+  if v_out.floor_advanced then
+    raise exception 'ASSERT FAIL: the floor advanced with no trustworthy source';
+  end if;
+
+  -- A trustworthy source establishes time and advances the floor.
+  v_out := kitluy_devices.evaluate_trusted_time_v1(v_device, 'development', v_base, null, null, gen_random_uuid());
+  if v_out.status <> 'trusted' or not v_out.floor_advanced then
+    raise exception 'ASSERT FAIL: a valid RTC did not establish trusted time (status %, advanced %)',
+      v_out.status, v_out.floor_advanced;
+  end if;
+  select trusted_time_floor into v_floor from kitluy_devices.device_trusted_time where device_id = v_device;
+  if v_floor <> v_base then
+    raise exception 'ASSERT FAIL: the floor is % rather than the selected time %', v_floor, v_base;
+  end if;
+
+  -- RTC BEHIND the floor WITHIN the tolerated skew: accepted, floor HELD.
+  v_out := kitluy_devices.evaluate_trusted_time_v1(
+    v_device, 'development', v_base - interval '120 seconds', null, null, gen_random_uuid());
+  if v_out.status <> 'trusted' then
+    raise exception 'ASSERT FAIL: an RTC 2 minutes behind the floor was treated as rollback (%)', v_out.status;
+  end if;
+  if v_out.floor_advanced then
+    raise exception 'ASSERT FAIL: a backwards clock advanced the floor';
+  end if;
+
+  -- RTC BEHIND the floor by MORE than five minutes: rollback, restricted.
+  v_out := kitluy_devices.evaluate_trusted_time_v1(
+    v_device, 'development', v_base - interval '600 seconds', null, null, gen_random_uuid());
+  if v_out.status <> 'restricted_clock_rollback' or not v_out.restricted then
+    raise exception 'ASSERT FAIL: an RTC 10 minutes behind the floor reported % rather than rollback', v_out.status;
+  end if;
+
+  -- Network time and token below the floor are discarded the same way. The
+  -- source does not buy leniency; only the value matters.
+  v_out := kitluy_devices.evaluate_trusted_time_v1(
+    v_device, 'development', null, v_base - interval '1 hour', null, gen_random_uuid());
+  if v_out.status <> 'restricted_clock_rollback' then
+    raise exception 'ASSERT FAIL: authenticated network time below the floor was accepted (%)', v_out.status;
+  end if;
+  v_out := kitluy_devices.evaluate_trusted_time_v1(
+    v_device, 'development', null, null, v_base - interval '1 hour', gen_random_uuid());
+  if v_out.status <> 'restricted_clock_rollback' then
+    raise exception 'ASSERT FAIL: a signed token below the floor was accepted (%)', v_out.status;
+  end if;
+
+  -- FORWARD JUMP beyond the signed threshold (development test value 3600s).
+  v_out := kitluy_devices.evaluate_trusted_time_v1(
+    v_device, 'development', v_base + interval '7200 seconds', null, null, gen_random_uuid());
+  if v_out.status <> 'restricted_forward_jump' or not v_out.restricted then
+    raise exception 'ASSERT FAIL: a 2-hour forward jump reported % rather than restricted_forward_jump', v_out.status;
+  end if;
+  if v_out.floor_advanced then
+    raise exception 'ASSERT FAIL: a suspicious forward jump advanced the floor';
+  end if;
+
+  -- A forward move INSIDE the threshold is normal and advances the floor.
+  v_out := kitluy_devices.evaluate_trusted_time_v1(
+    v_device, 'development', v_base + interval '600 seconds', null, null, gen_random_uuid());
+  if v_out.status <> 'trusted' or not v_out.floor_advanced then
+    raise exception 'ASSERT FAIL: a 10-minute forward move was refused (%)', v_out.status;
+  end if;
+
+  -- The floor NEVER moves backwards, and the database says so even when the
+  -- caller asks directly.
+  begin
+    update kitluy_devices.device_trusted_time
+    set trusted_time_floor = v_base - interval '1 day' where device_id = v_device;
+    raise exception 'ASSERT FAIL: the trusted-time floor was moved backwards by direct update';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-DEVICE-TIME-ROLLBACK%' then
+      raise exception 'ASSERT FAIL: the floor rollback was refused for the wrong reason: %', sqlerrm;
+    end if;
+  end;
+
+  -- Every evaluation left an audit row, including the refused ones.
+  if (select count(*) from kitluy_devices.device_trusted_time_events
+       where device_id = v_device) < 8 then
+    raise exception 'ASSERT FAIL: trusted-time evaluations did not leave durable audit rows';
+  end if;
+  if (select count(*) from kitluy_devices.device_trusted_time_events
+       where device_id = v_device and event_type = 'RESTRICTED_ENTERED') < 4 then
+    raise exception 'ASSERT FAIL: restricted evaluations were not recorded as such';
+  end if;
+
+  raise notice 'PASS ws11-trusted-time-calculation: trusted time is the MAXIMUM of validated sources; a source within tolerated skew is accepted but does not advance the floor; a source more than 5 minutes behind is rollback whatever its provenance; a jump beyond the SIGNED forward threshold is refused and does not advance the floor; the floor cannot be moved backwards even by direct update; and every evaluation including each refusal left durable audit';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 30c — pilot and production fail closed with no signed policy.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_profile uuid;
+  v_device uuid;
+  v_blocked int := 0;
+  v_env text;
+begin
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+  v_device := kitluy_devices.enroll_device_v1(
+    'WS11-T003-ENV-' || gen_random_uuid(), v_profile, now(),
+    repeat('8b', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'ca:02:' || substr(md5(random()::text),1,6) || ':12'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-env-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-env-' || gen_random_uuid())));
+
+  foreach v_env in array array['pilot', 'production'] loop
+    begin
+      perform kitluy_devices.evaluate_trusted_time_v1(v_device, v_env, now(), now(), now(), null);
+      raise exception 'ASSERT FAIL: trusted time evaluated in % with no signed policy', v_env;
+    exception when others then
+      if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+      if sqlerrm not like 'KLUY-DEVICE-POLICY-%' then
+        raise exception 'ASSERT FAIL: % evaluation refused for the wrong reason: %', v_env, sqlerrm;
+      end if;
+      v_blocked := v_blocked + 1;
+    end;
+  end loop;
+
+  if v_blocked <> 2 then
+    raise exception 'ASSERT FAIL: expected 2 environment refusals, got %', v_blocked;
+  end if;
+
+  raise notice 'PASS ws11-trusted-time-fails-closed: pilot and production trusted-time evaluation REFUSES while no signed policy exists — three perfectly good time sources do not substitute for the forward-jump threshold the owner refused to let anyone invent';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 30d — restricted trust mode blocks trust-changing work.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_profile uuid;
+  v_device uuid;
+  v_blocked int := 0;
+  v_base timestamptz := timestamptz '2026-07-28 09:00:00+07';
+begin
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+  v_device := kitluy_devices.enroll_device_v1(
+    'WS11-T003-RESTRICT-' || gen_random_uuid(), v_profile, now(),
+    repeat('9c', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'ca:03:' || substr(md5(random()::text),1,6) || ':13'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-res-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-res-' || gen_random_uuid())));
+
+  -- A device that never established trusted time is restricted by default.
+  if not kitluy_devices.is_trusted_time_restricted_v1(v_device) then
+    raise exception 'ASSERT FAIL: a device with no trusted-time record is not reported as restricted';
+  end if;
+
+  begin
+    perform kitluy_devices.issue_device_certificate_v1(
+      v_device, 'development', 'SER-RES-1', repeat('9c', 32), 'OP-PROBE');
+    raise exception 'ASSERT FAIL: a certificate was issued to a device that has never established trusted time';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-DEVICE-TIME-UNTRUSTED%' then
+      raise exception 'ASSERT FAIL: issuance refused for the wrong reason: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- Establish time, then force a rollback anomaly and re-probe.
+  perform kitluy_devices.evaluate_trusted_time_v1(v_device, 'development', v_base, null, null, null);
+  perform kitluy_devices.evaluate_trusted_time_v1(
+    v_device, 'development', v_base - interval '1 hour', null, null, null);
+
+  if not kitluy_devices.is_trusted_time_restricted_v1(v_device) then
+    raise exception 'ASSERT FAIL: a device in clock-rollback is not reported as restricted';
+  end if;
+
+  begin
+    perform kitluy_devices.issue_device_certificate_v1(
+      v_device, 'development', 'SER-RES-2', repeat('9c', 32), 'OP-PROBE');
+    raise exception 'ASSERT FAIL: a certificate was issued while the device is in restricted trust mode';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-DEVICE-TIME-RESTRICTED%' then
+      raise exception 'ASSERT FAIL: restricted issuance refused for the wrong reason: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  if (select count(*) from kitluy_devices.device_certificates where device_id = v_device) <> 0 then
+    raise exception 'ASSERT FAIL: a certificate row exists for a device that never had trustworthy time';
+  end if;
+
+  -- Restoring a good source clears restriction.
+  perform kitluy_devices.evaluate_trusted_time_v1(
+    v_device, 'development', v_base + interval '60 seconds', null, null, null);
+  if kitluy_devices.is_trusted_time_restricted_v1(v_device) then
+    raise exception 'ASSERT FAIL: restriction did not clear after a trustworthy source returned';
+  end if;
+
+  if v_blocked <> 2 then
+    raise exception 'ASSERT FAIL: expected 2 restricted refusals, got %', v_blocked;
+  end if;
+
+  raise notice 'PASS ws11-restricted-trust-mode: certificate issuance is refused both for a device that never established trusted time and for one in clock-rollback, no certificate row is created either way, and restriction clears when a trustworthy source returns';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 30e — emergency correction: typed outcome, four-eyes, no self-approval,
+-- and no path backwards even under emergency authority.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_profile uuid;
+  v_device uuid;
+  v_out kitluy_devices.time_correction_outcome;
+  v_base timestamptz := timestamptz '2026-07-28 10:00:00+07';
+  v_events_before int;
+  v_refused int := 0;
+begin
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+  v_device := kitluy_devices.enroll_device_v1(
+    'WS11-T003-CORRECT-' || gen_random_uuid(), v_profile, now(),
+    repeat('ad', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'ca:04:' || substr(md5(random()::text),1,6) || ':14'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-cor-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-cor-' || gen_random_uuid())));
+
+  perform kitluy_devices.evaluate_trusted_time_v1(v_device, 'development', v_base, null, null, null);
+  select count(*) into v_events_before from kitluy_devices.device_trusted_time_events
+   where device_id = v_device;
+
+  -- No approval id.
+  v_out := kitluy_devices.emergency_time_correction_v1(
+    v_device, v_base + interval '1 day', 'operator wristwatch', 'RTC battery failed',
+    '', 'OP-FIELD', 'OP-SECURITY', null);
+  if v_out.outcome <> 'REFUSED' or v_out.refusal_code <> 'KLUY-DEVICE-TIME-CORRECTION-UNAPPROVED' then
+    raise exception 'ASSERT FAIL: an unapproved correction returned % / %', v_out.outcome, v_out.refusal_code;
+  end if;
+  v_refused := v_refused + 1;
+
+  -- Self-approval.
+  v_out := kitluy_devices.emergency_time_correction_v1(
+    v_device, v_base + interval '1 day', 'operator wristwatch', 'RTC battery failed',
+    'APPR-1', 'OP-FIELD', 'OP-FIELD', null);
+  if v_out.outcome <> 'REFUSED' or v_out.refusal_code <> 'KLUY-DEVICE-TIME-CORRECTION-SELF-APPROVED' then
+    raise exception 'ASSERT FAIL: a self-approved correction returned % / %', v_out.outcome, v_out.refusal_code;
+  end if;
+  v_refused := v_refused + 1;
+
+  -- Missing evidence.
+  v_out := kitluy_devices.emergency_time_correction_v1(
+    v_device, v_base + interval '1 day', '', 'RTC battery failed',
+    'APPR-1', 'OP-FIELD', 'OP-SECURITY', null);
+  if v_out.outcome <> 'REFUSED' or v_out.refusal_code <> 'KLUY-DEVICE-TIME-CORRECTION-UNEVIDENCED' then
+    raise exception 'ASSERT FAIL: an unevidenced correction returned % / %', v_out.outcome, v_out.refusal_code;
+  end if;
+  v_refused := v_refused + 1;
+
+  -- Backwards, WITH full authority. Emergency authority does not buy rollback.
+  v_out := kitluy_devices.emergency_time_correction_v1(
+    v_device, v_base - interval '1 day', 'signed cloud token', 'clock ran ahead',
+    'APPR-2', 'OP-FIELD', 'OP-SECURITY', null);
+  if v_out.outcome <> 'REFUSED' or v_out.refusal_code <> 'KLUY-DEVICE-TIME-ROLLBACK' then
+    raise exception 'ASSERT FAIL: a fully approved BACKWARDS correction returned % / %', v_out.outcome, v_out.refusal_code;
+  end if;
+  v_refused := v_refused + 1;
+
+  -- Every refusal left durable evidence, which is the point of the typed
+  -- outcome: a raise would have rolled its own audit row back.
+  if (select count(*) from kitluy_devices.device_trusted_time_events
+       where device_id = v_device and event_type = 'EMERGENCY_CORRECTION'
+         and detail ->> 'outcome' = 'REFUSED') <> v_refused then
+    raise exception 'ASSERT FAIL: refused corrections did not each leave an audit row';
+  end if;
+
+  -- A properly approved forward correction applies and moves the floor.
+  v_out := kitluy_devices.emergency_time_correction_v1(
+    v_device, v_base + interval '2 days', 'signed cloud token', 'RTC battery replaced',
+    'APPR-3', 'OP-FIELD', 'OP-SECURITY', gen_random_uuid());
+  if v_out.outcome <> 'APPLIED' then
+    raise exception 'ASSERT FAIL: an approved forward correction was refused: %', v_out.refusal_message;
+  end if;
+  if (select trusted_time_floor from kitluy_devices.device_trusted_time where device_id = v_device)
+     <> v_base + interval '2 days' then
+    raise exception 'ASSERT FAIL: the approved correction did not advance the floor';
+  end if;
+  if (select status from kitluy_devices.device_trusted_time where device_id = v_device) <> 'trusted' then
+    raise exception 'ASSERT FAIL: the device is still restricted after an approved correction';
+  end if;
+
+  raise notice 'PASS ws11-emergency-time-correction: a correction with no approval, a self-approved one, an unevidenced one and a fully-approved BACKWARDS one are each REFUSED with their own code and each leave durable audit; only a four-eyes forward correction applies, atomically advancing the floor and clearing restriction';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 30f — station duplicate containment now reads SIGNED POLICY.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_station text := 'STATION-DUP-' || substr(md5(random()::text), 1, 8);
+  v_profile uuid;
+  v_device uuid;
+  v_quarantined boolean;
+begin
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+
+  insert into kitluy_devices.enrollment_stations
+    (station_key, display_name, environment, operator_org_ref)
+  values (v_station, 'duplicate probe station', 'development', 'HET-MFG');
+
+  v_device := kitluy_devices.enroll_device_v1(
+    'WS11-T003-STN-' || gen_random_uuid(), v_profile, now(),
+    repeat('be', 32), 'ed25519', 'software', v_station, 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'ca:05:' || substr(md5(random()::text),1,6) || ':15'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-stn-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-stn-' || gen_random_uuid())));
+
+  -- First duplicate: monitoring elevated, station NOT yet quarantined.
+  v_quarantined := kitluy_devices.record_station_duplicate_submission_v1(
+    v_station, v_device, 'development', null);
+  if v_quarantined then
+    raise exception 'ASSERT FAIL: the station was quarantined on its FIRST duplicate';
+  end if;
+  if not (select monitoring_elevated from kitluy_devices.enrollment_stations where station_key = v_station) then
+    raise exception 'ASSERT FAIL: the first duplicate did not raise station monitoring';
+  end if;
+
+  -- Second duplicate inside the signed window: station quarantined.
+  v_quarantined := kitluy_devices.record_station_duplicate_submission_v1(
+    v_station, v_device, 'development', null);
+  if not v_quarantined then
+    raise exception 'ASSERT FAIL: the station was not quarantined at the signed threshold';
+  end if;
+  if (select status from kitluy_devices.enrollment_stations where station_key = v_station) <> 'quarantined' then
+    raise exception 'ASSERT FAIL: the station status is not quarantined';
+  end if;
+
+  -- Immediate quarantine regardless of count, for the listed conditions.
+  insert into kitluy_devices.enrollment_stations
+    (station_key, display_name, environment, operator_org_ref)
+  values (v_station || '-B', 'immediate probe station', 'development', 'HET-MFG');
+  v_quarantined := kitluy_devices.record_station_duplicate_submission_v1(
+    v_station || '-B', v_device, 'development',
+    'duplicate presented the same TPM endorsement key');
+  if not v_quarantined then
+    raise exception 'ASSERT FAIL: a same-TPM duplicate did not quarantine the station immediately';
+  end if;
+
+  raise notice 'PASS ws11-station-containment: the first duplicate raises monitoring, a second inside the SIGNED window quarantines the station, and one of the listed immediate conditions (same TPM identity) quarantines regardless of count — the threshold comes from signed policy, not from a code constant';
+end $$;
+
+select 'assertions complete: groups 0010-0123 structural contract holds (incl. cycle-9 WS-10 section 27 and cycle-10 WS-11 sections 28 (T001), 29 (T002) and 30 (T003 trusted time))' as result;
