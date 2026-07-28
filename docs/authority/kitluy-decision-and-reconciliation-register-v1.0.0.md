@@ -766,3 +766,90 @@ NULL on the issuance path and the reserved value travels in the `detail` payload
 the credential remains joinable through
 `device_credentials.created_from_request_id`. Recorded here rather than fixed by
 editing group 0125, which is committed.
+
+---
+
+## KLRISK-DEVICE-003 — canonical record (owner wording, 2026-07-28)
+
+```text
+KLRISK-DEVICE-003 — OPEN
+
+PostgreSQL cannot independently verify KitLuy development-device
+credential Ed25519 signatures. The trusted issuance service performs
+cryptographic verification before finalization.
+
+PostgreSQL independently reconstructs and hashes canonical signing
+material, enforces immutable reservations, authority, state transitions,
+generation concurrency, chain bindings and atomic persistence.
+
+Development permitted.
+Pilot and production promotion blocked pending an approved closure.
+```
+
+### The distinction that bounds this risk
+
+**A compromised issuance service can poison or deny issuance. It cannot forge a
+credential that a conforming chain verifier will accept.**
+
+Those are different attacks and must not be collapsed:
+
+| Attack                             | Reachable under KLRISK-DEVICE-003? | Why                                                                                     |
+| ---------------------------------- | ---------------------------------- | --------------------------------------------------------------------------------------- |
+| Write a `device_credentials` row whose `detached_signature` is garbage | **YES**   | PostgreSQL cannot check the curve maths, so it accepts the service's attestation         |
+| Refuse to issue / stall the fleet  | **YES**                            | The service is the only path to the governed functions                                    |
+| Bind a credential to another device, serial, generation or window      | **NO**    | Those are reserved and frozen by the database; the caller only echoes them back           |
+| Produce a credential that AUTHENTICATES | **NO**                        | Authentication runs `verifyCertificateChain`, which needs the development signing key      |
+
+So the residual is a **database-state integrity and availability** risk, not an
+authentication bypass. A poisoned row reaches the database and then fails at the
+verifier — which is why the next requirement is non-negotiable:
+
+> **No read model may treat `state = 'issued'` as proof of cryptographic
+> validity.** `issued` means "the governed pipeline persisted this atomically".
+> It does not mean "this signature verifies". Every credential consumer must run
+> the actual Ed25519 chain verification before trusting a credential.
+
+`certificate-validity.ts` already enforces this: it takes a `CertificateChain`
+and `trustedRootFingerprints` and calls `verifyCertificateChain` itself. It has
+no `signatureValid` parameter to be lied to — that cutover happened before this
+risk existed, and it is what keeps the risk bounded.
+
+---
+
+## Divergence — concurrent renewal refuses EARLIER than specified
+
+**Specified outcome:** two simultaneous renewals yield one finalized renewal and
+one `RENEWAL_GENERATION_CONFLICT`.
+
+**Implemented outcome:** the second renewal is refused at PREPARATION with
+`KLUY-RENEWAL-ALREADY-RESERVED`, before a replacement key is generated.
+
+`prepare_device_credential_renewal_v1` locks the credential head and then
+refuses if an unfinished reservation already exists for the next generation.
+That guard was added so a doomed renewal does not generate a key that is
+guaranteed to be abandoned — but it means the head compare-and-swap conflict is
+no longer the FIRST thing a losing renewal meets.
+
+The compare-and-swap itself is unchanged and still proven: assertion `33f` takes
+two reservations against the same head version and shows exactly one issued
+credential and one `KLUY-CRED-RENEWAL-GENERATION-CONFLICT`, with the head
+advancing once.
+
+**Recorded rather than resolved — this needs an owner ruling:**
+
+- **A.** Keep the early guard. Concurrent renewal refuses with
+  `KLUY-RENEWAL-ALREADY-RESERVED`; no key is wasted; the specified
+  `RENEWAL_GENERATION_CONFLICT` remains reachable only on the raw issuance path.
+- **B.** Remove the guard so renewal produces the specified conflict at
+  finalization, accepting that the loser generates a key it will then abandon.
+
+Option A was implemented because it wastes less and fails earlier. It is a
+DIVERGENCE FROM THE SPECIFIED OUTCOME and is not being presented as compliance.
+
+### Also owed, not done
+
+`device_generation_keys` is unique per `(device, environment, purpose,
+generation)`, so two concurrent renewals cannot register two different keys for
+the same generation — the second gets `KLUY-KEY-GENERATION-TAKEN`. Under option
+B that constraint would also need revisiting, since each attempt would want its
+own key.

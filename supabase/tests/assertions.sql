@@ -4809,3 +4809,287 @@ begin
 
   raise notice 'PASS ws11-issuance-function-security: the three governed functions are SECURITY DEFINER with pinned search_path, owned by the NOLOGIN kitluy_credential_issuer (NOT the activation governor), executable ONLY by the named kitluy_issuance_service and never by PUBLIC, anon or authenticated; no application role is a member of the function owner; the migration membership was handed back; the reservation table keeps RLS ENABLE+FORCE; and service_role can read a reservation but write neither it nor an issued credential';
 end $$;
+
+
+-- ============================================================================
+-- SECTION 34 — renewal key lifecycle (migration 0128).
+--
+-- Renewal reuses the prepare -> sign -> finalize pipeline; it does not fork it.
+-- What is new is the REPLACEMENT KEY state machine, which is what stops a
+-- losing renewal's key being presented by a later request.
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 34a — a full two-generation renewal, and the key states it must leave.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_profile uuid;
+  v_device uuid;
+  v_token text := encode(sha256(convert_to('t34a-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_payload text := encode(sha256(convert_to('p34a-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_idem1 text := encode(sha256(convert_to('i34a1-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_idem2 text := encode(sha256(convert_to('i34a2-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_req1 text := 'rq-34a1-' || gen_random_uuid();
+  v_req2 text := 'rq-34a2-' || gen_random_uuid();
+  v_fp1 text := repeat('5a', 32);
+  v_fp2 text := repeat('5b', 32);
+  v_prep jsonb;
+  v_head kitluy_devices.device_credential_heads;
+  v_attempt_id uuid;
+  v_audit kitluy_devices.device_credential_issuance_attempts;
+  v_links jsonb := jsonb_build_array(
+    jsonb_build_object('link_position',0,'role','root','subject_fingerprint',repeat('r',64),
+                       'issuer_key_id','rk','canonical_tbs','R','detached_signature_b64','qg=='),
+    jsonb_build_object('link_position',1,'role','intermediate','subject_fingerprint',repeat('i',64),
+                       'issuer_key_id','rk','canonical_tbs','I','detached_signature_b64','uw=='));
+begin
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+  v_device := kitluy_devices.enroll_device_v1(
+    'WS11-T34A-' || gen_random_uuid(), v_profile, now(), v_fp1,
+    'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type','mac_address','signal_value','5a:01:' || substr(md5(random()::text),1,6) || ':01'),
+      jsonb_build_object('signal_type','board_serial','signal_value','board-34a-' || gen_random_uuid()),
+      jsonb_build_object('signal_type','storage_serial','signal_value','nvme-34a-' || gen_random_uuid())));
+  perform kitluy_devices.create_device_claim_v1(
+    v_device, '00000000-0000-4000-8000-000000000011',
+    '00000000-0000-4000-8000-000000000015', '00000000-0000-4000-8000-000000000018',
+    v_token, v_payload, 900, 'OP-PROVISION');
+  perform kitluy_devices.redeem_device_claim_v1(v_token, v_payload, v_device, 'HUB-AGENT');
+
+  -- GENERATION 1. Issued 21 days ago, so 9 days remain and the device is
+  -- legitimately inside its 10-day renewal window at the moment of renewal.
+  perform kitluy_devices.register_generation_key_v1(
+    v_device, 'development', 'device_identity', 1, 'handle-g1', 'PEM-G1', v_fp1);
+  v_prep := kitluy_devices.prepare_device_credential_issuance_v1(
+    v_req1, v_device, 'development', 'device_identity', 1, 'PEM-G1', v_fp1,
+    v_idem1, repeat('9', 64), 'ed25519', repeat('8', 64), decode('a1', 'hex'),
+    true, 'ica-34a', now() - interval '21 days', 'trusted', 'SVC');
+  perform kitluy_devices.record_device_credential_signature_v1(
+    v_req1, v_prep ->> 'canonical_tbs_hash', decode('1111', 'hex'), true, 'SVC');
+  perform kitluy_devices.finalize_device_credential_issuance_v1(v_req1, v_links, 'SVC');
+
+  -- Issuance ACTIVATED the generation-1 key. Promotion is a consequence of the
+  -- credential insert, not a call a caller can make on its own.
+  if (select state from kitluy_devices.device_generation_keys
+       where device_record_id = v_device and generation = 1) <> 'active' then
+    raise exception 'ASSERT FAIL: issuance did not activate the generation-1 key';
+  end if;
+
+  -- TYPED AUDIT LINKAGE (Option A). The audit row points at the reservation,
+  -- and the free-form detail agrees with it — the owner''s condition for
+  -- accepting the temporary contract at all.
+  select id into v_attempt_id from kitluy_devices.device_credential_signing_attempts
+   where request_id = v_req1;
+  select * into v_audit from kitluy_devices.device_credential_issuance_attempts
+   where request_id = v_req1 and to_state = 'issued';
+  if v_audit.issuance_attempt_id is distinct from v_attempt_id then
+    raise exception 'ASSERT FAIL: the audit row does not point at the reservation';
+  end if;
+  if (v_audit.detail ->> 'credential_id')
+     <> (select credential_id::text from kitluy_devices.device_credential_signing_attempts
+          where request_id = v_req1) then
+    raise exception 'ASSERT FAIL: the audit detail credential id does not match the reservation';
+  end if;
+
+  -- RENEWAL. A NEW key pair (§5.1), registered by the provider first.
+  perform kitluy_devices.register_generation_key_v1(
+    v_device, 'development', 'device_identity', 2, 'handle-g2', 'PEM-G2', v_fp2);
+
+  v_prep := kitluy_devices.prepare_device_credential_renewal_v1(
+    v_device, 'development', 'device_identity', v_req2, v_idem2, repeat('7', 64),
+    'PEM-G2', v_fp2, 'ed25519', repeat('6', 64), decode('b2', 'hex'), true,
+    'ica-34a', now(), 'trusted', 'SVC');
+  if (v_prep ->> 'certificate_generation') <> '2' then
+    raise exception 'ASSERT FAIL: renewal did not reserve generation 2: %', v_prep;
+  end if;
+  perform kitluy_devices.record_device_credential_signature_v1(
+    v_req2, v_prep ->> 'canonical_tbs_hash', decode('2222', 'hex'), true, 'SVC');
+  perform kitluy_devices.finalize_device_credential_issuance_v1(v_req2, v_links, 'SVC');
+
+  select * into v_head from kitluy_devices.device_credential_heads
+   where device_record_id = v_device and environment = 'development';
+  if v_head.current_generation <> 2 or v_head.version <> 2
+     or v_head.previous_generation <> 1 then
+    raise exception 'ASSERT FAIL: the head is not generation 2 / version 2 / previous 1 (got %/%/%)',
+      v_head.current_generation, v_head.version, v_head.previous_generation;
+  end if;
+  -- §5: the overlap never exceeds three days and never outlives the incumbent.
+  if v_head.overlap_ends_at is null
+     or v_head.overlap_ends_at > v_head.updated_at + interval '3 days' then
+    raise exception 'ASSERT FAIL: the overlap window is absent or exceeds 3 days';
+  end if;
+  if v_head.overlap_ends_at > (select not_after from kitluy_devices.device_credentials
+                                where device_record_id = v_device and certificate_generation = 1) then
+    raise exception 'ASSERT FAIL: the overlap outlives the credential it overlaps';
+  end if;
+
+  -- BOTH generations exist and are distinct credentials over DIFFERENT keys.
+  if (select count(*) from kitluy_devices.device_credentials
+       where device_record_id = v_device) <> 2 then
+    raise exception 'ASSERT FAIL: renewal did not leave two credentials';
+  end if;
+  if (select public_key_fingerprint from kitluy_devices.device_credentials
+       where device_record_id = v_device and certificate_generation = 2) = v_fp1 then
+    raise exception 'ASSERT FAIL: renewal reused the incumbent key';
+  end if;
+
+  -- Key states: the new generation is active, the old one superseded.
+  if (select state from kitluy_devices.device_generation_keys
+       where device_record_id = v_device and generation = 2) <> 'active' then
+    raise exception 'ASSERT FAIL: the replacement key is not active';
+  end if;
+  if (select state from kitluy_devices.device_generation_keys
+       where device_record_id = v_device and generation = 1) <> 'superseded' then
+    raise exception 'ASSERT FAIL: the incumbent key was not superseded';
+  end if;
+
+  raise notice 'PASS ws11-renewal-lifecycle: generation 1 issued and its key ACTIVATED by the credential insert; renewal through the SAME prepare/sign/finalize pipeline reserved generation 2 against a provider-generated replacement key, advanced the head to 2/v2 with previous=1, opened an overlap that neither exceeds 3 days nor outlives the incumbent, and left key states active/superseded — with the audit row typed-linked to its reservation and its detail agreeing';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 34b — what renewal refuses, and why an abandoned key is terminal.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_profile uuid;
+  v_device uuid;
+  v_token text := encode(sha256(convert_to('t34b-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_payload text := encode(sha256(convert_to('p34b-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_idem1 text := encode(sha256(convert_to('i34b1-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_fp1 text := repeat('6a', 32);
+  v_fp2 text := repeat('6b', 32);
+  v_req1 text := 'rq-34b1-' || gen_random_uuid();
+  v_prep jsonb;
+  v_blocked int := 0;
+  v_links jsonb := jsonb_build_array(
+    jsonb_build_object('link_position',0,'role','root','subject_fingerprint',repeat('r',64),
+                       'issuer_key_id','rk','canonical_tbs','R','detached_signature_b64','qg=='),
+    jsonb_build_object('link_position',1,'role','intermediate','subject_fingerprint',repeat('i',64),
+                       'issuer_key_id','rk','canonical_tbs','I','detached_signature_b64','uw=='));
+begin
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+  v_device := kitluy_devices.enroll_device_v1(
+    'WS11-T34B-' || gen_random_uuid(), v_profile, now(), v_fp1,
+    'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type','mac_address','signal_value','6a:01:' || substr(md5(random()::text),1,6) || ':01'),
+      jsonb_build_object('signal_type','board_serial','signal_value','board-34b-' || gen_random_uuid()),
+      jsonb_build_object('signal_type','storage_serial','signal_value','nvme-34b-' || gen_random_uuid())));
+  perform kitluy_devices.create_device_claim_v1(
+    v_device, '00000000-0000-4000-8000-000000000011',
+    '00000000-0000-4000-8000-000000000015', '00000000-0000-4000-8000-000000000018',
+    v_token, v_payload, 900, 'OP-PROVISION');
+  perform kitluy_devices.redeem_device_claim_v1(v_token, v_payload, v_device, 'HUB-AGENT');
+
+  -- A FRESH generation 1: 30 days remain, so renewal is far too early.
+  perform kitluy_devices.register_generation_key_v1(
+    v_device, 'development', 'device_identity', 1, 'h1', 'PEM-G1', v_fp1);
+  v_prep := kitluy_devices.prepare_device_credential_issuance_v1(
+    v_req1, v_device, 'development', 'device_identity', 1, 'PEM-G1', v_fp1,
+    v_idem1, repeat('9', 64), 'ed25519', repeat('8', 64), decode('a1', 'hex'),
+    true, 'ica-34b', now(), 'trusted', 'SVC');
+  perform kitluy_devices.record_device_credential_signature_v1(
+    v_req1, v_prep ->> 'canonical_tbs_hash', decode('1111', 'hex'), true, 'SVC');
+  perform kitluy_devices.finalize_device_credential_issuance_v1(v_req1, v_links, 'SVC');
+
+  perform kitluy_devices.register_generation_key_v1(
+    v_device, 'development', 'device_identity', 2, 'h2', 'PEM-G2', v_fp2);
+
+  -- TOO EARLY: 30 days remain against a 10-day window.
+  begin
+    perform kitluy_devices.prepare_device_credential_renewal_v1(
+      v_device, 'development', 'device_identity', 'rq-early-' || gen_random_uuid(),
+      encode(sha256(convert_to('early', 'UTF8')), 'hex'), repeat('7', 64),
+      'PEM-G2', v_fp2, 'ed25519', repeat('6', 64), decode('b2', 'hex'), true,
+      'ica-34b', now(), 'trusted', 'SVC');
+    raise exception 'ASSERT FAIL: renewal was permitted 30 days before expiry';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-RENEWAL-TOO-EARLY%' then
+      raise exception 'ASSERT FAIL: wrong refusal for an early renewal: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- EXPIRED routes to RECOVERY, never renewal. Judged against the trusted time
+  -- the caller presents, not against now().
+  begin
+    perform kitluy_devices.prepare_device_credential_renewal_v1(
+      v_device, 'development', 'device_identity', 'rq-exp-' || gen_random_uuid(),
+      encode(sha256(convert_to('exp', 'UTF8')), 'hex'), repeat('7', 64),
+      'PEM-G2', v_fp2, 'ed25519', repeat('6', 64), decode('b2', 'hex'), true,
+      'ica-34b', now() + interval '40 days', 'trusted', 'SVC');
+    raise exception 'ASSERT FAIL: an expired credential was renewed';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-RENEWAL-EXPIRED-REQUIRES-RECOVERY%' then
+      raise exception 'ASSERT FAIL: wrong refusal for an expired credential: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- A key the provider did not generate for this generation.
+  begin
+    perform kitluy_devices.prepare_device_credential_renewal_v1(
+      v_device, 'development', 'device_identity', 'rq-fp-' || gen_random_uuid(),
+      encode(sha256(convert_to('fp', 'UTF8')), 'hex'), repeat('7', 64),
+      'PEM-X', repeat('cc', 32), 'ed25519', repeat('6', 64), decode('b2', 'hex'),
+      true, 'ica-34b', now() + interval '25 days', 'trusted', 'SVC');
+    raise exception 'ASSERT FAIL: a caller-supplied replacement key was accepted';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-RENEWAL-KEY-FINGERPRINT-MISMATCH%' then
+      raise exception 'ASSERT FAIL: wrong refusal for a caller-supplied key: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- ABANDONED IS TERMINAL. This is the containment the owner asked for: a
+  -- losing renewal's key must never be usable by a later request.
+  perform kitluy_devices.abandon_generation_key_v1(
+    v_device, 'development', 'device_identity', 2, 'lost the head compare-and-swap');
+  if (select state from kitluy_devices.device_generation_keys
+       where device_record_id = v_device and generation = 2) <> 'abandoned' then
+    raise exception 'ASSERT FAIL: the key was not abandoned';
+  end if;
+
+  begin
+    perform kitluy_devices.prepare_device_credential_renewal_v1(
+      v_device, 'development', 'device_identity', 'rq-aband-' || gen_random_uuid(),
+      encode(sha256(convert_to('aband', 'UTF8')), 'hex'), repeat('7', 64),
+      'PEM-G2', v_fp2, 'ed25519', repeat('6', 64), decode('b2', 'hex'), true,
+      'ica-34b', now() + interval '25 days', 'trusted', 'SVC');
+    raise exception 'ASSERT FAIL: an ABANDONED key was accepted for renewal';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-KEY-NOT-GENERATED%' then
+      raise exception 'ASSERT FAIL: wrong refusal for an abandoned key: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- And it cannot be resurrected: abandoned -> active is not a transition.
+  begin
+    update kitluy_devices.device_generation_keys set state = 'active'
+     where device_record_id = v_device and generation = 2;
+    raise exception 'ASSERT FAIL: an abandoned key was promoted to active';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-KEY-BAD-TRANSITION%'
+       and sqlerrm not like 'KLUY-KEY-UNAUTHORIZED%'
+       and sqlerrm not like 'permission denied%' then
+      raise exception 'ASSERT FAIL: wrong refusal for an abandoned-key promotion: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  if v_blocked <> 5 then
+    raise exception 'ASSERT FAIL: expected 5 renewal refusals, got %', v_blocked;
+  end if;
+
+  raise notice 'PASS ws11-renewal-refusals: renewal is refused 30 days early, routes an EXPIRED credential to recovery with its own code rather than renewing it, rejects a caller-supplied replacement key that the provider never generated, and treats an ABANDONED key as terminal — it can neither enter proof of possession nor be promoted back to active';
+end $$;
