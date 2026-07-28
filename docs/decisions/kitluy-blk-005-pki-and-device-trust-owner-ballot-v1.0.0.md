@@ -4,7 +4,7 @@
 **Version:** v1.0.0
 **Date:** 2026-07-28
 **Owner:** HET / KitLuy Suite Project Owner (security decisions)
-**Status:** **OPEN — awaiting owner/security decision**
+**Status:** **DECIDED — OWNER-APPROVED 2026-07-28 as `KLD-2026-07-28-002`.** All twelve items ruled. Decision record: `kitluy-blk-005-pki-and-device-trust-owner-decision-v1.0.0.md`. **BLK-005 decision values are RESOLVED; BLK-005 IMPLEMENTATION is PENDING.** Item 4 carries a hardware sub-gate (the TPM/secure-element SKU is not yet selected), and item 10 leaves KLRISK-DEVICE-002 open until the restricted-investigation state, station containment and runbook are implemented and independently tested.
 **Blocks:** WS-11 steps 2 and 8; production device activation; WS-10 production signer; the whole of pilot and production device trust
 **Evidence discipline:** approving this ballot resolves a DECISION blockage only. It is not implementation evidence (KLD-EVIDENCE-001). WS-11 cannot become `IMPLEMENTED-IN-DEV` until the approved design is implemented, tested and independently reviewed.
 

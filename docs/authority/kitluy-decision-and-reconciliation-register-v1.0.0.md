@@ -301,6 +301,57 @@ assertions. **No code branches on the value and nothing has ever been written
 with it**, so no ambiguous use exists to correct. The rename is purely
 mechanical and safe.
 
+### Owner decision KLD-2026-07-28-002 — BLK-005 PKI, device trust and signing-key custody (OWNER-APPROVED 2026-07-28)
+
+Full record: `docs/decisions/kitluy-blk-005-pki-and-device-trust-owner-decision-v1.0.0.md`.
+Source ballot: `docs/decisions/kitluy-blk-005-pki-and-device-trust-owner-ballot-v1.0.0.md`.
+
+All twelve ballot items ruled. **BLK-005 decision values are RESOLVED;
+BLK-005 IMPLEMENTATION is PENDING.** The owner's evidence boundary is recorded
+verbatim in the decision document: approving the architecture proves no CA
+exists, no key is in an HSM, no Hub has a TPM or RTC, no certificate has been
+issued and nothing has been activated.
+
+**Status effect:**
+
+```text
+BLK-005 decision values                 RESOLVED
+BLK-005 implementation                  PENDING
+WS-11-T003                              AUTHORIZED TO BEGIN
+WS-11                                   SCAFFOLDED / IN PROGRESS
+development certificate implementation  AUTHORIZED
+pilot activation                        BLOCKED (hardware + signer evidence)
+production activation                   BLOCKED (implementation + security evidence)
+WS-10 production signer                 BLOCKED (signer implementation + evidence)
+```
+
+**Two sub-gates survive the decision and are not agent-closable:**
+
+1. **§4 hardware SKU.** Pilot and production hardware certification stay BLOCKED
+   until a specific TPM 2.0 or secure-element SKU is selected and certified in
+   the production BOM. The ruling explicitly does NOT block the provider
+   interface, lifecycle or test doubles.
+2. **§10 KLRISK-DEVICE-002.** Remains OPEN until the restricted-investigation
+   state, station containment and the runbook are implemented and independently
+   tested.
+
+**The ruling CONTRADICTS behavior already shipped in T001 and T002.** Recorded
+here so the corrections are owed rather than discovered:
+
+| §    | Ruling                                                                                       | What T001/T002 currently does                                          |
+| ---- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| 10   | Incumbent goes to `restricted_investigation`, NOT full quarantine                             | T002 quarantines BOTH identities unconditionally — **must be corrected** |
+| 11   | NVMe replacement retains `device_record_id` only when board AND TPM identity match             | T001 retains identity for any storage-module-only change                 |
+| 11   | Pi board or TPM replacement creates a NEW `device_record_id`                                   | Not implemented                                                          |
+| 1, 7 | SIX signing purposes (adds `manufacturing_enrollment`, `emergency_recovery`)                   | Four in `SIGNING_PURPOSES` and in the 0120 CHECK constraint              |
+| 5    | Certificate windows are now known values                                                       | `pki_trust_configuration` deliberately empty; opens for DEVELOPMENT only |
+
+The duplicate-evidence correction is the significant one: T002 deliberately held
+both identities and the owner has now ruled that the incumbent gets a lesser
+containment state. The current behavior is MORE restrictive than the ruling, so
+it fails safe in the interim, but it is not the approved policy and must not be
+described as such.
+
 ### Cycle-9 reconciliation — decision vs implemented enum (2026-07-28)
 
 | ID  | Conflict                                                                                                                                                                                                                                                                                              | Disposition                                                                                                                                                                                                                                                     |

@@ -237,22 +237,42 @@ not a choice between them**, with certificate validation taking the MAXIMUM of
 RTC time, authenticated time and the persisted floor, and trusted time never
 moving backwards. Ballot item 11 carries the six required behaviors.
 
-### Blocked while BLK-005 is open
+### BLK-005 RULED 2026-07-28 — KLD-2026-07-28-002
 
-    certificate issuance   — BLOCKED
-    production activation  — BLOCKED
-    production signer      — BLOCKED
-    WS-11 promotion        — BLOCKED
+Decision record:
+`docs/decisions/kitluy-blk-005-pki-and-device-trust-owner-decision-v1.0.0.md`
 
-**The next repository change is the BLK-005 owner decision, not T003
-implementation.** T001 and T002 are complete and held locally.
+    BLK-005 decision values                 RESOLVED
+    BLK-005 implementation                  PENDING
+    WS-11-T003                              AUTHORIZED TO BEGIN
+    development certificate implementation  AUTHORIZED
+    pilot activation                        BLOCKED (hardware + signer evidence)
+    production activation                   BLOCKED (implementation + security evidence)
+    WS-10 production signer                 BLOCKED (signer implementation + evidence)
+    WS-11                                   SCAFFOLDED / IN PROGRESS
 
-**KLRISK-DEVICE-002 is OPEN and deliberately unmitigated.** The T002
-duplicate-evidence policy creates an enrollment-station denial-of-service path:
-evidence matching an ACTIVE device quarantines the incumbent and may interrupt
-Store operation. The current fail-closed behavior is **not weakened** until an
-owner-approved containment policy exists, and four of the seven recommended
-controls depend on this ballot.
+**T003 must not claim production readiness.** The approved values are an
+architecture, not evidence that a CA exists, a key is in an HSM, a Hub has a TPM
+or an RTC, or that anything has been issued or activated.
+
+**Two sub-gates survive the ruling and no agent may close them:**
+
+1. **§4 hardware SKU.** Pilot and production HARDWARE certification stay blocked
+   until a specific TPM 2.0 or secure-element SKU is selected and certified in
+   the production BOM. The ruling explicitly does NOT block the provider
+   interface, lifecycle or test doubles — so T003 builds against the interface
+   and `production_eligible` stays false with no path to true.
+2. **§10 KLRISK-DEVICE-002.** Stays OPEN until the restricted-investigation
+   state, station containment and the runbook are implemented and independently
+   tested.
+
+**The ruling CONTRADICTS behavior already shipped in T001 and T002** — in
+incumbent containment, NVMe identity retention, board/TPM replacement identity,
+the number of signing purposes, and the certificate windows. Those corrections
+are owed by T003 and are itemized in the decision register. The shipped
+duplicate-evidence behavior is MORE restrictive than the ruling, so it fails
+safe in the interim, but it is not the approved policy and must not be described
+as such.
 
 **Carried from Cycle 9.** KLREQ-029 and KLREQ-030 may remain open during core
 WS-11 work, but they MUST be resolved before any synchronization-repair action
