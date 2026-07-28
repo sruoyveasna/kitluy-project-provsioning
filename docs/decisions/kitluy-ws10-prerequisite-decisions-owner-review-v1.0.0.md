@@ -3,7 +3,7 @@
 **Filename:** `kitluy-ws10-prerequisite-decisions-owner-review-v1.0.0.md`
 **Version:** v1.0.0
 **Date:** 2026-07-27
-**Status:** Every group is **OWNER-APPROVAL-REQUIRED**. Nothing below is decided.
+**Status:** **DECIDED — OWNER-APPROVED 2026-07-28 as KLD-2026-07-28-001.** Groups 1-4 APPROVED; Groups 5-7 APPROVED WITH DEFINITION. KLREQ-024 and KLREQ-028 remain deferred and are ruled together.
 **Blocks:** Cycle 9 (WS-10 synchronization and configuration publication)
 **Evidence discipline:** approving this ballot resolves a DECISION blockage only. It is not implementation evidence (KLD-EVIDENCE-001).
 
@@ -14,7 +14,7 @@
 
 ---
 
-## ☐ Group 1 — KLREQ-020 · Canonical terminal idempotency key
+## ☑ Group 1 — KLREQ-020 · Canonical terminal idempotency key — **APPROVED**
 
 **Recommendation:** confirm `kl1.{terminal_device_uuid}.{client_sequence}` as canonical.
 
@@ -26,7 +26,7 @@ Alternative: adopt the Hub-issued form instead, which would require amending the
 
 ---
 
-## ☐ Group 2 — KLREQ-021 · Persisted-state ↔ wire-state mapping
+## ☑ Group 2 — KLREQ-021 · Persisted-state ↔ wire-state mapping — **APPROVED**
 
 **Recommendation:** approve the mapping in `kitluy-storehub-local-schema-amendment-001-v1.0.0.md` §2.
 
@@ -38,7 +38,7 @@ Alternative: collapse persisted and wire vocabularies into one set, which would 
 
 ---
 
-## ☐ Group 3 — KLREQ-022 · Finance boundary
+## ☑ Group 3 — KLREQ-022 · Finance boundary — **APPROVED**
 
 **Recommendation:** confirm **NO** authoritative `edge_finance` ledger. The Hub emits finance-**source** events only; the cloud subledger produces the authoritative posting.
 
@@ -48,7 +48,7 @@ Alternative: authorize a Hub-local finance journal — which would create a seco
 
 ---
 
-## ☐ Group 4 — KLREQ-023 · Additive local mechanics
+## ☑ Group 4 — KLREQ-023 · Additive local mechanics — **APPROVED**
 
 **Recommendation:** approve the four additions and ratify them into the canonical Hub schema document.
 
@@ -58,7 +58,7 @@ Each satisfies an already-approved invariant and introduces no business semantic
 
 ---
 
-## ☐ Group 5 — KLREQ-025 · Local permission-grant projection
+## ☑ Group 5 — KLREQ-025 · Local permission-grant projection — **APPROVED WITH DEFINITION**
 
 **Owner definition required.** There is currently no Hub-local grant projection. Permission keys without a `terminal_role:` constraint are satisfied only by a presented, exactly-scoped grant; an absent grant denies.
 
@@ -66,7 +66,7 @@ Needs a ruling on: what a Hub-local grant projection contains, how it is refresh
 
 ---
 
-## ☐ Group 6 — KLREQ-026 · Hub-issued key namespace for multi-event commands
+## ☑ Group 6 — KLREQ-026 · Hub-issued key namespace for multi-event commands — **APPROVED WITH DEFINITION**
 
 **Owner definition required.** The canonical offline contract §2 defines only the terminal-issued form, which cannot distinguish several events emitted by one command.
 
@@ -74,7 +74,7 @@ Needs a ruling on the Hub-issued event-key namespace and an amendment to offline
 
 ---
 
-## ☐ Group 7 — KLREQ-027 · Service-originated provider callbacks
+## ☑ Group 7 — KLREQ-027 · Service-originated provider callbacks — **APPROVED WITH DEFINITION**
 
 **Owner definition required.** Provider callbacks cannot enter the terminal command ledger: `edge_sync.command_result.terminal_device_id` is NOT NULL and no RBAC key exists for a service-originated callback.
 
