@@ -20,17 +20,17 @@ whole local PostgreSQL cluster and destroys `kitluy_hub_local`, so the cloud gat
 runs FIRST and the Hub is rebuilt afterwards. A run in the wrong order still
 prints PASS while silently skipping 154 Hub-backed tests.
 
-| #   | Gate             | Command                                  | Result                                                               |
-| --- | ---------------- | ---------------------------------------- | -------------------------------------------------------------------- |
-| 1   | Cloud static     | `pnpm db:validate`                       | **PASS** — 18 migration files                                        |
-| 2   | Cloud from zero  | `pnpm db:reset` → `pnpm db:seed`         | **PASS** — group 0110 applied                                        |
-| 3   | Cloud assertions | `pnpm db:test`                           | **PASS** — **124** `NOTICE: PASS` (121 before + 3 new in section 27) |
-| 4   | Cloud RLS        | `pnpm test:rls`                          | **PASS** — 95 cases (14+9 baseline, WS5 14, WS6 19, WS7 19, WS8 19)  |
-| 5   | Hub static       | `pnpm hub:db:validate`                   | **PASS** — 24 Hub migration files                                    |
-| 6   | Hub from zero    | `pnpm hub:db:reset` → `pnpm hub:db:seed` | **PASS** — 24 migrations applied, fixtures seeded                    |
-| 7   | Hub assertions   | `pnpm hub:db:test`                       | **PASS** — **32** `NOTICE: PASS` (29 at WS-09 close + 3 new)         |
-| 8   | Hub journal      | `pnpm hub:db:status`                     | **PASS** — 24 applied, 0 pending, 0 checksum drift, 0 missing        |
-| 9   | Repository       | `pnpm verify`                            | **PASS — 11/11**                                                     |
+| #   | Gate             | Command                                  | Result                                                                |
+| --- | ---------------- | ---------------------------------------- | --------------------------------------------------------------------- |
+| 1   | Cloud static     | `pnpm db:validate`                       | **PASS** — 18 migration files                                         |
+| 2   | Cloud from zero  | `pnpm db:reset` → `pnpm db:seed`         | **PASS** — group 0110 applied                                         |
+| 3   | Cloud assertions | `pnpm db:test`                           | **PASS** — **124** `NOTICE: PASS` (121 before + 3 new in section 27)  |
+| 4   | Cloud RLS        | `pnpm test:rls`                          | **PASS** — **94** cases (23 baseline, WS5 14, WS6 19, WS7 19, WS8 19) |
+| 5   | Hub static       | `pnpm hub:db:validate`                   | **PASS** — 25 Hub migration files                                     |
+| 6   | Hub from zero    | `pnpm hub:db:reset` → `pnpm hub:db:seed` | **PASS** — 25 migrations applied, fixtures seeded                     |
+| 7   | Hub assertions   | `pnpm hub:db:test`                       | **PASS** — **33** `NOTICE: PASS` (29 at WS-09 close + 4 new)          |
+| 8   | Hub journal      | `pnpm hub:db:status`                     | **PASS** — 25 applied, 0 pending, 0 checksum drift, 0 missing         |
+| 9   | Repository       | `pnpm verify`                            | **PASS — 11/11**                                                      |
 
 Counting command for gate 7, pinned in code as `HUB_DB_ASSERTION_CONTRACT`:
 
@@ -45,7 +45,7 @@ many. A count derived from the summary line is never reported.
 
 | Suite                                  | Result                                                     |
 | -------------------------------------- | ---------------------------------------------------------- |
-| `@kitluy-services/kitluy-hub-agent`    | **261 passed, 2 skipped** (22 files: 21 passed, 1 skipped) |
+| `@kitluy-services/kitluy-hub-agent`    | **270 passed, 2 skipped** (22 files: 21 passed, 1 skipped) |
 | `@kitluy/sync-protocol`                | **21 passed**                                              |
 | `@kitluy-services/kitluy-sync-service` | **18 passed**                                              |
 | `pnpm verify` unit gate                | **PASS** across 60 workspace tasks                         |
@@ -56,25 +56,25 @@ The 2 skipped hub-agent tests are the opt-in destructive backup/restore suite
 **Caveat recorded rather than buried:** an earlier evidence run reported
 `109 passed / 154 skipped` for the hub-agent suite. That run followed the cloud
 reset without rebuilding the Hub database, so every DB-backed suite skipped. It
-is NOT cited as evidence anywhere; the 261/2 figures above come from a run with
+is NOT cited as evidence anywhere; the 270/2 figures above come from a run with
 a live Hub database.
 
 ---
 
 ## 2. What was built, per task
 
-| Task | Deliverable                                | Evidence                                                                                                                                                        |
-| ---- | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| T000 | Additive state alignment (A01)             | `hub/migrations/0015_sync_delivery_state_alignment.sql`; assertions 29a/29b                                                                                     |
-| T001 | Outbox leasing, `pending → in_flight`      | `0016_sync_outbox_leasing.sql`; `src/hub/sync/outbox-lease.ts`; `test/sync-outbox-lease.test.ts` 17/17                                                          |
-| T002 | Signed Hub→cloud transmission              | `0017_sync_transmission_batches.sql`; `src/hub/sync/{signing,transmission}.ts`; `test/sync-transmission.test.ts` 19/19; `@kitluy/sync-protocol` corrected       |
-| T003 | Idempotent cloud ingestion, `kh1.*`        | `0018_hub_effect_keys.sql`; `supabase/migrations/…0110_sync_ingestion.sql`; `src/hub/effect-contract.ts`; `kitluy-sync-service/src/ingestion.ts`; 18 + 10 tests |
-| T004 | Ack, rejection, retry/backoff, dead-letter | `0019_sync_delivery_outcomes.sql`; `src/hub/sync/delivery-outcome.ts`; `test/sync-delivery-outcome.test.ts` 17/17                                               |
-| T005 | Independent dimensions, governed clearance | `0020_revoke_public_execute.sql`; `src/hub/sync/reconciliation.ts`; `test/sync-reconciliation.test.ts` 7/7; assertion 29c                                       |
-| T006 | Cloud→Hub delivery, provider outcomes      | `0021_cloud_inbox_and_provider_outcomes.sql`; `src/hub/sync/inbox.ts`; `test/sync-inbox.test.ts` 15/15                                                          |
-| T007 | Signed grant + snapshot publication        | `0022_signed_grants_and_activation.sql`; `src/hub/sync/{grants,configuration}.ts`                                                                               |
-| T008 | Verification, atomic activation, rollback  | same migration; `test/sync-configuration.test.ts` 17/17                                                                                                         |
-| T009 | Cursor recovery, health, operator repair   | `0023_operator_repair_and_recovery.sql`; `src/hub/sync/operations.ts`; `test/sync-operations.test.ts` 8/8                                                       |
+| Task | Deliverable                                | Evidence                                                                                                                                                                                     |
+| ---- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| T000 | Additive state alignment (A01)             | `hub/migrations/0015_sync_delivery_state_alignment.sql`; assertions 29a/29b                                                                                                                  |
+| T001 | Outbox leasing, `pending → in_flight`      | `0016_sync_outbox_leasing.sql`; `src/hub/sync/outbox-lease.ts`; `test/sync-outbox-lease.test.ts` 17/17                                                                                       |
+| T002 | Signed Hub→cloud transmission              | `0017_sync_transmission_batches.sql`; `src/hub/sync/{signing,transmission}.ts`; `test/sync-transmission.test.ts` 19/19; `@kitluy/sync-protocol` corrected                                    |
+| T003 | Idempotent cloud ingestion, `kh1.*`        | `0018_hub_effect_keys.sql`; `supabase/migrations/…0110_sync_ingestion.sql`; `src/hub/effect-contract.ts`; `kitluy-sync-service/src/ingestion.ts`; 18 + 10 tests                              |
+| T004 | Ack, rejection, retry/backoff, dead-letter | `0019_sync_delivery_outcomes.sql`; `src/hub/sync/delivery-outcome.ts`; `test/sync-delivery-outcome.test.ts` 17/17                                                                            |
+| T005 | Independent dimensions, governed clearance | `0020_revoke_public_execute.sql` + `0024_governed_marker_and_scope_hierarchy.sql` (review RV-001); `src/hub/sync/reconciliation.ts`; `test/sync-reconciliation.test.ts` 11/11; assertion 29c |
+| T006 | Cloud→Hub delivery, provider outcomes      | `0021_cloud_inbox_and_provider_outcomes.sql`; `src/hub/sync/inbox.ts`; `test/sync-inbox.test.ts` 15/15                                                                                       |
+| T007 | Signed grant + snapshot publication        | `0022_signed_grants_and_activation.sql`; `src/hub/sync/{grants,configuration}.ts`                                                                                                            |
+| T008 | Verification, atomic activation, rollback  | `0022` + `0024` scope-chain resolver (review RV-002); `test/sync-configuration.test.ts` 22/22; assertion 29d                                                                                 |
+| T009 | Cursor recovery, health, operator repair   | `0023_operator_repair_and_recovery.sql`; `src/hub/sync/operations.ts`; `test/sync-operations.test.ts` 8/8                                                                                    |
 
 ---
 
@@ -133,6 +133,29 @@ deliberately NOT created.
 
 ---
 
+## 5a. Independent review findings, and what changed because of them
+
+Review: `00_AI_HANDOFF/reviews/2026-07-28__WS-10-SYNC__REVIEW.md`, verdict
+**APPROVED-WITH-CONDITIONS** with two BLOCKING findings. Both were reproduced
+independently before any fix was written, and both are now fixed in
+`hub/migrations/0024_governed_marker_and_scope_hierarchy.sql`.
+
+| Finding                     | What the reviewer proved                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Correction                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **RV-001 (HIGH, blocking)** | The 0015 governed marker was `current_setting('kitluy.reconciliation_governed')` — a custom GUC **any role can set with `set_config()`**. Running as `kitluy_sync_worker`, the reviewer set the marker and cleared a raised reconciliation with a forged authority string, an unrelated correlation event and **zero audit rows**. 0015's own comment claimed "This trigger makes it structural." **It did not.** 0020 closed a different hole (PUBLIC EXECUTE) and did not make the trigger unforgeable. | 0024 moves the gate to the **executing identity**: `raise_reconciliation` and `clear_reconciliation` are SECURITY DEFINER owned by a NOLOGIN, memberless role `kitluy_reconciliation_governor`, and the trigger recognises only that identity. Re-probed: the forge now fails for `kitluy_sync_worker` **and for the database owner**, while the governed path still works. Assertion 29c asserts the role is NOLOGIN, has zero members, and owns both SECURITY DEFINER procedures |
+| **RV-002 (HIGH, blocking)** | `resolve_permission_grant` filtered on the **exact** `(scope_type, scope_id)` tuple, so a `deny` at Digital Store scope was invisible when resolving at Location scope. With a live broad deny and a narrow allow, the resolver returned **`allow`**. The column comment claimed "DENY OVERRIDES ALLOW at every scope" — false.                                                                                                                                                                           | 0024 walks the whole chain (platform → tenant → digital_store → store_location, plus the exact tuple for scope types outside it) and a deny anywhere wins. The old signature is DROPPED rather than left callable. Re-probed: the same case now returns `deny`; a broader allow correctly covers a narrower request; offline without a signed policy still returns `unknown`. Assertion 29d covers it                                                                              |
+| **RV-005 (evidence)**       | `test:rls` reports **94** cases, not 95; this document's own itemization summed to 94 and so contradicted itself.                                                                                                                                                                                                                                                                                                                                                                                         | Corrected to 94 in §1. The figure was carried forward from earlier cycles' evidence without being recounted                                                                                                                                                                                                                                                                                                                                                                        |
+
+Register entry **C27** previously said "CLOSED", which was true of the PUBLIC
+EXECUTE hole and **not** true of the §5 enforcement it was cited for. It now
+records both halves, with C30 covering RV-001.
+
+Non-blocking findings (RV-003, RV-004, RV-007 and advisories) are recorded in
+§5 and in the decision register; **RV-004 in particular is the honest statement
+that WS-10 ships no wired production path** — see §7.
+
+---
+
 ## 6. Defects and hazards found during this cycle
 
 | Id             | Finding                                                                                                                                                                                                                                                                                                                                                                                                                                       | Disposition                                                                                                                            |
@@ -150,6 +173,17 @@ deliberately NOT created.
 - **No cloud↔Hub integration run exists.** The Hub and cloud halves are tested
   separately, against their own databases, with the transport injected. Nothing
   here demonstrates a live signed batch crossing a real network.
+- **No wired production path exists** (review finding RV-004). `ingestBatch`,
+  `prepareSignedBatch`, `applyBatchResponse` and `resolveGrant` have no
+  production callers; `IngestionPorts` and `SignedBatchTransport` have no
+  implementations. WS-10 delivers the mechanisms and their guarantees, not a
+  running delivery worker. Anyone reading "IMPLEMENTED-IN-DEV" as "the Hub is
+  syncing" would be wrong.
+- **The §5 separation is not exercised in practice.** All `kitluy_*` roles are
+  NOLOGIN and the Hub agent connects as the database owner, so the
+  worker-versus-runtime distinction that RV-001 turned on is currently
+  structural only. That is real mitigation for the finding and equally real
+  evidence that the separation has never run.
 - **No production signer exists.** `createProductionBatchSigner` refuses;
   key custody remains `[REQUIRED: ...]` on **BLK-005**.
 - **No complete T1→T4 lifecycle is claimed.** KLREQ-024 and KLREQ-028 remain

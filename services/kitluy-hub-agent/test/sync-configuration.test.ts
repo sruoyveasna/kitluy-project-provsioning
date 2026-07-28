@@ -353,6 +353,8 @@ describe.skipIf(!available)("WS-10-T007 signed grant projection (KLREQ-025)", ()
   }
 
   const query = (g: PublishedGrant, online: boolean) => ({
+    tenantId: g.tenantId,
+    digitalStoreId: g.digitalStoreId,
     locationId: g.locationId,
     actorId: g.actorId,
     permissionKey: g.permissionKey,
@@ -457,5 +459,139 @@ describe.skipIf(!available)("WS-10-T007 signed grant projection (KLREQ-025)", ()
     await expect(
       p.query(`delete from edge_config.permission_grant_projection where id = $1`, [g.id]),
     ).rejects.toThrow(/GRANT-IMMUTABLE/);
+  });
+});
+
+/**
+ * Regression tests for independent review finding RV-002.
+ *
+ * The 0022 resolver compared only the EXACT `(scope_type, scope_id)` tuple, so
+ * a `deny` recorded at Digital Store scope was invisible when resolving at
+ * Location scope — and the reviewer got `allow` out of a broad deny plus a
+ * narrow allow. Migration 0024 walks the whole scope chain.
+ */
+describe.skipIf(!available)("RV-002 regression — deny wins across the scope chain", () => {
+  let p: pg.Pool;
+  let snapshotId = "";
+
+  beforeAll(async () => {
+    p = pool();
+    await ensureRuntimeRoleMembership(p);
+    const snapshot = publish();
+    await withHubTransaction(p, async (client) => {
+      await recordDownloadedSnapshot(client, snapshot);
+      await verifySnapshotOrThrow(client, snapshot, signer);
+    });
+    snapshotId = snapshot.snapshotId;
+  });
+
+  afterAll(async () => {
+    await p.end().catch(() => undefined);
+  });
+
+  function scoped(
+    actorId: string,
+    effect: "allow" | "deny",
+    scopeType: string,
+    scopeId: string | null,
+    version: bigint,
+  ): PublishedGrant {
+    return {
+      id: uuidv7(),
+      tenantId: TENANT,
+      digitalStoreId: STORE,
+      locationId: CONFIG_LOCATION,
+      sourceSnapshotId: snapshotId,
+      projectionVersion: version,
+      actorId,
+      permissionKey: "payments.refund.request",
+      effect,
+      resourceType: "payment",
+      scopeType,
+      scopeId,
+      environment: "all",
+      requiresReauthentication: false,
+      requiresApproval: true,
+      requiresReason: true,
+      grantedAt: new Date(),
+      notBefore: new Date(Date.now() - 60_000),
+      expiresAt: null,
+      offlineValiditySeconds: null,
+      offlinePolicyReference: null,
+      signature: Buffer.from("beef", "hex"),
+      signatureAlgorithm: "hmac-sha256-development",
+      signingKeyId: "cloud-config-key-1",
+    };
+  }
+
+  const ask = (actorId: string) => ({
+    tenantId: TENANT,
+    digitalStoreId: STORE,
+    locationId: CONFIG_LOCATION,
+    actorId,
+    permissionKey: "payments.refund.request",
+    scopeType: "store_location",
+    scopeId: CONFIG_LOCATION,
+    online: true,
+  });
+
+  it("a narrow ALLOW cannot defeat a broad DENY", async () => {
+    const actorId = uuidv7();
+    await withHubTransaction(p, async (client) => {
+      await projectGrant(client, scoped(actorId, "deny", "digital_store", STORE, 1n));
+      await projectGrant(client, scoped(actorId, "allow", "store_location", CONFIG_LOCATION, 2n));
+    });
+    expect(await withHubTransaction(p, (client) => resolveGrant(client, ask(actorId)))).toBe(
+      "deny",
+    );
+  });
+
+  it("holds for a DENY at tenant scope and at platform scope", async () => {
+    for (const [scopeType, scopeId] of [
+      ["tenant", TENANT],
+      ["platform", null],
+    ] as ReadonlyArray<[string, string | null]>) {
+      const actorId = uuidv7();
+      await withHubTransaction(p, async (client) => {
+        await projectGrant(client, scoped(actorId, "deny", scopeType, scopeId, 1n));
+        await projectGrant(client, scoped(actorId, "allow", "store_location", CONFIG_LOCATION, 2n));
+      });
+      expect(
+        await withHubTransaction(p, (client) => resolveGrant(client, ask(actorId))),
+        scopeType,
+      ).toBe("deny");
+    }
+  });
+
+  it("lets a BROADER allow cover a narrower request", async () => {
+    const actorId = uuidv7();
+    await withHubTransaction(p, (client) =>
+      projectGrant(client, scoped(actorId, "allow", "tenant", TENANT, 1n)),
+    );
+    expect(await withHubTransaction(p, (client) => resolveGrant(client, ask(actorId)))).toBe(
+      "allow",
+    );
+  });
+
+  it("still fails closed offline without an approved signed policy", async () => {
+    const actorId = uuidv7();
+    await withHubTransaction(p, (client) =>
+      projectGrant(client, scoped(actorId, "allow", "tenant", TENANT, 1n)),
+    );
+    expect(
+      await withHubTransaction(p, (client) =>
+        resolveGrant(client, { ...ask(actorId), online: false }),
+      ),
+    ).toBe("unknown");
+  });
+
+  it("does not leak a grant across Digital Stores", async () => {
+    const actorId = uuidv7();
+    await withHubTransaction(p, (client) =>
+      projectGrant(client, scoped(actorId, "allow", "digital_store", uuidv7(), 1n)),
+    );
+    expect(await withHubTransaction(p, (client) => resolveGrant(client, ask(actorId)))).toBe(
+      "unknown",
+    );
   });
 });

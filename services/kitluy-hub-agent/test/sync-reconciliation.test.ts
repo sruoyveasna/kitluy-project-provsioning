@@ -313,3 +313,94 @@ describe.skipIf(!available)("WS-10-T005 dimension independence", () => {
     expect((await outboxRow(p, eventId)).reconciliation_state).toBe("required");
   });
 });
+
+/**
+ * Regression tests for independent review finding RV-001
+ * (`00_AI_HANDOFF/reviews/2026-07-28__WS-10-SYNC__REVIEW.md`).
+ *
+ * The 0015 trigger gated on `current_setting('kitluy.reconciliation_governed')`
+ * — a custom GUC that ANY role can set with `set_config()`. The reviewer
+ * reproduced the forge; so did I before writing the fix. Migration 0024 moves
+ * the gate to the EXECUTING IDENTITY, which a caller cannot produce.
+ *
+ * These reproduce the attack VERBATIM rather than testing the fix's mechanism,
+ * so the tests stay meaningful if the mechanism changes again.
+ */
+describe.skipIf(!available)("RV-001 regression — the governed marker is unforgeable", () => {
+  let p: pg.Pool;
+  let terminal: ProvisionedTerminal;
+  let generation = 0;
+
+  beforeAll(async () => {
+    p = pool();
+    await ensureRuntimeRoleMembership(p);
+    terminal = await provisionTerminal(p, "rv001", T1, ACTOR_CASHIER);
+    generation = await reserveSyncGenerationBlock(p, "lease");
+  });
+
+  afterAll(async () => {
+    await p.end().catch(() => undefined);
+  });
+
+  async function raised(): Promise<string> {
+    generation += 1;
+    const [event] = await seedOutboxStream(p, {
+      generation,
+      count: 1,
+      terminalDeviceId: terminal.terminalDeviceId,
+      suite: "rv001",
+    });
+    const conflictId = await seedSyncConflict(p, { localEventId: event!.eventId });
+    await p.query(`select edge_sync.raise_reconciliation($1::uuid, $2::uuid, 'divergence')`, [
+      event!.eventId,
+      conflictId,
+    ]);
+    return event!.eventId;
+  }
+
+  const forge = (eventId: string) => `
+    select set_config('kitluy.reconciliation_governed', 'on', true);
+    update edge_sync.outbox
+       set reconciliation_state = 'cleared', reconciliation_cleared_at = now(),
+           reconciliation_cleared_authority = 'FORGED',
+           reconciliation_clearing_reason = 'forged',
+           reconciliation_clearing_event_id = '${eventId}'
+     where event_id = '${eventId}';`;
+
+  it("refuses the forge from the SYNC WORKER, the role the amendment names", async () => {
+    const eventId = await raised();
+    await expect(
+      withHubTransaction(p, (client) => client.query(forge(eventId)), HUB_SYNC_WORKER_ROLE),
+    ).rejects.toThrow(/RECONCILIATION-GOVERNED/);
+    expect((await outboxRow(p, eventId)).reconciliation_state).toBe("required");
+  });
+
+  it("refuses the forge from the DATABASE OWNER too — the functions are the only door", async () => {
+    const eventId = await raised();
+    await expect(p.query(forge(eventId))).rejects.toThrow(/RECONCILIATION-GOVERNED/);
+    expect((await outboxRow(p, eventId)).reconciliation_state).toBe("required");
+  });
+
+  it("still lets the GOVERNED path through", async () => {
+    const eventId = await raised();
+    await p.query(
+      `select edge_sync.clear_reconciliation($1::uuid, null, 'automation:KLPOL-DEV:delivery:x',
+                                             'resolved', $2::uuid)`,
+      [eventId, eventId],
+    );
+    expect((await outboxRow(p, eventId)).reconciliation_state).toBe("cleared");
+  });
+
+  it("keeps the governor role unassumable — its membership is granted to nobody", async () => {
+    const members = await p.query<{ n: string }>(
+      `select count(*)::text as n from pg_auth_members m
+         join pg_roles r on r.oid = m.roleid
+        where r.rolname = 'kitluy_reconciliation_governor'`,
+    );
+    expect(Number(members.rows[0]!.n)).toBe(0);
+    const login = await p.query<{ rolcanlogin: boolean }>(
+      `select rolcanlogin from pg_roles where rolname = 'kitluy_reconciliation_governor'`,
+    );
+    expect(login.rows[0]!.rolcanlogin).toBe(false);
+  });
+});

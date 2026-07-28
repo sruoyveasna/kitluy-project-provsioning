@@ -123,6 +123,14 @@ export async function projectGrant(client: HubClient, grant: PublishedGrant): Pr
 }
 
 export interface GrantQuery {
+  /**
+   * The FULL scope chain. Review finding RV-002: the 0022 resolver compared
+   * only the exact requested tuple, so a `deny` recorded at Digital Store scope
+   * was invisible when resolving at Location scope and a narrow allow won.
+   * Migration 0024 walks the chain, and a deny anywhere in it wins.
+   */
+  readonly tenantId: string;
+  readonly digitalStoreId: string;
   readonly locationId: string;
   readonly actorId: string;
   readonly permissionKey: string;
@@ -138,14 +146,18 @@ export interface GrantQuery {
  *
  * The decision lives in SQL (`edge_config.resolve_permission_grant`) so it is
  * evaluated inside the same transaction and cannot be reimplemented, in a
- * subtly different order, by a second caller. Deny wins there; missing, unknown
- * and expired all return `unknown`.
+ * subtly different order, by a second caller. Deny wins there — across the
+ * WHOLE SCOPE CHAIN since migration 0024 (review finding RV-002); missing,
+ * unknown and expired all return `unknown`.
  */
 export async function resolveGrant(client: HubClient, query: GrantQuery): Promise<GrantDecision> {
   const result = await client.query<{ resolve_permission_grant: GrantDecision }>(
-    `select edge_config.resolve_permission_grant($1::uuid, $2::uuid, $3::text, $4::text,
-                                                 $5::uuid, $6::boolean, $7::timestamptz)`,
+    `select edge_config.resolve_permission_grant($1::uuid, $2::uuid, $3::uuid, $4::uuid,
+                                                 $5::text, $6::text, $7::uuid,
+                                                 $8::boolean, $9::timestamptz)`,
     [
+      query.tenantId,
+      query.digitalStoreId,
       query.locationId,
       query.actorId,
       query.permissionKey,

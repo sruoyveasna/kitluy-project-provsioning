@@ -195,10 +195,10 @@ describe("confirmed boundaries — finance and sync", () => {
 });
 
 describe("hub:db:test assertion-count contract", () => {
-  it("pins 32 NOTICE PASS lines and the correct counting command", () => {
-    expect(HUB_DB_ASSERTION_CONTRACT.expectedPassNotices).toBe(32);
+  it("pins 33 NOTICE PASS lines and the correct counting command", () => {
+    expect(HUB_DB_ASSERTION_CONTRACT.expectedPassNotices).toBe(33);
     expect(HUB_DB_ASSERTION_CONTRACT.countCommand).toContain('grep -c "NOTICE:  PASS"');
-    expect(HUB_DB_ASSERTION_CONTRACT.wrongCountCommand).toMatch(/33/);
+    expect(HUB_DB_ASSERTION_CONTRACT.wrongCountCommand).toMatch(/34/);
   });
 
   it("matches the number of PASS notices the assertions file actually emits", () => {

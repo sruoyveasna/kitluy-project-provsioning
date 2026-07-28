@@ -1395,34 +1395,41 @@ begin
     raise exception 'ASSERT FAIL: conflict override did not win; external status is %', v_status;
   end if;
 
-  -- (e) The two dimensions cannot move in ONE statement, even with the
-  --     governed marker set (§3).
+  -- (e) and (f) CHANGED BY RV-001 (migration 0024), and the change is the
+  --     point. These probes used to SET THE GOVERNED MARKER THEMSELVES and then
+  --     check that the deeper rules fired. That they COULD set it was the
+  --     vulnerability: the 0015 gate was a custom GUC and any role could set it
+  --     with set_config(). 0024 makes the gate the EXECUTING IDENTITY, so a bare
+  --     UPDATE is now refused at the door — before the dimension-independence
+  --     and not-discardable checks are reached. The probes assert that stronger
+  --     outcome. Those deeper branches stay in the trigger as defence-in-depth
+  --     against a future governed procedure that misbehaves, and are no longer
+  --     reachable from outside one — which is why nothing here exercises them.
   begin
     perform set_config('kitluy.reconciliation_governed', 'on', true);
     update edge_sync.outbox
        set delivery_state = 'retry_wait', reconciliation_raised_reason = 'smuggled'
      where event_id = v_event;
-    raise exception 'ASSERT FAIL: one statement moved both state dimensions';
+    raise exception 'ASSERT FAIL: a self-set marker still moved both state dimensions';
   exception when others then
     if sqlerrm like 'ASSERT FAIL%' then raise; end if;
-    if sqlerrm not like '%KLUY-EDGE-STATE-DIMENSIONS-INDEPENDENT%' then
-      raise exception 'ASSERT FAIL: expected KLUY-EDGE-STATE-DIMENSIONS-INDEPENDENT, got %', sqlerrm;
+    if sqlerrm not like '%KLUY-EDGE-RECONCILIATION-GOVERNED%' then
+      raise exception 'ASSERT FAIL: expected KLUY-EDGE-RECONCILIATION-GOVERNED, got %', sqlerrm;
     end if;
     v_blocked := v_blocked + 1;
   end;
 
-  -- (f) A raised reconciliation is never silently discarded.
   begin
     perform set_config('kitluy.reconciliation_governed', 'on', true);
     update edge_sync.outbox
        set reconciliation_state = 'none', reconciliation_conflict_id = null,
            reconciliation_raised_at = null, reconciliation_raised_reason = null
      where event_id = v_event;
-    raise exception 'ASSERT FAIL: a raised reconciliation was reset to none';
+    raise exception 'ASSERT FAIL: a self-set marker still discarded a raised reconciliation';
   exception when others then
     if sqlerrm like 'ASSERT FAIL%' then raise; end if;
-    if sqlerrm not like '%KLUY-EDGE-RECONCILIATION-NOT-DISCARDABLE%' then
-      raise exception 'ASSERT FAIL: expected KLUY-EDGE-RECONCILIATION-NOT-DISCARDABLE, got %', sqlerrm;
+    if sqlerrm not like '%KLUY-EDGE-RECONCILIATION-GOVERNED%' then
+      raise exception 'ASSERT FAIL: expected KLUY-EDGE-RECONCILIATION-GOVERNED, got %', sqlerrm;
     end if;
     v_blocked := v_blocked + 1;
   end;
@@ -1569,8 +1576,99 @@ begin
     raise exception 'ASSERT FAIL: the Hub runtime cannot clear a reconciliation';
   end if;
 
-  raise notice 'PASS procedure-privileges: none of the % edge_* procedures is EXECUTE-able by PUBLIC; the sync worker may raise a conflict but not clear one', v_checked;
+  -- RV-001 (independent review 2026-07-28). The 0015 gate was a custom GUC that
+  -- ANY role could set with set_config(), so the §5 rule was not enforced at
+  -- all. 0024 moved the gate to the EXECUTING IDENTITY. Assert the mechanism
+  -- itself, because a grant table alone cannot express it.
+  if not exists (select 1 from pg_roles where rolname = 'kitluy_reconciliation_governor') then
+    raise exception 'ASSERT FAIL: the governor role that makes the §5 gate unforgeable is missing (RV-001)';
+  end if;
+  if exists (select 1 from pg_roles where rolname = 'kitluy_reconciliation_governor' and rolcanlogin) then
+    raise exception 'ASSERT FAIL: kitluy_reconciliation_governor can log in; it must be NOLOGIN (RV-001)';
+  end if;
+  if exists (
+    select 1 from pg_auth_members m join pg_roles gr on gr.oid = m.roleid
+    where gr.rolname = 'kitluy_reconciliation_governor'
+  ) then
+    raise exception
+      'ASSERT FAIL: kitluy_reconciliation_governor has members; anyone who can SET ROLE to it can forge the §5 gate (RV-001)';
+  end if;
+  for r in
+    select p.proname, p.prosecdef, pg_get_userbyid(p.proowner) as owner
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'edge_sync'
+      and p.proname in ('raise_reconciliation', 'clear_reconciliation')
+  loop
+    if not r.prosecdef then
+      raise exception 'ASSERT FAIL: edge_sync.% is not SECURITY DEFINER, so it cannot produce the governed identity (RV-001)', r.proname;
+    end if;
+    if r.owner <> 'kitluy_reconciliation_governor' then
+      raise exception 'ASSERT FAIL: edge_sync.% is owned by %, not the governor role (RV-001)', r.proname, r.owner;
+    end if;
+  end loop;
+
+  raise notice 'PASS procedure-privileges: none of the % edge_* procedures is EXECUTE-able by PUBLIC; the sync worker may raise a conflict but not clear one; the §5 gate is the executing identity of a NOLOGIN, memberless governor role and both governed procedures are SECURITY DEFINER owned by it', v_checked;
 end $$;
+
+-- ---------------------------------------------------------------------------
+-- 29d. Grant resolution: DENY wins across the whole scope chain (RV-002).
+--
+--      The 0022 resolver compared only the exact (scope_type, scope_id) tuple,
+--      so a deny at Digital Store scope was invisible when resolving at
+--      Location scope and a narrow allow won. 0024 walks the chain.
+-- ---------------------------------------------------------------------------
+begin;
+
+do $$
+declare
+  v_snapshot uuid := 'e0000000-0000-4000-8000-0000000000f1';
+  v_actor    uuid := 'e0000000-0000-4000-8000-0000000000f2';
+  v_tenant   uuid := 'e0000000-0000-4000-8000-000000000001';
+  v_store    uuid := 'e0000000-0000-4000-8000-000000000002';
+  v_location uuid := 'e0000000-0000-4000-8000-000000000003';
+  v_decision text;
+begin
+  insert into edge_config.configuration_snapshot
+    (id, tenant_id, digital_store_id, location_id, snapshot_version, schema_version, created_at,
+     not_before, minimum_hub_version, manifest_sha256, signature_algorithm, signature,
+     signing_key_id, state, downloaded_at)
+  values (v_snapshot, v_tenant, v_store, v_location, 999999, 1, now(), now() - interval '1 hour',
+          '0.1.0', repeat('a', 64), 'assert', decode('beef', 'hex'), 'assert-key', 'verified', now());
+
+  insert into edge_config.permission_grant_projection
+    (id, tenant_id, digital_store_id, location_id, source_snapshot_id, projection_version, actor_id,
+     permission_key, effect, resource_type, scope_type, scope_id, environment,
+     requires_reauthentication, requires_approval, requires_reason, granted_at, not_before,
+     signature, signature_algorithm, signing_key_id, received_at)
+  values
+    (gen_random_uuid(), v_tenant, v_store, v_location, v_snapshot, 1, v_actor,
+     'payments.refund.request', 'deny', 'payment', 'digital_store', v_store, 'all',
+     false, true, true, now(), now() - interval '1 hour', decode('be', 'hex'), 'a', 'k', now()),
+    (gen_random_uuid(), v_tenant, v_store, v_location, v_snapshot, 2, v_actor,
+     'payments.refund.request', 'allow', 'payment', 'store_location', v_location, 'all',
+     false, true, true, now(), now() - interval '1 hour', decode('be', 'hex'), 'a', 'k', now());
+
+  v_decision := edge_config.resolve_permission_grant(
+    v_tenant, v_store, v_location, v_actor, 'payments.refund.request',
+    'store_location', v_location, true, now());
+  if v_decision <> 'deny' then
+    raise exception
+      'ASSERT FAIL: a narrow allow defeated a broad deny (got %); deny must win across the scope chain (RV-002)',
+      v_decision;
+  end if;
+
+  -- …and an unknown actor still fails closed.
+  v_decision := edge_config.resolve_permission_grant(
+    v_tenant, v_store, v_location, gen_random_uuid(), 'payments.refund.request',
+    'store_location', v_location, true, now());
+  if v_decision <> 'unknown' then
+    raise exception 'ASSERT FAIL: an ungranted actor resolved to % instead of unknown', v_decision;
+  end if;
+
+  raise notice 'PASS grant-scope-chain: a DENY at a broader scope beats a narrow ALLOW, and an ungranted actor still fails closed';
+end $$;
+
+rollback;
 
 -- ---------------------------------------------------------------------------
 -- 29b. reconciliation_required is NOT a delivery state (amendment §3).
