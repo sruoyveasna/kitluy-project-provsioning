@@ -3588,4 +3588,338 @@ begin
   raise notice 'PASS ws11-station-containment: the first duplicate raises monitoring, a second inside the SIGNED window quarantines the station, and one of the listed immediate conditions (same TPM identity) quarantines regardless of count — the threshold comes from signed policy, not from a code constant';
 end $$;
 
-select 'assertions complete: groups 0010-0123 structural contract holds (incl. cycle-9 WS-10 section 27 and cycle-10 WS-11 sections 28 (T001), 29 (T002) and 30 (T003 trusted time))' as result;
+
+-- ============================================================================
+-- SECTION 31 — WS-11-T003 Step 4 credential persistence (migration 0125).
+-- The owner's migration attacks (2026-07-28).
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 31a — the structural refusals: production eligibility, credential kind,
+-- lifetime, and who may write an ISSUED credential.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_profile uuid;
+  v_device uuid;
+  v_blocked int := 0;
+begin
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+  v_device := kitluy_devices.enroll_device_v1(
+    'WS11-T004-CRED-' || gen_random_uuid(), v_profile, now(),
+    repeat('c1', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'da:01:' || substr(md5(random()::text),1,6) || ':01'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-cred-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-cred-' || gen_random_uuid())));
+
+  insert into kitluy_devices.device_credential_requests
+    (request_id, idempotency_key, canonical_payload_hash, device_record_id, environment,
+     purpose, assignment_generation, public_key, public_key_fingerprint, hardware_trust_level)
+  values
+    ('rq-a-' || v_device, 'idem-a-' || v_device, repeat('a', 64), v_device, 'development',
+     'device_identity', 1, 'PUBKEY', repeat('b', 64), 'development_software');
+
+  -- SAME idempotency key, DIFFERENT payload hash.
+  begin
+    insert into kitluy_devices.device_credential_requests
+      (request_id, idempotency_key, canonical_payload_hash, device_record_id, environment,
+       purpose, assignment_generation, public_key, public_key_fingerprint, hardware_trust_level)
+    values
+      ('rq-a2-' || v_device, 'idem-a-' || v_device, repeat('c', 64), v_device, 'development',
+       'device_identity', 1, 'PUBKEY', repeat('b', 64), 'development_software');
+    raise exception 'ASSERT FAIL: the same idempotency key was accepted with a different payload hash';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if; v_blocked := v_blocked + 1;
+  end;
+
+  -- A credential with NO verified proof of possession.
+  begin
+    insert into kitluy_devices.device_credentials
+      (serial_number, device_record_id, environment, purpose, public_key,
+       public_key_fingerprint, issuer_key_id, certificate_generation, assignment_generation,
+       not_before, not_after, hardware_trust_level, canonical_tbs, detached_signature,
+       created_from_request_id)
+    values
+      ('SER-NOPOP', v_device, 'development', 'device_identity', 'PUBKEY',
+       repeat('b', 64), 'ica', 1, 1, now(), now() + interval '30 days',
+       'development_software', 'TBS', '\x00'::bytea, 'rq-a-' || v_device);
+    raise exception 'ASSERT FAIL: a credential was issued with no verified proof of possession';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-CRED-UNAUTHORIZED-ISSUE%'
+       and sqlerrm not like 'KLUY-CRED-NO-PROOF-OF-POSSESSION%' then
+      raise exception 'ASSERT FAIL: refused for the wrong reason: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- production_eligible = true, refused by CHECK regardless of identity.
+  begin
+    insert into kitluy_devices.device_credentials
+      (serial_number, device_record_id, environment, purpose, public_key,
+       public_key_fingerprint, issuer_key_id, certificate_generation, assignment_generation,
+       not_before, not_after, hardware_trust_level, production_eligible,
+       canonical_tbs, detached_signature, created_from_request_id)
+    values
+      ('SER-PROD', v_device, 'development', 'device_identity', 'PUBKEY',
+       repeat('b', 64), 'ica', 1, 1, now(), now() + interval '30 days',
+       'development_software', true, 'TBS', '\x00'::bytea, 'rq-a-' || v_device);
+    raise exception 'ASSERT FAIL: a development credential was marked production-eligible';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if; v_blocked := v_blocked + 1;
+  end;
+
+  -- A lifetime beyond the 30-day development policy.
+  begin
+    insert into kitluy_devices.device_credentials
+      (serial_number, device_record_id, environment, purpose, public_key,
+       public_key_fingerprint, issuer_key_id, certificate_generation, assignment_generation,
+       not_before, not_after, hardware_trust_level, canonical_tbs, detached_signature,
+       created_from_request_id)
+    values
+      ('SER-LONG', v_device, 'development', 'device_identity', 'PUBKEY',
+       repeat('b', 64), 'ica', 1, 1, now(), now() + interval '400 days',
+       'development_software', 'TBS', '\x00'::bytea, 'rq-a-' || v_device);
+    raise exception 'ASSERT FAIL: a 400-day development credential was accepted';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if; v_blocked := v_blocked + 1;
+  end;
+
+  -- A different credential KIND. A future X.509 credential is a different
+  -- decision, not a value slipped into this column.
+  begin
+    insert into kitluy_devices.device_credentials
+      (credential_kind, serial_number, device_record_id, environment, purpose, public_key,
+       public_key_fingerprint, issuer_key_id, certificate_generation, assignment_generation,
+       not_before, not_after, hardware_trust_level, canonical_tbs, detached_signature,
+       created_from_request_id)
+    values
+      ('x509', 'SER-X509', v_device, 'development', 'device_identity', 'PUBKEY',
+       repeat('b', 64), 'ica', 1, 1, now(), now() + interval '30 days',
+       'development_software', 'TBS', '\x00'::bytea, 'rq-a-' || v_device);
+    raise exception 'ASSERT FAIL: a credential claiming to be X.509 was accepted';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if; v_blocked := v_blocked + 1;
+  end;
+
+  -- A generation head written by anyone other than the governor.
+  begin
+    insert into kitluy_devices.device_credential_heads
+      (device_record_id, environment, purpose, current_generation)
+    values (v_device, 'development', 'device_identity', 1);
+    raise exception 'ASSERT FAIL: a generation head was written outside the governed path';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-CRED-UNAUTHORIZED-HEAD%' then
+      raise exception 'ASSERT FAIL: head write refused for the wrong reason: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  if v_blocked <> 6 then
+    raise exception 'ASSERT FAIL: expected 6 structural refusals, got %', v_blocked;
+  end if;
+
+  raise notice 'PASS ws11-credential-structure: the same idempotency key with a different payload, a credential with no verified proof of possession, a production-eligible development credential, a 400-day lifetime, a credential claiming to be X.509 and an ungoverned generation-head write are ALL refused by the database';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 31b — a FAILED proof of possession is spent, and audit is mandatory.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_profile uuid;
+  v_device uuid;
+  v_rq text;
+  v_blocked int := 0;
+begin
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+  v_device := kitluy_devices.enroll_device_v1(
+    'WS11-T004-POP-' || gen_random_uuid(), v_profile, now(),
+    repeat('d2', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'da:02:' || substr(md5(random()::text),1,6) || ':02'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-pop-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-pop-' || gen_random_uuid())));
+  v_rq := 'rq-pop-' || v_device;
+
+  insert into kitluy_devices.device_credential_requests
+    (request_id, idempotency_key, canonical_payload_hash, device_record_id, environment,
+     purpose, assignment_generation, public_key, public_key_fingerprint, hardware_trust_level)
+  values
+    (v_rq, 'idem-pop-' || v_device, repeat('e', 64), v_device, 'development',
+     'device_identity', 1, 'PUBKEY', repeat('f', 64), 'development_software');
+
+  insert into kitluy_devices.device_proof_of_possession_results
+    (request_id, algorithm, signed_preimage_hash, signature, verification_status, failure_code)
+  values
+    (v_rq, 'ed25519', repeat('1', 64), '\x00'::bytea, 'failed', 'SIGNATURE_INVALID');
+
+  -- The failed result cannot be overwritten with a success.
+  begin
+    update kitluy_devices.device_proof_of_possession_results
+    set verification_status = 'verified', failure_code = null,
+        verified_key_fingerprint = repeat('f', 64), verified_at_trusted_time = now()
+    where request_id = v_rq;
+    raise exception 'ASSERT FAIL: a FAILED proof of possession was rewritten as verified';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if; v_blocked := v_blocked + 1;
+  end;
+
+  -- A second proof for the same request cannot be added alongside it.
+  begin
+    insert into kitluy_devices.device_proof_of_possession_results
+      (request_id, algorithm, signed_preimage_hash, signature, verification_status,
+       verified_key_fingerprint, verified_at_trusted_time)
+    values
+      (v_rq, 'ed25519', repeat('2', 64), '\x01'::bytea, 'verified', repeat('f', 64), now());
+    raise exception 'ASSERT FAIL: a second proof of possession was accepted for a spent request';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if; v_blocked := v_blocked + 1;
+  end;
+
+  -- A chain link pointing at the wrong environment or purpose.
+  begin
+    insert into kitluy_devices.device_credential_chain_links
+      (credential_id, link_position, role, subject_fingerprint, issuer_key_id,
+       environment, purpose, canonical_tbs, detached_signature)
+    values
+      (gen_random_uuid(), 0, 'root', repeat('9', 64), 'root',
+       'production', 'device_identity', 'TBS', '\x00'::bytea);
+    raise exception 'ASSERT FAIL: a chain link for a nonexistent credential was accepted';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if; v_blocked := v_blocked + 1;
+  end;
+
+  if v_blocked <> 3 then
+    raise exception 'ASSERT FAIL: expected 3 refusals, got %', v_blocked;
+  end if;
+
+  raise notice 'PASS ws11-credential-pop: a FAILED proof of possession is SPENT — it cannot be rewritten as verified, and the request id cannot carry a second proof; a chain link for an unknown credential is refused';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 31c — the overlap window and head monotonicity, exercised as the governor.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_profile uuid;
+  v_device uuid;
+  v_blocked int := 0;
+begin
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+  v_device := kitluy_devices.enroll_device_v1(
+    'WS11-T004-HEAD-' || gen_random_uuid(), v_profile, now(),
+    repeat('e3', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'da:03:' || substr(md5(random()::text),1,6) || ':03'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-head-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-head-' || gen_random_uuid())));
+
+  set local role kitluy_credential_issuer;
+
+  insert into kitluy_devices.device_credential_heads
+    (device_record_id, environment, purpose, current_generation)
+  values (v_device, 'development', 'device_identity', 1);
+
+  -- An overlap beyond the 3-day development maximum.
+  begin
+    update kitluy_devices.device_credential_heads
+    set current_generation = 2, previous_generation = 1,
+        overlap_ends_at = now() + interval '10 days',
+        version = version + 1, updated_at = now()
+    where device_record_id = v_device;
+    raise exception 'ASSERT FAIL: a 10-day overlap was accepted';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-CRED-OVERLAP-EXCEEDED%' then
+      raise exception 'ASSERT FAIL: overlap refused for the wrong reason: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- A version that does not advance by exactly one: a stale compare-and-swap.
+  begin
+    update kitluy_devices.device_credential_heads
+    set current_generation = 2, version = version + 5, updated_at = now()
+    where device_record_id = v_device;
+    raise exception 'ASSERT FAIL: a head update skipped versions';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-CRED-HEAD-VERSION%' then
+      raise exception 'ASSERT FAIL: version refused for the wrong reason: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- A head rollback.
+  update kitluy_devices.device_credential_heads
+  set current_generation = 3, version = version + 1, updated_at = now()
+  where device_record_id = v_device;
+  begin
+    update kitluy_devices.device_credential_heads
+    set current_generation = 2, version = version + 1, updated_at = now()
+    where device_record_id = v_device;
+    raise exception 'ASSERT FAIL: a generation head moved backwards';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-CRED-HEAD-ROLLBACK%' then
+      raise exception 'ASSERT FAIL: rollback refused for the wrong reason: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- A head is never deleted.
+  begin
+    delete from kitluy_devices.device_credential_heads where device_record_id = v_device;
+    raise exception 'ASSERT FAIL: a generation head was deleted';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if; v_blocked := v_blocked + 1;
+  end;
+
+  reset role;
+
+  if v_blocked <> 4 then
+    raise exception 'ASSERT FAIL: expected 4 head refusals, got %', v_blocked;
+  end if;
+
+  raise notice 'PASS ws11-credential-heads: an overlap beyond the 3-day development maximum, a version that skips (a stale compare-and-swap), a backwards generation and a head deletion are all refused — even for the GOVERNOR role, which is the only identity allowed to touch the head at all';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 31d — application roles cannot write an issued credential or a head.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_priv boolean;
+begin
+  -- service_role holds SELECT on credentials and heads, and nothing more.
+  select has_table_privilege('service_role', 'kitluy_devices.device_credentials', 'INSERT')
+  into v_priv;
+  if v_priv then
+    raise exception 'ASSERT FAIL: service_role can INSERT a credential directly';
+  end if;
+  select has_table_privilege('service_role', 'kitluy_devices.device_credentials', 'UPDATE')
+  into v_priv;
+  if v_priv then
+    raise exception 'ASSERT FAIL: service_role can UPDATE a credential directly';
+  end if;
+  select has_table_privilege('service_role', 'kitluy_devices.device_credential_heads', 'UPDATE')
+  into v_priv;
+  if v_priv then
+    raise exception 'ASSERT FAIL: service_role can advance a generation head directly';
+  end if;
+  select has_table_privilege('service_role', 'kitluy_devices.device_credentials', 'SELECT')
+  into v_priv;
+  if not v_priv then
+    raise exception 'ASSERT FAIL: service_role cannot read credentials at all';
+  end if;
+
+  raise notice 'PASS ws11-credential-authority: service_role can READ credentials and generation heads but cannot INSERT or UPDATE either — writing them is the governed path''s job, enforced by grant AND by an executing-identity trigger rather than by convention';
+end $$;
+
+select 'assertions complete: groups 0010-0125 structural contract holds (incl. cycle-10 WS-11 sections 28 (T001), 29 (T002), 30 (T003 trusted time) and 31 (T003 credential persistence))' as result;
