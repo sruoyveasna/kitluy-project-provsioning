@@ -16,6 +16,7 @@ const steps = [
   ["OpenAPI validation", "pnpm contracts:validate"],
   ["Migration validation", "pnpm migrations:validate"],
   ["Secret scan", "pnpm secret:scan"],
+  ["Clock usage", "pnpm clock:check"],
   ["Docs link check", "pnpm docs:check"],
 ];
 

@@ -856,3 +856,4 @@ export function validateTrustConfiguration(
 
   return problems;
 }
+export * from "./trusted-time.js";

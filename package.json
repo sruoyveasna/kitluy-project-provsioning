@@ -26,6 +26,7 @@
     "clean": "turbo run clean",
     "docs:check": "node scripts/verification/docs-link-check.mjs",
     "contracts:validate": "node scripts/contracts/validate-openapi.mjs",
+    "clock:check": "node scripts/verification/clock-usage-check.mjs",
     "secret:scan": "node scripts/verification/secret-scan.mjs",
     "migrations:validate": "node scripts/database/validate-migrations.mjs",
     "db:validate": "node scripts/database/db-validate.mjs",
