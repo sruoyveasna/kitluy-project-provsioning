@@ -38,8 +38,18 @@ Persisted database state and wire vocabulary are reconciled explicitly, not merg
 | reconciliation required | `edge_sync.conflict_state = 'open'`    | (WS-10 vocabulary)   | **WS-10**                             |
 | retry waiting           | `retry_wait`                           | (WS-10 vocabulary)   | **WS-10**                             |
 
-WS-09 writes only `pending` and reports only `pending_cloud_sync`. Any other
-persisted delivery state written by WS-09 would be a fabricated cloud outcome.
+WS-09 writes only `pending` at RUNTIME and reports only `pending_cloud_sync`.
+Any other persisted delivery state written by WS-09 at runtime would be a
+fabricated cloud outcome.
+
+**Precision correction (independent review RV-007).** The shipped development
+fixtures deliberately seed one `acknowledged` outbox row (with a fictional
+`DEMO-CLOUD-ACK-0001` reference), one `retry_wait` row, and a cursor with
+`last_acked_hub_sequence = 1`, so that WS-10 has realistic prior state to read.
+These are FIXTURE rows, not runtime writes. The unqualified claim "no outbox
+row is anything but pending" is therefore false as stated and must not be used;
+the correct claim is that **no WS-09 code path writes a non-`pending` delivery
+state**, which is enforced by `WS09_WRITABLE_SYNC_STATES` and proven by probe.
 
 ## 3. The eleven schema deviations
 

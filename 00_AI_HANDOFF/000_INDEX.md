@@ -6,6 +6,7 @@ subfolder (repository/ shared/ apps/ services/ data/ infrastructure/ reviews/).
 
 | Date       | Area          | Task                              | Handoff                                                                                                                                              |
 | ---------- | ------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-07-27 | data          | WS-09-T001..T007                  | [Cycle 8/8B — Store Hub local runtime and persistence](data/2026-07-27__DATA__WS-09-CYCLE8B__STOREHUB-LOCAL-PERSISTENCE__AI-HANDOFF.md)              |
 | 2026-07-27 | governance    | KL-DEC-001-T001..T006             | Cycle 7 Stage A — contract vocabulary OWNER-APPROVED (KLD-2026-07-26-002); alignment tasks `00_AI_HANDOFF/tasks/KL-DEC-001-T00*.md`                  |
 | 2026-07-27 | data          | WS-07-T002..T004/WS-08-T002..T005 | [Cycle 6 — Booking, custody, payments, finance persistence](data/2026-07-27__DATA__WS-07-08-CYCLE6__BOOKING-CUSTODY-PAYMENTS-FINANCE__AI-HANDOFF.md) |
 | 2026-07-26 | documentation | KL-DOCS-001                       | [Owner source-of-truth corpus ingestion](repository/2026-07-26__DOCUMENTATION__KL-DOCS-001__OWNER-SOURCE-INGESTION__AI-HANDOFF.md)                   |
