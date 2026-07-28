@@ -148,12 +148,86 @@ export const OPEN_ITEM_PROVIDER_CALLBACK_LEDGER: HubOpenReconciliationItem = {
   ],
 };
 
+/**
+ * KLREQ-029 — no RBAC key for an OPERATOR clearing a sync reconciliation.
+ *
+ * Found while implementing amendment KLD-2026-07-28-001-A01 §5 in Cycle 9. The
+ * amendment requires "an authorized actor OR governed automated
+ * reconciliation"; the automated half has its authority (a signed cloud
+ * reconciliation decision) and is implemented. The operator half has no
+ * canonical permission key.
+ */
+export const OPEN_ITEM_RECONCILIATION_CLEARANCE_KEY: HubOpenReconciliationItem = {
+  id: "KLREQ-029",
+  status: "OPEN — awaiting owner ruling",
+  conflict:
+    "Owner amendment KLD-2026-07-28-001-A01 §5 permits an AUTHORIZED ACTOR to clear a raised reconciliation, but the canonical RBAC registry contains no permission key for that act. The nearest key, fleet.sync.trigger, permits REQUESTING a safe sync/reconciliation cycle — asking the system to try again — which is a materially different act from DECLARING a divergence resolved, and reusing it would silently widen it.",
+  sources: [
+    "docs/authority/kitluy-decision-and-reconciliation-register-v1.0.0.md — KLD-2026-07-28-001-A01 §5",
+    "docs/source/security/kitluy-suite-rbac-permission-registry-v1.0.0.csv — fleet.sync.trigger 'Request a safe sync/reconciliation cycle'",
+    "services/kitluy-hub-agent/src/hub/sync/reconciliation.ts — OPERATOR_CLEARANCE_PERMISSION",
+  ],
+  currentBehaviour:
+    "Fail closed, exactly as the KLREQ-015 routes do. clearReconciliationByOperator throws EDGE_PERMISSION_KEY_UNREGISTERED carrying its [REQUIRED: ...] marker. Every other precondition is already implemented — the governed procedure, the evidence constraints and the immutable audit row — so the path becomes callable the moment a canonical key exists. The GOVERNED AUTOMATED path is active because its authority is the signed cloud decision, not a Hub-side actor permission.",
+  rulingRequired:
+    "[REQUIRED: canonical RBAC permission key for an operator clearing a sync reconciliation, with its approval requirement, reauthentication requirement, reason requirement and primary audit event. Clearing a payment or custody divergence is a high-risk act and may warrant four-eyes.]",
+  doNot: [
+    "Do NOT reuse fleet.sync.trigger — it permits requesting a cycle, not declaring a divergence resolved.",
+    "Do NOT let the delivery worker clear a reconciliation under any code path.",
+  ],
+};
+
 export const HUB_OPEN_RECONCILIATION_ITEMS: readonly HubOpenReconciliationItem[] = [
   OPEN_ITEM_BOOKING_STATUS_VS_PRODUCTION_CHAIN,
   OPEN_ITEM_PERMISSION_GRANT_PROJECTION,
   OPEN_ITEM_HUB_EVENT_KEY_NAMESPACE,
   OPEN_ITEM_PROVIDER_CALLBACK_LEDGER,
+  OPEN_ITEM_RECONCILIATION_CLEARANCE_KEY,
 ];
+
+/**
+ * Items the owner has since RULED. Kept next to the open set so a reader can
+ * see what moved and under which decision, rather than having to notice an
+ * absence. The item bodies above are NOT rewritten to look prescient: they
+ * record what was true when the conflict was raised.
+ */
+export const HUB_RULED_RECONCILIATION_ITEMS = [
+  {
+    id: "KLREQ-020",
+    ruling: "KLD-2026-07-28-001 Group 1",
+    effect:
+      "The canonical terminal key kl1.{terminal_device_uuid}.{client_sequence} is confirmed; @kitluy/sync-protocol was corrected in Cycle 9 (WS-10-T002) and the location:...:hub:...:seq:N form is gone with no alias.",
+  },
+  {
+    id: "KLREQ-021",
+    ruling: "KLD-2026-07-28-001 Group 2, as amended by KLD-2026-07-28-001-A01",
+    effect:
+      "Delivery states aligned to pending/in_flight/retry_wait/acknowledged/rejected/dead_letter by hub migration 0015; reconciliation_required stays an ORTHOGONAL conflict state; one shared external projection with conflict override first.",
+  },
+  {
+    id: "KLREQ-022",
+    ruling: "KLD-2026-07-28-001 Group 3",
+    effect:
+      "No authoritative edge_finance ledger. The Hub emits finance-SOURCE events only; the boundary is unchanged by WS-10.",
+  },
+  {
+    id: "KLREQ-023",
+    ruling: "KLD-2026-07-28-001 Group 4",
+    effect: "The four additive local mechanics are ratified into the canonical Hub schema.",
+  },
+  {
+    id: "KLREQ-026",
+    ruling: "KLD-2026-07-28-001 Group 6",
+    effect:
+      "Hub-issued effects use kh1.{command_result_uuid}.{event_ordinal} with contract-defined ordinals. Implemented in Cycle 9 (WS-10-T003): hub/effect-contract.ts, migration 0018. The interim kl1.{hub_device_uuid}.{hub_sequence} derivation is retired.",
+  },
+  {
+    id: "KLREQ-027",
+    ruling: "KLD-2026-07-28-001 Group 7",
+    effect:
+      "Direct provider-to-Hub callbacks are NOT authorized. The canonical path is provider -> cloud -> signed WS-10 delivery -> local projection; the Hub pipeline now takes the signed delivery id as its effect-key namespace. The RBAC key for a service-originated callback remains open under KLREQ-027's own [REQUIRED: ...] marker.",
+  },
+] as const;
 
 // ---------------------------------------------------------------------------
 // Residual risks — hazards that survive their own workaround
@@ -255,15 +329,15 @@ export const HUB_CONFIRMED_BOUNDARIES = {
 /**
  * The `pnpm hub:db:test` assertion count and the ONLY correct way to count it.
  *
- * `hub/tests/assertions.sql` emits exactly 31 `NOTICE:  PASS` lines — 29 from
+ * `hub/tests/assertions.sql` emits exactly 32 `NOTICE:  PASS` lines — 29 from
  * WS-09 plus sections 29a/29b added by WS-10 for the delivery/conflict state
  * dimensions. A naive `grep -c PASS` also matches the runner's own summary line
- * ("assertions passed — 31 PASS notice(s)") and reports one too many. A count
+ * ("assertions passed — 32 PASS notice(s)") and reports one too many. A count
  * derived from the summary line must never be reported.
  */
 export const HUB_DB_ASSERTION_CONTRACT = {
-  expectedPassNotices: 31,
+  expectedPassNotices: 32,
   countCommand: 'pnpm hub:db:test | grep -c "NOTICE:  PASS"',
   wrongCountCommand:
-    "pnpm hub:db:test | grep -c PASS   // reports 32 — also matches the summary line",
+    "pnpm hub:db:test | grep -c PASS   // reports 33 — also matches the summary line",
 } as const;

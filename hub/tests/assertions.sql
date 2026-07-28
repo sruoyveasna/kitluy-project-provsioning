@@ -1514,6 +1514,61 @@ end $$;
 rollback;
 
 -- ---------------------------------------------------------------------------
+-- 29c. No PUBLIC EXECUTE on a privileged Hub procedure (migration 0020).
+--
+--      PostgreSQL grants EXECUTE to PUBLIC on every function at creation, and
+--      a later GRANT to a named role does NOT revoke it. Without this
+--      assertion, adding a procedure silently makes it callable by every role
+--      in the cluster — which is how amendment §5's "a delivery worker must NOT
+--      independently clear reconciliation_required" was, for one migration,
+--      enforced only by the worker not choosing to call the procedure.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  r record;
+  v_leaked text[] := '{}';
+  v_checked int := 0;
+begin
+  for r in
+    select n.nspname as schema_name, p.proname as proc_name, p.oid
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname like 'edge\_%'
+      -- Trigger functions are reachable only through their triggers.
+      and p.prorettype <> 'trigger'::regtype
+  loop
+    v_checked := v_checked + 1;
+    if has_function_privilege('public', r.oid, 'execute') then
+      v_leaked := v_leaked || format('%s.%s', r.schema_name, r.proc_name);
+    end if;
+  end loop;
+
+  if array_length(v_leaked, 1) is not null then
+    raise exception
+      'ASSERT FAIL: % Hub procedure(s) are EXECUTE-able by PUBLIC: %',
+      array_length(v_leaked, 1), array_to_string(v_leaked, ', ');
+  end if;
+
+  -- The §5 asymmetry, asserted directly: the delivery worker may RAISE a
+  -- conflict and may NOT clear one.
+  if not has_function_privilege('kitluy_sync_worker',
+        'edge_sync.raise_reconciliation(uuid,uuid,text)', 'execute') then
+    raise exception 'ASSERT FAIL: the sync worker cannot raise a conflict it observes';
+  end if;
+  if has_function_privilege('kitluy_sync_worker',
+        'edge_sync.clear_reconciliation(uuid,uuid,text,text,uuid)', 'execute') then
+    raise exception
+      'ASSERT FAIL: the sync worker can clear a reconciliation (KLD-2026-07-28-001-A01 §5)';
+  end if;
+  if not has_function_privilege('kitluy_hub_runtime',
+        'edge_sync.clear_reconciliation(uuid,uuid,text,text,uuid)', 'execute') then
+    raise exception 'ASSERT FAIL: the Hub runtime cannot clear a reconciliation';
+  end if;
+
+  raise notice 'PASS procedure-privileges: none of the % edge_* procedures is EXECUTE-able by PUBLIC; the sync worker may raise a conflict but not clear one', v_checked;
+end $$;
+
+-- ---------------------------------------------------------------------------
 -- 29b. reconciliation_required is NOT a delivery state (amendment §3).
 -- ---------------------------------------------------------------------------
 do $$
