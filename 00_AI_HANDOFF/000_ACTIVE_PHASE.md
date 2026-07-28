@@ -98,6 +98,35 @@ A task that needs to cross this fence must stop and file a conflict/decision rec
 - options and recommendation;
 - owner decision required.
 
+## 8. Cycle-9 scope fence — WS-10 only (2026-07-27)
+
+Cycle 9 is authorized for **WS-10 synchronization and configuration publication
+only**, and only after the seven WS-10-critical decisions are ruled (ballot:
+`docs/decisions/kitluy-ws10-prerequisite-decisions-owner-review-v1.0.0.md`).
+
+**In scope:** Hub outbox selection → signed cloud transmission → idempotent
+cloud ingestion → acknowledgement recording → retry and backoff → dead-letter
+handling → rejection handling → reconciliation-required state → configuration
+snapshot publication → snapshot activation and rollback → sync cursor recovery
+→ observability and operator repair.
+
+**Explicitly OUT of scope:** WS-11 device provisioning; T1–T4 application
+clients; any new production-stage business semantics; a second finance ledger;
+and silent conflict resolution of any kind.
+
+**Maximum justified promotion at the end of Cycle 9: WS-10
+IMPLEMENTED-IN-DEV.** That does not make the Store Hub system pilot-ready or
+production-ready, and it does not by itself establish a complete T1→T4
+lifecycle — which additionally requires KLREQ-024 and KLREQ-028.
+
+**Carried trust boundary:** database credentials are a trust boundary
+(KLRISK-HUB-003) — raw SQL bypasses command-layer engine authority. Any WS-10
+component with direct database access is trusted infrastructure, not a client.
+
+**Deferral condition:** KLREQ-024 and KLREQ-028 may remain open only if WS-10
+explicitly excludes Laundry production-stage synchronization. If WS-10 syncs
+production stages, both must be ruled first.
+
 ## 7. Cycle-6 execution boundary (2026-07-27)
 
 Cloud-side authoritative persistence for the Laundry Booking aggregate,

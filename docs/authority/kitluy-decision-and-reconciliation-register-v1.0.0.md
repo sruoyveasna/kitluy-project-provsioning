@@ -248,6 +248,23 @@ Retained at authority level so they cannot be dropped once a workaround exists.
 | KLRISK-HUB-004  | `EDGE_PERMISSION_KEY_UNREGISTERED` and `EDGE_COMMAND_UNKNOWN` throw outside the pipeline try/catch, so those two refusals emit no security event. The other 15 authorization dimensions each log exactly one                                                                            | OPEN — low severity; the refusal itself is correct and fail-closed                                                                                                                            |
 | KLRISK-HUB-005  | The backup runner's own fingerprint is row-counts only while printing "restore verified". An independent content-level fingerprint (row counts + per-relation md5 over 54 relations) also matched, so the claim is correct today but under-evidenced by the runner itself                | OPEN — strengthen the runner's fingerprint                                                                                                                                                    |
 
+**Owner disposition (2026-07-27).** All five risks remain VISIBLE and OPEN
+going into WS-10. Two are singled out by the owner as standing constraints:
+
+- **KLRISK-HUB-001** — the `GRANT ... TO current_user` PostgreSQL crash remains
+  an ENVIRONMENT HAZARD. It is avoided, not fixed. Mitigation (pin/patch the dev
+  image, or a CI guard rejecting the `TO current_user` form) is still owed.
+- **KLRISK-HUB-003** — **database credentials are a TRUST BOUNDARY**, because raw
+  SQL bypasses command-layer engine transition authority. Any WS-10 component
+  granted direct database access inherits this boundary and must be treated as
+  trusted infrastructure, never as an ordinary client.
+
+**Fixture-vs-runtime rule (carried into WS-10).** The development fixtures
+deliberately contain `acknowledged` and `retry_wait` outbox rows and a cursor
+with `last_acked_hub_sequence = 1`. These are **WS-10-shaped TEST STATE, not
+WS-09 runtime behavior**, and must remain labelled as such wherever they are
+cited. No WS-09 code path writes a non-`pending` delivery state.
+
 ### Engineering decisions (bootstrap + this task)
 
 KLBOOT-DEC-001..007 (see ADR-0001..0005 in `docs/decisions/`) remain in force.

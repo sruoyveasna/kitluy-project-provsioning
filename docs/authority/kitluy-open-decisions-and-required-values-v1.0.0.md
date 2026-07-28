@@ -57,6 +57,35 @@ against the current corpus is a registered follow-up owner task.
 | KLREQ-018 | Documentation amendments owed by the approved decision: Domain Event Registry envelope `aggregate` shape and name pattern (C14/C15), Store Hub LAN API `EDGE_*` error table (C16), RBAC CSV audit-event vocabulary (C23), API Error Code Registry rows for the four additive codes | OPEN — code implements the owner decision; the supporting contract documents still carry the superseded forms                                              |
 | KLREQ-019 | Owner ruling on neutral-Core boundary for vertical contract data (`/edge/v1/laundry/*` routes and Laundry RBAC key strings inside `packages/`) — reconciliation C20/C25                                                                                                          | OPEN — currently quarantined as inert contract data with no runtime dependency on the vertical                                                             |
 
+### WS-10 decision gate — owner prioritization (2026-07-27)
+
+The owner has prioritized the nine WS-09 open decisions against WS-10. This
+records the PRIORITIZATION and the deferral condition. It does **not** record
+any ruling: the seven below are still `OPEN` and each requires an explicit
+owner approval before WS-10 synchronization implementation begins.
+
+**Blocking for WS-10 — the seven that must be ruled first:**
+
+| Decision  | Ruling required of the owner                                                                             | State  |
+| --------- | ---------------------------------------------------------------------------------------------------------- | ------ |
+| KLREQ-020 | Confirm `kl1.{terminal_device_uuid}.{client_sequence}` as the canonical terminal idempotency key          | OPEN   |
+| KLREQ-021 | Approve the persisted-local-state ↔ wire-delivery-state mapping                                           | OPEN   |
+| KLREQ-022 | Confirm NO authoritative `edge_finance` ledger; the Hub emits finance-source events only                  | OPEN   |
+| KLREQ-023 | Approve the additive local mechanics missing from the original schema catalogue                           | OPEN   |
+| KLREQ-025 | Define how permission grants are projected and verified locally                                           | OPEN   |
+| KLREQ-026 | Define the Hub-issued key namespace for commands that emit multiple events                                | OPEN   |
+| KLREQ-027 | Define service-originated provider-callback identity and deduplication outside the terminal ledger        | OPEN   |
+
+**Deferrable — but only under an explicit exclusion:**
+
+| Decision  | Treatment                                                                                                                                                      |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| KLREQ-024 | May remain deferred **only if WS-10 explicitly excludes Laundry production-stage synchronization**. Booking status strictly coupled vs independently derived summary |
+| KLREQ-028 | May remain deferred under the same exclusion. Production-stage routes and RBAC keys for washing, drying and pressing                                            |
+
+**Standing constraint:** no complete T1→T4 lifecycle may be claimed until
+KLREQ-024 **and** KLREQ-028 are resolved. This holds regardless of WS-10 status.
+
 ### Cycle-8 additions (WS-09 Store Hub local persistence, 2026-07-27)
 
 Recorded by the WS-09-T001 reconciliation record
