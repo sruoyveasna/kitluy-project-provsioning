@@ -901,17 +901,21 @@ values
   ('e0000000-0000-4000-8000-000000000003', 'control', 0, 0, 12, 12, '2026-07-27T08:00:00Z')
 on conflict do nothing;
 
+-- `verified_at` added by hub migration 0021: offline contract §8 requires
+-- verification BEFORE application, so an applied message carries the moment its
+-- CLOUD signature verified. The rejected fixture carries none — it never
+-- reached verification, which is exactly the point of recording it as rejected.
 insert into edge_sync.inbox
   (message_id, tenant_id, digital_store_id, location_id, message_type, schema_version,
    cloud_sequence, issued_at, expires_at, payload_sha256, payload, signature,
-   signing_key_id, state, received_at, applied_at, error_code)
+   signing_key_id, state, received_at, verified_at, applied_at, error_code)
 values
   ('e0000000-0000-4000-8000-0000000000e5',
    'e0000000-0000-4000-8000-000000000001', 'e0000000-0000-4000-8000-000000000002',
    'e0000000-0000-4000-8000-000000000003', 'configuration_snapshot_available', 1, 12,
    '2026-07-26T00:04:00Z', null, encode(sha256('fixture:inbox:snapshot-7'), 'hex'),
    '{"snapshot_version": 7}'::jsonb, decode('beef0001', 'hex'), 'demo-signing-key-1',
-   'applied', '2026-07-26T00:04:30Z', '2026-07-26T00:10:00Z', null),
+   'applied', '2026-07-26T00:04:30Z', '2026-07-26T00:05:00Z', '2026-07-26T00:10:00Z', null),
   -- Expired command recorded as REJECTED, never silently skipped (offline §8).
   ('e0000000-0000-4000-8000-0000000000e6',
    'e0000000-0000-4000-8000-000000000001', 'e0000000-0000-4000-8000-000000000002',
@@ -919,7 +923,7 @@ values
    '2026-07-26T01:00:00Z', '2026-07-26T02:00:00Z',
    encode(sha256('fixture:inbox:expired-grant'), 'hex'),
    '{"reason": "expired"}'::jsonb, decode('beef0002', 'hex'), 'demo-signing-key-1',
-   'rejected', '2026-07-26T03:00:00Z', null, 'EDGE_INBOX_MESSAGE_EXPIRED')
+   'rejected', '2026-07-26T03:00:00Z', null, null, 'EDGE_INBOX_MESSAGE_EXPIRED')
 on conflict do nothing;
 
 insert into edge_sync.sync_conflict
