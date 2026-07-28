@@ -167,3 +167,17 @@ describe("trusted-time module takes no wall clock", () => {
     expect(ts).not.toMatch(/new Date\s*\(\s*\)/);
   });
 });
+
+describe("RV-TT-001: SQL and TypeScript agree that uninitialized is not trusted", () => {
+  it("the SQL gate refuses the uninitialized status explicitly", () => {
+    // assert_trusted_time_v1 raises KLUY-DEVICE-TIME-UNTRUSTED for a device
+    // whose status is uninitialized. TypeScript must not be more permissive.
+    expect(sql0123).toContain("v_state.status = 'uninitialized'");
+    expect(sql0123).toContain("KLUY-DEVICE-TIME-UNTRUSTED");
+  });
+
+  it("trustedInstant yields a time ONLY for the trusted status", () => {
+    const ts = readFileSync(join(process.cwd(), "src", "certificate-validity.ts"), "utf8");
+    expect(ts).toContain('evaluation.status !== "trusted"');
+  });
+});

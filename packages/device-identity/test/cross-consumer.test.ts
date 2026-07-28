@@ -309,3 +309,43 @@ describe("one TrustedTime instance drives all four consumers", () => {
     expect(r.configuration.valid).toBe(true);
   });
 });
+
+describe("RV-TT-001 regression: uninitialized is not trusted", () => {
+  // Review finding RV-TT-001. trustedInstant() keyed off !isRestricted(), so a
+  // TrustedTimeEvaluation carrying status "uninitialized" AND a time was
+  // accepted by every consumer. The SQL layer already refused the same status,
+  // so the two layers disagreed — the C34-C36 failure shape.
+  const uninitialized: TrustedTimeEvaluation = {
+    status: "uninitialized",
+    trustedTime: T0,
+    source: "none",
+    floorAdvanced: false,
+    anomalyType: null,
+    restricted: false,
+    detail: "never established",
+  };
+
+  it("refuses all four consumers on an uninitialized evaluation", () => {
+    const r = runAll(uninitialized);
+    expect(r.certificate.rejectionCode).toBe("CERT_NO_TRUSTED_TIME");
+    expect(r.renewal.refusalCode).toBe("RENEWAL_NO_TRUSTED_TIME");
+    expect(r.revocation.rejectionCode).toBe("SNAPSHOT_NO_TRUSTED_TIME");
+    expect(r.configuration.rejectionCode).toBe("CONFIG_NO_TRUSTED_TIME");
+  });
+
+  it("does not believe a self-reported restricted flag over the status", () => {
+    // A caller that sets restricted:false while the status is restricted must
+    // not be believed. Consumers key off the STATUS.
+    const lying: TrustedTimeEvaluation = {
+      ...uninitialized,
+      status: "restricted_clock_rollback",
+      anomalyType: "forged",
+      restricted: false,
+    };
+    const r = runAll(lying);
+    expect(r.certificate.valid).toBe(false);
+    expect(r.renewal.eligible).toBe(false);
+    expect(r.revocation.accepted).toBe(false);
+    expect(r.configuration.valid).toBe(false);
+  });
+});

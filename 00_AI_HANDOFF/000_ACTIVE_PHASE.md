@@ -200,6 +200,13 @@ relations), `@kitluy/device-identity`, 11 assertion sections, 5 RLS cases, 24
 package tests, and the BLK-005 ballot. Evidence
 `docs/evidence/phase1/ws-11/WS-11-T001-EXECUTION-EVIDENCE.md`.
 
+**WS-11-T003 Step 2 — trusted time: IMPLEMENTED-IN-DEV (2026-07-28).** Independent
+review APPROVED-WITH-CONDITIONS
+(`00_AI_HANDOFF/reviews/2026-07-28__WS-11-T003-STEP2-TRUSTED-TIME__REVIEW.md`).
+One HIGH blocking finding (RV-TT-001) was found by attack, fixed and regressed.
+**This promotion covers Step 2 ONLY.** Steps 4-8 of T003 remain open, and
+WS-11 overall stays SCAFFOLDED / IN PROGRESS.
+
 **T002 complete 2026-07-28** — cloud migration group 0121 (claims, assignments,
 terminal assignments, offline projection, claim audit), the `awaiting_trust`
 lifecycle state, 5 assertion sections, 4 RLS cases, 29 package tests. The two

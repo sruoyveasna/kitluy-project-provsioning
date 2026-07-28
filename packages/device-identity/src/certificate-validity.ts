@@ -99,7 +99,12 @@ export interface CertificateValidity {
  * what "now" means.
  */
 export function trustedInstant(evaluation: TrustedTimeEvaluation): Date | null {
-  if (isRestricted(evaluation.status)) return null;
+  // ONLY `trusted` yields an instant. Keying off !isRestricted() let
+  // `uninitialized` through — a device that has NEVER established trusted time
+  // was accepted as trusted, and the SQL layer already refused the same status
+  // (assert_trusted_time_v1 raises KLUY-DEVICE-TIME-UNTRUSTED). Review finding
+  // RV-TT-001: the two layers disagreed, which is the C34-C36 failure shape.
+  if (evaluation.status !== "trusted") return null;
   return evaluation.trustedTime;
 }
 
