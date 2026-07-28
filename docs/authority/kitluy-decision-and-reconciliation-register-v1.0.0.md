@@ -433,9 +433,43 @@ as well as the newcomer.
 actor with access to an approved enrollment station can quarantine a LIVE device
 by enrolling a unit that presents its evidence. This is the deliberate cost of
 not trusting the incumbent by default — which unit is the clone is not knowable
-from the evidence. Enrollment is a station-authorized internal operation, and
-trust policy §8 step 2 ("preserve Store offline operation when safe on the
-previously trusted Hub") is the runbook mitigation that is still OWED.
+from the evidence. Promoted to KLRISK-DEVICE-002 below.
+
+#### KLRISK-DEVICE-002 — duplicate-evidence enrollment can quarantine an incumbent device
+
+**Raised by the owner 2026-07-28, after reviewing T002.**
+
+    attacker or defective enrollment station
+      -> submits hardware evidence matching an ACTIVE device
+        -> active incumbent is quarantined
+          -> Store operation may be interrupted
+
+This is a denial-of-service path created deliberately by the T002 duplicate
+policy. It is the honest trade: the alternative — trusting whichever unit
+enrolled first — means a clone that arrives second is simply refused, leaving no
+evidence, and a clone that arrives first inherits the identity. Neither is
+acceptable, so both units are held and the availability cost is paid.
+
+**Status: OPEN — recorded, NOT mitigated. The current fail-closed behavior is
+NOT weakened until an owner-approved policy exists.**
+
+Owner-recommended controls, to be designed and implemented as one policy:
+
+| Control                                                                                                 | Notes                                                                                            |
+| ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Enrollment station must use a device certificate and a named operator session                            | Depends on BLK-005 — an enrollment station certificate is itself PKI                             |
+| Duplicate-evidence quarantine requires immutable incident creation                                       | Already true: `device_trust_incidents` is append-only and clearance names an operator            |
+| Quarantining an ACTIVE incumbent requires A3/A4 approval unless the evidence proves key compromise        | NOT implemented. Today the incumbent is held unconditionally                                     |
+| Automatic containment may block the NEW identity immediately while placing the incumbent in a RESTRICTED investigation state rather than unconditional shutdown | NOT implemented. Requires a restricted state that does not exist yet, and overlaps the BLK-005 item-6 restricted mode |
+| Recovery requires physical evidence inspection and a signed disposition                                  | NOT implemented; "signed" depends on BLK-005                                                     |
+| Repeated duplicate submissions from ONE station should revoke or quarantine that enrollment station       | NOT implemented. `enrollment_station_id` is recorded on every enrollment, so the signal exists but nothing acts on it |
+| The runbook must distinguish cloning, refurbished hardware, board replacement, data-entry error and malicious enrollment | NOT written. This is the substantive piece — the database cannot tell these apart, and today it treats all five identically |
+
+**Dependency note.** Four of the seven controls depend on BLK-005 (station
+certificates, signed dispositions, the restricted state, and the compromise
+evidence that would justify skipping A3/A4). This risk is therefore not
+independently closable ahead of the ballot, and is recorded as blocked on it
+rather than left as an open action with no owner.
 
 #### Cycle-10 execution findings — WS-11-T002 (2026-07-28)
 

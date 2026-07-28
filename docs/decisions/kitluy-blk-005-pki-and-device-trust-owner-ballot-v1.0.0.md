@@ -300,8 +300,40 @@ spare Hub" is the only supported path in Cambodia given repair logistics.
 
 ## ☐ Item 11 — Clock bootstrap and certificate-validation behavior when offline
 
-**Recommendation:** decide how a Store Hub establishes trusted time before it can
-validate a certificate, and what it does when it cannot.
+**Recommendation (owner-specified 2026-07-28): approve ALL THREE, not a choice
+between them.**
+
+```text
+hardware RTC
++ authenticated network time when available
++ persisted monotonic trusted-time floor
+```
+
+### Required behavior, to be bound by this decision
+
+1. The Hub **never moves trusted time backwards.**
+2. Certificate validation uses the **maximum** of RTC time, authenticated time
+   and the persisted floor.
+3. A new device **without sufficiently trustworthy time cannot activate
+   offline.**
+4. Loss of WAN **after** activation may continue only within an approved signed
+   offline-validity policy.
+5. Clock rollback or RTC tampering moves the Hub into a **restricted safety
+   state.**
+6. Emergency time override requires **reason, approval and immutable audit.**
+
+Point 2 is the load-bearing one: taking the maximum means an attacker must
+defeat every source at once to move time backwards, and a single failed source
+degrades availability rather than trust.
+
+Point 3 has a cost worth stating plainly: a Hub that arrives at a Store with no
+WAN and a dead RTC battery **cannot be commissioned on site**. That is the
+correct trade — a device that cannot tell the time cannot check whether its
+certificate is valid — but it is an operational constraint on Cambodian field
+deployment, not only a security property.
+
+**Original framing, retained:** decide how a Store Hub establishes trusted time
+before it can validate a certificate, and what it does when it cannot.
 
 Binds: this is a genuine bootstrap problem and it is currently unaddressed
 anywhere in the repository. Certificate validity is a time window; a Raspberry Pi
@@ -318,7 +350,11 @@ same restricted mode as item 6 rather than guessing.
 Alternative: trust the system clock and accept the risk. Cheapest; makes
 certificate expiry advisory rather than enforced.
 
-**Required values if approved:** `[REQUIRED: RTC requirement in the hardware profile]`, `[REQUIRED: trusted time source and clock-bootstrap procedure]`, `[REQUIRED: behavior when trusted time is unavailable]`
+Alternative: trust the system clock and accept the risk. Cheapest; makes
+certificate expiry advisory rather than enforced, which means revocation and
+lifetime (items 5 and 6) become advisory too.
+
+**Required values if approved:** `[REQUIRED: RTC part and battery life in the hardware profile]`, `[REQUIRED: authenticated time source and its trust anchor]`, `[REQUIRED: monotonic floor persistence location and tamper protection]`, `[REQUIRED: maximum offline validity window]`, `[REQUIRED: restricted safety-state capability set]`, `[REQUIRED: emergency time-override approval roles]`
 
 ---
 
@@ -342,6 +378,52 @@ designing rotation during an incident is an hour of Stores unable to operate.
 
 ---
 
+---
+
+## What the decision must BIND (owner-specified 2026-07-28)
+
+Approving this ballot is not a direction of travel. The decision has to bind
+these twelve implementation values, because each one is something the code
+currently refuses to guess:
+
+| #   | Value the decision must bind                                                                              | Ballot item |
+| --- | --------------------------------------------------------------------------------------------------------- | ----------- |
+| 1   | PKI hierarchy: offline root plus SEPARATE development, pilot, production and manufacturing intermediates  | 1           |
+| 2   | Root custody: offline, dual-control access, documented ceremony and recovery shares                       | 2           |
+| 3   | Device keys generated ON-DEVICE; private keys non-exportable where supported                              | 4           |
+| 4   | Hardware custody: the required TPM or secure-element model, chosen BEFORE the production BOM is certified | 4           |
+| 5   | Certificate windows: device lifetime, renewal threshold, overlap and maximum offline validity             | 5           |
+| 6   | Revocation: cloud registry, signed revocation snapshots and offline behavior                              | 6           |
+| 7   | Signer separation: independent device-identity, configuration, release and WS-10 transport keys           | 7           |
+| 8   | Production signer custody: HSM or equivalent controlled signer with four-eyes authorization               | 8           |
+| 9   | Manufacturing evidence: required board, storage, key and enrollment-station evidence                      | 9           |
+| 10  | Replacement policy: Pi replacement, NVMe replacement and complete-unit replacement                        | 10          |
+| 11  | Trusted time: RTC requirement, authenticated time bootstrap and rollback-resistant time floor             | 11          |
+| 12  | Compromise response: emergency revocation, CA rotation, recovery and forced reprovisioning                | 12          |
+
+Value 4 is the one with a lead time attached: it is a **bill-of-materials**
+decision, so it has to be settled before hardware is ordered, not before
+software is written.
+
+Value 9 gains weight from **KLRISK-DEVICE-002**: enrollment-station evidence is
+what would let the duplicate-evidence denial-of-service path be attributed to a
+station and contained, and four of that risk's seven recommended controls depend
+on this ballot.
+
+## Status while this ballot is open
+
+```text
+certificate issuance   — BLOCKED
+production activation  — BLOCKED
+production signer      — BLOCKED
+WS-11 promotion        — BLOCKED
+```
+
+Verified in the database, not asserted in prose: `pki_trust_configuration` is
+empty, activation refuses in all three environments, zero devices are `active`,
+zero certificates exist, and no offline assignment projection has ever been
+written.
+
 ## Dependency notes for the owner
 
 - **Item 4 is a bill-of-materials decision** as much as a security one. It cannot
@@ -356,15 +438,14 @@ designing rotation during an incident is an hour of Stores unable to operate.
 - Items 1, 2, 3, 7 can be ruled independently of the rest and would unblock the
   development-environment device trust chain on its own.
 
-## Status while this ballot is open
+## Cycle-10 progress against this gate
 
 ```text
-WS-11               — SCAFFOLDED / IN PROGRESS
-BLK-005             — OPEN
-Production activation — BLOCKED (fails closed, verified)
-Production signer     — BLOCKED (WS-10 carries no production signer)
+WS-11        — SCAFFOLDED / IN PROGRESS (T002 of 8 complete)
+BLK-005      — OPEN; this ballot awaits owner/security decision
 ```
 
-WS-11-T001 may be completed and committed with evidence. WS-11 cannot become
-`IMPLEMENTED-IN-DEV` until the approved cryptographic design is implemented and
-independently tested.
+T001 and T002 may be, and were, completed and committed with evidence. **T003
+(certificate issuance, signer custody, production activation) does not begin
+until this ballot is approved.** WS-11 cannot become `IMPLEMENTED-IN-DEV` until
+the approved cryptographic design is implemented and independently tested.

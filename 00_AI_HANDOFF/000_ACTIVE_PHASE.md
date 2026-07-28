@@ -232,7 +232,27 @@ replacement policy; production signer four-eyes access.
 **Trusted time (G12) is a hard security dependency, not an implementation
 detail.** Until an RTC, an authenticated time bootstrap and a rollback-resistant
 time floor are approved, an offline Hub cannot reliably prove that a certificate
-is currently valid.
+is currently valid. The owner has specified the minimum as **all three sources,
+not a choice between them**, with certificate validation taking the MAXIMUM of
+RTC time, authenticated time and the persisted floor, and trusted time never
+moving backwards. Ballot item 11 carries the six required behaviors.
+
+### Blocked while BLK-005 is open
+
+    certificate issuance   — BLOCKED
+    production activation  — BLOCKED
+    production signer      — BLOCKED
+    WS-11 promotion        — BLOCKED
+
+**The next repository change is the BLK-005 owner decision, not T003
+implementation.** T001 and T002 are complete and held locally.
+
+**KLRISK-DEVICE-002 is OPEN and deliberately unmitigated.** The T002
+duplicate-evidence policy creates an enrollment-station denial-of-service path:
+evidence matching an ACTIVE device quarantines the incumbent and may interrupt
+Store operation. The current fail-closed behavior is **not weakened** until an
+owner-approved containment policy exists, and four of the seven recommended
+controls depend on this ballot.
 
 **Carried from Cycle 9.** KLREQ-029 and KLREQ-030 may remain open during core
 WS-11 work, but they MUST be resolved before any synchronization-repair action
