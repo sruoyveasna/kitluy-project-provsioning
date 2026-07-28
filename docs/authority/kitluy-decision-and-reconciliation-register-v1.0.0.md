@@ -853,3 +853,94 @@ generation)`, so two concurrent renewals cannot register two different keys for
 the same generation — the second gets `KLUY-KEY-GENERATION-TAKEN`. Under option
 B that constraint would also need revisiting, since each attempt would want its
 own key.
+
+---
+
+## Renewal concurrency — two distinct errors (owner ruling, 2026-07-28)
+
+The divergence recorded above was ruled **acceptable and preferable**. The
+contract is now two errors with different meanings, and they must not be
+collapsed:
+
+| Code                              | Raised at     | Means                                                                 |
+| --------------------------------- | ------------- | ---------------------------------------------------------------------- |
+| `KLUY-RENEWAL-ALREADY-RESERVED`   | preparation   | another open renewal already owns the next generation — expected fast-fail, no key is generated |
+| `RENEWAL_GENERATION_CONFLICT`     | finalization  | a genuine race, detected by the credential-head compare-and-swap        |
+
+Acceptance criterion: exactly one reservation may own the next generation; the
+other normally gets `KLUY-RENEWAL-ALREADY-RESERVED`; if both nonetheless reach
+finalization through a race or a recovery path, exactly one succeeds and the
+other gets `RENEWAL_GENERATION_CONFLICT`; **never two credentials for the same
+generation**.
+
+Implemented: the preparation guard is in `prepare_device_credential_renewal_v1`
+(group 0128). The compare-and-swap is in
+`finalize_device_credential_issuance_v1` (group 0127) and is proven by assertion
+33f. What is NOT yet asserted is the two paths TOGETHER — a renewal that reaches
+finalization via recovery while another holds the head. Owed to closure item 4.
+
+---
+
+## OWED — the renewal ordering is currently INVERTED
+
+**Ruled order:** renewal eligibility → prepare reservation → receive
+`renewal_attempt_id` and `next_generation` → **then** generate the replacement
+key, idempotently on
+`(device_record_id, environment, purpose, next_generation, renewal_attempt_id)`.
+
+**What group 0128 implements:** the opposite.
+`prepare_device_credential_renewal_v1` refuses with
+`KLUY-RENEWAL-NO-REPLACEMENT-KEY` unless the key is ALREADY registered, so a key
+must exist before a reservation does.
+
+This is a real conflict, not a detail. The ruled ordering is what makes key
+generation idempotent on `renewal_attempt_id` — an identifier that does not
+exist until the reservation is taken. Under the current ordering there is
+nothing stable to key idempotency on, so a retry that loses its response could
+generate a second key.
+
+**Required change (additive migration, not an edit to 0128):**
+
+1. Split the key check out of `prepare_device_credential_renewal_v1`; the
+   reservation must succeed with no key registered.
+2. Add a `renewal_attempt_id` column to `device_generation_keys`, unique
+   together with the generation, so `register_generation_key_v1` becomes
+   idempotent on the attempt and a CONFLICTING attempt can neither receive nor
+   reuse the key.
+3. Move the `state = 'generated'` and fingerprint checks to
+   `record_device_credential_signature_v1` / finalization, where the key does
+   exist.
+
+Until this lands, the renewal path is reachable and tested (assertions 34a/34b)
+but does NOT match the ruled ordering, and retry-safety of key generation is
+NOT established.
+
+---
+
+## OWED — cross-system atomicity is not implemented
+
+PostgreSQL and the private-key provider cannot share a transaction. The ruled
+authority model is:
+
+```text
+PostgreSQL = authoritative credential and key-lifecycle state
+Provider   = private-key custody and operational key availability
+```
+
+with an `activation_pending` state between credential finalization and confirmed
+provider activation, and a reconciliation process that retries using the SAME
+attempt and key reference.
+
+**None of this is built.** Group 0128 marks a key `active` the moment the
+credential row is inserted, which asserts something about the PROVIDER that the
+database cannot know. That is optimistic and wrong under the ruled model.
+
+Consequence, stated plainly: **a renewed credential must not be reported usable
+today**, because only one of the two required conditions is checkable —
+`credential cryptographically valid` is enforced, `provider key activation
+confirmed` does not yet exist as a concept in the schema.
+
+Owed to closure item 3, together with the five crash points named in the ruling
+(after key generation before registration; after registration before PoP; after
+finalization before provider activation; after activation before
+acknowledgement; and during retry of each).
