@@ -98,6 +98,82 @@ A task that needs to cross this fence must stop and file a conflict/decision rec
 - options and recommendation;
 - owner decision required.
 
+## 10. Cycle-10 scope fence — WS-11 only (2026-07-28)
+
+Cycle 10 is authorized for **WS-11 device provisioning and fleet management
+only**.
+
+### The locked provisioning model (KLD-2026-07-21-003, OWNER-LOCKED)
+
+WS-11 must PRESERVE this chain. No step may be skipped, reordered or inferred:
+
+    Digital Store
+      -> registered Store Hub hardware
+        -> certificate-backed activation
+          -> Location assignment
+            -> terminal assignment
+              -> signed configuration
+                -> offline local authority
+
+### Dependency order
+
+1. Hardware manufacturing and internal enrollment records.
+2. Device identity and certificate trust chain.
+3. Raspberry Pi Store Hub claim and activation.
+4. Tenant, Digital Store and Location assignment.
+5. Assignment-generation issuance and revocation.
+6. Terminal T1-T4 assignment.
+7. Certificate rotation, expiry and revocation.
+8. Production signing-key custody for WS-10.
+9. Signed configuration and release trust.
+10. Device health, fleet status and support access.
+11. Hub replacement, NVMe replacement and recovery.
+12. Release-channel eligibility and rollback authorization.
+13. Security, offline, recovery and adversarial tests.
+14. Independent review and evidence.
+
+**Explicitly OUT of scope:** T1-T4 APPLICATION INTEGRATION. It does not begin
+until WS-11 proves real certificate identity, assignment enforcement,
+revocation, replacement and production signing-key custody. Also out: new
+business workflows, a second finance ledger, and silent conflict resolution of
+any kind.
+
+**Maximum justified promotion at the end of Cycle 10: WS-11
+IMPLEMENTED-IN-DEV.** Not INTEGRATION-VERIFIED, not pilot-ready, not
+production-ready.
+
+**Blocked on owner values.** BLK-005 (PKI root/CA design, HSM/secure-element
+model, certificate windows) is OPEN. Step 2 and step 8 cannot be completed
+without it. Those parts stay `[REQUIRED: ...]` and fail closed rather than
+being guessed — the same discipline that kept WS-10 from inventing a
+production batch signer.
+
+**Carried from Cycle 9.** KLREQ-029 and KLREQ-030 may remain open during core
+WS-11 work, but they MUST be resolved before any synchronization-repair action
+is exposed through Admin, Partner, Chain or support interfaces. KLREQ-024 and
+KLREQ-028 remain open, so no complete T1-T4 lifecycle may be claimed.
+
+## 9. Repository push control (2026-07-28, KLRISK-REPO-001)
+
+The `origin` PUSH url is deliberately disabled:
+
+    origin  https://github.com/Soenghak3301/HET-KITLUY-PROJECT.git (fetch)
+    origin  disabled://push-requires-owner-approval               (push)
+
+Cycle 9 observed commits reaching `origin/main` without an explicit push being
+issued, and the mechanism was never identified. Until it is, **"committed but
+not pushed" is not a containment boundary.**
+
+An authorized push is a four-step operation, and every step is the owner's call:
+
+1. restore the real push url,
+2. push,
+3. verify `git rev-parse HEAD` equals `git rev-parse origin/main`,
+4. disable the push url again.
+
+No agent restores the push url without an explicit owner instruction naming the
+push it is for. Fetching is unaffected.
+
 ## 8. Cycle-9 scope fence — WS-10 only (2026-07-27)
 
 Cycle 9 is authorized for **WS-10 synchronization and configuration publication

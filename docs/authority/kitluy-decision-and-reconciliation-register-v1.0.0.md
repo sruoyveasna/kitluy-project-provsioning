@@ -335,6 +335,17 @@ do:
 | G10 | `edge_sync.provider_outcome_delivery`                     | KLREQ-027 REQUIRES a dedupe on `provider_code + provider_account_reference + provider_event_id`, and a dedupe with nowhere to remember what it saw is not a dedupe. Stores no provider secret and verifies no provider signature |
 | G11 | `edge_config.permission_grant_projection`                 | KLREQ-025 REQUIRES a signed local grant projection; the §6 catalogue defines none                                                                             |
 
+### Repository-operation risks (2026-07-28)
+
+| ID              | Risk | Status |
+| --------------- | ---- | ------ |
+| KLRISK-REPO-001 | **Commits reached `origin/main` without an explicit push being issued, so "commit locally and wait for approval" could NOT be guaranteed.** Observed in Cycle 9: `git reflog show origin/main` records pushes at `f63dbd6`, `3321dc5`, `8a64492`, `a124bc2` and `1a9c6af`, none of which followed a `git push` command in the session. The build agent had stated the commits were being held locally pending owner authorization; that statement was FALSE, and the error surfaced only when the authorized push found a single commit ahead. **Mechanism NOT IDENTIFIED** — no git hook, no husky/lefthook configuration and no `push.*` git config was found. The cause is unknown rather than explained, and no claim is made about it | **CONTROLLED, NOT RESOLVED (2026-07-28).** Owner-directed control applied: `git remote set-url --push origin disabled://push-requires-owner-approval`. VERIFIED — `git push` and `git push --dry-run` both fail with exit 128 (`remote helper 'disabled' aborted session`) while `git fetch` still exits 0 and resolves `origin/main`. An authorized push requires explicitly restoring the real push url, pushing, verifying the SHAs match, and disabling it again. The underlying mechanism could act again the moment the url is restored, so the restore window is kept as short as possible. **No agent restores the push url without an explicit owner instruction naming the push it is for** |
+
+**Governance consequence.** Until KLRISK-REPO-001 is understood, no cycle may
+treat "committed but not pushed" as a containment boundary. Work that must not
+reach the remote is left uncommitted, or the push url is disabled before the
+work begins.
+
 ### Cycle-8/8B residual risks — Store Hub (WS-09, 2026-07-27)
 
 Retained at authority level so they cannot be dropped once a workaround exists.
