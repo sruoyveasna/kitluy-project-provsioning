@@ -671,3 +671,98 @@ DUPLICATE-FORMATTING-VARIANT after content-identity verification.
 KLV4-DEC-001..012 and KLD-2026-07-24-001 (12 KLMF capability decisions) are
 defined in RB v4 Parts 11; the owner register above adds KLD-2026-07-20-001 ..
 KLD-API-001. Full text lives in the bibles; none may be altered here.
+
+---
+
+## KLD-2026-07-28-003 — cryptographic verification boundary for governed issuance
+
+**Owner instruction, 2026-07-28:** _"Do not claim that PostgreSQL independently
+verifies Ed25519 unless the development database already has a tested, approved
+primitive for it."_ The owner required the answer be DETERMINED before
+`finalize_device_credential_issuance_v1` was written, and prohibited introducing
+an unreviewed extension or hand-written cryptography to satisfy the claim.
+
+### What was probed (not assumed)
+
+| Probe                       | Result                                                                                                                  |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Installed extensions        | `btree_gist`, `pg_graphql`, `pg_net`, `pg_stat_statements`, `pgcrypto 1.3`, `pgjwt`, `plpgsql`, `supabase_vault`, `uuid-ossp` |
+| `pgcrypto` asymmetric surface | `pgp_pub_encrypt` / `pgp_pub_decrypt` and PGP variants ONLY — encryption, no signature verification of any kind          |
+| Cluster-wide function name probe | No function matches `ed25519 \| eddsa \| sign_detached \| verify_detached \| crypto_sign`                           |
+| `pgsodium`                  | AVAILABLE in the image, **NOT INSTALLED**, never reviewed or approved by this project                                     |
+| `extensions.digest()`       | Present; SHA-256 over `text` and `bytea` agree (self-tested)                                                              |
+
+### Ruling — OPTION B
+
+PostgreSQL does **not** have an approved Ed25519 verification primitive.
+Therefore the trusted issuance service verifies the cryptography, while
+PostgreSQL independently enforces request binding, hashes, state, generation,
+authority and atomic persistence.
+
+Installing `pgsodium` — or writing curve arithmetic in plpgsql — purely so the
+system could claim "the database verifies it" was rejected. It would have traded
+a recorded, honest boundary for an unreviewed one, which is the trade the owner
+prohibited.
+
+### KLRISK-DEVICE-003 — the issuance service is inside the trusted computing base
+
+**Status: OPEN. Accepted for development; must be revisited before pilot.**
+
+    compromised or defective issuance service
+      -> presents a detached signature this database cannot check
+        -> the signature is accepted as attested
+          -> a credential is issued over bytes the database DID reserve,
+             but with a signature no one independently verified
+
+The database refuses an *unattested* signature (`KLUY-CRED-SIGNATURE-UNATTESTED`)
+and refuses one recorded against a different TBS hash, so the service cannot be
+silent or careless. It can, however, lie. Nothing in migration 0127 closes that,
+and the migration says so in its own header rather than leaving a reader to infer
+it.
+
+**What survives the risk** — the containment that still holds even with the
+service inside the TCB, because none of it needs asymmetric cryptography:
+
+- the canonical TBS is **built by the database** from reserved fields; the caller
+  echoes it back and a mismatch refuses;
+- the credential id, serial, generation and 30-day validity window are reserved
+  by the database and cannot be replaced at finalization (row-level trigger
+  `KLUY-CRED-RESERVATION-MUTATED`);
+- the **device** chain link is built from the reservation, never accepted from
+  the caller (`KLUY-CRED-DEVICE-LINK-SUPPLIED`);
+- generation authority is a head compare-and-swap, so a race yields one issue and
+  one `KLUY-CRED-RENEWAL-GENERATION-CONFLICT`;
+- `service_role` still cannot write `device_credentials` or advance a head
+  directly — the group-0125 trigger demands `kitluy_credential_issuer`, and no
+  application role is a member of it.
+
+**Candidate closures, none selected — these need an owner decision:**
+
+1. Review and approve `pgsodium` (or another audited primitive) so finalization
+   verifies Ed25519 database-side. Note `pgsodium`'s deprecation status must be
+   established first — `[REQUIRED: approved_database_signature_verification_primitive]`.
+2. Move signing behind an HSM/KMS whose attestation is itself verifiable, so the
+   service attests to something it cannot forge.
+3. Independent out-of-band verification: a second service re-verifies every
+   issued credential from `canonical_tbs` + `detached_signature` and raises on
+   mismatch. Detective rather than preventive, but it does not require a new
+   primitive.
+
+Pilot and production issuance remain **BLOCKED** (KLD-2026-07-28-002 §14), so
+this risk is currently confined to development-only credentials of kind
+`kitluy.development-device-credential.v1`, which are refused production
+eligibility by CHECK constraint.
+
+### Recorded divergence — the audit `credential_id` column is unusable on this path
+
+Group 0125 pins two requirements that point in opposite directions:
+`enforce_credential_issuance_integrity()` refuses a credential whose audit row is
+not ALREADY present, while `device_credential_issuance_attempts.credential_id`
+carries a foreign key to a credential that does not YET exist.
+
+Audit-before-credential wins, because it is what makes `issued` unreachable
+without an audit trail. The typed `credential_id` column is therefore written
+NULL on the issuance path and the reserved value travels in the `detail` payload;
+the credential remains joinable through
+`device_credentials.created_from_request_id`. Recorded here rather than fixed by
+editing group 0125, which is committed.

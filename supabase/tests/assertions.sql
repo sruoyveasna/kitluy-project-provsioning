@@ -4033,3 +4033,779 @@ begin
 end $$;
 
 select 'assertions complete: groups 0010-0125 structural contract holds (incl. cycle-10 WS-11 sections 28 (T001), 29 (T002), 30 (T003 trusted time), 31 (T003 credential persistence) and 32 (governor containment))' as result;
+
+
+-- ============================================================================
+-- SECTION 33 — governed issuance: prepare -> sign -> finalize (migration 0127).
+--
+-- CRYPTOGRAPHIC VERIFICATION BOUNDARY: OPTION B. This database has no Ed25519
+-- primitive (probed: pgcrypto offers PGP encryption only; pgsodium is available
+-- but NOT installed and never reviewed). So the signature itself is attested by
+-- the issuance service, and everything BINDING that signature — reserved
+-- identifiers, canonical TBS, hashes, state, generation authority, executing
+-- identity, atomic persistence — is enforced here and tested here.
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 33a — the happy path, and what it must leave behind.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_profile uuid;
+  v_device uuid;
+  v_token text := encode(sha256(convert_to('t33a-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_payload text := encode(sha256(convert_to('p33a-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_idem text := encode(sha256(convert_to('i33a-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_req text := 'rq-33a-' || gen_random_uuid();
+  v_prep jsonb;
+  v_fin jsonb;
+  v_links int;
+  v_head kitluy_devices.device_credential_heads;
+  v_cred kitluy_devices.device_credentials;
+begin
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+  v_device := kitluy_devices.enroll_device_v1(
+    'WS11-T33A-' || gen_random_uuid(), v_profile, now(),
+    repeat('3a', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type','mac_address','signal_value','3a:01:' || substr(md5(random()::text),1,6) || ':01'),
+      jsonb_build_object('signal_type','board_serial','signal_value','board-33a-' || gen_random_uuid()),
+      jsonb_build_object('signal_type','storage_serial','signal_value','nvme-33a-' || gen_random_uuid())));
+  perform kitluy_devices.create_device_claim_v1(
+    v_device, '00000000-0000-4000-8000-000000000011',
+    '00000000-0000-4000-8000-000000000015', '00000000-0000-4000-8000-000000000018',
+    v_token, v_payload, 900, 'OP-PROVISION');
+  perform kitluy_devices.redeem_device_claim_v1(v_token, v_payload, v_device, 'HUB-AGENT');
+
+  v_prep := kitluy_devices.prepare_device_credential_issuance_v1(
+    v_req, v_device, 'development', 'device_identity', 1, 'PUBKEY-PEM-33A',
+    repeat('3a', 32), v_idem, repeat('9', 64), 'ed25519', repeat('8', 64),
+    decode('a1b2c3', 'hex'), true, 'ica-key-33a', now(), 'trusted', 'ISSUANCE-SVC');
+
+  if v_prep ->> 'outcome' <> 'RESERVED' then
+    raise exception 'ASSERT FAIL: prepare did not reserve: %', v_prep;
+  end if;
+  -- The window is computed by the database, never accepted from the caller.
+  if (v_prep ->> 'not_after')::timestamptz - (v_prep ->> 'not_before')::timestamptz
+     <> interval '30 days' then
+    raise exception 'ASSERT FAIL: the reserved window is not the 30-day development lifetime';
+  end if;
+  -- The TBS the caller is asked to sign hashes to the hash it is given.
+  if encode(extensions.digest(v_prep ->> 'canonical_tbs', 'sha256'), 'hex')
+     <> (v_prep ->> 'canonical_tbs_hash') then
+    raise exception 'ASSERT FAIL: the reserved TBS does not hash to the reserved hash';
+  end if;
+  -- The serial is DERIVED from the idempotency key, so recovery recomputes it.
+  if (v_prep ->> 'serial_number') <> 'DEV-' || upper(substr(v_idem, 1, 16)) then
+    raise exception 'ASSERT FAIL: the serial is not derived from the idempotency key';
+  end if;
+
+  -- Finalizing before the signature is recorded is refused.
+  begin
+    perform kitluy_devices.finalize_device_credential_issuance_v1(v_req, '[]'::jsonb, 'SVC');
+    raise exception 'ASSERT FAIL: finalization succeeded with no recorded signature';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-CRED-NOT-SIGNED%' then
+      raise exception 'ASSERT FAIL: wrong refusal before signing: %', sqlerrm;
+    end if;
+  end;
+
+  perform kitluy_devices.record_device_credential_signature_v1(
+    v_req, v_prep ->> 'canonical_tbs_hash', decode('deadbeef', 'hex'), true, 'ISSUANCE-SVC');
+
+  if (select state from kitluy_devices.device_credential_requests where request_id = v_req)
+     <> 'signed_unpersisted' then
+    raise exception 'ASSERT FAIL: a recorded signature did not move the request to signed_unpersisted';
+  end if;
+
+  v_fin := kitluy_devices.finalize_device_credential_issuance_v1(
+    v_req,
+    jsonb_build_array(
+      jsonb_build_object('link_position', 0, 'role', 'root', 'subject_fingerprint', repeat('r', 64),
+                         'issuer_key_id', 'root-key-33a', 'canonical_tbs', 'ROOT-TBS',
+                         'detached_signature_b64', encode(decode('aa', 'hex'), 'base64')),
+      jsonb_build_object('link_position', 1, 'role', 'intermediate', 'subject_fingerprint', repeat('i', 64),
+                         'issuer_key_id', 'root-key-33a', 'canonical_tbs', 'ICA-TBS',
+                         'detached_signature_b64', encode(decode('bb', 'hex'), 'base64'))),
+    'ISSUANCE-SVC');
+
+  if v_fin ->> 'outcome' <> 'ISSUED' then
+    raise exception 'ASSERT FAIL: finalization did not issue: %', v_fin;
+  end if;
+
+  select * into v_cred from kitluy_devices.device_credentials
+   where created_from_request_id = v_req;
+  if v_cred.credential_id::text <> (v_prep ->> 'credential_id') then
+    raise exception 'ASSERT FAIL: the issued credential id is not the reserved one';
+  end if;
+  if v_cred.canonical_tbs <> (v_prep ->> 'canonical_tbs') then
+    raise exception 'ASSERT FAIL: the persisted TBS is not the reserved TBS';
+  end if;
+  if v_cred.production_eligible then
+    raise exception 'ASSERT FAIL: a development credential is production-eligible';
+  end if;
+
+  -- The DEVICE chain link is built by the database from the reservation, so
+  -- three links exist even though the caller supplied only two.
+  select count(*) into v_links from kitluy_devices.device_credential_chain_links
+   where credential_id = v_cred.credential_id;
+  if v_links <> 3 then
+    raise exception 'ASSERT FAIL: expected 3 chain links, found %', v_links;
+  end if;
+  if (select detached_signature from kitluy_devices.device_credential_chain_links
+       where credential_id = v_cred.credential_id and role = 'device')
+     <> decode('deadbeef', 'hex') then
+    raise exception 'ASSERT FAIL: the device chain link does not carry the recorded signature';
+  end if;
+
+  select * into v_head from kitluy_devices.device_credential_heads
+   where device_record_id = v_device and environment = 'development';
+  if v_head.current_generation <> 1 or v_head.version <> 1
+     or v_head.previous_generation is not null then
+    raise exception 'ASSERT FAIL: the first head is not generation 1 at version 1 with no overlap';
+  end if;
+
+  if not exists (select 1 from kitluy_devices.device_credential_issuance_attempts
+                  where request_id = v_req and to_state = 'issued') then
+    raise exception 'ASSERT FAIL: no issuance audit event for the issued credential';
+  end if;
+  if (select state from kitluy_devices.device_credential_signing_attempts where request_id = v_req)
+     <> 'finalized' then
+    raise exception 'ASSERT FAIL: the signing attempt was not marked finalized';
+  end if;
+
+  -- FINALIZATION RETRY returns the already-issued result, and mints nothing.
+  v_fin := kitluy_devices.finalize_device_credential_issuance_v1(v_req, '[]'::jsonb, 'SVC');
+  if v_fin ->> 'outcome' <> 'ALREADY_ISSUED' then
+    raise exception 'ASSERT FAIL: a finalization retry did not replay: %', v_fin;
+  end if;
+  if (select count(*) from kitluy_devices.device_credentials where device_record_id = v_device) <> 1 then
+    raise exception 'ASSERT FAIL: a finalization retry produced a second credential';
+  end if;
+  if (select version from kitluy_devices.device_credential_heads
+       where device_record_id = v_device and environment = 'development') <> 1 then
+    raise exception 'ASSERT FAIL: a finalization retry advanced the head again';
+  end if;
+
+  raise notice 'PASS ws11-issuance-happy-path: prepare reserved a 30-day window, a database-built TBS and a key-derived serial; finalization wrote credential + 3 chain links (the device link from the reservation, not the caller) + head v1 + audit atomically; and a finalization RETRY replayed without a second credential or a second head advance';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 33b — idempotency, and the immutability of a reservation.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_profile uuid;
+  v_device uuid;
+  v_token text := encode(sha256(convert_to('t33b-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_payload text := encode(sha256(convert_to('p33b-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_idem text := encode(sha256(convert_to('i33b-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_req text := 'rq-33b-' || gen_random_uuid();
+  v_first jsonb;
+  v_second jsonb;
+  v_blocked int := 0;
+begin
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+  v_device := kitluy_devices.enroll_device_v1(
+    'WS11-T33B-' || gen_random_uuid(), v_profile, now(),
+    repeat('3b', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type','mac_address','signal_value','3b:01:' || substr(md5(random()::text),1,6) || ':01'),
+      jsonb_build_object('signal_type','board_serial','signal_value','board-33b-' || gen_random_uuid()),
+      jsonb_build_object('signal_type','storage_serial','signal_value','nvme-33b-' || gen_random_uuid())));
+  perform kitluy_devices.create_device_claim_v1(
+    v_device, '00000000-0000-4000-8000-000000000011',
+    '00000000-0000-4000-8000-000000000015', '00000000-0000-4000-8000-000000000018',
+    v_token, v_payload, 900, 'OP-PROVISION');
+  perform kitluy_devices.redeem_device_claim_v1(v_token, v_payload, v_device, 'HUB-AGENT');
+
+  v_first := kitluy_devices.prepare_device_credential_issuance_v1(
+    v_req, v_device, 'development', 'device_identity', 1, 'PUBKEY-33B',
+    repeat('3b', 32), v_idem, repeat('9', 64), 'ed25519', repeat('8', 64),
+    decode('a1', 'hex'), true, 'ica-33b', now(), 'trusted', 'SVC');
+
+  -- REPEATING the same request returns the SAME attempt and the SAME TBS.
+  v_second := kitluy_devices.prepare_device_credential_issuance_v1(
+    v_req, v_device, 'development', 'device_identity', 1, 'PUBKEY-33B',
+    repeat('3b', 32), v_idem, repeat('9', 64), 'ed25519', repeat('8', 64),
+    decode('a1', 'hex'), true, 'ica-33b', now(), 'trusted', 'SVC');
+
+  if v_second ->> 'outcome' <> 'REPLAYED_RESERVATION' then
+    raise exception 'ASSERT FAIL: a repeated prepare did not replay: %', v_second;
+  end if;
+  if (v_second ->> 'attempt_id') <> (v_first ->> 'attempt_id')
+     or (v_second ->> 'serial_number') <> (v_first ->> 'serial_number')
+     or (v_second ->> 'certificate_generation') <> (v_first ->> 'certificate_generation')
+     or (v_second ->> 'canonical_tbs') <> (v_first ->> 'canonical_tbs')
+     or (v_second ->> 'credential_id') <> (v_first ->> 'credential_id') then
+    raise exception 'ASSERT FAIL: a repeated prepare allocated new signing material';
+  end if;
+  if (select count(*) from kitluy_devices.device_credential_signing_attempts
+       where device_record_id = v_device) <> 1 then
+    raise exception 'ASSERT FAIL: a repeated prepare created a second signing attempt';
+  end if;
+
+  -- A CHANGED payload under the same request id is refused outright.
+  begin
+    perform kitluy_devices.prepare_device_credential_issuance_v1(
+      v_req, v_device, 'development', 'device_identity', 1, 'PUBKEY-33B',
+      repeat('3b', 32), encode(sha256(convert_to('other', 'UTF8')), 'hex'), repeat('7', 64),
+      'ed25519', repeat('8', 64), decode('a1', 'hex'), true, 'ica-33b', now(), 'trusted', 'SVC');
+    raise exception 'ASSERT FAIL: a changed payload was accepted under a used request id';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-CRED-REQUEST-PAYLOAD-CHANGED%' then
+      raise exception 'ASSERT FAIL: wrong refusal for a changed payload: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- A reserved identifier cannot be rewritten, even by the governed path.
+  -- Exercised through the trigger, which is what protects it if a function
+  -- is ever wrong.
+  begin
+    update kitluy_devices.device_credential_signing_attempts
+       set serial_number = 'DEV-ATTACKER' where request_id = v_req;
+    raise exception 'ASSERT FAIL: a reserved serial was rewritten after preparation';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-CRED-RESERVATION-MUTATED%'
+       and sqlerrm not like 'KLUY-CRED-UNAUTHORIZED-ATTEMPT%'
+       and sqlerrm not like 'permission denied%' then
+      raise exception 'ASSERT FAIL: wrong refusal for a mutated reservation: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  if v_blocked <> 2 then
+    raise exception 'ASSERT FAIL: expected 2 blocked mutations, got %', v_blocked;
+  end if;
+
+  raise notice 'PASS ws11-issuance-idempotent: repeating a request returns the SAME attempt, serial, generation, credential id and TBS with no second reservation; a changed payload under a used request id is refused; and a reserved identifier cannot be rewritten after preparation';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 33c — the signature stage: what will not be recorded.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_profile uuid;
+  v_device uuid;
+  v_token text := encode(sha256(convert_to('t33c-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_payload text := encode(sha256(convert_to('p33c-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_idem text := encode(sha256(convert_to('i33c-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_req text := 'rq-33c-' || gen_random_uuid();
+  v_prep jsonb;
+  v_blocked int := 0;
+begin
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+  v_device := kitluy_devices.enroll_device_v1(
+    'WS11-T33C-' || gen_random_uuid(), v_profile, now(),
+    repeat('3c', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type','mac_address','signal_value','3c:01:' || substr(md5(random()::text),1,6) || ':01'),
+      jsonb_build_object('signal_type','board_serial','signal_value','board-33c-' || gen_random_uuid()),
+      jsonb_build_object('signal_type','storage_serial','signal_value','nvme-33c-' || gen_random_uuid())));
+  perform kitluy_devices.create_device_claim_v1(
+    v_device, '00000000-0000-4000-8000-000000000011',
+    '00000000-0000-4000-8000-000000000015', '00000000-0000-4000-8000-000000000018',
+    v_token, v_payload, 900, 'OP-PROVISION');
+  perform kitluy_devices.redeem_device_claim_v1(v_token, v_payload, v_device, 'HUB-AGENT');
+
+  v_prep := kitluy_devices.prepare_device_credential_issuance_v1(
+    v_req, v_device, 'development', 'device_identity', 1, 'PUBKEY-33C',
+    repeat('3c', 32), v_idem, repeat('9', 64), 'ed25519', repeat('8', 64),
+    decode('a1', 'hex'), true, 'ica-33c', now(), 'trusted', 'SVC');
+
+  -- A signature over a DIFFERENT TBS than the one reserved.
+  begin
+    perform kitluy_devices.record_device_credential_signature_v1(
+      v_req, repeat('f', 64), decode('cafe', 'hex'), true, 'SVC');
+    raise exception 'ASSERT FAIL: a signature over a different TBS was recorded';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-CRED-TBS-MISMATCH%' then
+      raise exception 'ASSERT FAIL: wrong refusal for a TBS mismatch: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- An EMPTY signature.
+  begin
+    perform kitluy_devices.record_device_credential_signature_v1(
+      v_req, v_prep ->> 'canonical_tbs_hash', ''::bytea, true, 'SVC');
+    raise exception 'ASSERT FAIL: an empty signature was recorded';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-CRED-EMPTY-SIGNATURE%' then
+      raise exception 'ASSERT FAIL: wrong refusal for an empty signature: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- A signature the SERVICE did not attest to. Under OPTION B the database
+  -- cannot check the curve maths, so an unattested signature is refused
+  -- rather than accepted on the caller's silence.
+  begin
+    perform kitluy_devices.record_device_credential_signature_v1(
+      v_req, v_prep ->> 'canonical_tbs_hash', decode('cafe', 'hex'), false, 'SVC');
+    raise exception 'ASSERT FAIL: an unattested signature was recorded';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-CRED-SIGNATURE-UNATTESTED%' then
+      raise exception 'ASSERT FAIL: wrong refusal for an unattested signature: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- The real signature is recorded, and then a DIFFERENT one is offered.
+  perform kitluy_devices.record_device_credential_signature_v1(
+    v_req, v_prep ->> 'canonical_tbs_hash', decode('c0ffee', 'hex'), true, 'SVC');
+  begin
+    perform kitluy_devices.record_device_credential_signature_v1(
+      v_req, v_prep ->> 'canonical_tbs_hash', decode('badbad', 'hex'), true, 'SVC');
+    raise exception 'ASSERT FAIL: a recorded signature was replaced';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-CRED-SIGNATURE-REPLACED%' then
+      raise exception 'ASSERT FAIL: wrong refusal for a replaced signature: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- Re-recording the IDENTICAL signature is a no-op, not an error: this is
+  -- what makes the crash point "after signing, before the record commits"
+  -- safely retryable.
+  if kitluy_devices.record_device_credential_signature_v1(
+       v_req, v_prep ->> 'canonical_tbs_hash', decode('c0ffee', 'hex'), true, 'SVC') ->> 'outcome'
+     <> 'ALREADY_RECORDED' then
+    raise exception 'ASSERT FAIL: re-recording the identical signature was not idempotent';
+  end if;
+
+  if v_blocked <> 4 then
+    raise exception 'ASSERT FAIL: expected 4 refused signature attempts, got %', v_blocked;
+  end if;
+
+  raise notice 'PASS ws11-issuance-signature-stage: a signature over another TBS, an empty signature, a signature the service did not attest to, and a replacement for an already-recorded signature are all refused with distinct codes — while re-recording the IDENTICAL signature is idempotent, which is what makes the post-signing crash point recoverable';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 33d — revalidation: what changes underneath a signature in flight.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_profile uuid;
+  v_device uuid;
+  v_token text;
+  v_payload text;
+  v_idem text;
+  v_req text;
+  v_prep jsonb;
+  v_blocked int := 0;
+begin
+  -- Case 1: the assignment generation moves while the CA is signing.
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+  v_token := encode(sha256(convert_to('t33d1-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_payload := encode(sha256(convert_to('p33d1-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_idem := encode(sha256(convert_to('i33d1-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_req := 'rq-33d1-' || gen_random_uuid();
+
+  v_device := kitluy_devices.enroll_device_v1(
+    'WS11-T33D1-' || gen_random_uuid(), v_profile, now(),
+    repeat('3d', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type','mac_address','signal_value','3d:01:' || substr(md5(random()::text),1,6) || ':01'),
+      jsonb_build_object('signal_type','board_serial','signal_value','board-33d1-' || gen_random_uuid()),
+      jsonb_build_object('signal_type','storage_serial','signal_value','nvme-33d1-' || gen_random_uuid())));
+  perform kitluy_devices.create_device_claim_v1(
+    v_device, '00000000-0000-4000-8000-000000000011',
+    '00000000-0000-4000-8000-000000000015', '00000000-0000-4000-8000-000000000018',
+    v_token, v_payload, 900, 'OP-PROVISION');
+  perform kitluy_devices.redeem_device_claim_v1(v_token, v_payload, v_device, 'HUB-AGENT');
+
+  v_prep := kitluy_devices.prepare_device_credential_issuance_v1(
+    v_req, v_device, 'development', 'device_identity', 1, 'PUBKEY-33D',
+    repeat('3d', 32), v_idem, repeat('9', 64), 'ed25519', repeat('8', 64),
+    decode('a1', 'hex'), true, 'ica-33d', now(), 'trusted', 'SVC');
+  perform kitluy_devices.record_device_credential_signature_v1(
+    v_req, v_prep ->> 'canonical_tbs_hash', decode('c0ffee', 'hex'), true, 'SVC');
+
+  -- The device is reassigned AFTER the signature exists.
+  update kitluy_devices.devices set assignment_generation = assignment_generation + 1
+   where id = v_device;
+
+  begin
+    perform kitluy_devices.finalize_device_credential_issuance_v1(
+      v_req,
+      jsonb_build_array(
+        jsonb_build_object('link_position',0,'role','root','subject_fingerprint',repeat('r',64),
+                           'issuer_key_id','rk','canonical_tbs','R','detached_signature_b64','qg=='),
+        jsonb_build_object('link_position',1,'role','intermediate','subject_fingerprint',repeat('i',64),
+                           'issuer_key_id','rk','canonical_tbs','I','detached_signature_b64','uw==')),
+      'SVC');
+    raise exception 'ASSERT FAIL: a credential was issued after the assignment generation moved';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-CRED-STALE-ASSIGNMENT%' then
+      raise exception 'ASSERT FAIL: wrong refusal for a stale assignment: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  if exists (select 1 from kitluy_devices.device_credentials where created_from_request_id = v_req) then
+    raise exception 'ASSERT FAIL: a refused finalization still wrote a credential';
+  end if;
+  if exists (select 1 from kitluy_devices.device_credential_heads where device_record_id = v_device) then
+    raise exception 'ASSERT FAIL: a refused finalization still advanced a head';
+  end if;
+
+  -- Case 2: a blocking trust incident opens while the CA is signing.
+  v_token := encode(sha256(convert_to('t33d2-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_payload := encode(sha256(convert_to('p33d2-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_idem := encode(sha256(convert_to('i33d2-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_req := 'rq-33d2-' || gen_random_uuid();
+
+  v_device := kitluy_devices.enroll_device_v1(
+    'WS11-T33D2-' || gen_random_uuid(), v_profile, now(),
+    repeat('3e', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type','mac_address','signal_value','3e:01:' || substr(md5(random()::text),1,6) || ':01'),
+      jsonb_build_object('signal_type','board_serial','signal_value','board-33d2-' || gen_random_uuid()),
+      jsonb_build_object('signal_type','storage_serial','signal_value','nvme-33d2-' || gen_random_uuid())));
+  perform kitluy_devices.create_device_claim_v1(
+    v_device, '00000000-0000-4000-8000-000000000011',
+    '00000000-0000-4000-8000-000000000015', '00000000-0000-4000-8000-000000000018',
+    v_token, v_payload, 900, 'OP-PROVISION');
+  perform kitluy_devices.redeem_device_claim_v1(v_token, v_payload, v_device, 'HUB-AGENT');
+
+  v_prep := kitluy_devices.prepare_device_credential_issuance_v1(
+    v_req, v_device, 'development', 'device_identity', 1, 'PUBKEY-33D2',
+    repeat('3e', 32), v_idem, repeat('9', 64), 'ed25519', repeat('8', 64),
+    decode('a1', 'hex'), true, 'ica-33d2', now(), 'trusted', 'SVC');
+  perform kitluy_devices.record_device_credential_signature_v1(
+    v_req, v_prep ->> 'canonical_tbs_hash', decode('c0ffee', 'hex'), true, 'SVC');
+
+  insert into kitluy_devices.device_trust_incidents
+    (device_id, incident_type, severity, detail, detected_by, detected_at)
+  values (v_device, 'key_fingerprint_mismatch', 'CRITICAL',
+          jsonb_build_object('note', 'opened while the CA was signing'),
+          'ASSERTION-PROBE', now());
+
+  begin
+    perform kitluy_devices.finalize_device_credential_issuance_v1(
+      v_req,
+      jsonb_build_array(
+        jsonb_build_object('link_position',0,'role','root','subject_fingerprint',repeat('r',64),
+                           'issuer_key_id','rk','canonical_tbs','R','detached_signature_b64','qg=='),
+        jsonb_build_object('link_position',1,'role','intermediate','subject_fingerprint',repeat('i',64),
+                           'issuer_key_id','rk','canonical_tbs','I','detached_signature_b64','uw==')),
+      'SVC');
+    raise exception 'ASSERT FAIL: a credential was issued despite an open trust incident';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-CRED-OPEN-TRUST-INCIDENT%' then
+      raise exception 'ASSERT FAIL: wrong refusal for an open incident: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  if v_blocked <> 2 then
+    raise exception 'ASSERT FAIL: expected 2 revalidation refusals, got %', v_blocked;
+  end if;
+
+  raise notice 'PASS ws11-issuance-revalidation: preparation is not a licence — a reassignment or a trust incident that lands WHILE the CA is signing refuses finalization with its own code, and the refused transaction leaves no credential and no head behind';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 33e — the chain, and the rollback it forces.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_profile uuid;
+  v_device uuid;
+  v_token text := encode(sha256(convert_to('t33e-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_payload text := encode(sha256(convert_to('p33e-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_idem text := encode(sha256(convert_to('i33e-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_req text := 'rq-33e-' || gen_random_uuid();
+  v_prep jsonb;
+  v_blocked int := 0;
+begin
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+  v_device := kitluy_devices.enroll_device_v1(
+    'WS11-T33E-' || gen_random_uuid(), v_profile, now(),
+    repeat('3f', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type','mac_address','signal_value','3f:01:' || substr(md5(random()::text),1,6) || ':01'),
+      jsonb_build_object('signal_type','board_serial','signal_value','board-33e-' || gen_random_uuid()),
+      jsonb_build_object('signal_type','storage_serial','signal_value','nvme-33e-' || gen_random_uuid())));
+  perform kitluy_devices.create_device_claim_v1(
+    v_device, '00000000-0000-4000-8000-000000000011',
+    '00000000-0000-4000-8000-000000000015', '00000000-0000-4000-8000-000000000018',
+    v_token, v_payload, 900, 'OP-PROVISION');
+  perform kitluy_devices.redeem_device_claim_v1(v_token, v_payload, v_device, 'HUB-AGENT');
+
+  v_prep := kitluy_devices.prepare_device_credential_issuance_v1(
+    v_req, v_device, 'development', 'device_identity', 1, 'PUBKEY-33E',
+    repeat('3f', 32), v_idem, repeat('9', 64), 'ed25519', repeat('8', 64),
+    decode('a1', 'hex'), true, 'ica-33e', now(), 'trusted', 'SVC');
+  perform kitluy_devices.record_device_credential_signature_v1(
+    v_req, v_prep ->> 'canonical_tbs_hash', decode('c0ffee', 'hex'), true, 'SVC');
+
+  -- A caller offering its OWN device chain link is refused: that link is
+  -- built from the reservation, so a caller cannot bind a different signature.
+  begin
+    perform kitluy_devices.finalize_device_credential_issuance_v1(
+      v_req,
+      jsonb_build_array(
+        jsonb_build_object('link_position',0,'role','root','subject_fingerprint',repeat('r',64),
+                           'issuer_key_id','rk','canonical_tbs','R','detached_signature_b64','qg=='),
+        jsonb_build_object('link_position',1,'role','intermediate','subject_fingerprint',repeat('i',64),
+                           'issuer_key_id','rk','canonical_tbs','I','detached_signature_b64','uw=='),
+        jsonb_build_object('link_position',2,'role','device','subject_fingerprint',repeat('d',64),
+                           'issuer_key_id','rk','canonical_tbs','ATTACKER','detached_signature_b64','zA==')),
+      'SVC');
+    raise exception 'ASSERT FAIL: a caller-supplied device chain link was accepted';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-CRED-DEVICE-LINK-SUPPLIED%' then
+      raise exception 'ASSERT FAIL: wrong refusal for a supplied device link: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- An INCOMPLETE chain: the credential insert has already happened inside the
+  -- function when this raises, so this is the rollback proof.
+  begin
+    perform kitluy_devices.finalize_device_credential_issuance_v1(
+      v_req,
+      jsonb_build_array(
+        jsonb_build_object('link_position',0,'role','root','subject_fingerprint',repeat('r',64),
+                           'issuer_key_id','rk','canonical_tbs','R','detached_signature_b64','qg==')),
+      'SVC');
+    raise exception 'ASSERT FAIL: a credential was issued with an incomplete chain';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-CRED-INCOMPLETE-CHAIN%' then
+      raise exception 'ASSERT FAIL: wrong refusal for an incomplete chain: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- NOTHING survived either refusal — not the credential, not the audit row,
+  -- not the head. This is the owner's "an audit or chain-link failure must
+  -- roll back every issuance write".
+  if exists (select 1 from kitluy_devices.device_credentials where created_from_request_id = v_req) then
+    raise exception 'ASSERT FAIL: a chain-link failure left a credential behind';
+  end if;
+  if exists (select 1 from kitluy_devices.device_credential_issuance_attempts
+              where request_id = v_req and to_state = 'issued') then
+    raise exception 'ASSERT FAIL: a chain-link failure left an issued audit row behind';
+  end if;
+  if exists (select 1 from kitluy_devices.device_credential_heads where device_record_id = v_device) then
+    raise exception 'ASSERT FAIL: a chain-link failure left a head behind';
+  end if;
+  -- And the signature is still durable, so this is RECOVERABLE rather than lost.
+  if (select state from kitluy_devices.device_credential_signing_attempts where request_id = v_req)
+     <> 'signed' then
+    raise exception 'ASSERT FAIL: a failed finalization discarded the recorded signature';
+  end if;
+
+  if v_blocked <> 2 then
+    raise exception 'ASSERT FAIL: expected 2 chain refusals, got %', v_blocked;
+  end if;
+
+  raise notice 'PASS ws11-issuance-chain-rollback: a caller-supplied DEVICE link is refused outright, an incomplete chain rolls back the credential, the audit row and the head together — and the recorded signature SURVIVES, so the attempt is recoverable rather than orphaned';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 33f — two reservations, one head: exactly one success.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_profile uuid;
+  v_device uuid;
+  v_token text := encode(sha256(convert_to('t33f-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_payload text := encode(sha256(convert_to('p33f-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_idem_a text := encode(sha256(convert_to('i33fa-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_idem_b text := encode(sha256(convert_to('i33fb-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_req_a text := 'rq-33fa-' || gen_random_uuid();
+  v_req_b text := 'rq-33fb-' || gen_random_uuid();
+  v_prep_a jsonb;
+  v_prep_b jsonb;
+  v_conflicts int := 0;
+  v_links jsonb := jsonb_build_array(
+    jsonb_build_object('link_position',0,'role','root','subject_fingerprint',repeat('r',64),
+                       'issuer_key_id','rk','canonical_tbs','R','detached_signature_b64','qg=='),
+    jsonb_build_object('link_position',1,'role','intermediate','subject_fingerprint',repeat('i',64),
+                       'issuer_key_id','rk','canonical_tbs','I','detached_signature_b64','uw=='));
+begin
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+  v_device := kitluy_devices.enroll_device_v1(
+    'WS11-T33F-' || gen_random_uuid(), v_profile, now(),
+    repeat('4a', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type','mac_address','signal_value','4a:01:' || substr(md5(random()::text),1,6) || ':01'),
+      jsonb_build_object('signal_type','board_serial','signal_value','board-33f-' || gen_random_uuid()),
+      jsonb_build_object('signal_type','storage_serial','signal_value','nvme-33f-' || gen_random_uuid())));
+  perform kitluy_devices.create_device_claim_v1(
+    v_device, '00000000-0000-4000-8000-000000000011',
+    '00000000-0000-4000-8000-000000000015', '00000000-0000-4000-8000-000000000018',
+    v_token, v_payload, 900, 'OP-PROVISION');
+  perform kitluy_devices.redeem_device_claim_v1(v_token, v_payload, v_device, 'HUB-AGENT');
+
+  -- BOTH reserve before EITHER finalizes: each sees head version 0 and
+  -- reserves generation 1. This is the concurrent-renewal race, made
+  -- deterministic.
+  v_prep_a := kitluy_devices.prepare_device_credential_issuance_v1(
+    v_req_a, v_device, 'development', 'device_identity', 1, 'PUBKEY-33F',
+    repeat('4a', 32), v_idem_a, repeat('9', 64), 'ed25519', repeat('8', 64),
+    decode('a1', 'hex'), true, 'ica-33f', now(), 'trusted', 'SVC-A');
+  v_prep_b := kitluy_devices.prepare_device_credential_issuance_v1(
+    v_req_b, v_device, 'development', 'device_identity', 1, 'PUBKEY-33F',
+    repeat('4a', 32), v_idem_b, repeat('9', 64), 'ed25519', repeat('8', 64),
+    decode('a1', 'hex'), true, 'ica-33f', now(), 'trusted', 'SVC-B');
+
+  if (v_prep_a ->> 'head_version_seen') <> '0' or (v_prep_b ->> 'head_version_seen') <> '0' then
+    raise exception 'ASSERT FAIL: the two reservations did not both see head version 0';
+  end if;
+  if (v_prep_a ->> 'serial_number') = (v_prep_b ->> 'serial_number') then
+    raise exception 'ASSERT FAIL: two distinct requests reserved the same serial';
+  end if;
+
+  perform kitluy_devices.record_device_credential_signature_v1(
+    v_req_a, v_prep_a ->> 'canonical_tbs_hash', decode('aaaa', 'hex'), true, 'SVC-A');
+  perform kitluy_devices.record_device_credential_signature_v1(
+    v_req_b, v_prep_b ->> 'canonical_tbs_hash', decode('bbbb', 'hex'), true, 'SVC-B');
+
+  perform kitluy_devices.finalize_device_credential_issuance_v1(v_req_a, v_links, 'SVC-A');
+
+  begin
+    perform kitluy_devices.finalize_device_credential_issuance_v1(v_req_b, v_links, 'SVC-B');
+    raise exception 'ASSERT FAIL: both reservations finalized against one head';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-CRED-RENEWAL-GENERATION-CONFLICT%' then
+      raise exception 'ASSERT FAIL: the loser was refused for the wrong reason: %', sqlerrm;
+    end if;
+    v_conflicts := v_conflicts + 1;
+  end;
+
+  if v_conflicts <> 1 then
+    raise exception 'ASSERT FAIL: expected exactly one conflict, got %', v_conflicts;
+  end if;
+  if (select count(*) from kitluy_devices.device_credentials where device_record_id = v_device) <> 1 then
+    raise exception 'ASSERT FAIL: the race produced more than one credential';
+  end if;
+  if (select version from kitluy_devices.device_credential_heads
+       where device_record_id = v_device and environment = 'development') <> 1 then
+    raise exception 'ASSERT FAIL: the head advanced more than once';
+  end if;
+
+  raise notice 'PASS ws11-issuance-head-conflict: two reservations taken against the same head version yield EXACTLY one issued credential and one KLUY-CRED-RENEWAL-GENERATION-CONFLICT; the head advances once, and the loser is refused by compare-and-swap rather than by a unique-index collision after the fact';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 33g — function security for the issuance surface.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_fn text;
+  v_findings text[] := '{}';
+  v_app text;
+  v_owner text;
+begin
+  foreach v_fn in array array[
+    'kitluy_devices.prepare_device_credential_issuance_v1(text, uuid, text, text, integer, text, text, text, text, text, text, bytea, boolean, text, timestamptz, text, text)',
+    'kitluy_devices.record_device_credential_signature_v1(text, text, bytea, boolean, text)',
+    'kitluy_devices.finalize_device_credential_issuance_v1(text, jsonb, text)']
+  loop
+    -- PUBLIC must never hold EXECUTE. PostgreSQL grants it at creation; the
+    -- migration revokes it explicitly rather than assuming it is absent.
+    if has_function_privilege('public', v_fn, 'execute') then
+      v_findings := v_findings || format('%s is EXECUTE-able by PUBLIC', v_fn);
+    end if;
+    -- Nor may the untrusted browser-facing roles.
+    foreach v_app in array array['anon', 'authenticated'] loop
+      if exists (select 1 from pg_roles where rolname = v_app)
+         and has_function_privilege(v_app, v_fn, 'execute') then
+        v_findings := v_findings || format('%s is EXECUTE-able by %s', v_fn, v_app);
+      end if;
+    end loop;
+    -- Only the NAMED issuance service role may execute.
+    if not has_function_privilege('kitluy_issuance_service', v_fn, 'execute') then
+      v_findings := v_findings || format('%s is not executable by the named issuance service', v_fn);
+    end if;
+
+    select pg_get_userbyid(p.proowner) into v_owner
+      from pg_proc p where p.oid = v_fn::regprocedure;
+    -- A dedicated NOLOGIN owner, NOT shared with activation authority.
+    if v_owner <> 'kitluy_credential_issuer' then
+      v_findings := v_findings || format('%s is owned by %s', v_fn, v_owner);
+    end if;
+    if v_owner = 'kitluy_activation_governor' then
+      v_findings := v_findings || format('%s shares its owner with activation authority', v_fn);
+    end if;
+    -- SECURITY DEFINER with a pinned search_path.
+    if not exists (
+      select 1 from pg_proc p
+      where p.oid = v_fn::regprocedure and p.prosecdef
+        and p.proconfig is not null
+        and exists (select 1 from unnest(p.proconfig) c where c like 'search\_path=%')) then
+      v_findings := v_findings || format('%s is not SECURITY DEFINER with a fixed search_path', v_fn);
+    end if;
+  end loop;
+
+  -- No application role may be a member of the FUNCTION OWNER — that is the
+  -- role whose privileges the definer body runs with, and membership in it
+  -- would make the whole governed path bypassable by SET ROLE.
+  foreach v_app in array array['service_role', 'authenticated', 'anon', 'authenticator'] loop
+    if exists (select 1 from pg_roles where rolname = v_app)
+       and pg_has_role(v_app, 'kitluy_credential_issuer', 'MEMBER') then
+      v_findings := v_findings || format('%s is a member of the function owner kitluy_credential_issuer', v_app);
+    end if;
+  end loop;
+
+  -- The temporary migration membership was handed back before commit.
+  if exists (
+    select 1 from pg_auth_members m
+    join pg_roles r on r.oid = m.member
+    join pg_roles g on g.oid = m.roleid
+    where g.rolname = 'kitluy_credential_issuer' and not r.rolsuper) then
+    v_findings := v_findings || 'a non-superuser retains membership of kitluy_credential_issuer';
+  end if;
+
+  -- The reservation table keeps RLS ENABLE+FORCE, so its owner is bound by its
+  -- own named policies rather than exempt from them.
+  if not exists (
+    select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'kitluy_devices'
+      and c.relname = 'device_credential_signing_attempts'
+      and c.relrowsecurity and c.relforcerowsecurity) then
+    v_findings := v_findings || 'device_credential_signing_attempts lacks RLS ENABLE+FORCE';
+  end if;
+
+  -- service_role may READ the reservation but never WRITE it.
+  if has_table_privilege('service_role', 'kitluy_devices.device_credential_signing_attempts', 'insert')
+     or has_table_privilege('service_role', 'kitluy_devices.device_credential_signing_attempts', 'update') then
+    v_findings := v_findings || 'service_role can write device_credential_signing_attempts directly';
+  end if;
+  -- And it still cannot write an issued credential directly, which is the
+  -- containment that survives OPTION B putting the service in the TCB.
+  if has_table_privilege('service_role', 'kitluy_devices.device_credentials', 'insert') then
+    v_findings := v_findings || 'service_role can insert device_credentials directly';
+  end if;
+
+  if cardinality(v_findings) > 0 then
+    raise exception 'ASSERT FAIL: % issuance-security finding(s): %',
+      cardinality(v_findings), array_to_string(v_findings, ' | ');
+  end if;
+
+  raise notice 'PASS ws11-issuance-function-security: the three governed functions are SECURITY DEFINER with pinned search_path, owned by the NOLOGIN kitluy_credential_issuer (NOT the activation governor), executable ONLY by the named kitluy_issuance_service and never by PUBLIC, anon or authenticated; no application role is a member of the function owner; the migration membership was handed back; the reservation table keeps RLS ENABLE+FORCE; and service_role can read a reservation but write neither it nor an issued credential';
+end $$;
