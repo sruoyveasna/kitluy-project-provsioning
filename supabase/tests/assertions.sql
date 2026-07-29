@@ -5579,3 +5579,186 @@ begin
 
   raise notice 'PASS ws11-renewal-activation-security: the three functions added by group 0130 are SECURITY DEFINER with pinned search_path, owned by the NOLOGIN kitluy_credential_issuer, executable only by the named issuance service and never by PUBLIC, anon or authenticated; the reservation table keeps RLS ENABLE+FORCE; service_role can write neither reservations nor provider-key lifecycle state; the migration membership was handed back; and rotation is still DISABLED in the shipped policy after the test override was restored';
 end $$;
+
+-- ============================================================================
+-- SECTION 36 — the named executor can actually execute (migration 0131).
+--
+-- Groups 0127-0130 granted kitluy_issuance_service EXECUTE on every governed
+-- function and never granted it USAGE on the schema those functions live in.
+-- EXECUTE does not imply name resolution, so every call made AS THE INTENDED
+-- ROLE failed with "permission denied for schema kitluy_devices". It went
+-- unnoticed because every test ran as `postgres`, which inherits schema USAGE
+-- through service_role — the privilege model was described, never exercised.
+--
+-- These assertions run the boundary from BOTH sides: the executor must be able
+-- to call the governed path, and must still be unable to touch anything it
+-- protects.
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 36a — the executor reaches the governed functions, and nothing else.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_findings text[] := array[]::text[];
+  v_table text;
+  v_privilege text;
+  v_fn text;
+begin
+  if not has_schema_privilege('kitluy_issuance_service', 'kitluy_devices', 'usage') then
+    v_findings := v_findings ||
+      'kitluy_issuance_service lacks USAGE on kitluy_devices and cannot call the governed path at all';
+  end if;
+  if has_schema_privilege('kitluy_issuance_service', 'kitluy_devices', 'create') then
+    v_findings := v_findings || 'kitluy_issuance_service holds CREATE on kitluy_devices';
+  end if;
+
+  foreach v_fn in array array[
+    'prepare_device_credential_issuance_v1(text, uuid, text, text, integer, text, text, text, text, text, text, bytea, boolean, text, timestamptz, text, text)',
+    'record_device_credential_signature_v1(text, text, bytea, boolean, text)',
+    'finalize_device_credential_issuance_v1(text, jsonb, text)',
+    'reserve_device_credential_renewal_v1(uuid, text, text, text, timestamptz, text, kitluy_devices.renewal_mode, text)',
+    'register_generation_key_v2(uuid, text, text, text, integer)',
+    'confirm_provider_key_activation_v1(uuid, uuid, uuid, text, text, integer, integer, text, text, text)']
+  loop
+    if not has_function_privilege('kitluy_issuance_service',
+                                  format('kitluy_devices.%s', v_fn), 'execute') then
+      v_findings := v_findings || format('the executor cannot execute %s', v_fn);
+    end if;
+    if has_function_privilege('public', format('kitluy_devices.%s', v_fn), 'execute') then
+      v_findings := v_findings || format('PUBLIC can execute %s', v_fn);
+    end if;
+  end loop;
+
+  -- The tables the governed path protects stay unreachable to the executor.
+  foreach v_table in array array[
+    'device_credentials', 'device_credential_heads',
+    'device_generation_keys', 'device_renewal_reservations']
+  loop
+    foreach v_privilege in array array['insert', 'update', 'delete'] loop
+      if has_table_privilege('kitluy_issuance_service',
+                             format('kitluy_devices.%I', v_table), v_privilege) then
+        v_findings := v_findings ||
+          format('the executor holds %s on kitluy_devices.%s', v_privilege, v_table);
+      end if;
+    end loop;
+  end loop;
+
+  if exists (
+    select 1 from pg_auth_members m
+    join pg_roles g on g.oid = m.roleid
+    join pg_roles r on r.oid = m.member
+    where g.rolname = 'kitluy_credential_issuer' and r.rolname = 'kitluy_issuance_service') then
+    v_findings := v_findings || 'the executor is a member of the governor';
+  end if;
+
+  if cardinality(v_findings) > 0 then
+    raise exception 'ASSERT FAIL: % executor-boundary finding(s): %',
+      cardinality(v_findings), array_to_string(v_findings, ' | ');
+  end if;
+
+  raise notice 'PASS ws11-executor-schema-usage: kitluy_issuance_service holds USAGE (not CREATE) on kitluy_devices and EXECUTE on the six governed functions, PUBLIC holds none, the executor has no insert/update/delete on credentials, heads, provider keys or renewal reservations, and it is not a member of kitluy_credential_issuer';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 36b — executed AS the role, not merely granted to it.
+--
+-- A privilege matrix can be right in the catalogue and wrong in practice; the
+-- only way to know is to assume the role and try. Every write below must be
+-- refused, and the read of the schema must succeed.
+-- ---------------------------------------------------------------------------
+do $executor_probe$
+declare
+  v_findings text[] := array[]::text[];
+  v_role text;
+  v_probe integer;
+  v_device uuid;
+begin
+  select id into v_device from kitluy_devices.devices limit 1;
+
+  set local role kitluy_issuance_service;
+
+  select current_user into v_role;
+  if v_role <> 'kitluy_issuance_service' then
+    v_findings := v_findings || format('the probe ran as %s, not the executor', v_role);
+  end if;
+
+  -- THE THING THAT WAS BROKEN: reaching the governed path at all. The device
+  -- id is random, so the only correct answer is the POLICY refusal. A
+  -- "permission denied for schema" here is the group-0131 defect returning,
+  -- and it is named as such rather than swallowed as "some error".
+  begin
+    perform kitluy_devices.reserve_device_credential_renewal_v1(
+      gen_random_uuid(), 'development', 'device_identity',
+      'executor-probe-' || gen_random_uuid(), now(), 'trusted',
+      'reuse_current_key'::kitluy_devices.renewal_mode, 'EXECUTOR-PROBE');
+    v_findings := v_findings ||
+      'the executor reserved a renewal for a device that does not exist';
+  exception when others then
+    if sqlerrm like '%permission denied for schema%' then
+      v_findings := v_findings ||
+        format('the executor cannot reach the governed path: %s', sqlerrm);
+    elsif sqlerrm not like 'KLUY-RENEWAL-NO-CURRENT-CREDENTIAL%' then
+      v_findings := v_findings ||
+        format('unexpected refusal from the governed path: %s', sqlerrm);
+    end if;
+  end;
+
+  -- Reaching the FUNCTIONS is not reaching the TABLES. The executor holds no
+  -- SELECT on the policy table the definer function just read on its behalf.
+  begin
+    select count(*) into v_probe from kitluy_devices.renewal_policy;
+    v_findings := v_findings || 'the executor can read kitluy_devices.renewal_policy directly';
+  exception when others then
+    null;
+  end;
+
+  begin
+    insert into kitluy_devices.device_credentials (
+      credential_id, serial_number, device_record_id, environment, purpose,
+      public_key, public_key_fingerprint, issuer_key_id, certificate_generation,
+      assignment_generation, not_before, not_after, hardware_trust_level,
+      canonical_tbs, detached_signature, created_from_request_id, state)
+    values (gen_random_uuid(), 'DEV-EXECUTOR-FORGED', v_device,
+            'development', 'device_identity', 'PEM', repeat('e', 64), 'ica', 99, 1,
+            now(), now() + interval '1 day', 'development_software', 'TBS',
+            decode('00', 'hex'), 'rq-executor-forged', 'issued');
+    v_findings := v_findings || 'the executor inserted a credential directly';
+  exception when others then
+    null;
+  end;
+
+  begin
+    update kitluy_devices.device_credential_heads
+    set current_generation = current_generation + 1, version = version + 1;
+    v_findings := v_findings || 'the executor advanced a generation head directly';
+  exception when others then
+    null;
+  end;
+
+  begin
+    update kitluy_devices.device_generation_keys set state = 'superseded';
+    v_findings := v_findings || 'the executor moved provider-key lifecycle state directly';
+  exception when others then
+    null;
+  end;
+
+  begin
+    execute 'set role kitluy_credential_issuer';
+    v_findings := v_findings || 'the executor escalated into the NOLOGIN governor';
+  exception when others then
+    null;
+  end;
+
+  reset role;
+
+  if cardinality(v_findings) > 0 then
+    raise exception 'ASSERT FAIL: % executed-boundary finding(s): %',
+      cardinality(v_findings), array_to_string(v_findings, ' | ');
+  end if;
+
+  raise notice 'PASS ws11-executor-executed-boundary: running AS kitluy_issuance_service the governed reservation function is reachable and answers with its POLICY refusal rather than permission denied for schema, while direct reads of renewal_policy, direct credential insertion, head advancement, provider-key lifecycle mutation and SET ROLE into kitluy_credential_issuer are all refused';
+end
+$executor_probe$;
+
+select 'assertions complete: groups 0010-0131 structural contract holds' as result;
