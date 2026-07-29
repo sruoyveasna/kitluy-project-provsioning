@@ -1650,3 +1650,192 @@ same triggers again without incident.
 recovery.** Not begun. Scheduled retry workers, full overlap-expiry lifecycle,
 credential revocation, automatic key destruction and independent hostile review
 all remain absent.
+
+---
+
+## Renewal reconciliation and interrupted-operation recovery — IMPLEMENTED-IN-DEV component
+
+`packages/device-identity/src/renewal-reconciliation.ts` adds
+`reconcileDeviceCredentialRenewal`: it asks PostgreSQL and the key provider what
+each believes, classifies the PAIR, and performs exactly ONE safe action.
+
+**The authority split is the design.** PostgreSQL owns the reservation, the
+mode, both generations, credential id and serial, canonical TBS, issuance state,
+credential persistence, head state, lifecycle and audit. The PROVIDER owns
+private-key custody, whether a key exists, its reference and its operational
+state. Neither is asked about the other's facts — a reconciler that trusted one
+system for the other's would "repair" states that were never broken.
+
+**One decision table, exhaustive, failing closed.** Nineteen rules, each with an
+id, the database condition, the provider condition, the classification, the
+single action and the reason it is safe. Ordered most-specific first, so a
+DIVERGENCE is never mistaken for progress. A state pair matching no rule is
+`INCONSISTENT_STATE` and is never guessed at — the states this module exists for
+are exactly the ones nobody predicted.
+
+**Exactly-once BUSINESS EFFECT, not exactly-once signing.** Nothing can promise
+the latter across a process boundary with a signer that may have completed
+before its caller died. What is guaranteed is one credential, one serial, one
+head advance, one provider key, one activation. An existing signature is REUSED;
+a second different signature for the same frozen TBS is never silently taken.
+`KLRISK-DEVICE-003` is untouched.
+
+**Single-step by design.** One action per call, one audit row per call, and the
+caller decides whether to call again. A reconciler that drove a renewal to
+completion in one pass would be a second implementation of the forward path, and
+the second implementation is always the one that drifts.
+
+---
+
+## KLRISK-DEVICE-008 — the granted three-day overlap could never be used
+
+**§9 asked what `superseded` means. Answered by execution, and the answer was
+worse than the question suggested.**
+
+What `superseded` does NOT do: it does not destroy the key. After a rotation the
+row has `destroyed_at = null`, and the incumbent private key is still in the
+provider. Cryptographic verification of the old credential does not need the
+private half at all — verified directly, the old credential returns VALID
+against its own key and generation.
+
+What was actually broken is the VERIFIER CONTRACT, not the database.
+`evaluateCertificateValidity` admitted exactly ONE `currentKeyFingerprint` and
+one generation floor. Presented with the device's CURRENT state after a rotation
+— generation 2, replacement key, which is what PostgreSQL reports — the previous
+credential was refused with `CERT_KEY_FINGERPRINT_MISMATCH`. Measured directly.
+
+So the three-day overlap §5 grants, which migration 0125 models explicitly
+(`previous_generation`, `overlap_ends_at`, with the comment that "two
+generations are legitimately usable at once"), was unreachable: the moment the
+head advanced, the previous credential stopped verifying.
+
+**§9's suggested remedy does not apply.** It says to record a DATABASE-contract
+defect and correct it additively. The database side is correct — it models the
+overlap faithfully. The defect is in this package's verification contract, so a
+migration would have fixed nothing. Recorded here rather than forced into the
+shape the instruction assumed.
+
+**Disposition: corrected additively in `certificate-validity.ts`.** An OPTIONAL
+`permittedOverlap` — previous generation, previous key fingerprint, and the
+head's `overlap_ends_at` — is now accepted. Absent by default, so a caller that
+supplies nothing gets exactly the previous behaviour and nothing loosens by
+omission. When supplied it admits EXACTLY the one previous generation and
+exactly the key it attested to, until the overlap ends against TRUSTED time.
+Chain, purpose, environment, device binding, validity window and revocation are
+unchanged and still apply: tests prove an overlap rescues neither a revoked nor
+an expired credential, and that "older than current" is not the test —
+generation 1 is refused when the head says generation 4 overlaps.
+
+Not fixed here, and belonging to Prompt 3B: overlap EXPIRY advancement and
+superseded-key destruction.
+
+---
+
+## KLRISK-DEVICE-009 — every rotation retry was refused as a changed payload
+
+**Found by the crash matrix, which is what it is for.**
+
+`completeRotateKeyCredentialRenewal` passed the proof-of-possession CHALLENGE
+hash as the governed `canonical_payload_hash`. The challenge embeds `issuedAt`
+and `expiresAt` so that it can expire — so it differs on every attempt. And
+`prepare_device_credential_issuance_v1` refuses a used request id whose payload
+hash changed, correctly, because that is how it detects a different request
+wearing an old id.
+
+Consequence: ANY rotation retry after a lost response was refused with
+`KLUY-CRED-REQUEST-PAYLOAD-CHANGED`. Rotation could be performed once and never
+recovered. The same-key path was unaffected because its payload hash is derived
+from frozen reservation values with no timestamp in it.
+
+The mistake was conflating two different questions: "which request is this"
+(must be stable) and "which proof was presented" (must expire). They are now
+separate: `rotationCanonicalPayloadHash` is derived from the frozen reservation
+and the replacement fingerprint only, and the PoP preimage hash still travels in
+its own field.
+
+No migration was needed — the database was refusing correctly. Proven by three
+crash-matrix cases that failed before the fix and pass after it.
+
+---
+
+## Migration 0133 — the durable-audit gap §15 anticipated
+
+Reconciliation had no durable evidence anywhere. The issuance tables
+(`device_credential_issuance_attempts`, `device_credential_renewal_attempts`,
+`device_credential_orphan_incidents`) have no place for the renewal attempt id,
+the observed PROVIDER state, the classification, the action or its result — so
+recording reconciliations there would have discarded most of what makes one
+explainable. Application logs are not an answer: the question "why is this
+device on this generation with a superseded key" gets asked long after a log has
+rotated away.
+
+`device_renewal_reconciliations` is append-only, RLS ENABLE+FORCE, written only
+through `record_renewal_reconciliation_v1`. The device and environment come from
+the RESERVATION rather than the caller, so nobody can write history against a
+device they never touched. It carries a `sequence_no` identity column because
+several reconciliations can occur inside one transaction and `now()` would stamp
+them identically — leaving "the sequence of rows IS the history" with no order
+at all. A CHECK refuses PEM private-key material outright: the cheapest way to
+leak a key is to log it while explaining why you could not use it.
+
+Assertion section 38 holds all of that permanently, including that the executor
+can record only THROUGH the function, that service_role reads but never writes,
+and that a recorded outcome can be neither updated nor deleted.
+
+---
+
+## Findings recorded, not fixed
+
+1. **Provider durability is not proven across a real process restart.** The
+   development provider keeps keys in memory, so the crash matrix hands a
+   "fresh" reconciler the SAME provider instance. PostgreSQL state IS genuinely
+   durable and is re-read. What is proven is that recovery decisions come from
+   OBSERVED state rather than from anything carried in the caller's variables:
+   the reconciler is constructed fresh, reads everything it acts on, and is
+   given no result from the interrupted run. A hardware provider surviving a
+   real restart is what would close the gap; it does not exist yet. Labelled in
+   the suite header rather than hidden.
+
+2. **True parallel reconcilers are not exercised in the live suite.** Two
+   reconcilers cannot share one `pg` client — interleaved queries on a single
+   connection corrupt the transaction, and the suite needs one rolled-back
+   transaction for isolation. The live test runs them SEQUENTIALLY and proves
+   the second produces no second business effect; the unit suite covers the
+   interleaved-decision case, where both read the same pre-state before either
+   acts.
+
+3. **PoP has no durable marker of its own.** `prepare_device_credential_issuance_v1`
+   is what records the proof, so prove-and-prepare is ONE durable step for
+   recovery. A rule that classified them separately would have named a
+   completion nothing could observe, and recovery would have looped on it. An
+   early draft did exactly that and was corrected.
+
+4. **`R&D_HSA_AI_Agent_MVP.md` still fails `prettier --check`** at `ea26e49`, as
+   at every prior head. Untouched and explicitly excluded.
+
+5. **Node 22.23.0 is still not installed.** Only v24.15.0. Aggregate
+   verification remains non-authoritative; every gate was run individually with
+   the documented temporary override and no config file was changed.
+
+---
+
+## Risk register status after Prompt 3A
+
+**OPEN, unchanged and NOT closed:** `KLRISK-DEVICE-003` (OPTION B — this package
+is still the only cryptographic verifier), `KLRISK-DEVICE-007` (still no
+governed credential-revocation operation; containment is still NOT equated with
+revocation, and none was implemented here), `KLRISK-REPO-001`, `KLRISK-REPO-002`.
+
+**NEW:** `KLRISK-DEVICE-008` (overlap unreachable — corrected additively in the
+verifier; expiry lifecycle deferred to Prompt 3B) and `KLRISK-DEVICE-009`
+(rotation retry refused as a changed payload — corrected, no migration needed).
+
+**Divergence that cannot be repaired automatically** is now a named, durable
+condition rather than an implicit one: a database-active key the provider does
+not have is classified `INCONSISTENT_STATE`, refused, and RECORDED in the
+reconciliation audit for a human. Nothing regenerates a key to "fix" it.
+
+**Still pending: Prompt 3B — credential overlap expiry and superseded-key
+lifecycle.** Not begun. Scheduled workers, cron deployment, overlap-expiry time
+advancement, automatic destruction of superseded keys, credential revocation and
+independent hostile review all remain absent.
