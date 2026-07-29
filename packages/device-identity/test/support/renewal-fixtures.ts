@@ -28,6 +28,11 @@ import type {
   ReconciliationReader,
 } from "../../src/renewal-reconciliation.js";
 import type {
+  LifecycleGateway,
+  LifecycleReader,
+  ObservedLifecycleState,
+} from "../../src/credential-lifecycle.js";
+import type {
   CredentialHeadRecord,
   IncumbentCredentialRecord,
   IncumbentCredentialRepository,
@@ -1015,5 +1020,258 @@ export async function readReconciliations(
     observedDatabaseState: row.observed_database_state,
     observedProviderState: row.observed_provider_state,
     failureCode: row.failure_code,
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// Lifecycle adapters
+// ---------------------------------------------------------------------------
+
+/**
+ * Reads the whole lifecycle state for one device.
+ *
+ * The retention blockers are real counts from the real tables, not a fixture
+ * flag: a key is retained because something actually still references it.
+ */
+export function pgLifecycleReader(client: pg.PoolClient): LifecycleReader {
+  return {
+    async loadLifecycleState(scope): Promise<ObservedLifecycleState | null> {
+      const head = await client.query(
+        `select current_generation, previous_generation, overlap_ends_at
+           from kitluy_devices.device_credential_heads
+          where device_record_id = $1 and environment = $2 and purpose = $3`,
+        [scope.deviceRecordId, scope.environment, scope.purpose],
+      );
+      if (head.rowCount === 0) return null;
+      const h = head.rows[0];
+
+      const credential = async (generation: number | null) => {
+        if (generation === null) return null;
+        const r = await client.query(
+          `select credential_id, certificate_generation, public_key_fingerprint,
+                  state::text state, not_after
+             from kitluy_devices.device_credentials
+            where device_record_id = $1 and environment = $2 and purpose = $3
+              and certificate_generation = $4`,
+          [scope.deviceRecordId, scope.environment, scope.purpose, generation],
+        );
+        const row = r.rows[0];
+        return row === undefined
+          ? null
+          : {
+              credentialId: row.credential_id,
+              certificateGeneration: Number(row.certificate_generation),
+              publicKeyFingerprint: row.public_key_fingerprint,
+              state: row.state,
+              notAfter: row.not_after as Date,
+            };
+      };
+
+      const current = await credential(Number(h.current_generation));
+      const previous = await credential(
+        h.previous_generation === null ? null : Number(h.previous_generation),
+      );
+
+      const keyFor = async (fingerprint: string | undefined) => {
+        if (fingerprint === undefined) return null;
+        const r = await client.query(
+          `select key_handle, public_key_fingerprint, generation, key_generation, state::text state
+             from kitluy_devices.device_generation_keys
+            where device_record_id = $1 and environment = $2 and purpose = $3
+              and public_key_fingerprint = $4`,
+          [scope.deviceRecordId, scope.environment, scope.purpose, fingerprint],
+        );
+        const row = r.rows[0];
+        return row === undefined
+          ? null
+          : {
+              providerKeyReference: row.key_handle,
+              publicKeyFingerprint: row.public_key_fingerprint,
+              generation: Number(row.generation),
+              keyGeneration: row.key_generation === null ? null : Number(row.key_generation),
+              state: row.state,
+            };
+      };
+
+      const policy = await client.query(
+        `select destruction_enabled, minimum_retention_days, recovery_retention_days,
+                requires_operator_approval, approved_by_decision_ref, required_owner_decision
+           from kitluy_devices.key_destruction_policy where environment = $1`,
+        [scope.environment],
+      );
+      const p = policy.rows[0];
+
+      // Real blocker counts, from the real tables.
+      const blockers = await client.query(
+        `select
+           (select count(*) from kitluy_devices.device_credential_signing_attempts
+             where device_record_id = $1 and state in ('reserved', 'signed')) unfinished_issuance,
+           (select count(*) from kitluy_devices.device_renewal_reservations
+             where device_record_id = $1
+               and status not in ('refused', 'abandoned', 'completed')) open_renewals,
+           (select count(*) from kitluy_devices.device_generation_keys
+             where device_record_id = $1
+               and state = 'credential_issued_pending_activation') activation_pending,
+           (select count(*) from kitluy_devices.device_renewal_reconciliations r
+             join kitluy_devices.device_renewal_reservations v
+               on v.renewal_attempt_id = r.renewal_attempt_id
+            where v.device_record_id = $1
+              and r.classification in ('MANUAL_REVIEW_REQUIRED', 'INCONSISTENT_STATE')) divergences`,
+        [scope.deviceRecordId],
+      );
+      const b = blockers.rows[0];
+
+      const referencing = await client.query(
+        `select credential_id from kitluy_devices.device_credentials
+          where device_record_id = $1 and environment = $2 and purpose = $3
+            and public_key_fingerprint = $4 and state = 'issued'`,
+        [
+          scope.deviceRecordId,
+          scope.environment,
+          scope.purpose,
+          previous?.publicKeyFingerprint ?? "",
+        ],
+      );
+
+      return {
+        deviceRecordId: scope.deviceRecordId,
+        environment: scope.environment,
+        purpose: scope.purpose,
+        headGeneration: Number(h.current_generation),
+        headPreviousGeneration:
+          h.previous_generation === null ? null : Number(h.previous_generation),
+        overlapEndsAt: h.overlap_ends_at as Date | null,
+        currentCredential: current,
+        previousCredential: previous,
+        currentKey: await keyFor(current?.publicKeyFingerprint),
+        previousKey: await keyFor(previous?.publicKeyFingerprint),
+        destructionPolicy: {
+          destructionEnabled: p?.destruction_enabled === true,
+          minimumRetentionDays:
+            p?.minimum_retention_days === null || p === undefined
+              ? null
+              : Number(p.minimum_retention_days),
+          recoveryRetentionDays:
+            p?.recovery_retention_days === null || p === undefined
+              ? null
+              : Number(p.recovery_retention_days),
+          requiresOperatorApproval: p?.requires_operator_approval !== false,
+          approvedByDecisionRef: p?.approved_by_decision_ref ?? null,
+          requiredOwnerDecision: p?.required_owner_decision ?? null,
+        },
+        retention: {
+          referencingCredentialIds: referencing.rows.map((r) => r.credential_id),
+          unfinishedIssuanceCount: Number(b.unfinished_issuance),
+          openRenewalCount: Number(b.open_renewals),
+          activationPendingCount: Number(b.activation_pending),
+          openReconciliationCount: 0,
+          manualReviewOutstanding: Number(b.divergences) > 0,
+        },
+      };
+    },
+  };
+}
+
+/** The governed lifecycle writes, executed as the ISSUANCE SERVICE. */
+export function pgLifecycleGateway(client: pg.PoolClient): LifecycleGateway & {
+  readonly rolesObserved: string[];
+} {
+  const rolesObserved: string[] = [];
+  const governed = async (sql: string, params: unknown[]): Promise<Record<string, unknown>> =>
+    withRole(client, TEST_ROLES.issuanceService, async () => {
+      rolesObserved.push(await currentRole(client));
+      const savepoint = `life_${randomUUID().replace(/-/g, "")}`;
+      await client.query(`savepoint ${savepoint}`);
+      try {
+        const r = await client.query<{ result: Record<string, unknown> }>(sql, params);
+        await client.query(`release savepoint ${savepoint}`);
+        return r.rows[0]?.result ?? {};
+      } catch (error) {
+        await client.query(`rollback to savepoint ${savepoint}`).catch(() => undefined);
+        throw error;
+      }
+    });
+
+  return {
+    rolesObserved,
+    async retireOverlappedCredential(input) {
+      const row = await governed(
+        `select kitluy_devices.retire_overlapped_credential_v1(
+           $1::uuid,$2,$3,$4::timestamptz,$5,$6) as result`,
+        [
+          input.deviceRecordId,
+          input.environment,
+          input.purpose,
+          input.trustedTime,
+          input.trustedTimeStatus,
+          input.actorRef,
+        ],
+      );
+      return {
+        outcome: String(row["outcome"] ?? ""),
+        previousCredentialId: row["previous_credential_id"] as string | undefined,
+      };
+    },
+    async recordLifecycleEvent(r) {
+      const row = await governed(
+        `select kitluy_devices.record_credential_lifecycle_event_v1(
+           $1::uuid,$2,$3,$4::timestamptz,$5,$6,$7::uuid,$8::integer,$9::uuid,$10::integer,
+           $11::timestamptz,$12,$13,$14,$15,$16,$17,$18,$19,$20) as result`,
+        [
+          r.deviceRecordId,
+          r.environment,
+          r.purpose,
+          r.trustedTime,
+          r.trustedTimeSource,
+          r.trustedTimeStatus,
+          r.currentCredentialId,
+          r.currentCredentialGeneration,
+          r.previousCredentialId,
+          r.previousCredentialGeneration,
+          r.overlapEndsAt,
+          r.classification,
+          r.credentialTransition,
+          r.providerKeyTransition,
+          r.destructionPolicyReference,
+          r.providerResult,
+          r.databaseConfirmationResult,
+          r.reason,
+          r.replayOutcome,
+          r.actorRef,
+        ],
+      );
+      return { lifecycleExecutionId: String(row["lifecycle_execution_id"] ?? "") };
+    },
+  };
+}
+
+/** Reads lifecycle history so a test can assert what was recorded. */
+export async function readLifecycleEvents(
+  client: pg.PoolClient,
+  deviceRecordId: string,
+): Promise<
+  ReadonlyArray<{
+    classification: string;
+    credentialTransition: string;
+    providerKeyTransition: string;
+    destructionPolicyReference: string | null;
+    trustedTimeStatus: string;
+    replayOutcome: string;
+  }>
+> {
+  const r = await client.query(
+    `select classification, credential_transition, provider_key_transition,
+            destruction_policy_reference, trusted_time_status, replay_outcome
+       from kitluy_devices.device_credential_lifecycle_events
+      where device_record_id = $1 order by sequence_no`,
+    [deviceRecordId],
+  );
+  return r.rows.map((row) => ({
+    classification: row.classification,
+    credentialTransition: row.credential_transition,
+    providerKeyTransition: row.provider_key_transition,
+    destructionPolicyReference: row.destruction_policy_reference,
+    trustedTimeStatus: row.trusted_time_status,
+    replayOutcome: row.replay_outcome,
   }));
 }

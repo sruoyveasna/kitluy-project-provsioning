@@ -350,6 +350,7 @@ describe("permitted credential overlap", () => {
         previousGeneration: 1,
         previousKeyFingerprint: oldFingerprint,
         overlapEndsAt: days(2),
+        previousCredentialState: "issued",
       },
     });
     expect(verdict.valid).toBe(true);
@@ -363,6 +364,7 @@ describe("permitted credential overlap", () => {
         previousGeneration: 1,
         previousKeyFingerprint: oldFingerprint,
         overlapEndsAt: days(-1),
+        previousCredentialState: "issued",
       },
     });
     expect(verdict.valid).toBe(false);
@@ -379,6 +381,7 @@ describe("permitted credential overlap", () => {
         previousGeneration: 4,
         previousKeyFingerprint: oldFingerprint,
         overlapEndsAt: days(2),
+        previousCredentialState: "issued",
       },
     });
     expect(verdict.valid).toBe(false);
@@ -391,6 +394,7 @@ describe("permitted credential overlap", () => {
       previousGeneration: 1,
       previousKeyFingerprint: oldFingerprint,
       overlapEndsAt: days(2),
+      previousCredentialState: "issued",
     };
     const revoked = evaluateCertificateValidity({
       ...context,
@@ -421,9 +425,143 @@ describe("permitted credential overlap", () => {
         previousGeneration: 1,
         previousKeyFingerprint: oldFingerprint,
         overlapEndsAt: days(2),
+        previousCredentialState: "issued",
       },
     });
     expect(verdict.valid).toBe(true);
     expect(JSON.stringify(verdict)).not.toContain("PRIVATE KEY");
+  });
+});
+
+// ===========================================================================
+// The overlap grant is not a bypass
+// ===========================================================================
+describe("overlap cannot become a generic bypass", () => {
+  async function fixture() {
+    const ca = new DevelopmentCertificateAuthority({ notBefore: days(-1), notAfter: days(365) });
+    const keys = new DevelopmentDeviceKeyProvider();
+    await keys.generateDeviceKey(DEVICE as DeviceRecordId, "development");
+    const oldPem = keys.publicKeyPem(DEVICE) as string;
+    const oldFingerprint = publicKeyFingerprint(oldPem);
+    const device = ca.issueDeviceCertificate({
+      deviceRecordId: DEVICE,
+      subjectPublicKeyPem: oldPem,
+      subjectFingerprint: oldFingerprint,
+      hardwareTrustLevel: "development_software",
+      certificateGeneration: 1,
+      notBefore: days(-20),
+      notAfter: days(9),
+      serialNumber: "DEV-BYPASS-GEN1",
+      certificateId: "11111111-1111-4111-8111-000000000009",
+    });
+    const replacement = new DevelopmentDeviceKeyProvider();
+    await replacement.generateDeviceKey(OTHER_DEVICE as DeviceRecordId, "development");
+    return {
+      oldFingerprint,
+      context: {
+        chain: { root: ca.rootCertificate, intermediate: ca.intermediateCertificate, device },
+        trustedTime: trusted(NOW),
+        environment: "development" as const,
+        deviceRecordId: DEVICE,
+        currentKeyFingerprint: publicKeyFingerprint(
+          replacement.publicKeyPem(OTHER_DEVICE) as string,
+        ),
+        currentCertificateGeneration: 2,
+        revocations: noRevocations,
+        trustedRootFingerprints: [ca.rootCertificate.tbs.subjectFingerprint],
+      },
+    };
+  }
+
+  it("refuses an overlap whose previous credential has been RETIRED", async () => {
+    // The lifecycle moved it to `superseded`. The grant is spent, and a caller
+    // still holding the old overlap object cannot keep it alive.
+    const { context, oldFingerprint } = await fixture();
+    const verdict = evaluateCertificateValidity({
+      ...context,
+      permittedOverlap: {
+        previousGeneration: 1,
+        previousKeyFingerprint: oldFingerprint,
+        overlapEndsAt: days(2),
+        previousCredentialState: "superseded",
+      },
+    });
+    expect(verdict.valid).toBe(false);
+    expect(verdict.rejectionCode).toBe("CERT_KEY_FINGERPRINT_MISMATCH");
+  });
+
+  it("refuses an overlap that names a key the credential never attested to", async () => {
+    const { context } = await fixture();
+    const verdict = evaluateCertificateValidity({
+      ...context,
+      permittedOverlap: {
+        previousGeneration: 1,
+        // A fingerprint the caller invented.
+        previousKeyFingerprint: "f".repeat(64),
+        overlapEndsAt: days(2),
+        previousCredentialState: "issued",
+      },
+    });
+    expect(verdict.valid).toBe(false);
+    expect(verdict.rejectionCode).toBe("CERT_KEY_FINGERPRINT_MISMATCH");
+  });
+
+  it("treats the boundary as HALF-OPEN, matching the database", async () => {
+    const { context, oldFingerprint } = await fixture();
+    const overlap = {
+      previousGeneration: 1,
+      previousKeyFingerprint: oldFingerprint,
+      previousCredentialState: "issued",
+    };
+
+    // A millisecond before: usable.
+    expect(
+      evaluateCertificateValidity({
+        ...context,
+        permittedOverlap: { ...overlap, overlapEndsAt: new Date(NOW.getTime() + 1) },
+      }).valid,
+    ).toBe(true);
+
+    // EXACTLY at the boundary: spent. `trusted_now >= overlap_end` is expired,
+    // stated identically here and in retire_overlapped_credential_v1, so no
+    // one-millisecond gap can open between the two layers.
+    expect(
+      evaluateCertificateValidity({
+        ...context,
+        permittedOverlap: { ...overlap, overlapEndsAt: NOW },
+      }).valid,
+    ).toBe(false);
+  });
+
+  it("refuses an overlap for another device", async () => {
+    const { context, oldFingerprint } = await fixture();
+    const verdict = evaluateCertificateValidity({
+      ...context,
+      deviceRecordId: OTHER_DEVICE,
+      permittedOverlap: {
+        previousGeneration: 1,
+        previousKeyFingerprint: oldFingerprint,
+        overlapEndsAt: days(2),
+        previousCredentialState: "issued",
+      },
+    });
+    expect(verdict.valid).toBe(false);
+    expect(verdict.rejectionCode).toBe("CERT_WRONG_DEVICE");
+  });
+
+  it("refuses an overlap for another environment", async () => {
+    const { context, oldFingerprint } = await fixture();
+    const verdict = evaluateCertificateValidity({
+      ...context,
+      environment: "pilot",
+      permittedOverlap: {
+        previousGeneration: 1,
+        previousKeyFingerprint: oldFingerprint,
+        overlapEndsAt: days(2),
+        previousCredentialState: "issued",
+      },
+    });
+    expect(verdict.valid).toBe(false);
+    expect(verdict.rejectionCode).toBe("CERT_CHAIN_INVALID");
   });
 });
