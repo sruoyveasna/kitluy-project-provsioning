@@ -23,6 +23,11 @@ import { runGovernedIssuance, type GovernedIssuanceGateway } from "../../src/iss
 import type { IncumbentDeviceKeySigner } from "../../src/same-key-renewal-issuance.js";
 import type { RotationGateway } from "../../src/rotate-key-renewal-issuance.js";
 import type {
+  ObservedDatabaseState,
+  ReconciliationAuditGateway,
+  ReconciliationReader,
+} from "../../src/renewal-reconciliation.js";
+import type {
   CredentialHeadRecord,
   IncumbentCredentialRecord,
   IncumbentCredentialRepository,
@@ -839,4 +844,176 @@ export function pgRotationGateway(client: pg.PoolClient): RotationGateway & {
       };
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Reconciliation adapters
+// ---------------------------------------------------------------------------
+
+/**
+ * Reads the whole observable database state for one renewal attempt.
+ *
+ * One query per fact, joined in TypeScript rather than in one clever query,
+ * because a reconciler that mis-read a join would "repair" states that were
+ * never broken and the mistake would be invisible.
+ */
+export function pgReconciliationReader(
+  client: pg.PoolClient,
+  requestIdFor: (renewalAttemptId: string) => string,
+): ReconciliationReader {
+  return {
+    async loadDatabaseState(renewalAttemptId): Promise<ObservedDatabaseState | null> {
+      const res = await client.query(
+        `select renewal_attempt_id, renewal_mode::text mode, device_record_id, environment,
+                purpose, status::text status, current_credential_id,
+                current_credential_generation, next_credential_generation,
+                assignment_generation, credential_head_version
+           from kitluy_devices.device_renewal_reservations
+          where renewal_attempt_id = $1`,
+        [renewalAttemptId],
+      );
+      const r = res.rows[0];
+      if (r === undefined) return null;
+
+      const key = await client.query(
+        `select state::text state, key_generation, public_key_fingerprint, key_handle
+           from kitluy_devices.device_generation_keys where renewal_attempt_id = $1`,
+        [renewalAttemptId],
+      );
+      const attempt = await client.query(
+        `select state::text state, credential_id, serial_number, certificate_generation,
+                canonical_tbs_hash, issuer_key_id, signature_sha256, detached_signature
+           from kitluy_devices.device_credential_signing_attempts where request_id = $1`,
+        [requestIdFor(renewalAttemptId)],
+      );
+      const credential = await client.query(
+        `select credential_id from kitluy_devices.device_credentials
+          where device_record_id = $1 and environment = $2 and purpose = $3
+            and certificate_generation = $4`,
+        [r.device_record_id, r.environment, r.purpose, Number(r.next_credential_generation)],
+      );
+      const head = await client.query(
+        `select current_generation, version from kitluy_devices.device_credential_heads
+          where device_record_id = $1 and environment = $2 and purpose = $3`,
+        [r.device_record_id, r.environment, r.purpose],
+      );
+      const device = await client.query(
+        `select assignment_generation from kitluy_devices.devices where id = $1`,
+        [r.device_record_id],
+      );
+
+      const k = key.rows[0];
+      const a = attempt.rows[0];
+      return {
+        renewalAttemptId: r.renewal_attempt_id,
+        renewalMode: r.mode,
+        deviceRecordId: r.device_record_id,
+        environment: r.environment,
+        purpose: r.purpose,
+        reservationStatus: r.status,
+        currentCredentialId: r.current_credential_id,
+        currentCredentialGeneration: Number(r.current_credential_generation),
+        nextCredentialGeneration: Number(r.next_credential_generation),
+        assignmentGeneration: Number(r.assignment_generation),
+        credentialHeadVersion: Number(r.credential_head_version),
+        headVersion: head.rows[0] === undefined ? null : Number(head.rows[0].version),
+        headGeneration: head.rows[0] === undefined ? null : Number(head.rows[0].current_generation),
+        replacementKey:
+          k === undefined
+            ? null
+            : {
+                state: k.state,
+                keyGeneration: k.key_generation === null ? null : Number(k.key_generation),
+                publicKeyFingerprint: k.public_key_fingerprint,
+                providerKeyReference: k.key_handle,
+              },
+        issuanceAttempt:
+          a === undefined
+            ? null
+            : {
+                state: a.state,
+                credentialId: a.credential_id,
+                serialNumber: a.serial_number,
+                certificateGeneration: Number(a.certificate_generation),
+                canonicalTbsHash: a.canonical_tbs_hash,
+                issuerKeyId: a.issuer_key_id,
+                signatureSha256: a.signature_sha256,
+                hasSignature: a.detached_signature !== null,
+              },
+        credentialPersisted: credential.rowCount !== null && credential.rowCount > 0,
+        persistedCredentialId: credential.rows[0]?.credential_id ?? null,
+        deviceAssignmentGeneration: Number(device.rows[0].assignment_generation),
+      };
+    },
+  };
+}
+
+/** Appends the reconciliation record through the governed function. */
+export function pgReconciliationAudit(
+  client: pg.PoolClient,
+): ReconciliationAuditGateway & { readonly rolesObserved: string[] } {
+  const rolesObserved: string[] = [];
+  return {
+    rolesObserved,
+    async record(input) {
+      return withRole(client, TEST_ROLES.issuanceService, async () => {
+        rolesObserved.push(await currentRole(client));
+        const savepoint = `rec_${randomUUID().replace(/-/g, "")}`;
+        await client.query(`savepoint ${savepoint}`);
+        try {
+          const r = await client.query<{ result: Record<string, unknown> }>(
+            `select kitluy_devices.record_renewal_reconciliation_v1(
+               $1::uuid,$2,$3,$4,$5,$6,$7,$8,$9) as result`,
+            [
+              input.renewalAttemptId,
+              input.observedDatabaseState,
+              input.observedProviderState,
+              input.classification,
+              input.actionAttempted,
+              input.actionResult,
+              input.replayOutcome,
+              input.failureCode,
+              input.actorRef,
+            ],
+          );
+          await client.query(`release savepoint ${savepoint}`);
+          return { reconciliationId: String(r.rows[0]?.result["reconciliation_id"] ?? "") };
+        } catch (error) {
+          await client.query(`rollback to savepoint ${savepoint}`).catch(() => undefined);
+          throw error;
+        }
+      });
+    },
+  };
+}
+
+/** Reads reconciliation history, so a test can assert what was recorded. */
+export async function readReconciliations(
+  client: pg.PoolClient,
+  renewalAttemptId: string,
+): Promise<
+  ReadonlyArray<{
+    classification: string;
+    actionAttempted: string;
+    replayOutcome: string;
+    observedDatabaseState: string;
+    observedProviderState: string;
+    failureCode: string | null;
+  }>
+> {
+  const r = await client.query(
+    `select classification, action_attempted, replay_outcome, observed_database_state,
+            observed_provider_state, failure_code
+       from kitluy_devices.device_renewal_reconciliations
+      where renewal_attempt_id = $1 order by sequence_no`,
+    [renewalAttemptId],
+  );
+  return r.rows.map((row) => ({
+    classification: row.classification,
+    actionAttempted: row.action_attempted,
+    replayOutcome: row.replay_outcome,
+    observedDatabaseState: row.observed_database_state,
+    observedProviderState: row.observed_provider_state,
+    failureCode: row.failure_code,
+  }));
 }
