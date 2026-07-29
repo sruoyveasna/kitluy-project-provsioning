@@ -21,6 +21,7 @@ import {
 } from "../../src/dev-crypto.js";
 import { runGovernedIssuance, type GovernedIssuanceGateway } from "../../src/issuance-adapter.js";
 import type { IncumbentDeviceKeySigner } from "../../src/same-key-renewal-issuance.js";
+import type { RotationGateway } from "../../src/rotate-key-renewal-issuance.js";
 import type {
   CredentialHeadRecord,
   IncumbentCredentialRecord,
@@ -679,5 +680,163 @@ export async function fleetCounts(
     reservations: Number(row.reservations),
     headGeneration: row.head_generation === null ? null : Number(row.head_generation),
     headVersion: row.head_version === null ? null : Number(row.head_version),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Rotation: policy, registration and activation
+// ---------------------------------------------------------------------------
+
+/**
+ * TEST-ONLY rotation enablement.
+ *
+ * Rotation stays DISABLED in the shipped policy. This names a test decision so
+ * the `renewal_policy_rotation_needs_decision_chk` CHECK is satisfied HONESTLY
+ * rather than bypassed — the constraint is the real control, and a test that
+ * dodged it would be testing nothing.
+ *
+ * Every caller runs inside `withDatabaseTransaction`, so the override is rolled
+ * back automatically. `restoreDevelopmentRotation` exists so a test can also
+ * prove the restore explicitly rather than trusting the rollback.
+ */
+export const TEST_ROTATION_DECISION_REF = "TEST-ONLY-ws11-prompt-2c";
+
+export async function enableDevelopmentRotation(
+  client: pg.PoolClient,
+  decisionRef: string = TEST_ROTATION_DECISION_REF,
+): Promise<void> {
+  await client.query(
+    `update kitluy_devices.renewal_policy
+        set allow_key_rotation = true, rotation_approved_by_decision_ref = $1
+      where environment = $2`,
+    [decisionRef, DEVELOPMENT],
+  );
+}
+
+export async function restoreDevelopmentRotation(client: pg.PoolClient): Promise<void> {
+  await client.query(
+    `update kitluy_devices.renewal_policy
+        set allow_key_rotation = false, rotation_approved_by_decision_ref = null
+      where environment = $1`,
+    [DEVELOPMENT],
+  );
+}
+
+export async function readRotationPolicy(
+  client: pg.PoolClient,
+): Promise<{ allowKeyRotation: boolean; decisionRef: string | null; defaultMode: string }> {
+  const r = await client.query(
+    `select allow_key_rotation, rotation_approved_by_decision_ref, default_renewal_mode
+       from kitluy_devices.renewal_policy where environment = $1`,
+    [DEVELOPMENT],
+  );
+  return {
+    allowKeyRotation: r.rows[0].allow_key_rotation === true,
+    decisionRef: r.rows[0].rotation_approved_by_decision_ref,
+    defaultMode: r.rows[0].default_renewal_mode,
+  };
+}
+
+/**
+ * The governed rotation writes, executed as the ISSUANCE SERVICE.
+ *
+ * Reads go as `postgres`: the executor can EXECUTE the governed functions and
+ * cannot SELECT the tables behind them, which is the boundary group 0131
+ * restored rather than widened.
+ */
+export function pgRotationGateway(client: pg.PoolClient): RotationGateway & {
+  readonly rolesObserved: string[];
+} {
+  const rolesObserved: string[] = [];
+
+  const governed = async (sql: string, params: unknown[]): Promise<Record<string, unknown>> =>
+    withRole(client, TEST_ROLES.issuanceService, async () => {
+      rolesObserved.push(await currentRole(client));
+      const savepoint = `rot_${randomUUID().replace(/-/g, "")}`;
+      await client.query(`savepoint ${savepoint}`);
+      try {
+        const result = await client.query<{ result: Record<string, unknown> }>(sql, params);
+        await client.query(`release savepoint ${savepoint}`);
+        return result.rows[0]?.result ?? {};
+      } catch (error) {
+        await client.query(`rollback to savepoint ${savepoint}`).catch(() => undefined);
+        throw error;
+      }
+    });
+
+  return {
+    rolesObserved,
+
+    async registerReplacementKey(input) {
+      const row = await governed(
+        `select kitluy_devices.register_generation_key_v2($1::uuid,$2,$3,$4,$5::integer) as result`,
+        [
+          input.renewalAttemptId,
+          input.providerKeyReference,
+          input.publicKeyPem,
+          input.publicKeyFingerprint,
+          input.keyGeneration,
+        ],
+      );
+      return {
+        outcome: row["outcome"] as "REGISTERED" | "ALREADY_REGISTERED",
+        keyId: String(row["key_id"] ?? ""),
+        state: String(row["state"] ?? ""),
+        providerKeyReference: String(row["provider_key_reference"] ?? ""),
+      };
+    },
+
+    async loadReplacementKey(renewalAttemptId) {
+      const r = await client.query(
+        `select id, state, key_generation, generation, public_key_fingerprint,
+                key_handle, renewal_attempt_id
+           from kitluy_devices.device_generation_keys
+          where renewal_attempt_id = $1`,
+        [renewalAttemptId],
+      );
+      const row = r.rows[0];
+      if (row === undefined) return null;
+      return {
+        keyId: row.id,
+        state: row.state,
+        keyGeneration: row.key_generation === null ? null : Number(row.key_generation),
+        generation: Number(row.generation),
+        publicKeyFingerprint: row.public_key_fingerprint,
+        providerKeyReference: row.key_handle,
+        renewalAttemptId: row.renewal_attempt_id,
+      };
+    },
+
+    async loadReservationStatus(renewalAttemptId) {
+      const r = await client.query(
+        `select status::text as s from kitluy_devices.device_renewal_reservations
+          where renewal_attempt_id = $1`,
+        [renewalAttemptId],
+      );
+      return r.rows[0]?.s ?? null;
+    },
+
+    async confirmProviderKeyActivation(input) {
+      const row = await governed(
+        `select kitluy_devices.confirm_provider_key_activation_v1(
+           $1::uuid,$2::uuid,$3::uuid,$4,$5,$6::integer,$7::integer,$8,$9,$10) as result`,
+        [
+          input.renewalAttemptId,
+          input.credentialId,
+          input.deviceRecordId,
+          input.environment,
+          input.purpose,
+          input.credentialGeneration,
+          input.keyGeneration,
+          input.providerKeyReference,
+          input.publicKeyFingerprint,
+          input.actorRef,
+        ],
+      );
+      return {
+        outcome: row["outcome"] as "ACTIVATED" | "ALREADY_ACTIVE",
+        keyId: String(row["key_id"] ?? ""),
+      };
+    },
   };
 }
