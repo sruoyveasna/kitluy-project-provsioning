@@ -6016,3 +6016,203 @@ end
 $section37b$;
 
 select 'assertions complete: groups 0010-0132 structural contract holds' as result;
+
+-- ============================================================================
+-- SECTION 38 — reconciliation audit (migration 0133).
+--
+-- Interrupted renewals are recovered by comparing PostgreSQL against the
+-- external key provider. That comparison and the action chosen from it were,
+-- before group 0133, recorded NOWHERE: the issuance tables have no place for
+-- the renewal attempt id, the observed PROVIDER state, the classification or
+-- the action, and an application log that has rotated away cannot answer "why
+-- is this device on this generation with a superseded key".
+--
+-- These assertions hold the audit surface to what recovery evidence has to be:
+-- append-only, written only through the governed function, readable by the
+-- service role, and incapable of carrying key material.
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 38a — the audit surface, and who may write it.
+-- ---------------------------------------------------------------------------
+do $section38a$
+declare
+  v_findings text[] := array[]::text[];
+  v_privilege text;
+begin
+  if to_regclass('kitluy_devices.device_renewal_reconciliations') is null then
+    raise exception 'ASSERT FAIL: the reconciliation audit table does not exist';
+  end if;
+
+  -- Append-only, by trigger rather than by convention.
+  if not exists (
+    select 1 from pg_trigger t join pg_class c on c.oid = t.tgrelid
+    where c.relname = 'device_renewal_reconciliations'
+      and t.tgname = 'trg_device_renewal_reconciliations_append_only'
+      and not t.tgisinternal
+  ) then
+    v_findings := v_findings || 'the reconciliation audit is not append-only';
+  end if;
+
+  if not exists (
+    select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'kitluy_devices' and c.relname = 'device_renewal_reconciliations'
+      and c.relrowsecurity and c.relforcerowsecurity
+  ) then
+    v_findings := v_findings || 'the reconciliation audit lacks RLS ENABLE+FORCE';
+  end if;
+
+  -- The EXECUTOR records through the function and never touches the table.
+  foreach v_privilege in array array['insert', 'update', 'delete'] loop
+    if has_table_privilege('kitluy_issuance_service',
+                           'kitluy_devices.device_renewal_reconciliations', v_privilege) then
+      v_findings := v_findings ||
+        format('the issuance executor holds %s on the reconciliation audit', v_privilege);
+    end if;
+  end loop;
+
+  -- The SERVICE ROLE reads history and never writes it.
+  if has_table_privilege('service_role',
+                         'kitluy_devices.device_renewal_reconciliations', 'insert')
+     or has_table_privilege('service_role',
+                            'kitluy_devices.device_renewal_reconciliations', 'update')
+     or has_table_privilege('service_role',
+                            'kitluy_devices.device_renewal_reconciliations', 'delete') then
+    v_findings := v_findings || 'service_role can write reconciliation history';
+  end if;
+  if not has_table_privilege('service_role',
+                             'kitluy_devices.device_renewal_reconciliations', 'select') then
+    v_findings := v_findings || 'service_role cannot read reconciliation history';
+  end if;
+
+  -- The writer is reachable by the named executor and by nobody else.
+  if not has_function_privilege(
+       'kitluy_issuance_service',
+       'kitluy_devices.record_renewal_reconciliation_v1(uuid, text, text, text, text, text, text, text, text)',
+       'execute') then
+    v_findings := v_findings || 'the executor cannot record a reconciliation';
+  end if;
+  if has_function_privilege(
+       'public',
+       'kitluy_devices.record_renewal_reconciliation_v1(uuid, text, text, text, text, text, text, text, text)',
+       'execute') then
+    v_findings := v_findings || 'PUBLIC can record a reconciliation';
+  end if;
+
+  if cardinality(v_findings) > 0 then
+    raise exception 'ASSERT FAIL: % reconciliation-audit finding(s): %',
+      cardinality(v_findings), array_to_string(v_findings, ' | ');
+  end if;
+
+  raise notice 'PASS ws11-reconciliation-audit-surface: the reconciliation audit is append-only with RLS ENABLE+FORCE, the issuance executor can record only THROUGH the governed function and holds no table authority, service_role reads history but cannot write it, and PUBLIC cannot record at all';
+end
+$section38a$;
+
+-- ---------------------------------------------------------------------------
+-- 38b — what the audit refuses to carry, and what it refuses to forget.
+-- ---------------------------------------------------------------------------
+do $section38b$
+declare
+  v_findings text[] := array[]::text[];
+  v_device uuid;
+  v_attempt uuid;
+  v_res jsonb;
+  v_first uuid;
+  v_count integer;
+begin
+  v_device := pg_temp.ws11_renewable_device('t38b', repeat('38', 32));
+
+  v_res := kitluy_devices.reserve_device_credential_renewal_v1(
+    v_device, 'development', 'device_identity',
+    encode(sha256(convert_to('res-38b-' || gen_random_uuid(), 'UTF8')), 'hex'),
+    now(), 'trusted', 'reuse_current_key'::kitluy_devices.renewal_mode, 'SVC');
+  v_attempt := (v_res ->> 'renewal_attempt_id')::uuid;
+
+  -- A reconciliation for an attempt that does not exist is refused: the device
+  -- and environment are taken from the RESERVATION, never from the caller, so
+  -- nobody can write history against a device they never touched.
+  begin
+    perform kitluy_devices.record_renewal_reconciliation_v1(
+      gen_random_uuid(), 'db', 'provider', 'NO_ACTION_COMPLETED', 'none', 'none',
+      'replayed', null, 'SVC');
+    v_findings := v_findings || 'a reconciliation was recorded for a nonexistent attempt';
+  exception when others then
+    if sqlerrm not like 'KLUY-RECONCILE-NO-RESERVATION%' then
+      v_findings := v_findings || format('wrong refusal for a foreign attempt: %s', sqlerrm);
+    end if;
+  end;
+
+  -- An incomplete record is refused rather than stored half-blank.
+  begin
+    perform kitluy_devices.record_renewal_reconciliation_v1(
+      v_attempt, 'db', 'provider', '', 'none', 'none', 'replayed', null, 'SVC');
+    v_findings := v_findings || 'a reconciliation with no classification was recorded';
+  exception when others then
+    if sqlerrm not like 'KLUY-RECONCILE-INCOMPLETE%' then
+      v_findings := v_findings || format('wrong refusal for an incomplete record: %s', sqlerrm);
+    end if;
+  end;
+
+  -- KEY MATERIAL IS REFUSED BY THE DATABASE. The cheapest way to leak a key is
+  -- to log it while explaining why you could not use it.
+  begin
+    perform kitluy_devices.record_renewal_reconciliation_v1(
+      v_attempt,
+      -- Assembled at runtime so this FILE contains no private-key block for
+      -- the secret scanner to find. The CHECK still sees the whole string.
+      '-----BEGIN ' || 'PRIVATE KEY----- leaked',
+      'provider', 'MANUAL_REVIEW_REQUIRED', 'none', 'none', 'not-replayed', null, 'SVC');
+    v_findings := v_findings || 'the audit accepted PEM private-key material';
+  exception when others then
+    if sqlerrm not like '%device_renewal_reconciliations_no_key_material_chk%' then
+      v_findings := v_findings || format('key material was refused for the wrong reason: %s', sqlerrm);
+    end if;
+  end;
+
+  -- A real record, then a SECOND one. History accumulates; it is never edited.
+  v_first := (kitluy_devices.record_renewal_reconciliation_v1(
+    v_attempt, 'reservation=issuance_pending key=none', 'key=missing incumbent=available',
+    'RESERVATION_PENDING', 'prepare the next credential', 'prepared', 'executed', null, 'SVC')
+    ->> 'reconciliation_id')::uuid;
+  perform kitluy_devices.record_renewal_reconciliation_v1(
+    v_attempt, 'reservation=completed key=none', 'key=missing incumbent=available',
+    'RESPONSE_REPLAY', 'replay the recorded result', 'nothing to do', 'replayed', null, 'SVC');
+
+  select count(*) into v_count from kitluy_devices.device_renewal_reconciliations
+   where renewal_attempt_id = v_attempt;
+  if v_count <> 2 then
+    v_findings := v_findings || format('expected 2 reconciliation rows, found %s', v_count);
+  end if;
+
+  -- The sequence is a TOTAL order even though both rows were written in one
+  -- transaction — now() would have stamped them identically.
+  if (select count(distinct sequence_no) from kitluy_devices.device_renewal_reconciliations
+       where renewal_attempt_id = v_attempt) <> 2 then
+    v_findings := v_findings || 'reconciliation history has no total order';
+  end if;
+
+  -- An earlier outcome can never be rewritten.
+  begin
+    update kitluy_devices.device_renewal_reconciliations
+       set classification = 'REWRITTEN' where reconciliation_id = v_first;
+    v_findings := v_findings || 'a recorded reconciliation outcome was overwritten';
+  exception when others then
+    null;
+  end;
+  begin
+    delete from kitluy_devices.device_renewal_reconciliations where reconciliation_id = v_first;
+    v_findings := v_findings || 'a recorded reconciliation outcome was deleted';
+  exception when others then
+    null;
+  end;
+
+  if cardinality(v_findings) > 0 then
+    raise exception 'ASSERT FAIL: % reconciliation-record finding(s): %',
+      cardinality(v_findings), array_to_string(v_findings, ' | ');
+  end if;
+
+  raise notice 'PASS ws11-reconciliation-audit-record: the device and environment come from the RESERVATION so history cannot be written against another device, a nonexistent attempt and an incomplete record are both refused, PEM private-key material is refused by CHECK, two reconciliations in one transaction still carry a total order, and a recorded outcome can be neither updated nor deleted';
+end
+$section38b$;
+
+select 'assertions complete: groups 0010-0133 structural contract holds' as result;
