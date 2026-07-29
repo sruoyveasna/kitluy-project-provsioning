@@ -2022,3 +2022,199 @@ of the other two was implemented as a stand-in), `KLRISK-REPO-001`,
 operational controls.** Not begun. Worker scheduling, cron and queue
 infrastructure, production key-provider durability, credential revocation and
 independent hostile review all remain absent.
+
+---
+
+## Renewal and credential-lifecycle worker runtime — IMPLEMENTED-IN-DEV component
+
+Groups 0125-0134 built reconciliation and credential-lifecycle advancement as
+callable services. Nothing could call them repeatedly and safely from more than
+one process. Migration group `0135` and `@kitluy/job-contracts` close that, and
+neither adds a scheduler.
+
+**The gap was proven by execution, not inferred.** Before a line was written the
+cloud database was probed for anything that could carry the work:
+
+```
+tables matching (job|queue|lease|dead_letter|worker|schedul)
+  -> exactly one: net.http_request_queue, owned by the pg_net EXTENSION
+columns matching (lease|next_attempt|attempt_count|backoff|dedup)
+  in any kitluy_* schema
+  -> none
+```
+
+**The Hub lease model was examined and deliberately NOT extended**, for two
+reasons that are facts rather than preferences. It lives in `kitluy_hub_local`,
+a SEPARATE database — a job table cannot lease work it cannot see. And its
+semantics are an ORDERED stream: the scan STOPS rather than skips, because
+skipping past an undelivered event silently reorders history. Device jobs are
+INDEPENDENT per device, so one stuck device must never block another device's
+renewal. Reusing it would have imported a head-of-line block as a feature.
+`kitluy_ops.claim_durable_jobs_v1` uses `FOR UPDATE SKIP LOCKED` for exactly the
+opposite reason.
+
+**A shared contract, not a device queue.** Nothing in group 0135 names a device,
+a credential or a key: work arrives as a job KIND and an opaque `subject_id`. A
+device-only queue would have to be rebuilt the first time any other subsystem
+needs durable retries, and two queues with two lease models is how one of them
+ends up subtly wrong. `@kitluy/job-contracts` — SCAFFOLDED since bootstrap — is
+the matching neutral package boundary and now has a relational contract to
+implement.
+
+**Placement was decided by the validator, not by taste.**
+`scripts/database/db-validate.mjs` allowlists exactly one control-plane schema:
+
+```js
+const CONTROL_PLANE_SCHEMAS = new Set(["kitluy_ops"]);
+```
+
+A new `kitluy_jobs` schema would fail `db:validate` for want of a data-dictionary
+entry. `kitluy_ops` is already declared as "migration and operations control
+plane; no tenant data".
+
+---
+
+## Two counters, because they answer different questions
+
+`attempt_count` is MONOTONIC evidence of how often a job was picked up.
+`deferral_count` records how many of those claims ended in "not due yet". The
+retry BUDGET is the difference.
+
+This was not the first design. The first `defer_durable_job_v1` refunded the
+claim by decrementing `attempt_count`, and the monotonicity trigger refused it —
+correctly. Conflating the two breaks one of them: refunding by decrementing
+falsifies the history, and charging deferrals to the budget would dead-letter a
+perfectly healthy device whose overlap simply ran the three days it was granted.
+Keeping both is the only version where neither lies. Asserted in the migration
+and in SQL section 40b.
+
+---
+
+## KEY_DESTRUCTION_NOT_AUTHORIZED is a completed job
+
+It is classified `terminal_success`, not `retryable`. An absent owner decision
+(KLREQ-031) is not a transient fault: retrying would produce a storm of identical
+evaluations that can only ever reach the same answer, and would eventually
+dead-letter a job whose result was correct every single time.
+
+Re-opening the question is handled by IDENTITY rather than by polling. The
+cleanup dedupe key includes the policy reference, so when an owner decision lands
+the reference changes, the key changes, and a NEW deduplicated job asks again.
+
+The cleanup handler contains no reference to a destroy operation — not a disabled
+one, not a guarded one, none — so there is no branch anyone could flip. Live
+evidence: `eligible: true, authorized: false`, job COMPLETED, provider destroy
+calls 0, database destroyed transitions 0, `destruction_enabled` still false.
+
+---
+
+## Defects found by executing group 0135
+
+All four were found by running the path, and all four are in code written this
+session. Recorded because the shape of each is a shape that recurs.
+
+**1. A worker that died AFTER starting could never be recovered.**
+`claim_durable_jobs_v1` reclaims expired leases from both `leased` and `running`,
+but `running -> leased` was missing from the transition table. The crash this
+whole model exists for was the one crash it could not recover from. Found by the
+live lease-expiry scenario; fixed in both layers.
+
+**2. Every attempt record failed with "permission denied for schema extensions".**
+`record_job_attempt_v1` is SECURITY DEFINER and runs as `kitluy_job_governor`,
+which holds no USAGE on `extensions` — so `extensions.digest()` was unreachable.
+Replaced with the `pg_catalog` builtin, removing the dependency rather than
+widening the grant. **The migration's own assertions had missed this because they
+only inspected grants and never CALLED the function**; an assertion that executes
+it was added.
+
+**3. Ownership transfer was refused before it began.** `alter table ... owner to
+kitluy_job_governor` failed with "permission denied for schema kitluy_ops":
+PostgreSQL requires a new owner to hold CREATE on the containing schema, and
+group 0000 revokes everything on `kitluy_ops` from public. Same family as
+KLRISK-DEVICE-004, where a named executor held EXECUTE on every function and no
+schema USAGE.
+
+**4. The worker role could not be assumed at all.** `set local role
+kitluy_worker_service` was refused because nothing granted membership. Group 0127
+makes `kitluy_issuance_service` assumable via `grant ... to service_role`; 0135
+now does the same. Membership grants the right to BECOME the worker and confers
+none of the worker's absent authorities, which the assertions check on the worker
+itself rather than on its members.
+
+---
+
+## A test-isolation defect worth recording
+
+The live suite was intermittently green. The cause was not the runtime: the
+concurrency scenarios must COMMIT (two real connections cannot share a rolled-back
+transaction), so a mid-test failure leaked claimable rows, and the next run's
+claim assertions picked up a stranger's job. Section 40b compounded it by
+committing a `queued` job under the REAL device job kind.
+
+Three corrections, because a flaky boundary test is worse than no boundary test:
+each concurrency scenario now uses its own unique job kind; section 40b uses a
+test-only kind rather than manufacturing claimable work in the production
+namespace; and the suite purges leftover `kitluy.test.%` jobs before it starts,
+so a failure reproduces where it happened instead of migrating to an unrelated
+test next run. Four consecutive full runs at 589/589 after the fix.
+
+---
+
+## Findings recorded, not fixed
+
+1. **No scheduler was deployed, and none was written.** No cron, no pg_cron, no
+   Kubernetes CronJob, no Supabase scheduled function, no timer in the package.
+   The runtime makes work CLAIMABLE; how often anything claims is a deployment
+   decision that has not been taken, and a migration that scheduled itself would
+   be that decision taken silently.
+
+2. **Provider durability across a real process restart is still NOT proven.** The
+   development provider is in memory, so a reconstructed worker is handed the
+   same instance. What IS proven is that recovery decisions come from OBSERVED
+   database state, re-read on every path. When a reconstructed worker cannot
+   resolve a provider key reference the job goes to `manual_review` with a typed
+   result and durable evidence, and never silently generates a replacement.
+   Unchanged from Prompt 3A and labelled in the suite header rather than hidden.
+
+3. **The renewal-reconcile job kind has no live end-to-end scenario of its own.**
+   Its handler and decision table are unit-tested, and the reconciliation state
+   machine it calls already has a 21-case live crash matrix from Prompt 3A. What
+   is NOT separately re-proved live is the job wrapper around it. Stated rather
+   than implied by the aggregate count.
+
+4. **`durable_jobs` pins `environment = 'development'`** by CHECK, as the device
+   tables do. It widens when pilot or production is authorized.
+
+5. **`R&D_HSA_AI_Agent_MVP.md` still fails `prettier --check`**, as at every
+   prior head. Untouched and explicitly excluded.
+
+6. **Node 22.23.0 is still not installed.** Only v24.15.0. Aggregate
+   verification remains non-authoritative; every gate ran individually with the
+   documented override and no config file was changed.
+
+---
+
+## Risk register status after Prompt 3C
+
+**OPEN, unchanged and NOT closed:** `KLRISK-DEVICE-003` (OPTION B — the
+device-identity package is still the only cryptographic verifier),
+`KLRISK-DEVICE-007` (still no governed credential revocation anywhere; overlap
+RETIREMENT is not revocation, key DESTRUCTION is not revocation, and a scheduled
+executor is not revocation either), `KLRISK-REPO-001`, `KLRISK-REPO-002`.
+
+**OPEN owner decision:** `KLREQ-031` — device private-key destruction. Unchanged
+and deliberately not closed. The cleanup job evaluates and completes; it destroys
+nothing and contains no code that could.
+
+**CORRECTED, pending independent hostile review:** `KLRISK-DEVICE-008`,
+`KLRISK-DEVICE-009`, `KLRISK-DEVICE-010`.
+
+**No new KLRISK-DEVICE entry was opened.** The four defects above are in code
+first written in this session and corrected before it shipped; none describes a
+weakness that reached a prior head. Recording them as risks against the shipped
+system would misstate what the register is for.
+
+**Still pending: Prompt 3D — governed credential revocation and recovery
+disposition.** Not begun. Production scheduling and deployment cadence, external
+queue infrastructure, production key-provider durability, credential revocation
+and independent hostile review all remain absent.
