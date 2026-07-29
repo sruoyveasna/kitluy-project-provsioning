@@ -95,6 +95,21 @@ class PrivateKeyVault {
   has(handle: string): boolean {
     return this.#keys.has(handle);
   }
+
+  /**
+   * Drops the private half. KLD-2026-07-29-DEVICE-KEY-DESTRUCTION-001.
+   *
+   * Returns whether a key was actually held, so a caller can tell "erased" from
+   * "there was nothing here" — a distinction KLREQ-031 depends on, because
+   * absence must never be reported as destruction.
+   *
+   * DEVELOPMENT ONLY, and software-backed: this removes a process-memory entry.
+   * It is not hardware-backed erasure and proves nothing about a TPM or secure
+   * element (BLK-005 §4 keeps that certification BLOCKED).
+   */
+  destroy(handle: string): boolean {
+    return this.#keys.delete(handle);
+  }
 }
 
 const vault = new PrivateKeyVault();
@@ -594,4 +609,20 @@ export function generateVaultKey(handlePrefix: string): GeneratedKey {
 /** Signs with a vault-held key WITHOUT surrendering it. */
 export function vaultSign(handle: string, payload: Uint8Array): Uint8Array {
   return vault.signWith(handle, payload);
+}
+
+/**
+ * Erases a vault-held private key. Returns whether one was actually held.
+ *
+ * A test proves destruction by observing that {@link vaultSign} now REFUSES —
+ * not by reading a flag, because a flag is what a broken erasure would still
+ * set.
+ */
+export function destroyVaultKey(handle: string): boolean {
+  return vault.destroy(handle);
+}
+
+/** Whether the vault still holds a private half under this handle. */
+export function vaultHolds(handle: string): boolean {
+  return vault.has(handle);
 }

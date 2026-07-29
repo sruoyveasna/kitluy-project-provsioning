@@ -39,10 +39,12 @@ import type { TrustEnvironment } from "./environments.js";
 import { RequiredCryptographicValueError } from "./errors.js";
 import {
   DEV_SIGNATURE_ALGORITHM,
+  destroyVaultKey,
   generateVaultKey,
   vaultSign,
   type GeneratedKey,
 } from "./dev-crypto.js";
+import { createHash } from "node:crypto";
 import type { DeviceKeyMetadata } from "./index.js";
 
 /**
@@ -117,12 +119,91 @@ export interface ActivationRequest extends ReplacementKeyScope {
   readonly credentialId?: string;
 }
 
+/**
+ * The ONLY two provider answers `confirm_key_destruction_v1` accepts.
+ *
+ * Deliberately does NOT include "not found". KLREQ-031: absence is not
+ * evidence of destruction — a key the provider cannot find may be a key it
+ * never held, a key behind a failed lookup, or a key in another region.
+ */
+export type ProviderDestructionResult = "DESTROYED" | "ALREADY_DESTROYED";
+
+/** Every binding the provider re-checks before it erases anything. */
+export interface ProviderDestructionRequest {
+  readonly destructionRequestId: string;
+  readonly providerKeyReference: string;
+  readonly publicKeyFingerprint: string;
+  readonly keyGeneration: number;
+  readonly deviceRecordId: string;
+  readonly environment: string;
+  readonly purpose: string;
+}
+
+/**
+ * Durable provider evidence. Contains NO key material and no provider secret —
+ * a digest of the attestation and a reference by which the provider can be
+ * asked again, which is what survives the key itself.
+ */
+export interface ProviderDestructionReceipt {
+  readonly destructionRequestId: string;
+  readonly providerKeyReference: string;
+  readonly publicKeyFingerprint: string;
+  readonly keyGeneration: number;
+  readonly result: ProviderDestructionResult;
+  /** SHA-256 of the provider attestation, hex. Never the attestation itself. */
+  readonly receiptDigest: string;
+  readonly responseReference: string;
+  readonly requestedAt: Date;
+  readonly completedAt: Date;
+  /**
+   * Development provider only. Recorded so no reader can mistake a simulated
+   * erasure for hardware-backed erasure evidence (KLREQ-031, BLK-005 §4).
+   */
+  readonly attestationKind: "development_simulated" | "provider_attested";
+}
+
+/**
+ * Raised when the provider CANNOT SAY whether the key was destroyed.
+ *
+ * Separate from `ReplacementKeyError` because the two demand opposite
+ * responses: a refusal means "it was not destroyed, and the database must stay
+ * non-destroyed"; an ambiguous outcome means "nobody knows yet, and the
+ * database must stay non-destroyed AND a human must reconcile it". Collapsing
+ * them is how a timeout becomes a success.
+ */
+export class ProviderDestructionAmbiguousError extends Error {
+  readonly providerKeyReference: string;
+  /** Redacted CLASS of failure. Never a provider payload. */
+  readonly classification: "TIMEOUT" | "CONNECTION_FAILED" | "INDETERMINATE";
+
+  constructor(
+    providerKeyReference: string,
+    classification: "TIMEOUT" | "CONNECTION_FAILED" | "INDETERMINATE",
+    detail: string,
+  ) {
+    super(`PROVIDER_DESTRUCTION_AMBIGUOUS(${classification}): ${detail}`);
+    this.name = "ProviderDestructionAmbiguousError";
+    this.providerKeyReference = providerKeyReference;
+    this.classification = classification;
+  }
+}
+
 export interface ReplacementKeyProvider {
   generateReplacementKey(scope: ReplacementKeyScope): Promise<ReplacementKeyDescriptor>;
   describeReplacementKey(renewalAttemptId: string): ReplacementKeyDescriptor | null;
   proveReplacementPossession(providerKeyReference: string, payload: Uint8Array): Uint8Array;
   activateReplacementKey(request: ActivationRequest): Promise<ReplacementKeyDescriptor>;
   abandonReplacementKey(renewalAttemptId: string, reason: string): ReplacementKeyDescriptor;
+  /**
+   * KLD-2026-07-29-DEVICE-KEY-DESTRUCTION-001. Erases the private half and
+   * returns EVIDENCE that it did.
+   *
+   * The return type is a receipt, not `void` and not a boolean, because
+   * KLREQ-031 forbids the database confirming a destruction it has no evidence
+   * for. A provider that cannot say what it destroyed has not proved it
+   * destroyed anything.
+   */
+  destroyProviderKey(request: ProviderDestructionRequest): Promise<ProviderDestructionReceipt>;
 }
 
 interface StoredReplacementKey {
@@ -131,6 +212,12 @@ interface StoredReplacementKey {
   state: ProviderKeyLifecycle;
   activatedAt: Date | null;
   abandonReason: string | null;
+  /**
+   * KLREQ-031: the receipt SURVIVES the key. It is kept here after the private
+   * half is gone so a later `ALREADY_DESTROYED` can return the evidence the
+   * first destruction produced rather than a fresh assertion.
+   */
+  destructionReceipt: ProviderDestructionReceipt | null;
 }
 
 /**
@@ -148,6 +235,7 @@ export class DevelopmentReplacementKeyProvider implements ReplacementKeyProvider
 
   #generations = 0;
   #activations = 0;
+  #destructions = 0;
 
   /** Counters, so a test can prove generation happened exactly once. */
   get generationCount(): number {
@@ -155,6 +243,10 @@ export class DevelopmentReplacementKeyProvider implements ReplacementKeyProvider
   }
   get activationCount(): number {
     return this.#activations;
+  }
+  /** So a test can prove the provider was called exactly once per destruction. */
+  get destructionCount(): number {
+    return this.#destructions;
   }
 
   /**
@@ -201,6 +293,7 @@ export class DevelopmentReplacementKeyProvider implements ReplacementKeyProvider
       state: "generated",
       activatedAt: null,
       abandonReason: null,
+      destructionReceipt: null,
     };
     this.#byAttempt.set(scope.renewalAttemptId, stored);
     this.#byReference.set(key.handle, scope.renewalAttemptId);
@@ -326,6 +419,101 @@ export class DevelopmentReplacementKeyProvider implements ReplacementKeyProvider
     return this.#describe(stored);
   }
 
+  /**
+   * Erases the private half and returns a receipt.
+   *
+   * IDEMPOTENT, and the idempotent answer is a DIFFERENT one: a key already
+   * destroyed returns `ALREADY_DESTROYED` with the receipt it was destroyed
+   * under the first time, not a fresh `DESTROYED`. KLREQ-031 accepts
+   * `ALREADY_DESTROYED` only "with matching prior evidence", so the prior
+   * evidence is what is returned.
+   *
+   * Every binding is re-checked against what the provider itself holds. A
+   * changed reference, fingerprint or generation REFUSES — those are the three
+   * ways a destruction request could name a key other than the one that was
+   * approved, and erasing the wrong private key is not recoverable.
+   */
+  async destroyProviderKey(
+    request: ProviderDestructionRequest,
+  ): Promise<ProviderDestructionReceipt> {
+    const stored = this.#resolve(request.providerKeyReference);
+
+    if (stored.key.fingerprint !== request.publicKeyFingerprint) {
+      throw new ReplacementKeyError(
+        "PROVIDER_KEY_FINGERPRINT_MISMATCH",
+        "the fingerprint presented for destruction is not the one the provider holds",
+      );
+    }
+    if (stored.scope.keyGeneration !== request.keyGeneration) {
+      throw new ReplacementKeyError(
+        "PROVIDER_KEY_WRONG_GENERATION",
+        `this key is key generation ${stored.scope.keyGeneration}, not ${request.keyGeneration}`,
+      );
+    }
+    if (stored.scope.deviceRecordId !== request.deviceRecordId) {
+      throw new ReplacementKeyError(
+        "PROVIDER_KEY_WRONG_DEVICE",
+        "the key presented for destruction belongs to another device",
+      );
+    }
+    if (stored.scope.environment !== request.environment) {
+      throw new ReplacementKeyError(
+        "PROVIDER_KEY_WRONG_SCOPE",
+        "the key presented for destruction belongs to another environment",
+      );
+    }
+
+    if (stored.state === "destroyed") {
+      const prior = stored.destructionReceipt;
+      if (prior === null) {
+        // Destroyed with no receipt is not evidence of anything. Refusing here
+        // keeps the database non-destroyed rather than confirming on a memory.
+        throw new ProviderDestructionAmbiguousError(
+          request.providerKeyReference,
+          "INDETERMINATE",
+          "the key is marked destroyed but the provider holds no receipt for it",
+        );
+      }
+      return {
+        ...prior,
+        result: "ALREADY_DESTROYED",
+        destructionRequestId: request.destructionRequestId,
+      };
+    }
+
+    const requestedAt = new Date();
+    // DEVELOPMENT ONLY: the vault drops the private half. This is a software
+    // erasure and is recorded as one — it is NOT hardware-backed erasure and no
+    // reader may treat it as such (KLREQ-031; BLK-005 §4 keeps TPM/secure-element
+    // certification BLOCKED).
+    destroyVaultKey(stored.key.handle);
+    stored.state = "destroyed";
+    const completedAt = new Date();
+
+    const receipt: ProviderDestructionReceipt = {
+      destructionRequestId: request.destructionRequestId,
+      providerKeyReference: stored.key.handle,
+      publicKeyFingerprint: stored.key.fingerprint,
+      keyGeneration: stored.scope.keyGeneration,
+      result: "DESTROYED",
+      // A digest over the PUBLIC bindings and the instant. No private material
+      // is an input, so the receipt can never leak the key it attests to.
+      receiptDigest: developmentReceiptDigest(
+        stored.key.handle,
+        stored.key.fingerprint,
+        stored.scope.keyGeneration,
+        completedAt,
+      ),
+      responseReference: `dev-destruction:${request.destructionRequestId}`,
+      requestedAt,
+      completedAt,
+      attestationKind: "development_simulated",
+    };
+    stored.destructionReceipt = receipt;
+    this.#destructions += 1;
+    return receipt;
+  }
+
   #resolve(providerKeyReference: string): StoredReplacementKey {
     const attemptId = this.#byReference.get(providerKeyReference);
     const stored = attemptId === undefined ? undefined : this.#byAttempt.get(attemptId);
@@ -359,6 +547,34 @@ export class DevelopmentReplacementKeyProvider implements ReplacementKeyProvider
       },
     };
   }
+}
+
+/**
+ * The development attestation digest.
+ *
+ * Inputs are PUBLIC ONLY — the provider reference, the public-key fingerprint,
+ * the key generation and the completion instant. No private material is an
+ * input, so the receipt cannot leak the key it attests to, and a receipt that
+ * survives the key (which KLREQ-031 requires) is safe to keep for ever.
+ */
+function developmentReceiptDigest(
+  providerKeyReference: string,
+  publicKeyFingerprint: string,
+  keyGeneration: number,
+  completedAt: Date,
+): string {
+  return createHash("sha256")
+    .update(
+      [
+        "kitluy.device.key.destruction.receipt.v1",
+        providerKeyReference,
+        publicKeyFingerprint,
+        String(keyGeneration),
+        completedAt.toISOString(),
+      ].join("\n"),
+      "utf8",
+    )
+    .digest("hex");
 }
 
 /**
