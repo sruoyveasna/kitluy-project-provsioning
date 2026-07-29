@@ -38,7 +38,12 @@
 import { createPrivateKey, createPublicKey, generateKeyPairSync, sign, verify } from "node:crypto";
 import { createHash, randomUUID } from "node:crypto";
 
-import type { SigningPurpose, TrustEnvironment } from "./environments.js";
+import {
+  SIGNING_PURPOSES,
+  TRUST_ENVIRONMENTS,
+  type SigningPurpose,
+  type TrustEnvironment,
+} from "./environments.js";
 import { RequiredCryptographicValueError } from "./errors.js";
 import type { DeviceKeyMetadata, DeviceKeyProvider, DeviceRecordId } from "./index.js";
 import type { HardwareTrustLevel } from "./index.js";
@@ -163,6 +168,97 @@ export function tbsBytes(tbs: TbsCertificate): Uint8Array {
     ].join("\n"),
     "utf8",
   );
+}
+
+/** Field counts either side of the PEM in {@link tbsBytes}. Fixed, not guessed. */
+const TBS_FIELDS_BEFORE_PEM = 7;
+const TBS_FIELDS_AFTER_PEM = 7;
+
+/**
+ * Rebuilds a {@link TbsCertificate} from its canonical bytes.
+ *
+ * Needed because a credential loaded from STORAGE arrives as the canonical
+ * string, and the chain has to be verified from what was actually stored rather
+ * than from a CA that happens to still be in memory.
+ *
+ * The subject PEM is the only field that itself contains newlines, and it sits
+ * at a FIXED position — seven fields before it, seven after. So the split is
+ * positional: the first seven lines, the last seven lines, and everything
+ * between them is the PEM. Locating it by content (`-----BEGIN`) would happily
+ * accept a structure whose other fields had been re-ordered.
+ *
+ * The parsed structure is RE-SERIALIZED and compared byte for byte before it is
+ * returned. Anything that does not round-trip is refused rather than repaired:
+ * a stored credential must be exactly the bytes that were signed, and a
+ * "helpful" reconstruction would verify a signature over something else.
+ *
+ * Returns null on any malformed input. It never throws, so a corrupt row
+ * becomes a typed refusal at the caller instead of an exception mid-chain.
+ */
+export function tbsFromCanonicalBytes(canonical: string): TbsCertificate | null {
+  const lines = canonical.split("\n");
+  if (lines.length < TBS_FIELDS_BEFORE_PEM + 1 + TBS_FIELDS_AFTER_PEM) return null;
+
+  const head = lines.slice(0, TBS_FIELDS_BEFORE_PEM);
+  const tail = lines.slice(lines.length - TBS_FIELDS_AFTER_PEM);
+  const subjectPublicKeyPem = lines
+    .slice(TBS_FIELDS_BEFORE_PEM, lines.length - TBS_FIELDS_AFTER_PEM)
+    .join("\n");
+
+  if (head[0] !== "kitluy.cert.v1") return null;
+
+  const role = head[3];
+  const purpose = head[4];
+  const environment = head[5];
+  if (role !== "root" && role !== "intermediate" && role !== "device") return null;
+  if (!SIGNING_PURPOSES.includes(purpose as SigningPurpose)) return null;
+  if (!TRUST_ENVIRONMENTS.includes(environment as TrustEnvironment)) return null;
+
+  // §4 admits no other value from a development CA, and the field is typed
+  // `false`. A canonical form claiming otherwise is not parsed into a structure
+  // the type system would then vouch for.
+  if (tail[4] !== "false") return null;
+
+  const generationRaw = tail[2];
+  let certificateGeneration: number | null = null;
+  if (generationRaw !== "-") {
+    const parsed = Number(generationRaw);
+    if (!Number.isInteger(parsed)) return null;
+    certificateGeneration = parsed;
+  }
+
+  const hardwareTrustLevelRaw = tail[3];
+  if (
+    hardwareTrustLevelRaw !== "-" &&
+    hardwareTrustLevelRaw !== "development_software" &&
+    hardwareTrustLevelRaw !== "tpm_2_0" &&
+    hardwareTrustLevelRaw !== "secure_element"
+  ) {
+    return null;
+  }
+
+  const tbs: TbsCertificate = {
+    certificateId: head[1] ?? "",
+    serialNumber: head[2] ?? "",
+    role,
+    purpose: purpose as SigningPurpose,
+    environment: environment as TrustEnvironment,
+    subjectFingerprint: head[6] ?? "",
+    subjectPublicKeyPem,
+    issuerKeyId: tail[0] ?? "",
+    deviceRecordId: tail[1] === "-" ? null : (tail[1] ?? ""),
+    certificateGeneration,
+    hardwareTrustLevel: hardwareTrustLevelRaw === "-" ? null : hardwareTrustLevelRaw,
+    productionEligible: false,
+    notBefore: tail[5] ?? "",
+    notAfter: tail[6] ?? "",
+  };
+
+  // The round trip is the whole guarantee. Without it a field containing a
+  // newline anywhere else would silently shift every later field by one.
+  if (Buffer.from(tbsBytes(tbs)).toString("utf8") !== canonical) return null;
+
+  return tbs;
 }
 
 function verifyAgainst(publicKeyPem: string, payload: Uint8Array, signature: Uint8Array): boolean {

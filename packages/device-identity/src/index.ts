@@ -788,3 +788,4 @@ export * from "./dev-crypto.js";
 export * from "./certificate-issuance.js";
 export * from "./issuance-adapter.js";
 export * from "./replacement-key-pop.js";
+export * from "./same-key-renewal-preflight.js";
