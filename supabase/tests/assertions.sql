@@ -5762,3 +5762,257 @@ end
 $executor_probe$;
 
 select 'assertions complete: groups 0010-0131 structural contract holds' as result;
+
+-- ============================================================================
+-- SECTION 37 — same-key renewal finalization (migration 0132).
+--
+-- Two defects, both found by executing a real same-key renewal end to end as
+-- kitluy_issuance_service, and both asserted BEHAVIOURALLY here rather than by
+-- reading the catalogue.
+--
+-- A. The overlap window compared DEVICE TRUSTED TIME against SERVER TIME.
+--    Finalization derives overlap_ends_at from the new credential's not_before
+--    (trusted time); group 0125's trigger bounded it by updated_at (now()).
+--    KLD-2026-07-28-002 §12 separates those clocks on purpose, so any positive
+--    skew — measured as little as 69ms — refused a legitimate renewal. The
+--    probe below prepares with the device clock DELIBERATELY AHEAD, which is
+--    exactly the case that used to fail.
+--
+-- B. A reuse_current_key reservation could never reach `completed`. The only
+--    writer of that status requires a provider key bound to the renewal
+--    attempt, and only rotation ever creates one, so a same-key renewal stayed
+--    `issuance_pending` for ever and its generation slot stayed blocked.
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 37a — a same-key renewal finalizes with the device clock AHEAD, and completes.
+-- ---------------------------------------------------------------------------
+do $section37a$
+declare
+  v_profile uuid;
+  v_device uuid;
+  v_token text := encode(sha256(convert_to('t37a-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_payload text := encode(sha256(convert_to('p37a-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_fp text := repeat('37', 32);
+  v_idem1 text := encode(sha256(convert_to('i37a-1-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_idem2 text := encode(sha256(convert_to('i37a-2-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_req1 text := 'rq-37a-1-' || gen_random_uuid();
+  v_req2 text := 'rq-37a-2-' || gen_random_uuid();
+  v_issued_at timestamptz := now() - interval '21 days';
+  v_ahead timestamptz;
+  v_prep jsonb;
+  v_res jsonb;
+  v_fin jsonb;
+  v_links jsonb;
+  v_head kitluy_devices.device_credential_heads;
+  v_new kitluy_devices.device_credentials;
+  v_status text;
+begin
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+
+  v_device := kitluy_devices.enroll_device_v1(
+    'WS11-T37A-' || gen_random_uuid(), v_profile, v_issued_at,
+    v_fp, 'ed25519', 'software', 'STATION-37A', 'OP-37A',
+    jsonb_build_array(
+      jsonb_build_object('signal_type','mac_address','signal_value','37:0a:' || substr(md5(random()::text),1,6) || ':01'),
+      jsonb_build_object('signal_type','board_serial','signal_value','board-37a-' || gen_random_uuid()),
+      jsonb_build_object('signal_type','storage_serial','signal_value','nvme-37a-' || gen_random_uuid())));
+  perform kitluy_devices.create_device_claim_v1(
+    v_device, '00000000-0000-4000-8000-000000000011',
+    '00000000-0000-4000-8000-000000000015', '00000000-0000-4000-8000-000000000018',
+    v_token, v_payload, 900, 'OP-37A');
+  perform kitluy_devices.redeem_device_claim_v1(v_token, v_payload, v_device, 'HUB-37A');
+
+  v_links := jsonb_build_array(
+    jsonb_build_object('link_position', 0, 'role', 'root', 'subject_fingerprint', repeat('a7', 32),
+                       'issuer_key_id', 'root-37a', 'canonical_tbs', 'ROOT-TBS-37A',
+                       'detached_signature_b64', encode(decode('aa', 'hex'), 'base64')),
+    jsonb_build_object('link_position', 1, 'role', 'intermediate', 'subject_fingerprint', repeat('b7', 32),
+                       'issuer_key_id', 'root-37a', 'canonical_tbs', 'ICA-TBS-37A',
+                       'detached_signature_b64', encode(decode('bb', 'hex'), 'base64')));
+
+  -- GENERATION 1, issued 21 days ago so the renewal window is open.
+  v_prep := kitluy_devices.prepare_device_credential_issuance_v1(
+    v_req1, v_device, 'development', 'device_identity', 1, 'PUBKEY-PEM-37A',
+    v_fp, v_idem1, repeat('9', 64), 'ed25519', repeat('8', 64),
+    decode('a1b2c3', 'hex'), true, 'ica-key-37a', v_issued_at, 'trusted', 'ISSUANCE-SVC');
+  perform kitluy_devices.record_device_credential_signature_v1(
+    v_req1, v_prep ->> 'canonical_tbs_hash', decode('deadbeef', 'hex'), true, 'ISSUANCE-SVC');
+  perform kitluy_devices.finalize_device_credential_issuance_v1(v_req1, v_links, 'ISSUANCE-SVC');
+
+  -- RESERVE the same-key renewal.
+  v_res := kitluy_devices.reserve_device_credential_renewal_v1(
+    v_device, 'development', 'device_identity',
+    encode(sha256(convert_to('res-37a-' || gen_random_uuid(), 'UTF8')), 'hex'),
+    now(), 'trusted', 'reuse_current_key'::kitluy_devices.renewal_mode, 'ISSUANCE-SVC');
+  if v_res ->> 'outcome' <> 'RESERVED' then
+    raise exception 'ASSERT FAIL: the same-key renewal did not reserve: %', v_res;
+  end if;
+  if v_res ->> 'status' <> 'issuance_pending' then
+    raise exception 'ASSERT FAIL: a reuse_current_key reservation should be issuance_pending, got %',
+      v_res ->> 'status';
+  end if;
+
+  -- GENERATION 2, prepared with the DEVICE CLOCK AHEAD of the server clock.
+  -- This is precisely the case group 0125's trigger refused: not_before ends up
+  -- later than now(), so `not_before + 3 days` exceeded `now() + 3 days`.
+  v_ahead := now() + interval '2 seconds';
+  v_prep := kitluy_devices.prepare_device_credential_issuance_v1(
+    v_req2, v_device, 'development', 'device_identity', 1, 'PUBKEY-PEM-37A',
+    v_fp, v_idem2, repeat('7', 64), 'ed25519', repeat('6', 64),
+    decode('c3b2a1', 'hex'), true, 'ica-key-37a', v_ahead, 'trusted', 'ISSUANCE-SVC');
+
+  if (v_prep ->> 'certificate_generation')::integer <> 2 then
+    raise exception 'ASSERT FAIL: renewal preparation reserved generation %, expected 2',
+      v_prep ->> 'certificate_generation';
+  end if;
+
+  perform kitluy_devices.record_device_credential_signature_v1(
+    v_req2, v_prep ->> 'canonical_tbs_hash', decode('beefdead', 'hex'), true, 'ISSUANCE-SVC');
+
+  begin
+    v_fin := kitluy_devices.finalize_device_credential_issuance_v1(v_req2, v_links, 'ISSUANCE-SVC');
+  exception when others then
+    if sqlerrm like 'KLUY-CRED-OVERLAP-EXCEEDED%' then
+      raise exception
+        'ASSERT FAIL: the group-0132 overlap correction is missing — a renewal prepared with the device clock ahead of the server clock was refused: %', sqlerrm;
+    end if;
+    raise;
+  end;
+
+  if v_fin ->> 'outcome' <> 'ISSUED' then
+    raise exception 'ASSERT FAIL: renewal finalization did not issue: %', v_fin;
+  end if;
+
+  select * into v_head from kitluy_devices.device_credential_heads
+   where device_record_id = v_device;
+  select * into v_new from kitluy_devices.device_credentials
+   where device_record_id = v_device and certificate_generation = 2;
+
+  if v_head.current_generation <> 2 or v_head.previous_generation <> 1 then
+    raise exception 'ASSERT FAIL: the head did not advance 1 -> 2 (current %, previous %)',
+      v_head.current_generation, v_head.previous_generation;
+  end if;
+  -- The overlap is anchored on the NEW credential's own validity start, and is
+  -- exactly three days of it.
+  if v_head.overlap_ends_at <> v_new.not_before + interval '3 days' then
+    raise exception
+      'ASSERT FAIL: overlap ends % but the new credential starts % — the overlap is not anchored on the credential clock',
+      v_head.overlap_ends_at, v_new.not_before;
+  end if;
+  if v_new.not_before <= now() then
+    raise exception
+      'ASSERT FAIL: the probe did not actually exercise a device clock AHEAD of the server clock';
+  end if;
+  if v_new.public_key_fingerprint <> v_fp then
+    raise exception 'ASSERT FAIL: the renewed credential attests to a different key';
+  end if;
+
+  -- DEFECT B: the reservation COMPLETED, atomically with the credential.
+  select status::text into v_status from kitluy_devices.device_renewal_reservations
+   where device_record_id = v_device;
+  if v_status <> 'completed' then
+    raise exception
+      'ASSERT FAIL: the same-key reservation is % rather than completed — group 0130 left `completed` reachable only through provider activation, which same-key renewal never performs',
+      v_status;
+  end if;
+
+  -- No replacement key was created, and nothing waits for provider activation.
+  if exists (select 1 from kitluy_devices.device_generation_keys
+              where device_record_id = v_device) then
+    raise exception 'ASSERT FAIL: a same-key renewal created a provider key row';
+  end if;
+
+  raise notice 'PASS ws11-same-key-renewal-finalization: a reuse_current_key renewal prepared with the DEVICE CLOCK AHEAD of the server clock finalizes, the head advances 1 -> 2, the overlap is anchored on the new credential''s own not_before at exactly three days, the fingerprint is unchanged, the reservation reaches completed atomically with the credential, and no provider key row is created';
+end
+$section37a$;
+
+-- ---------------------------------------------------------------------------
+-- 37b — the completion trigger BINDS before it completes, and leaves rotation
+--       alone.
+-- ---------------------------------------------------------------------------
+do $section37b$
+declare
+  v_findings text[] := array[]::text[];
+  v_src text;
+begin
+  -- Both triggers armed, on the right tables.
+  if not exists (
+    select 1 from pg_trigger t
+    join pg_class c on c.oid = t.tgrelid
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'kitluy_devices' and c.relname = 'device_credentials'
+      and t.tgname = 'trg_device_credentials_complete_same_key_renewal' and not t.tgisinternal
+  ) then
+    v_findings := v_findings || 'the same-key completion trigger is not armed on device_credentials';
+  end if;
+  if not exists (
+    select 1 from pg_trigger t
+    join pg_class c on c.oid = t.tgrelid
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'kitluy_devices' and c.relname = 'device_credential_heads'
+      and t.tgname = 'trg_device_heads_overlap' and not t.tgisinternal
+  ) then
+    v_findings := v_findings || 'the overlap trigger is not armed on device_credential_heads';
+  end if;
+
+  -- The completion trigger must refuse a key change and must not touch
+  -- rotation. Asserted on the definition because reaching those branches needs
+  -- a deliberately corrupt renewal, which the governed path will not produce.
+  select pg_get_functiondef(p.oid) into v_src
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'kitluy_devices' and p.proname = 'complete_same_key_renewal';
+
+  if v_src is null then
+    v_findings := v_findings || 'complete_same_key_renewal() does not exist';
+  else
+    if v_src not like '%KLUY-RENEWAL-KEY-CHANGED%' then
+      v_findings := v_findings ||
+        'the completion trigger does not refuse a finalization against a different key';
+    end if;
+    if v_src not like '%renewal_mode <> ''reuse_current_key''%' then
+      v_findings := v_findings ||
+        'the completion trigger does not leave rotation to provider activation';
+    end if;
+    if v_src not like '%KLUY-RENEWAL-ASSIGNMENT-BINDING%'
+       or v_src not like '%KLUY-RENEWAL-GENERATION-BINDING%' then
+      v_findings := v_findings || 'the completion trigger does not bind generation and assignment';
+    end if;
+  end if;
+
+  -- The overlap rule is anchored on the credential clock, not the server clock.
+  select pg_get_functiondef(p.oid) into v_src
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'kitluy_devices' and p.proname = 'enforce_overlap_window';
+  if v_src not like '%v_new_not_before%' then
+    v_findings := v_findings ||
+      'enforce_overlap_window no longer anchors the three-day maximum on the new credential not_before';
+  end if;
+  if v_src not like '%KLUY-CRED-OVERLAP-BEYOND-EXPIRY%' then
+    v_findings := v_findings ||
+      'enforce_overlap_window lost the cap against the previous credential expiry';
+  end if;
+
+  -- Group 0130/0131 containment is untouched.
+  if (select allow_key_rotation from kitluy_devices.renewal_policy
+       where environment = 'development') then
+    v_findings := v_findings || 'key rotation became enabled in the shipped development policy';
+  end if;
+  if has_table_privilege('kitluy_issuance_service',
+                         'kitluy_devices.device_renewal_reservations', 'update')
+     or has_table_privilege('kitluy_issuance_service',
+                            'kitluy_devices.device_credentials', 'insert') then
+    v_findings := v_findings || 'the issuance executor gained authority it must not have';
+  end if;
+
+  if cardinality(v_findings) > 0 then
+    raise exception 'ASSERT FAIL: % same-key finalization finding(s): %',
+      cardinality(v_findings), array_to_string(v_findings, ' | ');
+  end if;
+
+  raise notice 'PASS ws11-same-key-completion-binding: both group-0132 triggers are armed, the completion trigger binds generation, assignment and the incumbent fingerprint before completing and leaves rotation to provider activation, the overlap rule is anchored on the new credential''s not_before while keeping the previous-expiry cap, rotation stays disabled and the issuance executor gained no table authority';
+end
+$section37b$;
+
+select 'assertions complete: groups 0010-0132 structural contract holds' as result;
