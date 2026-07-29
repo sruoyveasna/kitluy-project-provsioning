@@ -6237,47 +6237,101 @@ select 'assertions complete: groups 0010-0133 structural contract holds' as resu
 do $section39a$
 declare
   v_findings text[] := array[]::text[];
+  v_p kitluy_devices.key_destruction_policy;
 begin
-  if (select destruction_enabled from kitluy_devices.key_destruction_policy
-       where environment = 'development') then
-    v_findings := v_findings || 'key destruction is ENABLED in the shipped policy';
+  -- Group 0134 shipped this policy INERT and this section asserted that it was.
+  -- Owner decision KLD-2026-07-29-DEVICE-KEY-DESTRUCTION-001 (OWNER-APPROVED
+  -- 2026-07-29) closed KLREQ-031, and group 0137 configured it. The assertion
+  -- therefore changes from "no policy exists" to "the policy is EXACTLY the one
+  -- the owner approved, and cannot be weakened" — which is the same discipline
+  -- pointed at a world that now has an answer.
+  select * into v_p from kitluy_devices.key_destruction_policy where environment = 'development';
+
+  if not v_p.destruction_enabled then
+    v_findings := v_findings || 'the approved destruction policy is not enabled';
   end if;
-  if (select approved_by_decision_ref is not null or minimum_retention_days is not null
-         or recovery_retention_days is not null
-        from kitluy_devices.key_destruction_policy where environment = 'development') then
-    v_findings := v_findings || 'a destruction decision or retention period was invented';
+  if v_p.approved_by_decision_ref is distinct from 'KLD-2026-07-29-DEVICE-KEY-DESTRUCTION-001' then
+    v_findings := v_findings || 'the policy does not name the approving owner decision';
   end if;
-  if (select coalesce(required_owner_decision, '') from kitluy_devices.key_destruction_policy
-       where environment = 'development') not like '%REQUIRED%' then
-    v_findings := v_findings || 'the missing destruction decision is not named';
+  if v_p.required_owner_decision is not null then
+    v_findings := v_findings || 'the policy still names a missing owner decision';
   end if;
 
-  -- Enabling by flipping the boolean is refused.
+  -- The approved values, verbatim from decision §15. A rounded or "tidied"
+  -- retention period is a different policy from the one that was approved.
+  if v_p.superseded_minimum_retention_days is distinct from 30
+     or v_p.abandoned_minimum_retention_days is distinct from 7
+     or v_p.recovery_retention_days is distinct from 14
+     or v_p.approval_validity_hours is distinct from 24
+     or v_p.maximum_execution_attempts is distinct from 5 then
+    v_findings := v_findings || 'the configured retention/approval values are not the approved §15 values';
+  end if;
+  if v_p.automatic_provider_destruction or not v_p.four_eyes_required
+     or not v_p.requires_operator_approval then
+    v_findings := v_findings || 'the policy permits automatic or single-person destruction';
+  end if;
+
+  -- §7: the irreversible provider call cannot be made automatic.
   begin
-    update kitluy_devices.key_destruction_policy set destruction_enabled = true
+    update kitluy_devices.key_destruction_policy set automatic_provider_destruction = true
      where environment = 'development';
-    v_findings := v_findings || 'destruction was enabled without naming a decision';
+    v_findings := v_findings || 'the irreversible provider call was made automatic';
   exception when others then
-    if sqlerrm not like '%key_destruction_policy_needs_decision_chk%' then
-      v_findings := v_findings || format('wrong refusal enabling destruction: %s', sqlerrm);
+    if sqlerrm not like '%not_automatic_chk%' then
+      v_findings := v_findings || format('wrong refusal automating destruction: %s', sqlerrm);
     end if;
   end;
 
-  -- Naming a decision is still not enough: the durations must come with it.
+  -- §6: four-eyes cannot be dropped while destruction is enabled.
   begin
-    update kitluy_devices.key_destruction_policy
-       set destruction_enabled = true, approved_by_decision_ref = 'TEST-ONLY-section39a'
+    update kitluy_devices.key_destruction_policy set four_eyes_required = false
      where environment = 'development';
-    v_findings := v_findings || 'destruction was enabled without retention periods';
+    v_findings := v_findings || 'four-eyes was disabled while destruction is enabled';
   exception when others then
-    if sqlerrm not like '%key_destruction_policy_needs_retention_chk%' then
-      v_findings := v_findings || format('wrong refusal for missing retention: %s', sqlerrm);
+    if sqlerrm not like '%four_eyes_when_enabled_chk%' then
+      v_findings := v_findings || format('wrong refusal disabling four-eyes: %s', sqlerrm);
     end if;
   end;
 
-  -- The executor can neither enable destruction nor write lifecycle history.
+  -- §12: the database may never record a confirmed destruction without
+  -- verified provider evidence. This is the invariant the decision turns on.
+  if not exists (
+    select 1 from pg_constraint
+     where conrelid = 'kitluy_devices.device_key_destruction_requests'::regclass
+       and conname = 'device_key_destruction_no_confirm_without_evidence') then
+    v_findings := v_findings || 'the database may confirm destruction without provider evidence';
+  end if;
+  -- §6/§8: requester != approver, and a hold is not released by its declarer.
+  if not exists (
+    select 1 from pg_constraint
+     where conrelid = 'kitluy_devices.device_key_destruction_requests'::regclass
+       and conname = 'device_key_destruction_requests_four_eyes') then
+    v_findings := v_findings || 'a requester may approve their own destruction';
+  end if;
+  if not exists (
+    select 1 from pg_constraint
+     where conrelid = 'kitluy_devices.device_key_holds'::regclass
+       and conname = 'device_key_holds_release_is_four_eyes') then
+    v_findings := v_findings || 'a hold may be released by its own declarer';
+  end if;
+
+  -- §10: `destroyed` is reachable only from a FINISHED key. Group 0128
+  -- permitted active->destroyed and generated->destroyed; 0137 closed both.
+  if exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'kitluy_devices' and p.proname = 'enforce_device_key_transitions'
+       and (pg_get_functiondef(p.oid) like '%when ''active'' then new.state in (''superseded'', ''destroyed'')%'
+            or pg_get_functiondef(p.oid) like '%when ''generated'' then new.state in (''active'', ''abandoned'', ''destroyed'')%')) then
+    v_findings := v_findings || 'an active or freshly generated key can still be destroyed directly';
+  end if;
+
+  -- The executor holds no direct authority over any of it.
   if has_table_privilege('kitluy_issuance_service',
                          'kitluy_devices.key_destruction_policy', 'update')
+     or has_table_privilege('kitluy_issuance_service',
+                            'kitluy_devices.device_key_destruction_requests', 'update')
+     or has_table_privilege('kitluy_issuance_service',
+                            'kitluy_devices.device_key_holds', 'insert')
      or has_table_privilege('kitluy_issuance_service',
                             'kitluy_devices.device_credential_lifecycle_events', 'insert') then
     v_findings := v_findings || 'the issuance executor holds direct authority it must not have';
@@ -6288,6 +6342,11 @@ begin
        'execute') then
     v_findings := v_findings || 'PUBLIC can retire a credential';
   end if;
+  if has_function_privilege('public',
+       'kitluy_devices.confirm_key_destruction_v1(uuid, text, text, text, text, text, text, timestamptz, timestamptz)',
+       'execute') then
+    v_findings := v_findings || 'PUBLIC can confirm a key destruction';
+  end if;
   if not exists (
     select 1 from pg_trigger t join pg_class c on c.oid = t.tgrelid
     where c.relname = 'device_credential_lifecycle_events'
@@ -6297,12 +6356,18 @@ begin
     v_findings := v_findings || 'the lifecycle audit is not append-only';
   end if;
 
+  -- And after all of that, nothing has actually been destroyed.
+  if exists (select 1 from kitluy_devices.device_generation_keys
+              where state = 'destroyed' or destroyed_at is not null) then
+    v_findings := v_findings || 'a provider key is recorded as destroyed';
+  end if;
+
   if cardinality(v_findings) > 0 then
     raise exception 'ASSERT FAIL: % destruction-policy finding(s): %',
       cardinality(v_findings), array_to_string(v_findings, ' | ');
   end if;
 
-  raise notice 'PASS ws11-key-destruction-blocked: destruction ships DISABLED with every retention period NULL and the missing owner decision NAMED, it cannot be enabled by flipping a boolean nor by naming a decision without both retention periods, the issuance executor can neither enable it nor write lifecycle history directly, PUBLIC cannot retire a credential, and the lifecycle audit is append-only';
+  raise notice 'PASS ws11-key-destruction-governed: the destruction policy is EXACTLY owner decision KLD-2026-07-29-DEVICE-KEY-DESTRUCTION-001 §15 (30/7/14 day retentions, 24h approval, 5 attempts), the irreversible provider call cannot be made automatic and four-eyes cannot be disabled while destruction is enabled, the database cannot confirm a destruction without verified provider evidence, a requester cannot approve their own request and a hold cannot be released by its declarer, an active or freshly generated key can no longer be destroyed directly, the issuance executor holds no direct authority over policy, requests or holds, PUBLIC can neither retire a credential nor confirm a destruction, the lifecycle audit is append-only, and no provider key is recorded as destroyed';
 end
 $section39a$;
 
@@ -6716,9 +6781,17 @@ begin
 
   -- NOTHING in this section destroyed a provider key, and destruction is still
   -- disabled: a scheduled executor must not become a way around the policy.
-  if (select destruction_enabled from kitluy_devices.key_destruction_policy
-       where environment = 'development') then
-    v_findings := v_findings || 'the job runtime enabled key destruction';
+  -- Destruction is now ENABLED by owner decision KLD-2026-07-29-DEVICE-KEY-
+  -- DESTRUCTION-001, so "enabled" is no longer the defect this once checked for.
+  -- What still matters is that the JOB RUNTIME cannot touch the policy: an
+  -- executor that could enable its own authority would make four-eyes optional.
+  if has_table_privilege('kitluy_worker_service',
+                         'kitluy_devices.key_destruction_policy', 'update')
+     or has_table_privilege('kitluy_worker_service',
+                            'kitluy_devices.device_key_destruction_requests', 'update')
+     or has_table_privilege('kitluy_worker_service',
+                            'kitluy_devices.device_key_holds', 'update') then
+    v_findings := v_findings || 'the worker can change destruction policy, requests or holds'::text;
   end if;
   if exists (select 1 from kitluy_devices.device_generation_keys
               where state = 'destroyed' or destroyed_at is not null) then
