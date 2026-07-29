@@ -6435,3 +6435,303 @@ end
 $section39b$;
 
 select 'assertions complete: groups 0010-0134 structural contract holds' as result;
+
+-- ============================================================================
+-- SECTION 40 — durable job runtime (migration 0135).
+--
+-- Groups 0125-0134 built reconciliation and credential-lifecycle advancement as
+-- callable services. Nothing could call them repeatedly and safely from more
+-- than one process: probing this database for any table matching
+-- (job|queue|lease|dead_letter|worker|schedul) returned exactly one row, and it
+-- belongs to the pg_net EXTENSION.
+--
+-- These assertions hold the contract that closed that gap: deduplicated work,
+-- one active lease per job, completion bound to that lease, legal transitions
+-- only, monotonic attempt history, append-only evidence, and a worker that
+-- holds no authority over anything it is not executing.
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 40a — the shape of the contract: ownership, exposure, RLS, search_path.
+-- ---------------------------------------------------------------------------
+do $section40a$
+declare
+  v_findings text[] := array[]::text[];
+  r record;
+begin
+  -- Governors are NOLOGIN. A login-capable owner is an owner someone can become.
+  if exists (select 1 from pg_roles
+              where rolname in ('kitluy_job_governor', 'kitluy_worker_service')
+                and rolcanlogin) then
+    v_findings := v_findings || 'a job governor or worker role can log in';
+  end if;
+
+  -- The tables are owned by the governor, not by the migration user.
+  for r in
+    select c.relname, pg_get_userbyid(c.relowner) as owner, c.relrowsecurity, c.relforcerowsecurity
+      from pg_class c join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = 'kitluy_ops'
+       and c.relname in ('durable_jobs', 'durable_job_attempts')
+  loop
+    if r.owner <> 'kitluy_job_governor' then
+      v_findings := v_findings || format('%s is owned by %s', r.relname, r.owner);
+    end if;
+    if not r.relrowsecurity or not r.relforcerowsecurity then
+      v_findings := v_findings || format('%s does not have RLS ENABLED and FORCED', r.relname);
+    end if;
+  end loop;
+
+  -- Every governed function is SECURITY DEFINER with a FIXED search_path, owned
+  -- by the governor, and invisible to PUBLIC. A definer function with a
+  -- caller-controlled search_path is a definer function the caller writes.
+  for r in
+    select p.proname, p.prosecdef, p.proconfig, pg_get_userbyid(p.proowner) as owner,
+           p.oid::regprocedure as sig
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'kitluy_ops'
+       and p.proname like '%durable_job%' or (n.nspname = 'kitluy_ops' and p.proname like '%job%')
+  loop
+    if r.owner <> 'kitluy_job_governor' then
+      v_findings := v_findings || format('%s is owned by %s', r.proname, r.owner);
+    end if;
+    if has_function_privilege('public', r.sig, 'execute') then
+      v_findings := v_findings || format('PUBLIC can execute %s', r.proname);
+    end if;
+    if r.prosecdef and (r.proconfig is null
+        or not exists (select 1 from unnest(r.proconfig) c where c like 'search_path=%')) then
+      v_findings := v_findings || format('%s is SECURITY DEFINER without a fixed search_path', r.proname);
+    end if;
+  end loop;
+
+  -- The worker executes the runtime and NOTHING else. It cannot write the job
+  -- tables, cannot clear its own escalations, and holds no authority over
+  -- credentials, heads, keys or lifecycle state.
+  if has_table_privilege('kitluy_worker_service', 'kitluy_ops.durable_jobs', 'insert')
+     or has_table_privilege('kitluy_worker_service', 'kitluy_ops.durable_jobs', 'update')
+     or has_table_privilege('kitluy_worker_service', 'kitluy_ops.durable_jobs', 'delete')
+     or has_table_privilege('kitluy_worker_service', 'kitluy_ops.durable_job_attempts', 'insert') then
+    v_findings := v_findings || 'the worker holds direct authority over the job tables';
+  end if;
+  if has_table_privilege('kitluy_worker_service', 'kitluy_devices.device_credentials', 'update')
+     or has_table_privilege('kitluy_worker_service', 'kitluy_devices.device_credential_heads', 'update')
+     or has_table_privilege('kitluy_worker_service', 'kitluy_devices.device_generation_keys', 'update')
+     or has_table_privilege('kitluy_worker_service', 'kitluy_devices.device_renewal_reservations', 'update') then
+    v_findings := v_findings || 'the worker holds direct authority over credential state';
+  end if;
+  if has_function_privilege('kitluy_worker_service',
+       'kitluy_ops.release_manual_review_job_v1(uuid, text, text, text)', 'execute')
+     or has_function_privilege('kitluy_worker_service',
+       'kitluy_ops.cancel_durable_job_v1(uuid, text, text)', 'execute')
+     or has_function_privilege('kitluy_worker_service',
+       'kitluy_ops.escalate_dead_letter_job_v1(uuid, text, text)', 'execute') then
+    v_findings := v_findings || 'the worker can release, cancel or revive its own jobs';
+  end if;
+  -- Job authority is not credential authority. A worker that could retire a
+  -- credential directly would make the governed path optional.
+  if has_function_privilege('kitluy_worker_service',
+       'kitluy_devices.retire_overlapped_credential_v1(uuid, text, text, timestamptz, text, text)',
+       'execute') then
+    v_findings := v_findings || 'the worker can retire a credential without the issuance role';
+  end if;
+
+  -- Evidence is append-only by trigger, and jobs are never deleted.
+  if not exists (select 1 from pg_trigger t join pg_class c on c.oid = t.tgrelid
+                  where c.relname = 'durable_job_attempts'
+                    and t.tgname = 'trg_durable_job_attempts_append_only' and not t.tgisinternal) then
+    v_findings := v_findings || 'the job attempt audit is not append-only';
+  end if;
+  if not exists (select 1 from pg_trigger t join pg_class c on c.oid = t.tgrelid
+                  where c.relname = 'durable_jobs'
+                    and t.tgname = 'trg_durable_jobs_no_delete' and not t.tgisinternal) then
+    v_findings := v_findings || 'durable jobs can be deleted';
+  end if;
+
+  if cardinality(v_findings) > 0 then
+    raise exception 'ASSERT FAIL: % durable-job contract finding(s): %',
+      cardinality(v_findings), array_to_string(v_findings, ' | ');
+  end if;
+
+  raise notice 'PASS ws11-durable-job-contract: the job tables are owned by a NOLOGIN governor with RLS ENABLED and FORCED, every governed function is SECURITY DEFINER with a fixed search_path and no PUBLIC EXECUTE, the worker holds no direct table authority here or over credential state, cannot release cancel or revive its own jobs, cannot retire a credential without the issuance role, job evidence is append-only and jobs cannot be deleted';
+end
+$section40a$;
+
+-- ---------------------------------------------------------------------------
+-- 40b — the behaviour: deduplication, leases, transitions, budgets.
+-- ---------------------------------------------------------------------------
+do $section40b$
+declare
+  v_findings text[] := array[]::text[];
+  -- A TEST-ONLY kind. These rows COMMIT (db:test is not idempotent by design),
+  -- and manufacturing them under the real device kind would leave claimable
+  -- work in the production namespace for the next thing that sweeps it.
+  v_kind text := 'kitluy.test.assertions-section40b.v1';
+  v_key text := 'section40b-' || gen_random_uuid();
+  v_subject uuid := gen_random_uuid();
+  v_job uuid;
+  v_lease uuid := gen_random_uuid();
+  v_other uuid := gen_random_uuid();
+  v_res jsonb;
+  v_n integer;
+begin
+  -- Deduplication: the same work, discovered twice, is ONE job.
+  v_res := kitluy_ops.enqueue_durable_job_v1(
+    v_kind, 1, v_key, 'development', v_subject, '{}'::jsonb, 2, 'SECTION40B');
+  v_job := (v_res ->> 'job_id')::uuid;
+  v_res := kitluy_ops.enqueue_durable_job_v1(
+    v_kind, 1, v_key, 'development', v_subject, '{}'::jsonb, 2, 'SECTION40B');
+  if (v_res ->> 'outcome') <> 'EXISTING' or (v_res ->> 'job_id')::uuid <> v_job then
+    v_findings := v_findings || 'the same work produced two jobs';
+  end if;
+  -- ...and the uniqueness is a CONSTRAINT, not a convention.
+  if not exists (
+    select 1 from pg_constraint
+     where conrelid = 'kitluy_ops.durable_jobs'::regclass
+       and conname = 'durable_jobs_dedupe_unique' and contype = 'u') then
+    v_findings := v_findings || 'deduplication is not enforced by a unique constraint';
+  end if;
+
+  -- One active lease. A second claimant finds nothing to claim.
+  perform kitluy_ops.claim_durable_jobs_v1(array[v_kind], 'development', 'w-a', v_lease, 60, 10);
+  select count(*) into v_n from kitluy_ops.claim_durable_jobs_v1(
+    array[v_kind], 'development', 'w-b', v_other, 60, 10) c where c.job_id = v_job;
+  if v_n <> 0 then
+    v_findings := v_findings || 'a second worker claimed a job under a live lease';
+  end if;
+  if (select attempt_count from kitluy_ops.durable_jobs where job_id = v_job) <> 1 then
+    v_findings := v_findings || 'a claim did not increment the attempt count exactly once';
+  end if;
+
+  -- The lease token is the authority. Nothing else is.
+  begin
+    perform kitluy_ops.complete_durable_job_v1(v_job, v_other, 'DONE', 'SECTION40B');
+    v_findings := v_findings || 'a stale lease token completed a job';
+  exception when others then
+    if sqlerrm not like 'KLUY-JOB-STALE-LEASE%' then
+      v_findings := v_findings || format('wrong refusal for a stale lease: %s', sqlerrm);
+    end if;
+  end;
+  begin
+    perform kitluy_ops.fail_durable_job_v1(
+      v_job, v_other, 'PROVIDER_UNAVAILABLE',
+      'retryable'::kitluy_ops.job_outcome_classification, 0, 'SECTION40B');
+    v_findings := v_findings || 'a stale lease token failed a job';
+  exception when others then
+    if sqlerrm not like 'KLUY-JOB-STALE-LEASE%' then
+      v_findings := v_findings || format('wrong refusal failing under a stale lease: %s', sqlerrm);
+    end if;
+  end;
+
+  -- A deferral preserves the claim history and discounts the BUDGET. The two
+  -- counters answer different questions and neither may be made to lie.
+  v_res := kitluy_ops.defer_durable_job_v1(
+    v_job, v_lease, now() + interval '3 days', 'NOT DUE', 'SECTION40B');
+  if (v_res ->> 'outcome') <> 'DEFERRED' then
+    v_findings := v_findings || 'a deferral was refused';
+  end if;
+  if (select attempt_count from kitluy_ops.durable_jobs where job_id = v_job) <> 1
+     or (select deferral_count from kitluy_ops.durable_jobs where job_id = v_job) <> 1 then
+    v_findings := v_findings || 'a deferral did not preserve history while discounting the budget';
+  end if;
+  -- A deferred job is genuinely out of the queue until its due time.
+  select count(*) into v_n from kitluy_ops.claim_durable_jobs_v1(
+    array[v_kind], 'development', 'w-c', gen_random_uuid(), 60, 10) c where c.job_id = v_job;
+  if v_n <> 0 then
+    v_findings := v_findings || 'a deferred job was claimed before it was due';
+  end if;
+
+  -- Attempt history is monotonic against a direct write by the table owner.
+  begin
+    update kitluy_ops.durable_jobs set attempt_count = 0 where job_id = v_job;
+    v_findings := v_findings || 'the attempt count was reset';
+  exception when others then
+    if sqlerrm not like 'KLUY-JOB-ATTEMPTS-NOT-MONOTONIC%' then
+      v_findings := v_findings || format('wrong refusal resetting attempts: %s', sqlerrm);
+    end if;
+  end;
+
+  -- Identity and payload are fixed at creation. Retrying as a different kind,
+  -- or against a different subject, is not a retry.
+  begin
+    update kitluy_ops.durable_jobs set subject_id = gen_random_uuid() where job_id = v_job;
+    v_findings := v_findings || 'a job was re-aimed at another subject';
+  exception when others then
+    if sqlerrm not like 'KLUY-JOB-IDENTITY-IMMUTABLE%' then
+      v_findings := v_findings || format('wrong refusal re-aiming a job: %s', sqlerrm);
+    end if;
+  end;
+  begin
+    update kitluy_ops.durable_jobs set payload = '{"injected":true}'::jsonb where job_id = v_job;
+    v_findings := v_findings || 'a job payload was rewritten';
+  exception when others then
+    if sqlerrm not like 'KLUY-JOB-PAYLOAD-IMMUTABLE%' then
+      v_findings := v_findings || format('wrong refusal rewriting a payload: %s', sqlerrm);
+    end if;
+  end;
+
+  -- Exhausting the budget dead-letters, and a dead letter does NOT return to
+  -- the queue by itself. Two governed acts are required, and each is recorded.
+  update kitluy_ops.durable_jobs set next_attempt_at = now() where job_id = v_job;
+  perform kitluy_ops.claim_durable_jobs_v1(array[v_kind], 'development', 'w-a', v_lease, 60, 10);
+  perform kitluy_ops.fail_durable_job_v1(
+    v_job, v_lease, 'PROVIDER_UNAVAILABLE',
+    'retryable'::kitluy_ops.job_outcome_classification, 0, 'SECTION40B');
+  update kitluy_ops.durable_jobs set next_attempt_at = now() where job_id = v_job;
+  v_lease := gen_random_uuid();
+  perform kitluy_ops.claim_durable_jobs_v1(array[v_kind], 'development', 'w-a', v_lease, 60, 10);
+  v_res := kitluy_ops.fail_durable_job_v1(
+    v_job, v_lease, 'PROVIDER_UNAVAILABLE',
+    'retryable'::kitluy_ops.job_outcome_classification, 0, 'SECTION40B');
+  if (v_res ->> 'outcome') <> 'DEAD_LETTER' then
+    v_findings := v_findings ||
+      format('an exhausted budget produced %s rather than a dead letter', v_res ->> 'outcome');
+  end if;
+  begin
+    update kitluy_ops.durable_jobs set status = 'queued' where job_id = v_job;
+    v_findings := v_findings || 'a dead letter returned itself to the queue';
+  exception when others then
+    if sqlerrm not like 'KLUY-JOB-ILLEGAL-TRANSITION%' then
+      v_findings := v_findings || format('wrong refusal requeueing a dead letter: %s', sqlerrm);
+    end if;
+  end;
+  -- The failure evidence survives the dead-lettering.
+  if (select last_failure_code from kitluy_ops.durable_jobs where job_id = v_job)
+       is distinct from 'PROVIDER_UNAVAILABLE' then
+    v_findings := v_findings || 'the dead letter discarded why it died';
+  end if;
+
+  -- A manual-review release does NOT reset the attempt history.
+  perform kitluy_ops.escalate_dead_letter_job_v1(v_job, 'operator review', 'SECTION40B');
+  v_res := kitluy_ops.release_manual_review_job_v1(v_job, 'retry', 'transient outage fixed', 'SECTION40B');
+  if (v_res ->> 'outcome') <> 'QUEUED' then
+    v_findings := v_findings || 'a manual release did not requeue the job';
+  end if;
+  if (select attempt_count from kitluy_ops.durable_jobs where job_id = v_job) < 2 then
+    v_findings := v_findings || 'a manual release silently reset the attempt count';
+  end if;
+
+  -- Environment isolation: a job in one environment is invisible to another.
+  if ((kitluy_ops.durable_job_status_summary_v1('pilot', array[v_kind], v_subject)) ->> 'queued')::int <> 0 then
+    v_findings := v_findings || 'the operational summary leaked across environments';
+  end if;
+
+  -- NOTHING in this section destroyed a provider key, and destruction is still
+  -- disabled: a scheduled executor must not become a way around the policy.
+  if (select destruction_enabled from kitluy_devices.key_destruction_policy
+       where environment = 'development') then
+    v_findings := v_findings || 'the job runtime enabled key destruction';
+  end if;
+  if exists (select 1 from kitluy_devices.device_generation_keys
+              where state = 'destroyed' or destroyed_at is not null) then
+    v_findings := v_findings || 'a provider key was destroyed';
+  end if;
+
+  if cardinality(v_findings) > 0 then
+    raise exception 'ASSERT FAIL: % durable-job behaviour finding(s): %',
+      cardinality(v_findings), array_to_string(v_findings, ' | ');
+  end if;
+
+  raise notice 'PASS ws11-durable-job-behaviour: the same work deduplicates to ONE job under a unique constraint, only one worker holds a live lease, a claim counts exactly one attempt, a stale lease token can neither complete nor fail a job, a deferral preserves the claim history while discounting the retry budget and stays out of the queue until due, attempt history is monotonic and job identity and payload are immutable against a direct write, an exhausted budget dead-letters while keeping its failure evidence, a dead letter cannot requeue itself, a manual release never resets the attempt count, the operational summary does not leak across environments, and no provider key was destroyed';
+end
+$section40b$;
+
+select 'assertions complete: groups 0010-0135 structural contract holds' as result;
