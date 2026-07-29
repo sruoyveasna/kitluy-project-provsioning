@@ -19,8 +19,10 @@
     "test": "vitest run"
   },
   "devDependencies": {
-    "typescript": "catalog:",
     "@types/node": "catalog:",
+    "@types/pg": "catalog:",
+    "pg": "catalog:",
+    "typescript": "catalog:",
     "vitest": "catalog:"
   }
 }

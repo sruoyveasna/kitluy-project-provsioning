@@ -1081,3 +1081,84 @@ on the strength of these states alone.
 `rotate_key` remains disabled in the shipped development policy. Section 35b
 enables it under a *named test decision* and restores it; assertion 35c proves
 the restore happened, so a leaked override cannot pass unnoticed.
+
+---
+
+## KLRISK-REPO-002 — unexplained commit `9d324f7` (2026-07-29)
+
+An unrequested commit appeared between two authorized ones:
+
+```text
+9d324f7  "Implement code changes to enhance functionality and improve performance"
+         deletes R&D_HSA_AI_Agent_MVP.md (3,498 lines) — and nothing else
+         Author = Committer = the repository's own configured git identity
+         AuthorDate = CommitDate = 2026-07-29 09:08:08 +0700
+```
+
+It landed **72 seconds** after the authorized `614e217`. The same deletion had
+been caught STAGED and explicitly reverted during that commit's preparation, so
+this is the second time it appeared. Its message describes work the commit does
+not contain.
+
+**Verdict: UNKNOWN SOURCE.** What was ruled out by inspection:
+
+- `git show --name-status` confirms the deletion is the ONLY change;
+- `.git/hooks` contains no non-sample hook and `core.hooksPath` is unset;
+- no file under `.claude`, `.github`, `scripts`, `tools` or `00_AI_HANDOFF`
+  invokes `git commit`;
+- the reflog entry is a plain `commit:`, not an amend, rebase or merge.
+
+So it was not repository automation. It was a normal commit made with the
+repository's configured identity by something outside this session — an editor,
+extension or agent. Which one is **not** identified, and is not guessed here.
+
+**Disposition:** reverted by `4fcb4d5` (`git revert`, no history rewriting).
+The file is restored at 3,498 lines.
+
+**Why this stays open rather than closing as "fixed":** the deletion recurred
+after an explicit revert. Until the mechanism is identified, any file in this
+repository can be removed by a commit nobody authorized, and the next one may
+not be a document. This is the same shape as the earlier KLRISK-REPO-001, whose
+mechanism also went unidentified.
+
+Recommended owner actions: audit editor/extension git integrations and any
+background agent with write access to this checkout; consider whether the push
+block is the only thing currently preventing an unauthorized change reaching a
+remote.
+
+---
+
+## Device-identity database harness (test-only)
+
+`@kitluy/device-identity` gained `pg` and `@types/pg` as DEV dependencies and a
+gated harness at `test/support/dev-database.ts`. Renewal orchestration needs to
+run against the real governed functions, and there was no way to reach them from
+Node in that package.
+
+Deliberately **not** exported from `src/`: nothing in the shipped package should
+be able to open a database connection. A general-purpose database utility
+escaping into the runtime is how a local-only tool becomes a production one.
+
+The environment contract is the repository's existing `KITLUY_DEV_DB_URL` with
+the local default, reused rather than reinvented so one place decides what a
+development database is.
+
+Fail-closed refusals, each with its own test: empty URL, malformed URL,
+non-postgres protocol, remote host, hosted Supabase, RDS, `NODE_ENV=production`,
+and — the one that is easy to miss — a **production-named database on
+localhost**, because a restored production dump on `127.0.0.1` is still
+production data. Error messages never interpolate the URL, which carries a
+password; a test asserts the password, user and host are absent.
+
+A refused target reports as *not reachable* rather than throwing, so a suite
+cannot catch the refusal and read it as a pass. Skips are announced explicitly:
+`SKIPPED … this suite did NOT run and is not evidence.`
+
+`withDatabaseTransaction` rolls back **unconditionally**, not only on failure —
+the SQL assertion suite is order-sensitive and leaked fixture rows would surface
+as failures far from their cause.
+
+**Still pending: Prompt 2B renewal orchestration.** The harness is infrastructure
+only. No same-key or rotation orchestration exists in TypeScript, reconciliation
+is not implemented, and the full lifecycle and KLRISK-DEVICE-003 containment
+suites are not written.
