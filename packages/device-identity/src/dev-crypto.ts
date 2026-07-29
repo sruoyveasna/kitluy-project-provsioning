@@ -575,3 +575,23 @@ export function verifyDetachedSignature(
 ): boolean {
   return verifyAgainst(publicKeyPem, payload, signature);
 }
+
+// ---------------------------------------------------------------------------
+// Vault access for other custody modules
+// ---------------------------------------------------------------------------
+// The vault itself stays module-private. These two functions are the ONLY way
+// another module in this package reaches it, and neither can yield key
+// material: one returns public metadata, the other returns a signature. Adding
+// a third that returned a private half would have to be written deliberately,
+// which is the point of routing custody through here rather than exporting the
+// vault.
+
+/** Generates a key pair inside the vault and returns PUBLIC metadata only. */
+export function generateVaultKey(handlePrefix: string): GeneratedKey {
+  return generateKey(handlePrefix);
+}
+
+/** Signs with a vault-held key WITHOUT surrendering it. */
+export function vaultSign(handle: string, payload: Uint8Array): Uint8Array {
+  return vault.signWith(handle, payload);
+}

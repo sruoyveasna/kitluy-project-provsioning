@@ -580,6 +580,12 @@ const sha256Hex = (value: Uint8Array | string): string =>
 export function bindReservationToPreparation(
   gateway: GovernedIssuanceGateway,
   reservation: SameKeyRenewalReservation,
+  /**
+   * The fingerprint preparation must present. The incumbent under
+   * `reuse_current_key`; the REPLACEMENT under `rotate_key`, where presenting
+   * the incumbent would mean the rotation silently did not rotate.
+   */
+  expectedPublicKeyFingerprint: string = reservation.currentPublicKeyFingerprint,
 ): GovernedIssuanceGateway {
   return {
     ...gateway,
@@ -623,9 +629,9 @@ export function bindReservationToPreparation(
           `${BINDING_MARKER}-ASSIGNMENT_MOVED: preparation carries assignment generation ${prepared.assignmentGeneration}, the reservation froze ${reservation.assignmentGeneration}`,
         );
       }
-      if (prepareInput.publicKeyFingerprint !== reservation.currentPublicKeyFingerprint) {
+      if (prepareInput.publicKeyFingerprint !== expectedPublicKeyFingerprint) {
         throw new Error(
-          `${BINDING_MARKER}-FINGERPRINT_CHANGED: preparation presents a key other than the incumbent`,
+          `${BINDING_MARKER}-FINGERPRINT_CHANGED: preparation presents a key other than the one this renewal reserved`,
         );
       }
       if (prepareInput.deviceRecordId !== reservation.deviceRecordId) {

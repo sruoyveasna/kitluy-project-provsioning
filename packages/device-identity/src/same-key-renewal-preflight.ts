@@ -77,6 +77,20 @@ import type { HardwareTrustLevel } from "./index.js";
 export const SAME_KEY_RENEWAL_MODE = "reuse_current_key" as const;
 export type SameKeyRenewalMode = typeof SAME_KEY_RENEWAL_MODE;
 
+/**
+ * The OPTIONAL rotation mode. Kept beside the same-key constant rather than in
+ * its own module because the verification, eligibility and reservation route is
+ * ONE route — the mode decides what happens after the reservation, not how the
+ * incumbent is proved. A second, weaker verification path for rotation is
+ * exactly what this shared preflight exists to prevent.
+ *
+ * Rotation additionally requires `kitluy_devices.renewal_policy` to permit it,
+ * which the DATABASE enforces; nothing here can enable it.
+ */
+export const ROTATE_KEY_RENEWAL_MODE = "rotate_key" as const;
+export type RotateKeyRenewalMode = typeof ROTATE_KEY_RENEWAL_MODE;
+export type RenewalMode = SameKeyRenewalMode | RotateKeyRenewalMode;
+
 // ---------------------------------------------------------------------------
 // Refusals
 // ---------------------------------------------------------------------------
@@ -285,7 +299,7 @@ export interface ReserveRenewalInput {
   /** Trusted time. The database refuses anything but a `trusted` status. */
   readonly trustedTime: Date;
   readonly trustedTimeStatus: string;
-  readonly renewalMode: SameKeyRenewalMode;
+  readonly renewalMode: RenewalMode;
   readonly actorRef: string;
 }
 
@@ -326,6 +340,15 @@ export interface SameKeyRenewalPreflightInput {
   readonly expectedCredentialHeadVersion?: number;
   /** Days the device has already held a second, overlapping credential. */
   readonly existingOverlapDays?: number;
+  /**
+   * Which renewal this is. Defaults to `reuse_current_key`, so a caller that
+   * says nothing gets the mode that needs no owner decision.
+   *
+   * `rotate_key` does NOT become permitted by asking for it here: the database
+   * refuses it unless `kitluy_devices.renewal_policy` permits rotation, and
+   * that column cannot be set without naming an owner decision.
+   */
+  readonly renewalMode?: RenewalMode;
 }
 
 /**
@@ -349,7 +372,7 @@ export interface SameKeyRenewalDiagnostics {
  */
 export interface SameKeyRenewalReservation {
   readonly renewalAttemptId: string;
-  readonly renewalMode: SameKeyRenewalMode;
+  readonly renewalMode: RenewalMode;
   readonly deviceRecordId: string;
   readonly currentCredentialId: string;
   readonly currentCredentialGeneration: number;
@@ -414,6 +437,12 @@ export async function prepareSameKeyCredentialRenewal(
     detail,
     ...extra,
   });
+
+  // The mode a caller ASKS for. It does not authorize anything: `rotate_key`
+  // still has to get past `kitluy_devices.renewal_policy`, and the database is
+  // what refuses it. Defaulting to reuse means a caller that says nothing gets
+  // the mode that needs no owner decision.
+  const requestedMode: RenewalMode = input.renewalMode ?? SAME_KEY_RENEWAL_MODE;
 
   const scope: RenewalScope = {
     deviceRecordId: input.deviceRecordId,
@@ -705,7 +734,7 @@ export async function prepareSameKeyCredentialRenewal(
       idempotencyKey: input.idempotencyKey,
       trustedTime: now,
       trustedTimeStatus: input.trustedTime.status,
-      renewalMode: SAME_KEY_RENEWAL_MODE,
+      renewalMode: requestedMode,
       actorRef: input.actorRef,
     });
   } catch (error) {
@@ -716,10 +745,10 @@ export async function prepareSameKeyCredentialRenewal(
 
   // The database froze the mode. A caller cannot change it, and this preflight
   // will not report success against a reservation that says something else.
-  if (reserved.renewalMode !== SAME_KEY_RENEWAL_MODE) {
+  if (reserved.renewalMode !== requestedMode) {
     return refuse(
       "RENEWAL_PREFLIGHT_RESERVATION_MODE_MISMATCH",
-      `the database reserved mode ${reserved.renewalMode}, not ${SAME_KEY_RENEWAL_MODE}`,
+      `the database reserved mode ${reserved.renewalMode}, not ${requestedMode}`,
       { diagnostics },
     );
   }
@@ -751,7 +780,7 @@ export async function prepareSameKeyCredentialRenewal(
     diagnostics,
     reservation: {
       renewalAttemptId: reserved.renewalAttemptId,
-      renewalMode: SAME_KEY_RENEWAL_MODE,
+      renewalMode: requestedMode,
       deviceRecordId: input.deviceRecordId,
       currentCredentialId: reserved.currentCredentialId,
       currentCredentialGeneration: reserved.currentCredentialGeneration,
