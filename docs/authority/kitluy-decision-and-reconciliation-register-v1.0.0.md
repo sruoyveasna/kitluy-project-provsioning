@@ -1490,3 +1490,163 @@ avoid.
 activation.** Not begun. Crash-point reconciliation, overlap expiry, credential
 revocation and independent hostile review of this unit all remain absent.
 `KLRISK-DEVICE-003`, `KLRISK-REPO-001` and `KLRISK-REPO-002` remain OPEN.
+
+---
+
+## Optional rotate_key orchestration and provider activation — IMPLEMENTED-IN-DEV component
+
+Two new modules complete the OPTIONAL rotation path:
+
+- `packages/device-identity/src/replacement-key-provider.ts` — replacement-key
+  custody: generation, possession proof, activation, abandonment.
+- `packages/device-identity/src/rotate-key-renewal-issuance.ts` —
+  `completeRotateKeyCredentialRenewal`, the orchestration.
+
+```
+preflight + reservation -> generate -> register -> prove possession
+  -> prepare/sign/finalize -> PENDING ACTIVATION -> provider activates
+  -> database confirms -> re-verify the persisted credential
+```
+
+**ROTATION IS STILL NOT THE DEFAULT, AND THIS DOES NOT MAKE IT ONE.** Migration
+0129's correction stands: §5.1 was a RECOMMENDATION, and
+`kitluy_devices.renewal_policy` keeps `rotate_key` DISABLED pending
+`[REQUIRED: renewal_key_rotation_owner_decision]`. Nothing in either module
+enables it. Asking for the mode authorizes nothing — the database refuses it
+unless the policy permits it, and `renewal_policy_rotation_needs_decision_chk`
+means the policy cannot permit it without naming an owner decision. Tests enable
+rotation only by NAMING a test decision, satisfying the CHECK honestly rather
+than bypassing it, and every test transaction rolls back. A test asserts the
+shipped policy is unchanged in a FRESH transaction afterwards.
+
+**Verification is the SHARED route, not a weaker one.** Rather than duplicating
+incumbent loading, trusted-time evaluation and real Ed25519 chain verification,
+the same-key preflight was widened additively to carry a `renewalMode` that
+defaults to `reuse_current_key`. Rotation gets the same verification with a
+different mode; there is no second, laxer path to a reservation.
+
+**The signing split is unchanged and deliberate.** The CA intermediate signs the
+credential TBS — `verifyCertificateChain` requires it, and a device-signed
+credential could not satisfy the post-finalization check. The REPLACEMENT device
+key signs a renewal-bound proof of possession instead. Twelve bindings, each
+killing one replay, reused verbatim from `replacement-key-pop.ts`.
+
+**Provider activation is where the truth lives.** Migration 0130 TASK D: a
+credential row proves issuance, never that the private half is loaded. So
+finalization leaves the replacement key
+`credential_issued_pending_activation` and the reservation `activation_pending`;
+the PROVIDER activates; the database RECORDS that answer. A test drives a
+provider that refuses to activate and asserts the credential exists, the key is
+still pending, the reservation is still `activation_pending`, the INCUMBENT key
+is still `active`, and NO readiness is reported at all.
+
+**Operational readiness is three separate booleans, not one.** Written as a
+conjunction — credential cryptographically valid AND replacement key active in
+the provider AND database confirmation recorded — so a future edit has to delete
+a term rather than quietly widen a flag.
+
+**The incumbent survives.** Nothing in these modules abandons, supersedes or
+destroys the incumbent key. Supersession belongs to
+`confirm_provider_key_activation_v1`, and only after the replacement is active.
+The live suite asserts the end state is `superseded:1,active:2` — two keys, the
+old one retired by the database and not by this code.
+
+---
+
+## NO migration was required — verified by execution, not assumed
+
+Prompt 2C's migration policy was tested rather than taken on faith. The whole
+rotation path was executed end to end under `kitluy_issuance_service` before any
+migration was considered, and the database contract turned out to be COMPLETE:
+
+- `register_generation_key_v2` (0130) binds the key to the renewal attempt and
+  is idempotent on it;
+- `confirm_provider_key_activation_v1` (0130) enforces nine bindings;
+- the `credential_issued_pending_activation` state and the
+  `promote_generation_key` trigger (0130) already distinguish rotation from
+  initial issuance;
+- and — the one that would have blocked everything — group 0128 had already
+  GENERALIZED the enrollment-fingerprint check in
+  `prepare_device_credential_issuance_v1`. Group 0127 accepted only the
+  manufacturing-enrollment key, which made rotation unreachable by construction
+  since a new key pair can never match it. 0128 widened it to also accept a
+  provider-GENERATED replacement registered for this device and still in state
+  `generated`.
+
+So `0133` was NOT added. The next free migration remains `0133`.
+
+---
+
+## Findings recorded, not fixed
+
+1. **Registration cannot be replayed once the renewal COMPLETES.**
+   `register_generation_key_v2` refuses a terminal reservation with
+   `KLUY-RENEWAL-RESERVATION-TERMINAL`. That is stronger than idempotence and
+   correct, but it means registration idempotency is only exercisable
+   MID-FLIGHT — before finalization. The live suite proves it there, and proves
+   the terminal refusal separately. A first attempt to assert both at once was
+   wrong about the contract, not about the database.
+
+2. **`key_generation` may be null on keys predating group 0130.** 0130 SPLIT key
+   generation from credential generation; earlier rows carry null. The preflight
+   falls back to the credential generation the key was registered against, which
+   for a generation-1 key is 1, so rotation still computes the next key
+   generation correctly. Asserted explicitly rather than left implicit.
+
+3. **There is no durable challenge-nonce ledger.** The PoP challenge nonce is
+   DERIVED from the renewal attempt, so it cannot be freely chosen, and a proof
+   bound to another attempt, device, incumbent, generation, fingerprint,
+   assignment generation, environment or purpose is refused by binding — each
+   proven with a GENUINE signature over a differently bound challenge. A
+   verbatim replay of the SAME challenge for the SAME attempt is idempotent
+   rather than refused, because `device_proof_of_possession_results` is UNIQUE
+   per request id and the request id is derived from the frozen attempt. That is
+   durable protection for the case that matters; a cross-process nonce store
+   does not exist and is not claimed.
+
+4. **`R&D_HSA_AI_Agent_MVP.md` still fails `prettier --check` at `67152d2`**, as
+   at `8b9ecb7` and `8bb6b42`. Untouched and explicitly excluded, so
+   `format:check` — and aggregate `pnpm verify` — still cannot pass at baseline.
+
+5. **Node 22.23.0 is still not installed.** Re-checked at session start; only
+   v24.15.0. Aggregate verification remains non-authoritative and every gate was
+   run individually with the documented temporary override. No `.npmrc`,
+   `package.json` engines or lockfile change was made.
+
+---
+
+## Risk register status after Prompt 2C
+
+**CLOSED, with evidence:**
+
+- **KLRISK-DEVICE-005** (the overlap window compared two clocks) — closed by
+  migration `0132`, which anchors the three-day maximum on the new credential's
+  own `not_before`. Evidence: migration-local hostile assertions; permanent SQL
+  assertion section 37a, which prepares a renewal with the device clock
+  deliberately AHEAD of the server clock and asserts it finalizes; and the live
+  same-key issuance suite.
+- **KLRISK-DEVICE-006** (a `reuse_current_key` reservation could never complete)
+  — closed by migration `0132`'s completion trigger, which binds generation,
+  assignment generation and the incumbent fingerprint before completing.
+  Evidence: section 37a asserts `status = completed` after a real renewal;
+  section 37b asserts the binding and that rotation is left to provider
+  activation; the live same-key suite asserts the same from PostgreSQL.
+
+Both registers reference the migration and the tests. Neither is reopened: no
+contrary evidence was found this session, and the rotation path exercised the
+same triggers again without incident.
+
+**STILL OPEN, unchanged:**
+
+- **KLRISK-DEVICE-003** — OPTION B. This package remains the only cryptographic
+  verifier and is inside the trusted computing base. Rotation did not change
+  that and does not weaken it.
+- **KLRISK-DEVICE-007** — there is still NO governed credential-revocation
+  operation. NOT implemented here, and device containment is still not equated
+  with credential revocation.
+- **KLRISK-REPO-001**, **KLRISK-REPO-002** — unchanged.
+
+**Still pending: Prompt 3A — crash reconciliation and interrupted-rotation
+recovery.** Not begun. Scheduled retry workers, full overlap-expiry lifecycle,
+credential revocation, automatic key destruction and independent hostile review
+all remain absent.
