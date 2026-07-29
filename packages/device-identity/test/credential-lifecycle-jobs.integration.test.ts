@@ -58,12 +58,18 @@ import {
   credentialLifecycleHandler,
   keyCleanupEvaluateHandler,
 } from "../src/credential-lifecycle-jobs.js";
+import {
+  evaluateKeyDestruction,
+  type KeyDestructionApproval,
+} from "../src/credential-lifecycle.js";
 import { runDurableJobs, backoffSeconds } from "@kitluy/job-contracts";
 import type { TrustedTimeEvaluation } from "../src/trusted-time.js";
 
 const DEVELOPMENT = "development";
 const DEVICE_IDENTITY = "device_identity";
 const MS_PER_DAY = 86_400_000;
+/** The decision that closed KLREQ-031 and enabled the policy (0137 §15). */
+const DECISION_REF = "KLD-2026-07-29-DEVICE-KEY-DESTRUCTION-001";
 
 let reachable = false;
 /** Counted so a skip can never be reported as a pass. */
@@ -427,19 +433,81 @@ describe("durable job runtime — live PostgreSQL", () => {
         expect(mine[0].resultCode).toBe("KEY_DESTRUCTION_NOT_AUTHORIZED");
 
         const job = await readJob(client, enqueued.jobId);
-        // COMPLETED, not retry_scheduled: an absent owner decision is a final
-        // answer, and retrying it would be a storm that can only ever reach the
-        // same result before dead-lettering a correct job.
+        // COMPLETED, not retry_scheduled: a missing four-eyes approval is a
+        // final answer, and retrying it would be a storm that can only ever
+        // reach the same result before dead-lettering a correct job.
         expect(job?.status).toBe("completed");
         expect(job?.terminal_reason).toBe("KEY_DESTRUCTION_NOT_AUTHORIZED");
         expect(Number(job?.attempt_count)).toBe(1);
 
-        expect(await destroyedKeyCount(client, fixture.deviceRecordId)).toBe(0);
+        // -- WHY it was blocked, and what it is NOT ---------------------------
+        // The policy is ENABLED and carries the owner decision. That changed
+        // nothing here, which is the whole point of this test now: the flag is
+        // not the authority (0137 §15), the four-eyes record is (§6), and none
+        // exists. Asserting the policy is disabled would no longer be true, and
+        // asserting only "not authorized" would no longer say why.
         const { rows } = await client.query(
-          `select destruction_enabled from kitluy_devices.key_destruction_policy
-          where environment = 'development'`,
+          `select destruction_enabled, approved_by_decision_ref, required_owner_decision,
+                  four_eyes_required, automatic_provider_destruction
+             from kitluy_devices.key_destruction_policy where environment = 'development'`,
         );
-        expect(rows[0].destruction_enabled).toBe(false);
+        expect(rows[0].destruction_enabled).toBe(true);
+        expect(rows[0].approved_by_decision_ref).toBe(DECISION_REF);
+        expect(rows[0].required_owner_decision).toBeNull();
+        expect(rows[0].four_eyes_required).toBe(true);
+        expect(rows[0].automatic_provider_destruction).toBe(false);
+
+        const state = (await pgLifecycleReader(client).loadLifecycleState({
+          deviceRecordId: fixture.deviceRecordId,
+          environment: DEVELOPMENT,
+          purpose: DEVICE_IDENTITY,
+        }))!;
+        // NO APPROVAL — not in the state the handler read, not in the database.
+        expect(state.destructionApproval ?? null).toBeNull();
+        for (const table of [
+          `select count(*) n from kitluy_devices.device_key_destruction_requests
+            where device_record_id = $1`,
+          `select count(*) n from kitluy_devices.device_key_destruction_attempts a
+             join kitluy_devices.device_key_destruction_requests r
+               on r.destruction_request_id = a.destruction_request_id
+            where r.device_record_id = $1`,
+        ]) {
+          const { rows: counted } = await client.query(table, [fixture.deviceRecordId]);
+          expect(Number(counted[0].n)).toBe(0);
+        }
+
+        const eligibility = evaluateKeyDestruction(state, boundary);
+        expect(eligibility.authorized).toBe(false);
+        expect(eligibility.policyReference).toBe(DECISION_REF);
+        expect(eligibility.requiredOwnerDecision).toBeNull();
+        // This device renewed with the SAME key, so it is not even eligible —
+        // the key still backs the current credential — and an approval would
+        // not change that. Both answers are asserted so neither can be read as
+        // standing in for the other.
+        expect(eligibility.eligible).toBe(false);
+        const fourEyes: KeyDestructionApproval = {
+          destructionRequestId: "00000000-0000-4000-8000-000000000002",
+          approved: true,
+          requestedBy: "operator:alice",
+          approvedBy: "operator:bob",
+          expiresAt: new Date(boundary.getTime() + 3_600_000),
+        };
+        expect(
+          evaluateKeyDestruction({ ...state, destructionApproval: fourEyes }, boundary).eligible,
+        ).toBe(false);
+
+        // -- NOTHING WAS DESTROYED. Unchanged and non-negotiable. -------------
+        expect(await destroyedKeyCount(client, fixture.deviceRecordId)).toBe(0);
+        // The handler holds no reference to a destroy operation at all, and the
+        // durable evidence shows it: one attempt, whose only called operation
+        // was the evaluation. There is no provider destroy call to count
+        // because there is no branch that could make one.
+        const attempts = await readJobAttempts(client, enqueued.jobId);
+        expect(attempts).toHaveLength(1);
+        expect(attempts[0].called_operation).toBe("evaluateKeyDestruction");
+        expect(attempts[0].operation_result).toBe("KEY_DESTRUCTION_NOT_AUTHORIZED");
+        expect(String(attempts[0].observed_business_state)).toContain("authorized=false");
+        expect(attempts[0].failure_code).toBeNull();
         executed += 1;
       });
     },

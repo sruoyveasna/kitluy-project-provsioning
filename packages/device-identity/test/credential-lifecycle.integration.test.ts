@@ -40,6 +40,7 @@ import {
   advanceDeviceCredentialLifecycle,
   evaluateKeyDestruction,
   permittedOverlapFrom,
+  type KeyDestructionApproval,
   type LifecycleInput,
 } from "../src/credential-lifecycle.js";
 import { completeSameKeyCredentialRenewal } from "../src/same-key-renewal-issuance.js";
@@ -50,6 +51,9 @@ import { evaluateCertificateValidity } from "../src/certificate-validity.js";
 import type { TrustedTimeEvaluation } from "../src/trusted-time.js";
 
 const SUITE = "@kitluy/device-identity credential overlap lifecycle";
+
+/** The decision that closed KLREQ-031 and enabled the policy (0137 §15). */
+const DECISION_REF = "KLD-2026-07-29-DEVICE-KEY-DESTRUCTION-001";
 
 const reachable = await isDevDatabaseReachable();
 if (!reachable) reportSkippedIntegration(SUITE);
@@ -353,9 +357,65 @@ describe.skipIf(!reachable)("live credential overlap lifecycle", () => {
       expect(afterRun.classification).toBe("KEY_DESTRUCTION_NOT_AUTHORIZED");
       expect(afterRun.destructionEligibility?.eligible).toBe(true);
       expect(afterRun.destructionEligibility?.authorized).toBe(false);
-      expect(afterRun.destructionEligibility?.requiredOwnerDecision).toContain(
-        "device_key_destruction_owner_decision",
+
+      // WHY it is not authorized has moved, and the assertion moves with it.
+      // The owner decision LANDED: the policy is enabled, names
+      // KLD-2026-07-29-DEVICE-KEY-DESTRUCTION-001, and `required_owner_decision`
+      // is null because nothing is outstanding any more. None of that is
+      // permission. What is missing is the §6 four-eyes approval, and the
+      // absence of one is what the assertions below pin down.
+      expect(afterRun.destructionEligibility?.policyReference).toBe(DECISION_REF);
+      expect(afterRun.destructionEligibility?.requiredOwnerDecision).toBeNull();
+
+      const afterState = (await reader.loadLifecycleState({
+        deviceRecordId: fixture.deviceRecordId,
+        environment: DEVELOPMENT,
+        purpose: DEVICE_IDENTITY,
+      }))!;
+      expect(afterState.destructionPolicy.destructionEnabled).toBe(true);
+      expect(afterState.destructionPolicy.approvedByDecisionRef).toBe(DECISION_REF);
+      expect(afterState.destructionPolicy.requiredOwnerDecision).toBeNull();
+      // NO APPROVAL EXISTS — neither in the loaded state nor in the database.
+      expect(afterState.destructionApproval ?? null).toBeNull();
+      const requests = await client.query(
+        `select count(*) n from kitluy_devices.device_key_destruction_requests
+          where device_record_id = $1`,
+        [fixture.deviceRecordId],
       );
+      expect(Number(requests.rows[0].n)).toBe(0);
+      const attempts = await client.query(
+        `select count(*) n from kitluy_devices.device_key_destruction_attempts a
+           join kitluy_devices.device_key_destruction_requests r
+             on r.destruction_request_id = a.destruction_request_id
+          where r.device_record_id = $1`,
+        [fixture.deviceRecordId],
+      );
+      expect(Number(attempts.rows[0].n)).toBe(0);
+
+      // Given trusted time — which the service deliberately does not supply —
+      // the evaluator still refuses, because the approval is what is missing.
+      expect(evaluateKeyDestruction(afterState, after).authorized).toBe(false);
+
+      // And the approval is the ONLY thing missing: the same real state, with a
+      // §6-complete approval bolted on, authorizes. That is what makes the
+      // refusal above evidence rather than an accident of some other blocker.
+      const fourEyes: KeyDestructionApproval = {
+        destructionRequestId: "00000000-0000-4000-8000-000000000001",
+        approved: true,
+        requestedBy: "operator:alice",
+        approvedBy: "operator:bob",
+        expiresAt: new Date(after.getTime() + 3_600_000),
+      };
+      expect(
+        evaluateKeyDestruction({ ...afterState, destructionApproval: fourEyes }, after).authorized,
+      ).toBe(true);
+      // Self-approval is not four eyes, whatever the policy says.
+      expect(
+        evaluateKeyDestruction(
+          { ...afterState, destructionApproval: { ...fourEyes, approvedBy: "operator:alice" } },
+          after,
+        ).authorized,
+      ).toBe(false);
 
       // NOTHING WAS DESTROYED. The replacement key is active and the old one is
       // still superseded, exactly as before.
@@ -369,10 +429,13 @@ describe.skipIf(!reachable)("live credential overlap lifecycle", () => {
 
       const history = await readLifecycleEvents(client, fixture.deviceRecordId);
       expect(history.map((h) => h.classification)).toContain("KEY_DESTRUCTION_NOT_AUTHORIZED");
+      // The durable evidence names the DECISION that governs the refusal now
+      // that one exists, rather than a placeholder for a missing one.
       expect(
         history.find((h) => h.classification === "KEY_DESTRUCTION_NOT_AUTHORIZED")
           ?.destructionPolicyReference,
-      ).toContain("device_key_destruction_owner_decision");
+      ).toBe(DECISION_REF);
+      expect(history.every((h) => h.providerKeyTransition !== "destroyed")).toBe(true);
     });
   }, 180_000);
 
@@ -527,13 +590,76 @@ describe.skipIf(!reachable)("live credential overlap lifecycle", () => {
     });
   }, 180_000);
 
-  it("refuses to enable destruction without a decision and both retention periods", async () => {
+  it("refuses to weaken the APPROVED destruction policy — automation, four-eyes, decision or retention", async () => {
     await withDatabaseTransaction(async (client) => {
-      // The CHECKs are the real control, exactly as for rotation.
+      // The owner decision landed, so "enable destruction without a decision"
+      // is no longer a reachable shape: the decision and both retention periods
+      // are already there. The CHECKs did not stop being the real control — the
+      // direction they bite from did. Every guard below is exercised by trying
+      // to REMOVE what the decision supplied, plus the two guards 0137 added
+      // precisely so that an enabled policy cannot become a bypass.
+      const columns = `destruction_enabled, approved_by_decision_ref, required_owner_decision,
+                       minimum_retention_days, recovery_retention_days,
+                       superseded_minimum_retention_days, abandoned_minimum_retention_days,
+                       approval_validity_hours, maximum_execution_attempts,
+                       automatic_provider_destruction, four_eyes_required, policy_version`;
+      const read = async () =>
+        (
+          await client.query(
+            `select ${columns} from kitluy_devices.key_destruction_policy
+              where environment = 'development'`,
+          )
+        ).rows[0];
+
+      // -- The approved policy, value by value (0137 §15, verbatim) ----------
+      const shipped = await read();
+      expect(shipped.destruction_enabled).toBe(true);
+      expect(shipped.approved_by_decision_ref).toBe(DECISION_REF);
+      expect(shipped.required_owner_decision).toBeNull();
+      expect(Number(shipped.superseded_minimum_retention_days)).toBe(30);
+      expect(Number(shipped.abandoned_minimum_retention_days)).toBe(7);
+      expect(Number(shipped.recovery_retention_days)).toBe(14);
+      expect(Number(shipped.approval_validity_hours)).toBe(24);
+      expect(Number(shipped.maximum_execution_attempts)).toBe(5);
+      // §7: the irreversible provider call is NOT automatic, and four eyes are
+      // required. Enabling destruction did not relax either one.
+      expect(shipped.automatic_provider_destruction).toBe(false);
+      expect(shipped.four_eyes_required).toBe(true);
+
+      // -- 0137 §7: the provider call cannot be made automatic ---------------
+      const automatic = await expectRefused(client, () =>
+        client.query(
+          `update kitluy_devices.key_destruction_policy
+              set automatic_provider_destruction = true where environment = 'development'`,
+        ),
+      );
+      expect(automatic).toMatch(/key_destruction_policy_not_automatic_chk/);
+
+      // -- 0137 §6: four-eyes cannot be dropped while destruction is enabled --
+      const noFourEyes = await expectRefused(client, () =>
+        client.query(
+          `update kitluy_devices.key_destruction_policy
+              set four_eyes_required = false where environment = 'development'`,
+        ),
+      );
+      expect(noFourEyes).toMatch(/key_destruction_policy_four_eyes_when_enabled_chk/);
+
+      // The two together — the shape someone would actually write to build a
+      // fully automatic destroyer — is refused as well.
+      const fullBypass = await expectRefused(client, () =>
+        client.query(
+          `update kitluy_devices.key_destruction_policy
+              set four_eyes_required = false, automatic_provider_destruction = true
+            where environment = 'development'`,
+        ),
+      );
+      expect(fullBypass).toMatch(/key_destruction_policy_four_eyes_when_enabled_chk/);
+
+      // -- 0134's guards still bite, from the other direction ----------------
       const noDecision = await expectRefused(client, () =>
         client.query(
           `update kitluy_devices.key_destruction_policy
-              set destruction_enabled = true where environment = 'development'`,
+              set approved_by_decision_ref = null where environment = 'development'`,
         ),
       );
       expect(noDecision).toMatch(/key_destruction_policy_needs_decision_chk/);
@@ -541,23 +667,46 @@ describe.skipIf(!reachable)("live credential overlap lifecycle", () => {
       const noRetention = await expectRefused(client, () =>
         client.query(
           `update kitluy_devices.key_destruction_policy
-              set destruction_enabled = true, approved_by_decision_ref = 'KLD-TEST'
-            where environment = 'development'`,
+              set minimum_retention_days = null where environment = 'development'`,
         ),
       );
       expect(noRetention).toMatch(/key_destruction_policy_needs_retention_chk/);
 
-      const shipped = await client.query(
-        `select destruction_enabled, approved_by_decision_ref, minimum_retention_days,
-                required_owner_decision
-           from kitluy_devices.key_destruction_policy where environment = 'development'`,
+      // -- 0137's fuller retention set is mandatory too ----------------------
+      const noValidityWindow = await expectRefused(client, () =>
+        client.query(
+          `update kitluy_devices.key_destruction_policy
+              set approval_validity_hours = null where environment = 'development'`,
+        ),
       );
-      expect(shipped.rows[0].destruction_enabled).toBe(false);
-      expect(shipped.rows[0].approved_by_decision_ref).toBeNull();
-      expect(shipped.rows[0].minimum_retention_days).toBeNull();
-      expect(shipped.rows[0].required_owner_decision).toContain(
-        "device_key_destruction_owner_decision",
+      expect(noValidityWindow).toMatch(/key_destruction_policy_full_retention_chk/);
+
+      const noAttemptCeiling = await expectRefused(client, () =>
+        client.query(
+          `update kitluy_devices.key_destruction_policy
+              set maximum_execution_attempts = null where environment = 'development'`,
+        ),
       );
+      expect(noAttemptCeiling).toMatch(/key_destruction_policy_full_retention_chk/);
+
+      const noSupersededRetention = await expectRefused(client, () =>
+        client.query(
+          `update kitluy_devices.key_destruction_policy
+              set superseded_minimum_retention_days = null where environment = 'development'`,
+        ),
+      );
+      expect(noSupersededRetention).toMatch(/key_destruction_policy_full_retention_chk/);
+
+      const noAbandonedRetention = await expectRefused(client, () =>
+        client.query(
+          `update kitluy_devices.key_destruction_policy
+              set abandoned_minimum_retention_days = null where environment = 'development'`,
+        ),
+      );
+      expect(noAbandonedRetention).toMatch(/key_destruction_policy_full_retention_chk/);
+
+      // Nine refusals, and not one of them changed a single column.
+      expect(await read()).toEqual(shipped);
     });
   }, 120_000);
 

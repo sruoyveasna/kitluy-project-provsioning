@@ -14,6 +14,7 @@ import {
   lifecycleRequiresHumanReview,
   overlapIsActive,
   permittedOverlapFrom,
+  type KeyDestructionApproval,
   type KeyDestructionPolicy,
   type LifecycleAuditRecord,
   type LifecycleGateway,
@@ -56,7 +57,7 @@ function untrusted(status: TrustedTimeStatus): TrustedTimeEvaluation {
   };
 }
 
-/** No owner decision exists, which is the shipped reality. */
+/** The pre-decision world: no owner decision, destruction disabled. */
 const NO_POLICY: KeyDestructionPolicy = {
   destructionEnabled: false,
   minimumRetentionDays: null,
@@ -65,6 +66,42 @@ const NO_POLICY: KeyDestructionPolicy = {
   approvedByDecisionRef: null,
   requiredOwnerDecision: "[REQUIRED: device_key_destruction_owner_decision]",
 };
+
+/** The decision that closed KLREQ-031, OWNER-APPROVED 2026-07-29. */
+const DECISION_REF = "KLD-2026-07-29-DEVICE-KEY-DESTRUCTION-001";
+
+/**
+ * The shipped POST-decision policy — enabled, decision named, retentions set.
+ *
+ * Decision §15: `destruction_enabled = true` means the governed workflow may
+ * ACCEPT REQUESTS. It is not itself permission to destroy anything, and the
+ * tests below exist to keep that distinction from quietly collapsing again.
+ */
+const APPROVED_POLICY: KeyDestructionPolicy = {
+  destructionEnabled: true,
+  minimumRetentionDays: 30,
+  recoveryRetentionDays: 14,
+  requiresOperatorApproval: true,
+  approvedByDecisionRef: DECISION_REF,
+  requiredOwnerDecision: null,
+};
+
+const REQUESTER = "operator:alice";
+const APPROVER = "operator:bob";
+/** §6: an approval is valid for 24 hours and no longer. */
+const APPROVAL_EXPIRES = new Date(NOW.getTime() + 24 * 3_600_000);
+
+/** A §6-complete approval: two distinct humans, approved, and still in date. */
+function approval(overrides: Partial<KeyDestructionApproval> = {}): KeyDestructionApproval {
+  return {
+    destructionRequestId: "44444444-4444-4444-8444-444444444444",
+    approved: true,
+    requestedBy: REQUESTER,
+    approvedBy: APPROVER,
+    expiresAt: APPROVAL_EXPIRES,
+    ...overrides,
+  };
+}
 
 const NO_BLOCKERS = {
   referencingCredentialIds: [] as readonly string[],
@@ -450,7 +487,11 @@ describe("destruction policy", () => {
 
     expect(outcome.classification).toBe("KEY_DESTRUCTION_NOT_AUTHORIZED");
     expect(outcome.providerKeyAction).toContain("retained");
-    expect(outcome.reason).toContain("owner decision");
+    // Names the SPECIFIC missing thing rather than the phrase "owner decision",
+    // which this fixture's pre-decision policy carries as an underscored
+    // marker. The reason goes into durable evidence, so asserting the exact
+    // marker is what proves the record identifies which decision is absent.
+    expect(outcome.reason).toContain("device_key_destruction_owner_decision");
     // Nothing was destroyed, and the record says which decision is missing.
     expect(h.audited[0]?.destructionPolicyReference).toContain(
       "device_key_destruction_owner_decision",
@@ -458,7 +499,117 @@ describe("destruction policy", () => {
     expect(h.audited[0]?.providerResult).toBeNull();
   });
 
-  it("requires BOTH a decision reference and both retention periods to authorize", () => {
+  // =========================================================================
+  // THE REGRESSION TEST for the destruction bypass.
+  //
+  // `authorized` was once computed from the POLICY FLAG alone. That expression
+  // was invisibly wrong for as long as the policy was disabled — it could only
+  // ever be false — and the moment owner decision KLD-2026-07-29-DEVICE-KEY-
+  // DESTRUCTION-001 enabled the policy it began answering `true` for a key with
+  // NO destruction request and NO four-eyes approval. That is the precise
+  // bypass §6 and §7 exist to prevent, and every case below is written so that
+  // reintroducing it fails here rather than in production.
+  // =========================================================================
+
+  /** A retired-previous-credential rotation world, i.e. genuinely ELIGIBLE. */
+  const retired = (
+    destructionApproval?: KeyDestructionApproval | null,
+    policy: KeyDestructionPolicy = APPROVED_POLICY,
+  ): ObservedLifecycleState =>
+    rotated({
+      previousCredential: { ...rotated().previousCredential!, state: "superseded" },
+      destructionPolicy: policy,
+      ...(destructionApproval === undefined ? {} : { destructionApproval }),
+    });
+
+  it("does NOT authorize on the APPROVED POLICY ALONE — no request, no approval, no permission", () => {
+    // Enabled, decision named, both retention periods set: the complete policy.
+    const noApproval = evaluateKeyDestruction(retired(undefined), NOW);
+
+    // The key really is eligible — nothing in the fleet references it any more.
+    expect(noApproval.eligible).toBe(true);
+    expect(noApproval.blockers).toEqual([]);
+    // And it is still NOT AUTHORIZED. Eligibility is a fact; permission is a
+    // four-eyes record, and absent evidence is not authorization.
+    expect(noApproval.authorized).toBe(false);
+    expect(noApproval.policyReference).toBe(DECISION_REF);
+    expect(noApproval.requiredOwnerDecision).toBeNull();
+
+    // An explicitly null approval says the same thing as an absent one.
+    expect(evaluateKeyDestruction(retired(null), NOW).authorized).toBe(false);
+    // And so does the default call shape, which supplies no trusted time at all.
+    expect(evaluateKeyDestruction(retired(undefined)).authorized).toBe(false);
+  });
+
+  it("authorizes ONLY with a complete, unexpired, second-human approval AND trusted time", () => {
+    const complete = evaluateKeyDestruction(retired(approval()), NOW);
+    expect(complete.eligible).toBe(true);
+    expect(complete.authorized).toBe(true);
+    expect(complete.policyReference).toBe(DECISION_REF);
+
+    // The same approval one millisecond before it lapses is still good...
+    expect(
+      evaluateKeyDestruction(retired(approval()), new Date(APPROVAL_EXPIRES.getTime() - 1))
+        .authorized,
+    ).toBe(true);
+    // ...and at the expiry instant it is not. HALF-OPEN, the same shape as the
+    // overlap boundary: `expiresAt > trustedNow`, so "exactly at" is expired.
+    expect(evaluateKeyDestruction(retired(approval()), APPROVAL_EXPIRES).authorized).toBe(false);
+  });
+
+  const incompleteApprovals: ReadonlyArray<readonly [string, Partial<KeyDestructionApproval>]> = [
+    ["it has already expired", { expiresAt: new Date(NOW.getTime() - 1) }],
+    ["it carries no expiry at all, so §6's 24-hour window cannot be checked", { expiresAt: null }],
+    ["the approver IS the requester — one human is not four eyes", { approvedBy: REQUESTER }],
+    ["nobody approved it", { approved: false }],
+    ["no approver is named", { approvedBy: null }],
+    [
+      "it is unapproved AND self-signed, so neither half holds",
+      { approved: false, approvedBy: REQUESTER },
+    ],
+  ];
+
+  for (const [why, override] of incompleteApprovals) {
+    it(`refuses authorization when ${why}`, () => {
+      const eligibility = evaluateKeyDestruction(retired(approval(override)), NOW);
+      // Still eligible — which is exactly why this must not be authorized.
+      expect(eligibility.eligible).toBe(true);
+      expect(eligibility.authorized).toBe(false);
+    });
+  }
+
+  it("refuses authorization when the expiry cannot be judged because trusted time is absent", () => {
+    // A complete approval whose validity nobody can check is not a permission
+    // to make an irreversible provider call. It fails CLOSED.
+    expect(evaluateKeyDestruction(retired(approval()), null).authorized).toBe(false);
+    expect(evaluateKeyDestruction(retired(approval())).authorized).toBe(false);
+    // The device's own untrusted clock is not a substitute: the caller has to
+    // supply trusted time, and only then does the same approval authorize.
+    expect(evaluateKeyDestruction(retired(approval()), NOW).authorized).toBe(true);
+  });
+
+  it("keeps the POLICY half load-bearing even when the approval is perfect", () => {
+    const disabled: KeyDestructionPolicy = { ...APPROVED_POLICY, destructionEnabled: false };
+    expect(evaluateKeyDestruction(retired(approval(), disabled), NOW).authorized).toBe(false);
+
+    const undecided: KeyDestructionPolicy = { ...APPROVED_POLICY, approvedByDecisionRef: null };
+    expect(evaluateKeyDestruction(retired(approval(), undecided), NOW).authorized).toBe(false);
+
+    // The pre-decision policy shipped in 0134 refuses a perfect approval too.
+    expect(evaluateKeyDestruction(retired(approval(), NO_POLICY), NOW).authorized).toBe(false);
+  });
+
+  it("never authorizes on a partial policy — no decision, or a missing retention period", () => {
+    // PRESERVED FROM THE PRE-APPROVAL SUITE, unchanged, because the answer is
+    // unchanged. What has changed is which check does the work.
+    //
+    // `evaluateKeyDestruction` reads `destructionEnabled` and
+    // `approvedByDecisionRef`; it does NOT re-check the two retention periods,
+    // because a policy row with destruction enabled and a null retention cannot
+    // exist — `key_destruction_policy_needs_retention_chk` (0134) and
+    // `key_destruction_policy_full_retention_chk` (0137) refuse it, and the
+    // live suite exercises both. These cases therefore assert the answer, and
+    // the constraint tests assert why the shape is unreachable.
     const partial: ReadonlyArray<Partial<KeyDestructionPolicy>> = [
       { destructionEnabled: true, approvedByDecisionRef: null },
       { destructionEnabled: true, approvedByDecisionRef: "KLD-X", minimumRetentionDays: null },
@@ -470,32 +621,48 @@ describe("destruction policy", () => {
       },
     ];
     for (const policy of partial) {
-      const eligibility = evaluateKeyDestruction(
-        rotated({
-          previousCredential: { ...rotated().previousCredential!, state: "superseded" },
-          destructionPolicy: { ...NO_POLICY, ...policy },
-        }),
-      );
-      expect(eligibility.authorized).toBe(false);
+      expect(
+        evaluateKeyDestruction(retired(undefined, { ...NO_POLICY, ...policy }), NOW).authorized,
+      ).toBe(false);
     }
+  });
 
-    // Complete policy: authorized. Eligibility and authorization are separate,
-    // and both must hold.
-    const complete = evaluateKeyDestruction(
-      rotated({
-        previousCredential: { ...rotated().previousCredential!, state: "superseded" },
-        destructionPolicy: {
-          destructionEnabled: true,
-          approvedByDecisionRef: "KLD-TEST-DESTRUCTION",
-          minimumRetentionDays: 30,
-          recoveryRetentionDays: 7,
-          requiresOperatorApproval: true,
-          requiredOwnerDecision: null,
-        },
-      }),
+  it("refuses an approval attached to a key that is NOT eligible", () => {
+    // A same-key renewal: the "previous" key still backs the CURRENT
+    // credential. An approval does not make that key destroyable, and the
+    // caller must read `eligible` as well as `authorized` — so the fixture
+    // proves the two answers stay independent rather than collapsing.
+    const state = sameKey({
+      previousCredential: { ...sameKey().previousCredential!, state: "superseded" },
+      destructionPolicy: APPROVED_POLICY,
+      destructionApproval: approval(),
+    });
+    const eligibility = evaluateKeyDestruction(state, NOW);
+    expect(eligibility.eligible).toBe(false);
+    expect(eligibility.blockers[0]).toContain("CURRENT credential");
+  });
+
+  it("never reports authorization from the lifecycle SERVICE, whatever the state carries", async () => {
+    // `advanceDeviceCredentialLifecycle` evaluates destruction without passing
+    // trusted time, so this path fails closed by construction: there is no
+    // state — not even an approved policy plus a §6-complete approval — that
+    // makes the service hand back `authorized: true`, and nothing it returns
+    // can be mistaken for a permission to destroy.
+    const h = harness([retired(approval())]);
+    const outcome = await advanceDeviceCredentialLifecycle(
+      input({ trustedTime: trustedAt(OVERLAP_END) }),
+      h.reader,
+      h.gateway,
     );
-    expect(complete.authorized).toBe(true);
-    expect(complete.eligible).toBe(true);
+
+    expect(outcome.classification).toBe("KEY_DESTRUCTION_NOT_AUTHORIZED");
+    expect(outcome.destructionEligibility?.eligible).toBe(true);
+    expect(outcome.destructionEligibility?.authorized).toBe(false);
+    expect(outcome.providerKeyAction).toContain("retained");
+    // The audit names the DECISION now that one exists, not a missing one.
+    expect(h.audited[0]?.destructionPolicyReference).toBe(DECISION_REF);
+    expect(h.audited[0]?.providerResult).toBeNull();
+    expect(h.audited[0]?.providerKeyTransition).toBe("retained");
   });
 });
 
