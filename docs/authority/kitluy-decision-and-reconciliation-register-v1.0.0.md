@@ -1288,3 +1288,205 @@ grants.
 credential issuance, key rotation, provider activation, lifecycle
 reconciliation, overlap expiry or independent review exists for renewal.
 `KLRISK-DEVICE-003`, `KLRISK-REPO-001` and `KLRISK-REPO-002` remain OPEN.
+
+---
+
+## Same-key prepare/sign/finalize — IMPLEMENTED-IN-DEV component
+
+`packages/device-identity/src/same-key-renewal-issuance.ts` adds one operation,
+`completeSameKeyCredentialRenewal`, which runs:
+
+```
+preflight + reservation (Prompt 2B-1, reused verbatim)
+  -> prepare_device_credential_issuance_v1
+  -> the CA signs the reserved bytes
+  -> record_device_credential_signature_v1
+  -> finalize_device_credential_issuance_v1
+  -> the PERSISTED credential, re-verified cryptographically
+```
+
+The middle four steps are `runGovernedIssuance` from `issuance-adapter.ts`,
+**unchanged**. Renewal does not get a second issuance route. What the new module
+adds is the RENEWAL BINDING — the reservation the database froze must still
+describe reality at the moment the database prepares — and that check runs
+inside a gateway decorator, between preparation and signing, so a disagreement
+refuses with **nothing signed**.
+
+**The caller supplies nothing that decides identity.** Credential id, serial,
+generation, validity window, canonical TBS and its digest all come from the
+database. So does the idempotency key: it is DERIVED from the frozen renewal
+attempt id, because `prepare_device_credential_issuance_v1` derives the
+credential id and serial FROM that key — a caller able to choose it would be
+choosing the serial.
+
+**WHO SIGNS WHAT — a deliberate reading of the instruction.** Prompt 2B-2 §6
+says "use the same private key to sign the new credential TBS". Taken
+literally that would have the DEVICE key sign its own credential, which
+`verifyCertificateChain` refuses (the device link must be signed by the
+intermediate) and which §9 of the same instruction then requires to verify. The
+two cannot both hold. Implemented as: the **CA intermediate** signs the
+credential TBS, so the chain verifies; the **device key** signs a
+domain-separated, renewal-bound proof of possession (`kitluy.same-key-renewal-pop.v1`,
+binding attempt, device, incumbent, both generations, fingerprint, assignment
+generation and scope). That proof is what makes it a *same-key* renewal rather
+than an assertion that the key is unchanged, and it is verified with the real
+verifier before the database is told anything about it. Recorded here rather
+than silently resolved.
+
+**Post-finalization verification is not optional.** Finalization succeeding is a
+statement about bookkeeping. The credential is loaded back OUT of PostgreSQL and
+put through `evaluateCertificateValidity`; a one-byte mutation of the persisted
+signature is refused even though the row still reads `issued`. The result still
+carries no caller-usable "verified" boolean — only
+`consumersMustReVerifyAtAuthenticationBoundary`.
+
+**What the result reports, as four separate facts rather than one:**
+`credentialGenerationAdvanced: true`, `keyGenerationUnchanged: true`,
+`keyRotated: false`, and the unchanged fingerprint.
+
+---
+
+## KLRISK-DEVICE-005 — the overlap window compared two different clocks
+
+**Found by executing a real same-key renewal end to end as
+`kitluy_issuance_service`. Reproduced deterministically; not a fixture or seed
+problem.**
+
+Group 0127's finalization derives the overlap from DEVICE TRUSTED TIME:
+
+```sql
+overlap_ends_at := least(attempt.not_before + interval '3 days',
+                         previous_credential.not_after)
+```
+
+Group 0125's trigger bounded the same value by SERVER TIME:
+
+```sql
+if new.overlap_ends_at > new.updated_at + interval '3 days' then refuse
+```
+
+`not_before` is the trusted time the device presented; `updated_at` is `now()`.
+KLD-2026-07-28-002 §12 separates those clocks ON PURPOSE — device trusted time
+governs certificate validity, server time governs approval creation and expiry —
+so they are never guaranteed to agree.
+
+Consequence: whenever the device's trusted time was AHEAD of the server clock by
+**any** amount, `not_before + 3 days` exceeded `now() + 3 days` and finalization
+was refused with `KLUY-CRED-OVERLAP-EXCEEDED`. Measured on the local stack, a
+skew of **69 milliseconds** was enough. Same-key renewal was therefore not
+fragile — it was impossible for any device whose trusted time did not happen to
+lag the database.
+
+Isolation was exact: the identical fixture finalizes with trusted time 5 minutes
+BEHIND the transaction clock and is refused with it 1 second AHEAD.
+
+**Why four migration groups and 176 assertions missed it:** no renewal had ever
+been finalized. Group 0127's tests issue GENERATION 1, where the head is
+INSERTed with a null overlap and the comparison never runs. The rule was only
+reachable on the second generation, which nothing had ever created.
+
+**Disposition:** migration `0132` anchors the three-day maximum on the NEW
+credential's own `not_before` — the same clock the value is derived from — so
+the rule now says what §5 means: at most three days OF THE NEW CREDENTIAL'S OWN
+VALIDITY. The independent cap against the previous credential's expiry is
+unchanged, and a missing credential row for the incoming head generation still
+fails closed on the original server-clock rule. This is not a relaxation: under
+the old rule a `not_before` in the past permitted an overlap running to
+`now() + 3 days`, i.e. more than three days of the new credential's life.
+
+---
+
+## KLRISK-DEVICE-006 — a reuse_current_key renewal could never complete
+
+Group 0130 defines `completed` in `renewal_reservation_status` and writes it in
+exactly one place: `confirm_provider_key_activation_v1`. That function requires a
+`device_generation_keys` row bound to the renewal attempt, and the only writer of
+that binding, `register_generation_key_v2`, REFUSES any reservation that is not
+`rotate_key`.
+
+So a `reuse_current_key` reservation reached `issuance_pending`, its credential
+was issued, the head advanced — and the reservation stayed `issuance_pending`
+for ever. Observed directly: after a fully successful renewal,
+`status = issuance_pending`. Worse than cosmetic — group 0130's partial unique
+index treats a non-terminal reservation as OPEN, so the completed renewal kept
+blocking the next renewal of that generation.
+
+**Disposition:** migration `0132` completes it where it actually completes —
+atomically with the credential insert, in the same transaction as the audit,
+chain links and head advance. Rotation is untouched and still waits for provider
+activation, because for a rotated key a credential row genuinely does not prove
+the private half is usable (group 0130 TASK D).
+
+The trigger BINDS before it completes: generation, assignment generation, and
+the incumbent's fingerprint. That last check is what makes `reuse_current_key`
+MEAN reuse at the database level — a renewal that finalized against a different
+key is refused outright rather than silently completed.
+
+Assertion section 37a proves both corrections BEHAVIOURALLY, in SQL, independent
+of the TypeScript suite: it prepares a renewal with the device clock
+deliberately ahead of the server clock, finalizes it, and asserts the head
+advanced, the overlap is anchored on the new credential's `not_before`, the
+fingerprint is unchanged, the reservation reached `completed`, and no provider
+key row was created.
+
+---
+
+## KLRISK-DEVICE-007 — there is no governed credential-revocation operation
+
+Restated and escalated to a named risk, having now been confirmed a second time.
+
+Migrations 0125–0132 define `credential_state = 'revoked'`, the refusal
+`KLUY-RENEWAL-REVOKED-REQUIRES-RECOVERY`, and a revocation-aware verifier — but
+**no function moves a credential into `revoked`**, and `postgres` cannot write
+the table (probed: `permission denied for table device_credentials`). The
+database branch is unreachable from any caller and therefore untested.
+
+Renewal preflight covers the revoked case through DEVICE CONTAINMENT
+(`quarantine_device_v1`) instead. **Containment and revocation are different
+controls** and the substitution is recorded, not claimed as equivalent: nothing
+in this repository has tested an authorized revocation path, and direct
+credential status mutation has NOT been tested as one.
+
+Not implemented here — out of scope for Prompt 2B-2, and inventing a revocation
+workflow without an owner decision on who may revoke, on what evidence and with
+what four-eyes requirement would be exactly the failure this project exists to
+avoid.
+
+---
+
+## Findings recorded, not fixed (out of scope)
+
+1. **The live device-identity fixtures depend on `db:test` having run.** The
+   hardware profile `WS11-T001-HUB-PROBE` is created by
+   `supabase/tests/assertions.sql`, NOT by the seed — `supabase/seed/` creates no
+   hardware profiles at all. The canonical order (reset → seed → db:test →
+   test:rls → vitest) therefore is not a convention, it is a requirement. The
+   fixture's error message now says so explicitly, because "profile is missing"
+   on its own sends a reader hunting through the seed for something that was
+   never there. Not resolved by inventing a profile: certification status and
+   secure-element expectation are owner decisions.
+
+2. **Orchestration-level retry after a COMPLETED renewal refuses as
+   `RENEWAL_PREFLIGHT_NOT_IN_RENEWAL_WINDOW`.** This is correct and safe — the
+   head now carries a fresh 30-day credential, so a second renewal of it is
+   genuinely too early, and nothing is minted. Idempotency lives one level down,
+   on the request id derived from the frozen attempt: preparation, signature
+   recording and finalization each replay rather than duplicate, proven stage by
+   stage in the live suite. A caller that lost its response and wants the
+   credential back should read the head, not re-run the orchestration.
+
+3. **`R&D_HSA_AI_Agent_MVP.md` still fails `prettier --check` at `8bb6b42`**, as
+   it did at `8b9ecb7`. Untouched by this session and explicitly excluded from
+   it, so `format:check` — and therefore aggregate `pnpm verify` — still cannot
+   pass at the recorded baseline.
+
+4. **Node 22.23.0 is still not installed.** Re-checked at session start. Only
+   Node v24.15.0 is present, so aggregate `pnpm verify` and `pnpm docs:verify`
+   remain non-authoritative and every gate was run individually with the
+   documented temporary engine override. No `.npmrc`, `package.json` engines or
+   lockfile change was made to silence the mismatch.
+
+**Still pending: Prompt 2C — optional rotate_key orchestration and provider
+activation.** Not begun. Crash-point reconciliation, overlap expiry, credential
+revocation and independent hostile review of this unit all remain absent.
+`KLRISK-DEVICE-003`, `KLRISK-REPO-001` and `KLRISK-REPO-002` remain OPEN.

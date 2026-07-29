@@ -6,6 +6,7 @@ subfolder (repository/ shared/ apps/ services/ data/ infrastructure/ reviews/).
 
 | Date       | Area          | Task                              | Handoff                                                                                                                                                             |
 | ---------- | ------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-07-29 | shared        | WS-11-T003 Step 4 (Prompt 2B-2)   | [Same-key prepare/sign/finalize — IMPLEMENTED-IN-DEV component](shared/2026-07-29__SHARED__WS-11-T003-STEP4__SAME-KEY-PREPARE-SIGN-FINALIZE__AI-HANDOFF.md)         |
 | 2026-07-29 | shared        | WS-11-T003 Step 4 (Prompt 2B-1)   | [Same-key renewal preflight and reservation — IMPLEMENTED-IN-DEV component](shared/2026-07-29__SHARED__WS-11-T003-STEP4__SAME-KEY-RENEWAL-PREFLIGHT__AI-HANDOFF.md) |
 | 2026-07-28 | reviews       | WS-11-T003 Step 2                 | [Independent security review — trusted time (APPROVED-WITH-CONDITIONS)](reviews/2026-07-28__WS-11-T003-STEP2-TRUSTED-TIME__REVIEW.md)                               |
 | 2026-07-28 | data          | WS-11-T002                        | [Cycle 10 — Hub claim, scope resolution and assignment (BLK-005 gated)](data/2026-07-28__DATA__WS-11-T002-CYCLE10__CLAIM-SCOPE-AND-ASSIGNMENT__AI-HANDOFF.md)       |
