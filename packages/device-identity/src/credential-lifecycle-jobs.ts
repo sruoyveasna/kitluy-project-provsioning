@@ -638,7 +638,12 @@ export function keyCleanupEvaluateHandler(deps: CredentialLifecycleHandlerDeps):
         };
       }
 
-      const eligibility = evaluateKeyDestruction(state);
+      // Trusted time is passed so an APPROVED destruction can be recognised at
+      // all. Omitting it made every evaluation fail closed for ever — safe, but
+      // it would have left the four-eyes workflow permanently unreachable and
+      // the failure indistinguishable from "nobody approved it".
+      const trustedTime = await deps.trustedTime({ deviceRecordId });
+      const eligibility = evaluateKeyDestruction(state, trustedTime.trustedTime);
 
       const evidence = {
         observedBusinessState: `eligible=${eligibility.eligible} authorized=${eligibility.authorized}`,

@@ -32,15 +32,20 @@
  * the layer that verifies and the layer that retires.
  *
  * ===========================================================================
- * DESTRUCTION IS SPECIFIED AND BLOCKED
+ * DESTRUCTION IS APPROVED IN POLICY AND STILL NOT AUTOMATIC
  * ===========================================================================
- * No owner decision governs private-key retention. Migration 0134 therefore
- * ships `key_destruction_policy` with destruction DISABLED and both retention
- * periods NULL, naming `[REQUIRED: device_key_destruction_owner_decision]`.
+ * Owner decision KLD-2026-07-29-DEVICE-KEY-DESTRUCTION-001 (OWNER-APPROVED
+ * 2026-07-29) closed KLREQ-031, and migration 0137 configured the policy with
+ * its approved values. Until that ruling this module said no owner decision
+ * existed; that is no longer true, so the sentence is removed rather than left
+ * to mislead a reader.
  *
- * This module evaluates ELIGIBILITY and records it. It does not destroy
- * anything, and it does not choose a retention period — inventing one would be
- * exactly the failure the empty policy table exists to prevent.
+ * What has NOT changed is that this module destroys nothing. It evaluates
+ * ELIGIBILITY — a fact about the fleet — and reports AUTHORIZATION separately,
+ * which per decision §6 requires a complete, unexpired approval by a human
+ * other than the requester. An enabled policy is NOT an authorization, and
+ * treating it as one was a real defect this module carried for exactly as long
+ * as the policy stayed disabled and nobody could see it.
  */
 
 import type { TrustEnvironment } from "./environments.js";
@@ -114,6 +119,21 @@ export interface KeyRetentionBlockers {
   readonly manualReviewOutstanding: boolean;
 }
 
+/**
+ * An approved destruction request for the previous key, when one exists.
+ *
+ * Optional, and its ABSENCE is meaningful: no approval means not authorized.
+ * Decision §6 requires two distinct humans and a 24-hour validity window, so
+ * an approval that cannot be shown is not an approval.
+ */
+export interface KeyDestructionApproval {
+  readonly destructionRequestId: string;
+  readonly approved: boolean;
+  readonly requestedBy: string;
+  readonly approvedBy: string | null;
+  readonly expiresAt: Date | null;
+}
+
 export interface ObservedLifecycleState {
   readonly deviceRecordId: string;
   readonly environment: string;
@@ -127,6 +147,8 @@ export interface ObservedLifecycleState {
   readonly previousKey: LifecycleProviderKey | null;
   readonly destructionPolicy: KeyDestructionPolicy;
   readonly retention: KeyRetentionBlockers;
+  /** Absent means no approval exists, which is NOT authorization. */
+  readonly destructionApproval?: KeyDestructionApproval | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -295,7 +317,15 @@ export function permittedOverlapFrom(
  * so without this a routine same-key renewal would nominate the device's only
  * working key for destruction.
  */
-export function evaluateKeyDestruction(state: ObservedLifecycleState): KeyDestructionEligibility {
+export function evaluateKeyDestruction(
+  state: ObservedLifecycleState,
+  /**
+   * Required to judge approval expiry. Absent means the expiry cannot be
+   * judged, and an approval whose validity cannot be checked is not an
+   * authorization — so the answer fails closed to NOT authorized.
+   */
+  trustedNow: Date | null = null,
+): KeyDestructionEligibility {
   const blockers: string[] = [];
   const previousKey = state.previousKey;
   const policy = state.destructionPolicy;
@@ -356,12 +386,36 @@ export function evaluateKeyDestruction(state: ObservedLifecycleState): KeyDestru
 
   const eligible = blockers.length === 0;
 
-  // AUTHORIZATION is a separate question, and today the answer is always no.
+  // AUTHORIZATION is a separate question from eligibility, and an ENABLED
+  // POLICY IS NOT AN ANSWER TO IT.
+  //
+  // This once read `policy.destructionEnabled && ...decisionRef !== null`,
+  // which was invisibly wrong for as long as the policy was disabled: the
+  // expression could only ever be false. The moment owner decision
+  // KLD-2026-07-29-DEVICE-KEY-DESTRUCTION-001 enabled it, that same expression
+  // began reporting `authorized: true` for a key with no destruction request
+  // and no approval — the precise bypass §6 and §7 exist to prevent.
+  //
+  // Authorization now requires what the decision requires: an approval that
+  // exists, names a different human from the requester, and has not expired.
+  // Absent evidence is NOT authorization.
+  const approval = state.destructionApproval ?? null;
   const authorized =
     policy.destructionEnabled &&
     policy.approvedByDecisionRef !== null &&
+    // The retention values are also required here, not only by the database
+    // CHECK. A policy row that reached this code with a null retention has
+    // already escaped one guard; agreeing with it would make this layer the
+    // second thing that failed rather than the thing that caught it.
     policy.minimumRetentionDays !== null &&
-    policy.recoveryRetentionDays !== null;
+    policy.recoveryRetentionDays !== null &&
+    approval !== null &&
+    approval.approved &&
+    approval.approvedBy !== null &&
+    approval.approvedBy !== approval.requestedBy &&
+    approval.expiresAt !== null &&
+    trustedNow !== null &&
+    approval.expiresAt.getTime() > trustedNow.getTime();
 
   return {
     providerKeyReference: previousKey?.providerKeyReference ?? null,
@@ -436,7 +490,7 @@ export async function advanceDeviceCredentialLifecycle(
     decision.classification === "PREVIOUS_CREDENTIAL_RETIRED" ||
     decision.classification === "KEY_STILL_REFERENCED" ||
     decision.classification === "KEY_DESTRUCTION_NOT_AUTHORIZED"
-      ? evaluateKeyDestruction(state)
+      ? evaluateKeyDestruction(state, trustedNow)
       : undefined;
 
   const record = async (
@@ -699,7 +753,7 @@ export function classifyLifecycle(
   }
 
   // Already retired — the remaining question is only about the key.
-  const eligibility = evaluateKeyDestruction(state);
+  const eligibility = evaluateKeyDestruction(state, trustedNow);
   if (!eligibility.eligible) {
     return {
       classification: "KEY_STILL_REFERENCED",
@@ -709,7 +763,16 @@ export function classifyLifecycle(
   }
   return {
     classification: "KEY_DESTRUCTION_NOT_AUTHORIZED",
-    reason: `nothing references the previous key any more, but destruction is not authorized: ${eligibility.requiredOwnerDecision ?? "no owner decision governs private-key retention"}. Eligibility is a fact about the fleet; permission is an owner decision, and the two are not the same.`,
+    // WHICH condition is absent, not a single catch-all. This sentence goes
+    // into durable lifecycle evidence, and "no owner decision governs
+    // retention" would be a lie once one does — an audit record that explains
+    // a refusal with the wrong cause is worse than one that says nothing.
+    reason: `nothing references the previous key any more, but destruction is not authorized: ${
+      eligibility.requiredOwnerDecision ??
+      (eligibility.policyReference === null
+        ? "no owner decision has approved destruction for this environment"
+        : "no complete, unexpired four-eyes approval exists for this key")
+    }. Eligibility is a fact about the fleet; authorization is a decision two people made, and the two are not the same.`,
     automatic: true,
   };
 }
