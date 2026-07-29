@@ -1162,3 +1162,129 @@ as failures far from their cause.
 only. No same-key or rotation orchestration exists in TypeScript, reconciliation
 is not implemented, and the full lifecycle and KLRISK-DEVICE-003 containment
 suites are not written.
+
+---
+
+## Same-key renewal preflight and reservation — IMPLEMENTED-IN-DEV component
+
+`packages/device-identity/src/same-key-renewal-preflight.ts` implements one
+operation, `prepareSameKeyCredentialRenewal`, and stops where the next unit
+begins:
+
+```
+trusted time -> credential head -> incumbent credential -> stored chain
+  -> REAL Ed25519 verification -> renewal eligibility -> provider key
+  -> governed reservation (reuse_current_key) -> frozen reservation
+```
+
+No credential is prepared, signed or finalized. No key is generated, rotated or
+activated. No head is advanced. No lifecycle status is promoted. Those are later
+units and are absent rather than stubbed.
+
+**The incumbent is derived, never accepted.** The credential renewed is whichever
+one the authoritative head points at. `assertedCurrentCredentialId` exists only
+so a caller's belief can be COMPARED; the repository fetches by GENERATION, so
+the id a caller supplies is never used to look anything up. A caller nominating
+another issued credential is refused with
+`RENEWAL_PREFLIGHT_INCUMBENT_NOT_CURRENT`.
+
+**No caller-supplied trust.** There is no `signatureValid`, no `isVerified` and
+no injectable verifier on this boundary. `state = 'issued'`, the existence of a
+row and the existence of an issuance audit are treated as bookkeeping, never as
+evidence that a signature verifies. Tests prove it by flipping ONE byte of the
+device link's stored signature and observing
+`CHAIN_DEVICE_NOT_SIGNED_BY_INTERMEDIATE` while the row still reads `issued`.
+The result carries no caller-usable verified boolean either — only
+`consumersMustReVerifyAtAuthenticationBoundary`.
+
+`tbsFromCanonicalBytes` was added to `dev-crypto.ts` because a chain loaded from
+PostgreSQL arrives as canonical strings. The subject PEM is the only field that
+contains newlines and sits at a FIXED position, so the split is positional, and
+the parsed structure is re-serialized and compared byte for byte before use. A
+structure that does not round-trip is refused rather than repaired.
+
+**Purpose is pinned, and a unit test found why it had to be.** With the caller
+asking to renew a `transport_signing` credential, `evaluateCertificateValidity`
+verified a `device_identity` chain and returned VALID: that function pins the
+purpose internally and has no purpose input. The preflight now refuses any
+purpose other than `device_identity`, matching the `purpose = 'device_identity'`
+CHECK on every credential table, and additionally compares the SIGNED purpose.
+
+---
+
+## KLRISK-DEVICE-004 — the named executor could never execute (migration 0131)
+
+**Found by running the integration suite AS `kitluy_issuance_service` instead of
+as `postgres`.**
+
+Groups 0127-0130 created `kitluy_issuance_service` as THE named executor of the
+governed issuance path and granted it EXECUTE on every governed function. None
+of them granted it USAGE on the schema those functions live in. The ACL read:
+
+```
+postgres=UC  service_role=U  authenticated=U
+kitluy_credential_issuer=UC  kitluy_activation_governor=UC
+```
+
+EXECUTE is not sufficient to CALL: PostgreSQL resolves `kitluy_devices.<fn>`
+through the schema first, so every governed call made as the intended role
+failed with `permission denied for schema kitluy_devices`.
+
+**Why it survived four migration groups and 174 passing assertions:** every test
+ran as `postgres`, which is a member of `service_role`, which HAS schema USAGE.
+The inherited privilege masked the gap completely. The functions ran, the
+assertions passed, and the role the whole design names as the executor had never
+once executed them. The privilege model was described, never exercised.
+
+**Disposition:** migration `0131` grants USAGE — and only USAGE — on
+`kitluy_devices` to `kitluy_issuance_service`. It does not grant CREATE, does not
+grant any table privilege, and does not grant any role membership. The migration
+carries hostile assertions that FAIL THE MIGRATION if the boundary widens:
+CREATE absent, no insert/update/delete on credentials, heads, provider keys or
+reservations, not a member of `kitluy_credential_issuer`, both roles still
+NOLOGIN, PUBLIC still holding no EXECUTE, RLS still ENABLE+FORCE.
+
+Assertion section 36 makes the same checks permanent, and 36b runs them **as the
+role**: it calls the governed reservation function and requires the answer to be
+the POLICY refusal (`KLUY-RENEWAL-NO-CURRENT-CREDENTIAL`) rather than a
+permission error, then confirms that direct reads of `renewal_policy`, direct
+credential insertion, head advancement, provider-key lifecycle mutation and
+`SET ROLE kitluy_credential_issuer` are all still refused.
+
+**Generalized lesson, recorded rather than fixed here:** a privilege matrix can
+be correct in the catalogue and wrong in practice. Any future governed role must
+be tested by ASSUMING it, not by executing as a superset that inherits its
+grants.
+
+---
+
+## Renewal-preflight findings recorded, not fixed (out of scope)
+
+1. **No governed credential-revocation path exists.** Migrations 0125-0131
+   define `credential_state = 'revoked'` and
+   `KLUY-RENEWAL-REVOKED-REQUIRES-RECOVERY`, but no function moves a credential
+   into `revoked`, and `postgres` cannot (probed: `permission denied for table
+   device_credentials`). The database branch is therefore UNREACHABLE and
+   untested from any caller. Renewal preflight covers the revoked case through
+   device containment (`quarantine_device_v1`) instead, which is a real signal
+   but a different one. A governed revocation function is needed before
+   `KLUY-RENEWAL-REVOKED-REQUIRES-RECOVERY` can be called tested.
+
+2. **`R&D_HSA_AI_Agent_MVP.md` fails `prettier --check` at `8b9ecb7`.** The file
+   is unmodified by this session and fails on its own, so `pnpm format:check`
+   — and therefore `pnpm verify` — cannot pass at the recorded baseline. Not
+   fixed here: it is outside this unit's scope and a repository-wide format run
+   is prohibited.
+
+3. **Node 22 is not installed on this machine.** The repository pins
+   `>=22.12.0 <23` with `engine-strict=true`; only Node v24.15.0 is present, so
+   `pnpm verify` and `pnpm docs:verify` cannot be invoked as aggregates (their
+   nested `pnpm` children re-read the project `.npmrc`). Every constituent step
+   was run individually with the engine check relaxed and the results are
+   recorded per step. The toolchain deviation is recorded rather than papered
+   over: these results were NOT produced on the ACTIVE-BASELINE Node 22.23.0.
+
+**Still pending: Prompt 2B-2 — same-key prepare, sign and finalize.** No
+credential issuance, key rotation, provider activation, lifecycle
+reconciliation, overlap expiry or independent review exists for renewal.
+`KLRISK-DEVICE-003`, `KLRISK-REPO-001` and `KLRISK-REPO-002` remain OPEN.
