@@ -291,6 +291,43 @@ export function buildReplacementChallenge(
   };
 }
 
+/**
+ * The REQUEST-IDENTITY hash, derived from frozen values only.
+ *
+ * `prepare_device_credential_issuance_v1` refuses a used request id whose
+ * canonical payload hash changed — correctly, because that is how it detects a
+ * different request wearing an old id. The proof-of-possession CHALLENGE hash
+ * cannot serve this purpose: the challenge embeds issuedAt/expiresAt so it can
+ * expire, so it differs on every retry and the database refused every rotation
+ * retry with KLUY-CRED-REQUEST-PAYLOAD-CHANGED. Conflating "which request is
+ * this" with "which proof was presented" is what broke it; they are separated
+ * here. The PoP preimage hash still travels in its own field, where it belongs.
+ */
+export function rotationCanonicalPayloadHash(
+  reservation: SameKeyRenewalReservation,
+  replacementFingerprint: string,
+): string {
+  return createHash("sha256")
+    .update(
+      Buffer.from(
+        [
+          "kitluy.rotate-key-request.v1",
+          reservation.renewalAttemptId,
+          reservation.deviceRecordId,
+          reservation.currentCredentialId,
+          String(reservation.currentCredentialGeneration),
+          String(reservation.nextCredentialGeneration),
+          String(reservation.assignmentGeneration),
+          replacementFingerprint,
+          reservation.environment,
+          reservation.purpose,
+        ].join("\n"),
+        "utf8",
+      ),
+    )
+    .digest("hex");
+}
+
 /** Derived from the frozen attempt, so the caller cannot steer the serial. */
 export function rotationIdempotencyKey(reservation: SameKeyRenewalReservation): string {
   return createHash("sha256")
@@ -565,7 +602,10 @@ export async function completeRotateKeyCredentialRenewal(
       publicKeyPem: replacement.publicKeyPem,
       publicKeyFingerprint: replacement.publicKeyFingerprint,
       idempotencyKey: rotationIdempotencyKey(reservation),
-      canonicalPayloadHash: popVerdict.challengeHash ?? sha256Hex(challenge.nonce),
+      canonicalPayloadHash: rotationCanonicalPayloadHash(
+        reservation,
+        replacement.publicKeyFingerprint,
+      ),
       popAlgorithm: "ed25519",
       popSignedPreimageHash: sha256Hex(replacementChallengeBytes(challenge)),
       popSignature,
