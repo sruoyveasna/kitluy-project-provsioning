@@ -270,3 +270,160 @@ describe("certificate.validity with real cryptography", () => {
     expect(code).not.toMatch(/signatureValid/);
   });
 });
+
+// ===========================================================================
+// The §5 overlap — two generations are legitimately usable at once
+// ===========================================================================
+describe("permitted credential overlap", () => {
+  /** A generation-1 credential, and the generation-2 state that replaced it. */
+  async function overlapping() {
+    const ca = new DevelopmentCertificateAuthority({ notBefore: days(-1), notAfter: days(365) });
+    const keys = new DevelopmentDeviceKeyProvider();
+    await keys.generateDeviceKey(DEVICE as DeviceRecordId, "development");
+    const oldPem = keys.publicKeyPem(DEVICE) as string;
+    const oldFingerprint = publicKeyFingerprint(oldPem);
+
+    const oldCertificate = ca.issueDeviceCertificate({
+      deviceRecordId: DEVICE,
+      subjectPublicKeyPem: oldPem,
+      subjectFingerprint: oldFingerprint,
+      hardwareTrustLevel: "development_software",
+      certificateGeneration: 1,
+      notBefore: days(-20),
+      notAfter: days(9),
+      serialNumber: "DEV-OVERLAP-GEN1",
+      certificateId: "11111111-1111-4111-8111-000000000001",
+    });
+
+    // The device has since rotated: generation 2, a different key.
+    const replacement = new DevelopmentDeviceKeyProvider();
+    await replacement.generateDeviceKey(OTHER_DEVICE as DeviceRecordId, "development");
+    const newFingerprint = publicKeyFingerprint(replacement.publicKeyPem(OTHER_DEVICE) as string);
+
+    return {
+      chain: {
+        root: ca.rootCertificate,
+        intermediate: ca.intermediateCertificate,
+        device: oldCertificate,
+      },
+      oldFingerprint,
+      newFingerprint,
+      roots: [ca.rootCertificate.tbs.subjectFingerprint],
+    };
+  }
+
+  const base = async () => {
+    const o = await overlapping();
+    return {
+      ...o,
+      context: {
+        chain: o.chain,
+        trustedTime: trusted(NOW),
+        environment: "development" as const,
+        deviceRecordId: DEVICE,
+        // The device's CURRENT state after the rotation.
+        currentKeyFingerprint: o.newFingerprint,
+        currentCertificateGeneration: 2,
+        revocations: noRevocations,
+        trustedRootFingerprints: o.roots,
+      },
+    };
+  };
+
+  it("refuses the previous credential when no overlap is supplied", async () => {
+    // Unchanged default behaviour. A caller that says nothing gets exactly
+    // what it got before, so nothing loosens by omission.
+    const { context } = await base();
+    const verdict = evaluateCertificateValidity(context);
+    expect(verdict.valid).toBe(false);
+    expect(verdict.rejectionCode).toBe("CERT_KEY_FINGERPRINT_MISMATCH");
+  });
+
+  it("accepts the previous credential inside the granted overlap", async () => {
+    // §5 grants up to three days during which BOTH generations are usable, and
+    // migration 0125 models it. Before this, the grant could never be used:
+    // the moment the head advanced, the previous credential was refused.
+    const { context, oldFingerprint } = await base();
+    const verdict = evaluateCertificateValidity({
+      ...context,
+      permittedOverlap: {
+        previousGeneration: 1,
+        previousKeyFingerprint: oldFingerprint,
+        overlapEndsAt: days(2),
+      },
+    });
+    expect(verdict.valid).toBe(true);
+  });
+
+  it("refuses it again once the overlap has ended, against TRUSTED time", async () => {
+    const { context, oldFingerprint } = await base();
+    const verdict = evaluateCertificateValidity({
+      ...context,
+      permittedOverlap: {
+        previousGeneration: 1,
+        previousKeyFingerprint: oldFingerprint,
+        overlapEndsAt: days(-1),
+      },
+    });
+    expect(verdict.valid).toBe(false);
+    expect(verdict.rejectionCode).toBe("CERT_KEY_FINGERPRINT_MISMATCH");
+  });
+
+  it("accepts EXACTLY the previous generation, not merely anything older", async () => {
+    const { context, oldFingerprint } = await base();
+    const verdict = evaluateCertificateValidity({
+      ...context,
+      currentCertificateGeneration: 5,
+      permittedOverlap: {
+        // The head says generation 4 overlaps. The presented credential is 1.
+        previousGeneration: 4,
+        previousKeyFingerprint: oldFingerprint,
+        overlapEndsAt: days(2),
+      },
+    });
+    expect(verdict.valid).toBe(false);
+    expect(verdict.rejectionCode).toBe("CERT_STALE_CERTIFICATE_GENERATION");
+  });
+
+  it("does not let an overlap rescue a revoked or expired credential", async () => {
+    const { context, oldFingerprint } = await base();
+    const overlap = {
+      previousGeneration: 1,
+      previousKeyFingerprint: oldFingerprint,
+      overlapEndsAt: days(2),
+    };
+    const revoked = evaluateCertificateValidity({
+      ...context,
+      permittedOverlap: overlap,
+      revocations: revokes("DEV-OVERLAP-GEN1"),
+    });
+    expect(revoked.rejectionCode).toBe("CERT_REVOKED");
+
+    // The overlap is STILL in effect here (it ends at day 12) while the
+    // credential itself expired on day 9 — so this proves the overlap does not
+    // rescue expiry, rather than merely proving the overlap ran out.
+    const expired = evaluateCertificateValidity({
+      ...context,
+      permittedOverlap: { ...overlap, overlapEndsAt: days(12) },
+      trustedTime: trusted(days(10)),
+    });
+    expect(expired.rejectionCode).toBe("CERT_EXPIRED");
+  });
+
+  it("does not need the provider private key to verify the previous credential", async () => {
+    // Verification reads the stored chain and public keys only. A superseded
+    // key being unavailable for SIGNING does not make its credential
+    // unverifiable — which is what makes the overlap meaningful at all.
+    const { context, oldFingerprint } = await base();
+    const verdict = evaluateCertificateValidity({
+      ...context,
+      permittedOverlap: {
+        previousGeneration: 1,
+        previousKeyFingerprint: oldFingerprint,
+        overlapEndsAt: days(2),
+      },
+    });
+    expect(verdict.valid).toBe(true);
+    expect(JSON.stringify(verdict)).not.toContain("PRIVATE KEY");
+  });
+});

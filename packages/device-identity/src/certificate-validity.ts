@@ -79,6 +79,38 @@ export interface CertificateVerificationContext {
   readonly revocations: RevocationLookup;
   /** This verifier's trust anchors. A development root is absent in production. */
   readonly trustedRootFingerprints: readonly string[];
+  /**
+   * The PERMITTED OVERLAP, read from `kitluy_devices.device_credential_heads`.
+   *
+   * §5 grants a renewed device up to three days during which BOTH generations
+   * are legitimately usable, and migration 0125 models it
+   * (`previous_generation`, `overlap_ends_at`) saying so in as many words. This
+   * verifier admitted exactly ONE key fingerprint and one generation floor, so
+   * the moment the head advanced, a verifier configured from the device's
+   * CURRENT state refused the previous credential with
+   * `CERT_KEY_FINGERPRINT_MISMATCH` — the granted overlap could never be used.
+   *
+   * OPTIONAL and ABSENT BY DEFAULT. A caller that supplies nothing gets exactly
+   * the previous behaviour, so nothing loosens by omission; accepting the
+   * previous generation is something a caller must ask for, with facts it read
+   * from the head row.
+   */
+  readonly permittedOverlap?: CredentialOverlap;
+}
+
+/**
+ * The previous generation, and the instant it stops being usable.
+ *
+ * Deliberately NOT "accept anything older": exactly ONE previous generation and
+ * exactly the key it attested to, until `overlapEndsAt` measured against
+ * TRUSTED time. Everything else — chain, purpose, environment, device binding,
+ * validity window, revocation — is unchanged and still applies.
+ */
+export interface CredentialOverlap {
+  readonly previousGeneration: number;
+  readonly previousKeyFingerprint: string;
+  /** From the head row. Trusted time past this ends the overlap. */
+  readonly overlapEndsAt: Date;
 }
 
 export interface CertificateValidity {
@@ -193,9 +225,15 @@ export function evaluateCertificateValidity(
   if (tbs.deviceRecordId !== context.deviceRecordId) {
     return reject("CERT_WRONG_DEVICE", "credential was issued for another device");
   }
-  // The credential must attest to the key the device ACTUALLY holds. One for a
-  // superseded key is not merely stale — it vouches for a key that is gone.
-  if (tbs.subjectFingerprint !== context.currentKeyFingerprint) {
+  // The credential must attest to a key the device ACTUALLY holds. During the
+  // §5 overlap that is TWO keys, not one — see `permittedOverlap`. Outside it,
+  // a credential for a superseded key is not merely stale: it vouches for a key
+  // that is gone.
+  const overlap = overlapInEffect(context, now);
+  const attestsToCurrent = tbs.subjectFingerprint === context.currentKeyFingerprint;
+  const attestsToOverlapping =
+    overlap !== null && tbs.subjectFingerprint === overlap.previousKeyFingerprint;
+  if (!attestsToCurrent && !attestsToOverlapping) {
     return reject(
       "CERT_KEY_FINGERPRINT_MISMATCH",
       "the credential attests to a key this device does not currently hold",
@@ -217,12 +255,18 @@ export function evaluateCertificateValidity(
   }
 
   // 4. Generation. A credential from before the current generation attests to
-  //    a superseded identity state.
-  if ((tbs.certificateGeneration ?? 0) < context.currentCertificateGeneration) {
-    return reject(
-      "CERT_STALE_CERTIFICATE_GENERATION",
-      `credential generation ${tbs.certificateGeneration}, device is at ${context.currentCertificateGeneration}`,
-    );
+  //    a superseded identity state — EXCEPT the one generation the head still
+  //    records as overlapping, and only until the overlap ends. "Older than
+  //    current" is not the test; "exactly the previous generation, still inside
+  //    its granted window" is.
+  const generation = tbs.certificateGeneration ?? 0;
+  if (generation < context.currentCertificateGeneration) {
+    if (overlap === null || generation !== overlap.previousGeneration) {
+      return reject(
+        "CERT_STALE_CERTIFICATE_GENERATION",
+        `credential generation ${tbs.certificateGeneration}, device is at ${context.currentCertificateGeneration}`,
+      );
+    }
   }
 
   // 5. REVOCATION BEFORE EXPIRY. §5.4: a revoked credential is invalid even
@@ -249,6 +293,24 @@ export function evaluateCertificateValidity(
     expiresAt: notAfter,
     credentialKind: CREDENTIAL_KIND,
   };
+}
+
+/**
+ * The overlap, if one is in effect at `now`.
+ *
+ * Returns null when no overlap was supplied OR when trusted time is past
+ * `overlapEndsAt`. Expiry is judged against TRUSTED time like every other
+ * window in this module — a host clock could otherwise extend the overlap
+ * indefinitely, which is the one thing a bounded grant must not permit.
+ */
+function overlapInEffect(
+  context: CertificateVerificationContext,
+  now: Date,
+): CredentialOverlap | null {
+  const overlap = context.permittedOverlap;
+  if (overlap === undefined) return null;
+  if (now.getTime() > overlap.overlapEndsAt.getTime()) return null;
+  return overlap;
 }
 
 /**
