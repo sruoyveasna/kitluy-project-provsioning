@@ -8631,4 +8631,1007 @@ begin
 end
 $section43$;
 
-select 'assertions complete: groups 0010-0140 structural contract holds (incl. WS-11-T003 Step 4 approval gate bounded to a NOLOGIN non-BYPASSRLS reader per KLD-2026-07-29-DEVICE-REVOCATION-BOUNDARY-002 Ruling 2)' as result;
+-- ============================================================================
+-- SECTION 44 — WS-11-T003 Step 4: the recorded revocation scope is
+-- CRYPTOGRAPHICALLY BOUND into the approval that authorizes it (migration 0141).
+-- Authority: KLD-2026-07-29-DEVICE-REVOCATION-BOUNDARY-002 **Ruling 1**,
+--   amending KLD-2026-07-29-DEVICE-CREDENTIAL-REVOCATION-001 §3/§3.1; migration
+--   groups 0138 (the recorded scope and its refusals), 0140 (the NOLOGIN reader
+--   that may touch kitluy_auth) and 0141 (the binding).
+--
+-- Group 0138 let a scope row CITE an approval. A citation is not a binding: the
+-- row could name approval X while describing an affected set the approvers of X
+-- never saw, and nothing spent the scope when it was used. Ruling 1 makes the
+-- exact scope a TERM of the approval — the digest of the canonical affected set,
+-- together with the reason, environment, subject type, tenancy, identifier
+-- count, requester and owner-decision version, is inside `payload_hash` — so an
+-- approval either commits to this exact set or it does not verify at all, and
+-- the scope is then spent exactly once.
+--
+-- A binding is only a binding if changing ANY ONE of its terms breaks it, so
+-- every term is varied on its own below and the resulting hash compared. Almost
+-- nothing here is taken from the catalogue: the digests are really recomputed,
+-- the scope rows are really inserted, the 0138 refusals are really attempted,
+-- the verifier and the consumer are really called AS the credential governor,
+-- and the scope is really spent. `pg_proc` is read only for the three facts
+-- that have no behaviour — ownership, PUBLIC EXECUTE and the pinned
+-- search_path — and the PUBLIC one is corroborated by six roles actually trying
+-- the calls.
+--
+-- TWO NOTES ON WHAT THE SHIPPED CODE ACTUALLY ANSWERS, so a later reader does
+-- not mistake these for weakened assertions:
+--
+--   * the verifier is owned by `kitluy_credential_issuer`, NOT by the approval
+--     reader, because it reads the governor's own `revocation_recorded_scopes`.
+--     The ONE fact it needs from `kitluy_auth` is fetched through
+--     `credential_revocation_approval_payload_hash_v1`, a separate definer owned
+--     by the reader that returns one hash for one credential-revocation
+--     approval and nothing else. Control 10 asserts that split precisely,
+--     because it is the whole reason Ruling 1 and Ruling 2 can both hold.
+--   * that helper returns NULL for an approval whose `payload_hash` is null or
+--     blank, so the verifier's `UNBOUND` branch is answered as `UNAPPROVED`
+--     before it is reached. Control 7c therefore asserts the SECURITY property
+--     (a blank hash is never read as "nothing to check") and accepts either
+--     refusal code rather than pinning the assertion to dead code.
+--
+-- The governor membership this section borrows is handed back before it
+-- finishes, exactly as sections 41c and 43 do. If any assertion raises, the
+-- whole DO block rolls back and the borrow rolls back with it, so section 32's
+-- containment assertion still holds on the next run.
+-- ============================================================================
+do $section44$
+declare
+  v_findings text[] := array[]::text[];
+  v_msg text := '';
+  v_fp text := encode(sha256(convert_to('t44-' || gen_random_uuid()::text, 'UTF8')), 'hex');
+  v_fp_other text := encode(sha256(convert_to('t44b-' || gen_random_uuid()::text, 'UTF8')), 'hex');
+  v_device uuid;
+  v_other_device uuid;
+
+  -- The terms of the binding, named once so each variant can differ in EXACTLY
+  -- one of them.
+  v_env constant text := 'development';
+  v_env_other constant text := 'staging';
+  v_reason constant kitluy_devices.credential_revocation_reason := 'SECURITY_INCIDENT';
+  v_reason_other constant kitluy_devices.credential_revocation_reason := 'PROVIDER_COMPROMISE';
+  v_subject constant text := 'MIXED';
+  v_tenant constant uuid := '00000000-0000-4000-8000-000000000011';
+  v_store constant uuid := '00000000-0000-4000-8000-000000000015';
+  v_location constant uuid := '00000000-0000-4000-8000-000000000018';
+  v_requester constant text := 'sec-a@44';
+  v_dv constant text := 'KLD-2026-07-29-DEVICE-REVOCATION-BOUNDARY-002';
+  v_keys constant text[] := array['pk-44-beta', 'pk-44-alpha'];
+  v_devices uuid[];
+  v_count integer;
+
+  v_requester_id constant uuid := '00000000-0000-4000-8000-000000000007';
+  v_approver_id constant uuid := '00000000-0000-4000-8000-000000000008';
+  v_incident text := 'INC-44-' || gen_random_uuid()::text;
+
+  v_canon text;
+  v_canon_b text;
+  v_digest text;
+  v_digest_b text;
+  v_digest_other text;
+  v_digest_stg text;
+  v_payload text;
+  v_payload_stg text;
+
+  v_policy_dev uuid;
+  v_policy_stg uuid;
+  v_ap_ok uuid;
+  v_ap_hash uuid;
+  v_ap_unbound uuid;
+  v_ap_stg uuid;
+  v_ap_consume uuid;
+
+  v_scope_ok uuid;
+  v_scope_hash uuid;
+  v_scope_unbound uuid;
+  v_scope_stg uuid;
+  v_scope_envmix uuid;
+  v_scope_consume uuid;
+  v_scope_missing uuid := gen_random_uuid();
+  v_revocation_id uuid := gen_random_uuid();
+
+  v_stored_digest text;
+  v_stored_payload text;
+  v_stored_count integer;
+  v_consumption uuid;
+
+  v_verdict jsonb;
+  v_res jsonb;
+  v_role text;
+  v_sig text;
+  v_n integer;
+begin
+  -- ------------------------------------------------------------------------
+  -- Fixtures: two real devices, so the affected set names identifiers that
+  -- actually exist, and the approvals in the SAME kitluy_auth aggregate group
+  -- 0124 uses. The approval payload hashes are COMPUTED here from the terms the
+  -- scope rows are about to carry — which is the whole point of Ruling 1: an
+  -- approver commits to a hash, and the recorded scope must reproduce it
+  -- exactly or it is not the set that was approved.
+  -- ------------------------------------------------------------------------
+  v_device := pg_temp.ws11_renewable_device('t44', v_fp);
+  v_other_device := pg_temp.ws11_renewable_device('t44b', v_fp_other);
+  v_devices := array[v_device];
+  v_count := cardinality(v_devices) + cardinality(v_keys);
+
+  -- ========================================================================
+  -- CONTROL 1 — CANONICALIZATION. Order and duplication cannot move the bytes;
+  -- one changed identifier must.
+  -- ========================================================================
+  -- 1a. The same set in a DIFFERENT ORDER: identical bytes, identical digest.
+  v_canon := kitluy_devices.canonical_revocation_scope_v1(
+    v_reason, v_env, v_subject, v_tenant, v_store, v_location, v_requester, v_dv,
+    array[v_device, v_other_device], array['pk-44-beta', 'pk-44-alpha'],
+    array[]::text[], array[]::uuid[]);
+  v_canon_b := kitluy_devices.canonical_revocation_scope_v1(
+    v_reason, v_env, v_subject, v_tenant, v_store, v_location, v_requester, v_dv,
+    array[v_other_device, v_device], array['pk-44-alpha', 'pk-44-beta'],
+    array[]::text[], array[]::uuid[]);
+  if v_canon_b is distinct from v_canon then
+    v_findings := v_findings ||
+      format('control 1a: reordering the identifiers changed the canonical scope bytes');
+  end if;
+  if kitluy_devices.revocation_scope_digest_v1(v_canon_b)
+     is distinct from kitluy_devices.revocation_scope_digest_v1(v_canon) then
+    v_findings := v_findings ||
+      format('control 1a: reordering the identifiers changed the scope digest');
+  end if;
+
+  -- 1b. DEDUPLICATION, at the level the migration defines it: the identifier
+  -- list itself. A repeated member renders once, so it cannot vary the bytes.
+  if kitluy_devices.canonical_identifier_list_v1(array['pk-44-beta', 'pk-44-alpha', 'pk-44-beta'])
+     is distinct from kitluy_devices.canonical_identifier_list_v1(array['pk-44-alpha', 'pk-44-beta']) then
+    v_findings := v_findings ||
+      format('control 1b: a duplicated identifier survived canonicalization');
+  end if;
+  if kitluy_devices.canonical_identifier_list_v1(array['pk-44-beta', 'pk-44-alpha'])
+     is distinct from 'pk-44-alpha,pk-44-beta' then
+    v_findings := v_findings ||
+      format('control 1b: the canonical identifier list is not sorted and comma-joined');
+  end if;
+  -- ...and at scope level: the same duplicated multiset, differently arranged,
+  -- digests identically. (Each list's CARDINALITY is emitted beside it, so
+  -- ADDING a duplicate is a DIFFERENT scope — that is control 2f's
+  -- identifier-count term doing its job, not a failure of deduplication.)
+  if kitluy_devices.revocation_scope_digest_v1(kitluy_devices.canonical_revocation_scope_v1(
+       v_reason, v_env, v_subject, v_tenant, v_store, v_location, v_requester, v_dv,
+       v_devices, array['pk-44-beta', 'pk-44-alpha', 'pk-44-beta'], array[]::text[], array[]::uuid[]))
+     is distinct from
+     kitluy_devices.revocation_scope_digest_v1(kitluy_devices.canonical_revocation_scope_v1(
+       v_reason, v_env, v_subject, v_tenant, v_store, v_location, v_requester, v_dv,
+       v_devices, array['pk-44-beta', 'pk-44-beta', 'pk-44-alpha'], array[]::text[], array[]::uuid[])) then
+    v_findings := v_findings ||
+      format('control 1b: a duplicated identifier in a different position changed the scope digest');
+  end if;
+
+  -- 1c. ONE STABLE REPRESENTATION: recomputing the same scope yields the same
+  -- bytes and the same digest, every time.
+  if kitluy_devices.canonical_revocation_scope_v1(
+       v_reason, v_env, v_subject, v_tenant, v_store, v_location, v_requester, v_dv,
+       array[v_device, v_other_device], array['pk-44-beta', 'pk-44-alpha'],
+       array[]::text[], array[]::uuid[]) is distinct from v_canon then
+    v_findings := v_findings ||
+      format('control 1c: recomputing the canonical scope produced different bytes');
+  end if;
+  if kitluy_devices.revocation_scope_digest_v1(v_canon)
+     is distinct from kitluy_devices.revocation_scope_digest_v1(v_canon) then
+    v_findings := v_findings || format('control 1c: the scope digest is not deterministic');
+  end if;
+  if kitluy_devices.revocation_scope_digest_v1(v_canon) !~ '^[0-9a-f]{64}$' then
+    v_findings := v_findings ||
+      format('control 1c: the scope digest is not a 64-character sha256 hex');
+  end if;
+
+  -- 1d. ONE CHANGED IDENTIFIER changes the digest. `v_digest` is the digest the
+  -- OK scope will carry; the other two are its one-identifier neighbours.
+  v_digest := kitluy_devices.revocation_scope_digest_v1(
+    kitluy_devices.canonical_revocation_scope_v1(
+      v_reason, v_env, v_subject, v_tenant, v_store, v_location, v_requester, v_dv,
+      v_devices, v_keys, array[]::text[], array[]::uuid[]));
+  v_digest_other := kitluy_devices.revocation_scope_digest_v1(
+    kitluy_devices.canonical_revocation_scope_v1(
+      v_reason, v_env, v_subject, v_tenant, v_store, v_location, v_requester, v_dv,
+      array[v_other_device], v_keys, array[]::text[], array[]::uuid[]));
+  if v_digest = v_digest_other then
+    v_findings := v_findings ||
+      format('control 1d: swapping ONE affected device left the scope digest unchanged');
+  end if;
+  v_digest_b := kitluy_devices.revocation_scope_digest_v1(
+    kitluy_devices.canonical_revocation_scope_v1(
+      v_reason, v_env, v_subject, v_tenant, v_store, v_location, v_requester, v_dv,
+      v_devices, array['pk-44-beta', 'pk-44-alphb'], array[]::text[], array[]::uuid[]));
+  if v_digest = v_digest_b then
+    v_findings := v_findings ||
+      format('control 1d: changing ONE character of ONE key reference left the scope digest unchanged');
+  end if;
+
+  -- ========================================================================
+  -- CONTROL 2 — EVERY TERM RULING 1 ENUMERATES IS BOUND. The baseline payload
+  -- hash is computed once; each variant differs in exactly one term and must
+  -- produce a different hash, or that term is decoration rather than a binding.
+  -- ========================================================================
+  v_payload := kitluy_devices.revocation_approval_payload_hash_v1(
+    v_digest, v_reason, v_env, v_subject, v_tenant, v_store, v_location,
+    v_count, v_requester, v_dv);
+  if v_payload !~ '^[0-9a-f]{64}$' then
+    v_findings := v_findings ||
+      format('control 2: the approval payload hash is not a 64-character sha256 hex');
+  end if;
+  if v_payload = v_digest then
+    v_findings := v_findings ||
+      format('control 2: the payload hash and the scope digest are the same value, so one could be replayed as the other');
+  end if;
+
+  -- 2a. THE EXACT SCOPE DIGEST is a term: the one-identifier neighbour from
+  -- control 1d, with every other term held constant, hashes differently.
+  if kitluy_devices.revocation_approval_payload_hash_v1(
+       v_digest_other, v_reason, v_env, v_subject, v_tenant, v_store, v_location,
+       v_count, v_requester, v_dv) = v_payload then
+    v_findings := v_findings ||
+      format('control 2a: the scope digest is not a term of the approval payload hash');
+  end if;
+  -- 2b. REASON.
+  if kitluy_devices.revocation_approval_payload_hash_v1(
+       v_digest, v_reason_other, v_env, v_subject, v_tenant, v_store, v_location,
+       v_count, v_requester, v_dv) = v_payload then
+    v_findings := v_findings ||
+      format('control 2b: the revocation reason is not bound into the payload hash');
+  end if;
+  -- 2c. ENVIRONMENT.
+  if kitluy_devices.revocation_approval_payload_hash_v1(
+       v_digest, v_reason, v_env_other, v_subject, v_tenant, v_store, v_location,
+       v_count, v_requester, v_dv) = v_payload then
+    v_findings := v_findings ||
+      format('control 2c: the environment is not bound into the payload hash');
+  end if;
+  -- 2d. SUBJECT TYPE.
+  if kitluy_devices.revocation_approval_payload_hash_v1(
+       v_digest, v_reason, v_env, 'DEVICE', v_tenant, v_store, v_location,
+       v_count, v_requester, v_dv) = v_payload then
+    v_findings := v_findings ||
+      format('control 2d: the subject type is not bound into the payload hash');
+  end if;
+  -- 2e. TENANT, DIGITAL STORE and STORE LOCATION, each on its own.
+  if kitluy_devices.revocation_approval_payload_hash_v1(
+       v_digest, v_reason, v_env, v_subject, v_store, v_store, v_location,
+       v_count, v_requester, v_dv) = v_payload then
+    v_findings := v_findings || format('control 2e: the tenant is not bound into the payload hash');
+  end if;
+  if kitluy_devices.revocation_approval_payload_hash_v1(
+       v_digest, v_reason, v_env, v_subject, v_tenant, v_location, v_location,
+       v_count, v_requester, v_dv) = v_payload then
+    v_findings := v_findings ||
+      format('control 2e: the digital store is not bound into the payload hash');
+  end if;
+  if kitluy_devices.revocation_approval_payload_hash_v1(
+       v_digest, v_reason, v_env, v_subject, v_tenant, v_store, v_tenant,
+       v_count, v_requester, v_dv) = v_payload then
+    v_findings := v_findings ||
+      format('control 2e: the store location is not bound into the payload hash');
+  end if;
+  -- ...and an ABSENT tenancy is distinguishable from a present one, so an
+  -- omitted term cannot silently hash as a supplied one.
+  if kitluy_devices.revocation_approval_payload_hash_v1(
+       v_digest, v_reason, v_env, v_subject, null, v_store, v_location,
+       v_count, v_requester, v_dv) = v_payload then
+    v_findings := v_findings ||
+      format('control 2e: a NULL tenant hashes the same as a named tenant');
+  end if;
+  -- 2f. IDENTIFIER COUNT.
+  if kitluy_devices.revocation_approval_payload_hash_v1(
+       v_digest, v_reason, v_env, v_subject, v_tenant, v_store, v_location,
+       v_count + 1, v_requester, v_dv) = v_payload then
+    v_findings := v_findings ||
+      format('control 2f: the identifier count is not bound into the payload hash');
+  end if;
+  -- 2g. REQUESTER.
+  if kitluy_devices.revocation_approval_payload_hash_v1(
+       v_digest, v_reason, v_env, v_subject, v_tenant, v_store, v_location,
+       v_count, 'sec-z@44', v_dv) = v_payload then
+    v_findings := v_findings || format('control 2g: the requester is not bound into the payload hash');
+  end if;
+  -- 2h. OWNER DECISION VERSION.
+  if kitluy_devices.revocation_approval_payload_hash_v1(
+       v_digest, v_reason, v_env, v_subject, v_tenant, v_store, v_location,
+       v_count, v_requester, v_dv || '-DRAFT') = v_payload then
+    v_findings := v_findings ||
+      format('control 2h: the owner decision version is not bound into the payload hash');
+  end if;
+
+  -- ------------------------------------------------------------------------
+  -- The approvals. Each carries the hash its own recorded scope must reproduce,
+  -- EXCEPT the two that are deliberately wrong: one committing to some other
+  -- affected set, and one committing to nothing at all.
+  -- ------------------------------------------------------------------------
+  v_digest_stg := kitluy_devices.revocation_scope_digest_v1(
+    kitluy_devices.canonical_revocation_scope_v1(
+      v_reason, v_env_other, v_subject, v_tenant, v_store, v_location, v_requester, v_dv,
+      v_devices, v_keys, array[]::text[], array[]::uuid[]));
+  v_payload_stg := kitluy_devices.revocation_approval_payload_hash_v1(
+    v_digest_stg, v_reason, v_env_other, v_subject, v_tenant, v_store, v_location,
+    v_count, v_requester, v_dv);
+
+  insert into kitluy_auth.approval_policies
+    (policy_key, version, permission_key, environment, quorum, status, risk_class)
+  values ('cred.revocation.scope.a4.' || substr(md5(random()::text), 1, 8), 1,
+          'device.credential.revoke', v_env, 1, 'ACTIVE', 'A4')
+  returning id into v_policy_dev;
+  insert into kitluy_auth.approval_policies
+    (policy_key, version, permission_key, environment, quorum, status, risk_class)
+  values ('cred.revocation.scope.stg.a4.' || substr(md5(random()::text), 1, 8), 1,
+          'device.credential.revoke', v_env_other, 1, 'ACTIVE', 'A4')
+  returning id into v_policy_stg;
+
+  insert into kitluy_auth.approval_requests
+    (policy_id, requester_id, resource_type, resource_id, environment, action,
+     payload_hash, reason, status)
+  values (v_policy_dev, v_requester_id, 'device', v_device, v_env,
+          'device_credential_revocation', v_payload,
+          'the affected set of incident 44', 'APPROVED')
+  returning id into v_ap_ok;
+  insert into kitluy_auth.approval_decisions (approval_request_id, approver_id, decision)
+  values (v_ap_ok, v_approver_id, 'APPROVE');
+
+  -- A perfectly good A4 approval that commits to SOME OTHER affected set.
+  insert into kitluy_auth.approval_requests
+    (policy_id, requester_id, resource_type, resource_id, environment, action,
+     payload_hash, reason, status)
+  values (v_policy_dev, v_requester_id, 'device', v_device, v_env,
+          'device_credential_revocation',
+          encode(sha256(convert_to('44-some-other-set-' || v_incident, 'UTF8')), 'hex'),
+          'an approval committing to another set', 'APPROVED')
+  returning id into v_ap_hash;
+  insert into kitluy_auth.approval_decisions (approval_request_id, approver_id, decision)
+  values (v_ap_hash, v_approver_id, 'APPROVE');
+
+  -- An approval that commits to NOTHING. Ruling 1 does not read a blank hash as
+  -- "nothing to check".
+  insert into kitluy_auth.approval_requests
+    (policy_id, requester_id, resource_type, resource_id, environment, action,
+     payload_hash, reason, status)
+  values (v_policy_dev, v_requester_id, 'device', v_device, v_env,
+          'device_credential_revocation', '   ',
+          'an approval carrying no payload hash', 'APPROVED')
+  returning id into v_ap_unbound;
+  insert into kitluy_auth.approval_decisions (approval_request_id, approver_id, decision)
+  values (v_ap_unbound, v_approver_id, 'APPROVE');
+
+  insert into kitluy_auth.approval_requests
+    (policy_id, requester_id, resource_type, resource_id, environment, action,
+     payload_hash, reason, status)
+  values (v_policy_stg, v_requester_id, 'device', v_device, v_env_other,
+          'device_credential_revocation', v_payload_stg,
+          'the same affected set, another environment', 'APPROVED')
+  returning id into v_ap_stg;
+  insert into kitluy_auth.approval_decisions (approval_request_id, approver_id, decision)
+  values (v_ap_stg, v_approver_id, 'APPROVE');
+
+  insert into kitluy_auth.approval_requests
+    (policy_id, requester_id, resource_type, resource_id, environment, action,
+     payload_hash, reason, status)
+  values (v_policy_dev, v_requester_id, 'device', v_device, v_env,
+          'device_credential_revocation', v_payload,
+          'the affected set of incident 44, for the consumption probe', 'APPROVED')
+  returning id into v_ap_consume;
+  insert into kitluy_auth.approval_decisions (approval_request_id, approver_id, decision)
+  values (v_ap_consume, v_approver_id, 'APPROVE');
+
+  -- ========================================================================
+  -- CONTROL 3 — THE BINDING IS COMPUTED, NOT ACCEPTED. The row below is
+  -- inserted with a deliberately WRONG digest, a wrong payload hash and an
+  -- identifier count of 9999. All three are overwritten by the BEFORE INSERT
+  -- trigger with values derived from the identifiers actually stored, so a
+  -- caller cannot record a scope whose binding disagrees with its own contents.
+  -- ========================================================================
+  insert into kitluy_devices.revocation_recorded_scopes (
+    incident_reference, environment, reason_code, approval_request_id,
+    affected_device_ids, affected_key_references, affected_fingerprints,
+    affected_credential_ids, subject_type, tenant_id, digital_store_id,
+    store_location_id, requester_ref, decision_version,
+    identifier_count, scope_digest, payload_hash, recorded_by, approved_by)
+  values (
+    v_incident || '-OK', v_env, v_reason, v_ap_ok,
+    v_devices, v_keys, array[]::text[], array[]::uuid[],
+    v_subject, v_tenant, v_store, v_location, v_requester, v_dv,
+    9999, repeat('0', 64), repeat('f', 64), 'sec-a@44', 'sec-b@44')
+  returning incident_scope_id, scope_digest, payload_hash, identifier_count
+       into v_scope_ok, v_stored_digest, v_stored_payload, v_stored_count;
+
+  if v_stored_digest = repeat('0', 64) then
+    v_findings := v_findings ||
+      format('control 3: A CALLER-SUPPLIED SCOPE DIGEST WAS STORED — the binding can be asserted rather than computed');
+  end if;
+  if v_stored_payload = repeat('f', 64) then
+    v_findings := v_findings ||
+      format('control 3: a caller-supplied approval payload hash was stored');
+  end if;
+  if v_stored_digest is distinct from v_digest then
+    v_findings := v_findings ||
+      format('control 3: the stored scope digest does not recompute from the stored identifiers (%s vs %s)',
+             v_stored_digest, v_digest);
+  end if;
+  if v_stored_payload is distinct from v_payload then
+    v_findings := v_findings ||
+      format('control 3: the stored payload hash is not the value recomputed from the stored terms');
+  end if;
+  if v_stored_count is distinct from v_count then
+    v_findings := v_findings ||
+      format('control 3: the stored identifier count is %s, not the %s identifiers actually recorded',
+             coalesce(v_stored_count, -1), v_count);
+  end if;
+
+  -- ========================================================================
+  -- CONTROL 4 — IMMUTABLE AFTER SUBMISSION. Group 0138's append-only trigger
+  -- still refuses every UPDATE and every DELETE, which is what makes a computed
+  -- digest a binding rather than a suggestion. Run as the session owner of the
+  -- table, so the refusal is the trigger's and not a missing grant.
+  -- ========================================================================
+  begin
+    update kitluy_devices.revocation_recorded_scopes
+       set affected_device_ids = array[v_other_device]
+     where incident_scope_id = v_scope_ok;
+    v_findings := v_findings || format('control 4: A RECORDED SCOPE WAS UPDATED AFTER SUBMISSION');
+  exception when others then
+    get stacked diagnostics v_msg = message_text;
+    if v_msg not like 'KLUY-AUTH-APPEND-ONLY%' then
+      v_findings := v_findings ||
+        format('control 4: wrong refusal updating a recorded scope: %s', v_msg);
+    end if;
+  end;
+  begin
+    update kitluy_devices.revocation_recorded_scopes
+       set scope_digest = repeat('a', 64), payload_hash = repeat('b', 64)
+     where incident_scope_id = v_scope_ok;
+    v_findings := v_findings ||
+      format('control 4: A RECORDED SCOPE BINDING WAS REWRITTEN AFTER SUBMISSION');
+  exception when others then
+    get stacked diagnostics v_msg = message_text;
+    if v_msg not like 'KLUY-AUTH-APPEND-ONLY%' then
+      v_findings := v_findings ||
+        format('control 4: wrong refusal rewriting a scope binding: %s', v_msg);
+    end if;
+  end;
+  begin
+    delete from kitluy_devices.revocation_recorded_scopes
+     where incident_scope_id = v_scope_ok;
+    v_findings := v_findings || format('control 4: A RECORDED SCOPE WAS DELETED');
+  exception when others then
+    get stacked diagnostics v_msg = message_text;
+    if v_msg not like 'KLUY-AUTH-APPEND-ONLY%' then
+      v_findings := v_findings ||
+        format('control 4: wrong refusal deleting a recorded scope: %s', v_msg);
+    end if;
+  end;
+  -- The row is untouched, digest and all.
+  select scope_digest, payload_hash into v_stored_digest, v_stored_payload
+    from kitluy_devices.revocation_recorded_scopes where incident_scope_id = v_scope_ok;
+  if v_stored_digest is distinct from v_digest or v_stored_payload is distinct from v_payload then
+    v_findings := v_findings ||
+      format('control 4: the recorded scope binding moved despite the append-only refusals');
+  end if;
+
+  -- ========================================================================
+  -- CONTROL 5 — GROUP 0138's REFUSALS STILL STAND. Group 0141 is additive; a
+  -- scope that is empty, wildcard-tokened or flagged unrestricted is still not
+  -- a scope, and the binding trigger rescues none of them by computing a
+  -- perfectly good digest over nothing.
+  -- ========================================================================
+  begin
+    insert into kitluy_devices.revocation_recorded_scopes (
+      incident_reference, environment, reason_code, subject_type,
+      recorded_by, approved_by)
+    values (v_incident || '-EMPTY', v_env, v_reason, v_subject, 'sec-a@44', 'sec-b@44');
+    v_findings := v_findings || format('control 5: AN EMPTY AFFECTED SET WAS RECORDED');
+  exception when others then
+    get stacked diagnostics v_msg = message_text;
+    if v_msg not like '%not_empty_chk%' and v_msg not like '%identifier_count_chk%' then
+      v_findings := v_findings ||
+        format('control 5: wrong refusal for an empty affected set: %s', v_msg);
+    end if;
+  end;
+  begin
+    insert into kitluy_devices.revocation_recorded_scopes (
+      incident_reference, environment, reason_code, affected_key_references,
+      subject_type, recorded_by, approved_by)
+    values (v_incident || '-TOKEN', v_env, v_reason, array['*'], v_subject, 'sec-a@44', 'sec-b@44');
+    v_findings := v_findings || format('control 5: A WILDCARD TOKEN AFFECTED SET WAS RECORDED');
+  exception when others then
+    get stacked diagnostics v_msg = message_text;
+    if v_msg not like '%no_token_chk%' then
+      v_findings := v_findings ||
+        format('control 5: wrong refusal for a wildcard token: %s', v_msg);
+    end if;
+  end;
+  begin
+    insert into kitluy_devices.revocation_recorded_scopes (
+      incident_reference, environment, reason_code, affected_device_ids,
+      unrestricted_wildcard, subject_type, recorded_by, approved_by)
+    values (v_incident || '-WILD', v_env, v_reason, v_devices, true, v_subject,
+            'sec-a@44', 'sec-b@44');
+    v_findings := v_findings || format('control 5: AN UNRESTRICTED WILDCARD SCOPE WAS RECORDED');
+  exception when others then
+    get stacked diagnostics v_msg = message_text;
+    if v_msg not like '%no_wildcard_chk%' then
+      v_findings := v_findings ||
+        format('control 5: wrong refusal for an unrestricted wildcard: %s', v_msg);
+    end if;
+  end;
+
+  -- ------------------------------------------------------------------------
+  -- The remaining scope rows, each bound by the same trigger and each paired
+  -- with the approval whose failure it exists to expose.
+  -- ------------------------------------------------------------------------
+  insert into kitluy_devices.revocation_recorded_scopes (
+    incident_reference, environment, reason_code, approval_request_id,
+    affected_device_ids, affected_key_references, subject_type, tenant_id,
+    digital_store_id, store_location_id, requester_ref, decision_version,
+    recorded_by, approved_by)
+  values (v_incident || '-HASH', v_env, v_reason, v_ap_hash, v_devices, v_keys,
+          v_subject, v_tenant, v_store, v_location, v_requester, v_dv,
+          'sec-a@44', 'sec-b@44')
+  returning incident_scope_id into v_scope_hash;
+
+  insert into kitluy_devices.revocation_recorded_scopes (
+    incident_reference, environment, reason_code, approval_request_id,
+    affected_device_ids, affected_key_references, subject_type, tenant_id,
+    digital_store_id, store_location_id, requester_ref, decision_version,
+    recorded_by, approved_by)
+  values (v_incident || '-UNBOUND', v_env, v_reason, v_ap_unbound, v_devices, v_keys,
+          v_subject, v_tenant, v_store, v_location, v_requester, v_dv,
+          'sec-a@44', 'sec-b@44')
+  returning incident_scope_id into v_scope_unbound;
+
+  -- The same affected set recorded in ANOTHER environment against an approval
+  -- granted in that environment: correctly bound there, and no authority here.
+  insert into kitluy_devices.revocation_recorded_scopes (
+    incident_reference, environment, reason_code, approval_request_id,
+    affected_device_ids, affected_key_references, subject_type, tenant_id,
+    digital_store_id, store_location_id, requester_ref, decision_version,
+    recorded_by, approved_by)
+  values (v_incident || '-STG', v_env_other, v_reason, v_ap_stg, v_devices, v_keys,
+          v_subject, v_tenant, v_store, v_location, v_requester, v_dv,
+          'sec-a@44', 'sec-b@44')
+  returning incident_scope_id into v_scope_stg;
+
+  -- ...and the mirror image: a development scope citing a STAGING approval. The
+  -- environment is a TERM OF THE HASH, so this is refused by the binding itself
+  -- rather than by a separate environment column comparison.
+  insert into kitluy_devices.revocation_recorded_scopes (
+    incident_reference, environment, reason_code, approval_request_id,
+    affected_device_ids, affected_key_references, subject_type, tenant_id,
+    digital_store_id, store_location_id, requester_ref, decision_version,
+    recorded_by, approved_by)
+  values (v_incident || '-ENVMIX', v_env, v_reason, v_ap_stg, v_devices, v_keys,
+          v_subject, v_tenant, v_store, v_location, v_requester, v_dv,
+          'sec-a@44', 'sec-b@44')
+  returning incident_scope_id into v_scope_envmix;
+
+  insert into kitluy_devices.revocation_recorded_scopes (
+    incident_reference, environment, reason_code, approval_request_id,
+    affected_device_ids, affected_key_references, subject_type, tenant_id,
+    digital_store_id, store_location_id, requester_ref, decision_version,
+    recorded_by, approved_by)
+  values (v_incident || '-CONSUME', v_env, v_reason, v_ap_consume, v_devices, v_keys,
+          v_subject, v_tenant, v_store, v_location, v_requester, v_dv,
+          'sec-a@44', 'sec-b@44')
+  returning incident_scope_id into v_scope_consume;
+
+  -- ========================================================================
+  -- CONTROL 6 — THE BINDING ITSELF, against the real approval rows and without
+  -- the verifier, so the arithmetic Ruling 1 rests on is established
+  -- independently of the function that performs it.
+  -- ========================================================================
+  if (select r.payload_hash from kitluy_auth.approval_requests r where r.id = v_ap_ok)
+     is distinct from (select s.payload_hash from kitluy_devices.revocation_recorded_scopes s
+                        where s.incident_scope_id = v_scope_ok) then
+    v_findings := v_findings ||
+      format('control 6: the approving request does not carry the payload hash the recorded scope computes');
+  end if;
+  if (select r.payload_hash from kitluy_auth.approval_requests r where r.id = v_ap_hash)
+     = (select s.payload_hash from kitluy_devices.revocation_recorded_scopes s
+         where s.incident_scope_id = v_scope_hash) then
+    v_findings := v_findings ||
+      format('control 6: an approval committing to another affected set carries this scope''s payload hash');
+  end if;
+  -- The same identifiers recorded in another environment produce a DIFFERENT
+  -- binding, so an approval cannot be carried across environments.
+  if (select s.payload_hash from kitluy_devices.revocation_recorded_scopes s
+       where s.incident_scope_id = v_scope_stg)
+     = (select s.payload_hash from kitluy_devices.revocation_recorded_scopes s
+         where s.incident_scope_id = v_scope_ok) then
+    v_findings := v_findings ||
+      format('control 6: the same affected set binds identically in two environments');
+  end if;
+
+  -- ========================================================================
+  -- CONTROL 7 — VERIFICATION, AS THE GOVERNOR.
+  --
+  -- `verify_revocation_scope_binding_v1` and `consume_revocation_scope_v1` are
+  -- EXECUTE-able only by kitluy_credential_issuer, so the membership is
+  -- borrowed for the length of controls 7 and 8 and handed back below —
+  -- sections 41c and 43 do the same, and section 32's containment assertion
+  -- refuses a session that keeps one.
+  -- ========================================================================
+  execute format('grant kitluy_credential_issuer to %I', current_user);
+  execute 'set role kitluy_credential_issuer';
+  begin
+    -- 7a. THE BINDING HOLDS: an approval whose payload_hash carries the value
+    -- computed from this exact affected set authorizes it.
+    v_verdict := to_jsonb(kitluy_devices.verify_revocation_scope_binding_v1(
+      v_scope_ok, v_ap_ok, v_env));
+    if (v_verdict ->> 'authorized')::boolean is not true then
+      v_findings := v_findings ||
+        format('control 7a: a correctly bound scope did not verify: %s', v_verdict);
+    end if;
+
+    -- 7b. HASH MISMATCH: the approval commits to another affected set.
+    v_verdict := to_jsonb(kitluy_devices.verify_revocation_scope_binding_v1(
+      v_scope_hash, v_ap_hash, v_env));
+    if (v_verdict ->> 'authorized')::boolean is not false
+       or (v_verdict ->> 'refusal_code') not like '%HASH-MISMATCH%' then
+      v_findings := v_findings ||
+        format('control 7b: an approval committing to another set authorized this one: %s', v_verdict);
+    end if;
+
+    -- 7c. A BLANK PAYLOAD HASH IS NOT "NOTHING TO CHECK". The reader-owned hash
+    -- helper filters a null or blank hash to NULL, so the shipped verifier
+    -- answers UNAPPROVED where its own UNBOUND branch would otherwise speak;
+    -- either is fail-closed and both are accepted, but authorizing is not.
+    v_verdict := to_jsonb(kitluy_devices.verify_revocation_scope_binding_v1(
+      v_scope_unbound, v_ap_unbound, v_env));
+    if (v_verdict ->> 'authorized')::boolean is not false
+       or ((v_verdict ->> 'refusal_code') not like '%UNBOUND%'
+           and (v_verdict ->> 'refusal_code') not like '%UNAPPROVED%') then
+      v_findings := v_findings ||
+        format('control 7c: an approval with a blank payload hash was treated as nothing to check: %s', v_verdict);
+    end if;
+
+    -- 7d. A DIFFERENT APPROVAL: a scope is authority only together with the
+    -- approval it is bound to.
+    v_verdict := to_jsonb(kitluy_devices.verify_revocation_scope_binding_v1(
+      v_scope_ok, v_ap_hash, v_env));
+    if (v_verdict ->> 'authorized')::boolean is not false
+       or (v_verdict ->> 'refusal_code') not like '%MISMATCH%' then
+      v_findings := v_findings ||
+        format('control 7d: a scope was presented under an approval it is not bound to: %s', v_verdict);
+    end if;
+
+    -- 7e. ANOTHER ENVIRONMENT, three ways: a scope recorded elsewhere, a scope
+    -- recorded here whose approval was granted elsewhere, and a correct pair
+    -- presented under an environment neither belongs to.
+    v_verdict := to_jsonb(kitluy_devices.verify_revocation_scope_binding_v1(
+      v_scope_stg, v_ap_stg, v_env));
+    if (v_verdict ->> 'authorized')::boolean is not false
+       or (v_verdict ->> 'refusal_code') not like '%MISMATCH%' then
+      v_findings := v_findings ||
+        format('control 7e: a scope recorded in another environment authorized this one: %s', v_verdict);
+    end if;
+    v_verdict := to_jsonb(kitluy_devices.verify_revocation_scope_binding_v1(
+      v_scope_envmix, v_ap_stg, v_env));
+    if (v_verdict ->> 'authorized')::boolean is not false
+       or (v_verdict ->> 'refusal_code') not like '%MISMATCH%' then
+      v_findings := v_findings ||
+        format('control 7e: an approval granted in another environment authorized this scope: %s', v_verdict);
+    end if;
+    v_verdict := to_jsonb(kitluy_devices.verify_revocation_scope_binding_v1(
+      v_scope_ok, v_ap_ok, v_env_other));
+    if (v_verdict ->> 'authorized')::boolean is not false
+       or (v_verdict ->> 'refusal_code') not like '%MISMATCH%' then
+      v_findings := v_findings ||
+        format('control 7e: a development scope verified under staging: %s', v_verdict);
+    end if;
+
+    -- 7f. MISSING and UNAPPROVED: a scope id naming nothing, no scope id at
+    -- all, and a scope presented with no approval at all.
+    v_verdict := to_jsonb(kitluy_devices.verify_revocation_scope_binding_v1(
+      v_scope_missing, v_ap_ok, v_env));
+    if (v_verdict ->> 'authorized')::boolean is not false
+       or (v_verdict ->> 'refusal_code') not like '%MISSING%' then
+      v_findings := v_findings ||
+        format('control 7f: a nonexistent recorded scope verified: %s', v_verdict);
+    end if;
+    v_verdict := to_jsonb(kitluy_devices.verify_revocation_scope_binding_v1(
+      null, v_ap_ok, v_env));
+    if (v_verdict ->> 'authorized')::boolean is not false
+       or (v_verdict ->> 'refusal_code') not like '%MISSING%' then
+      v_findings := v_findings ||
+        format('control 7f: a revocation presenting no recorded scope at all verified: %s', v_verdict);
+    end if;
+    v_verdict := to_jsonb(kitluy_devices.verify_revocation_scope_binding_v1(
+      v_scope_ok, null, v_env));
+    if (v_verdict ->> 'authorized')::boolean is not false
+       or (v_verdict ->> 'refusal_code') not like '%UNAPPROVED%' then
+      v_findings := v_findings ||
+        format('control 7f: a recorded scope with no approval at all verified: %s', v_verdict);
+    end if;
+
+    -- ======================================================================
+    -- CONTROL 8 — SINGLE USE, ATOMIC WITH THE REVOCATION. The scope verifies,
+    -- is spent once, and is then authority for nothing — including for itself.
+    -- ======================================================================
+    v_verdict := to_jsonb(kitluy_devices.verify_revocation_scope_binding_v1(
+      v_scope_consume, v_ap_consume, v_env));
+    if (v_verdict ->> 'authorized')::boolean is not true then
+      v_findings := v_findings ||
+        format('control 8: the consumption fixture did not verify before it was spent: %s', v_verdict);
+    end if;
+
+    v_res := kitluy_devices.consume_revocation_scope_v1(
+      v_scope_consume, v_ap_consume, v_revocation_id, v_env, 'governor@44');
+    if (v_res ->> 'outcome') <> 'CONSUMED' then
+      v_findings := v_findings ||
+        format('control 8: a verified scope could not be consumed: %s', v_res);
+    end if;
+    if (v_res ->> 'scope_digest') is distinct from v_digest then
+      v_findings := v_findings ||
+        format('control 8: the consumption evidence names a different digest: %s', v_res);
+    end if;
+
+    -- The replay, in the three shapes a racing revocation could take it. Each
+    -- is a distinct replay and each has its own UNIQUE constraint.
+    v_res := kitluy_devices.consume_revocation_scope_v1(
+      v_scope_consume, v_ap_consume, gen_random_uuid(), v_env, 'governor@44');
+    if (v_res ->> 'outcome') <> 'SCOPE_REFUSED'
+       or (v_res ->> 'refusal_code') not like '%CONSUMED%' then
+      v_findings := v_findings || format('control 8: A SPENT SCOPE WAS CONSUMED TWICE: %s', v_res);
+    end if;
+    v_res := kitluy_devices.consume_revocation_scope_v1(
+      v_scope_ok, v_ap_consume, gen_random_uuid(), v_env, 'governor@44');
+    if (v_res ->> 'outcome') <> 'SCOPE_REFUSED'
+       or (v_res ->> 'refusal_code') not like '%CONSUMED%' then
+      v_findings := v_findings ||
+        format('control 8: a spent approval consumed a second scope: %s', v_res);
+    end if;
+    v_res := kitluy_devices.consume_revocation_scope_v1(
+      v_scope_ok, v_ap_ok, v_revocation_id, v_env, 'governor@44');
+    if (v_res ->> 'outcome') <> 'SCOPE_REFUSED'
+       or (v_res ->> 'refusal_code') not like '%CONSUMED%' then
+      v_findings := v_findings || format('control 8: one revocation consumed two scopes: %s', v_res);
+    end if;
+    -- A scope that does not exist cannot be consumed either.
+    v_res := kitluy_devices.consume_revocation_scope_v1(
+      v_scope_missing, gen_random_uuid(), gen_random_uuid(), v_env, 'governor@44');
+    if (v_res ->> 'outcome') <> 'SCOPE_REFUSED'
+       or (v_res ->> 'refusal_code') not like '%MISSING%' then
+      v_findings := v_findings || format('control 8: a nonexistent scope was consumed: %s', v_res);
+    end if;
+
+    -- The single-use FACT, asked of the helper the verifier depends on: true
+    -- for what was actually spent, false for what was not.
+    if not kitluy_devices.revocation_scope_consumed_v1(v_scope_consume, v_ap_consume) then
+      v_findings := v_findings ||
+        format('control 8: the single-use helper does not report a spent scope as spent');
+    end if;
+    if kitluy_devices.revocation_scope_consumed_v1(v_scope_hash, v_ap_hash) then
+      v_findings := v_findings ||
+        format('control 8: the single-use helper reports an unspent scope as spent');
+    end if;
+
+    -- ...and the VERIFIER now refuses the spent scope, so single use is not
+    -- merely a constraint a caller could decline to hit.
+    v_verdict := to_jsonb(kitluy_devices.verify_revocation_scope_binding_v1(
+      v_scope_consume, v_ap_consume, v_env));
+    if (v_verdict ->> 'authorized')::boolean is not false
+       or (v_verdict ->> 'refusal_code') not like '%CONSUMED%' then
+      v_findings := v_findings ||
+        format('control 8: a spent scope still verified as authority for a revocation: %s', v_verdict);
+    end if;
+
+    select consumption_id into v_consumption
+      from kitluy_devices.revocation_scope_consumptions
+     where incident_scope_id = v_scope_consume;
+    if v_consumption is null then
+      v_findings := v_findings || format('control 8: the consumption left no evidence row');
+    end if;
+
+    execute 'reset role';
+  exception when others then
+    get stacked diagnostics v_msg = message_text;
+    execute 'reset role';
+    v_findings := v_findings ||
+      format('control 7/8: the governor probe did not complete: %s', v_msg);
+  end;
+  execute format('revoke kitluy_credential_issuer from %I', current_user);
+
+  -- ========================================================================
+  -- CONTROL 9 — THE CONSUMPTION EVIDENCE IS APPEND-ONLY. A spent scope that
+  -- could be un-spent is not spent. Run as the session owner of the table, so
+  -- the refusal is the trigger's.
+  -- ========================================================================
+  if v_consumption is null then
+    v_findings := v_findings ||
+      format('control 9: no consumption evidence exists to test for immutability');
+  else
+    begin
+      update kitluy_devices.revocation_scope_consumptions
+         set consumed_by = 'someone-else'
+       where consumption_id = v_consumption;
+      v_findings := v_findings || format('control 9: CONSUMPTION EVIDENCE WAS REWRITTEN');
+    exception when others then
+      get stacked diagnostics v_msg = message_text;
+      if v_msg not like 'KLUY-AUTH-APPEND-ONLY%' then
+        v_findings := v_findings ||
+          format('control 9: wrong refusal rewriting consumption evidence: %s', v_msg);
+      end if;
+    end;
+    begin
+      delete from kitluy_devices.revocation_scope_consumptions
+       where consumption_id = v_consumption;
+      v_findings := v_findings ||
+        format('control 9: CONSUMPTION EVIDENCE WAS DELETED, UN-SPENDING A SPENT SCOPE');
+    exception when others then
+      get stacked diagnostics v_msg = message_text;
+      if v_msg not like 'KLUY-AUTH-APPEND-ONLY%' then
+        v_findings := v_findings ||
+          format('control 9: wrong refusal deleting consumption evidence: %s', v_msg);
+      end if;
+    end;
+    if not exists (select 1 from kitluy_devices.revocation_scope_consumptions
+                    where consumption_id = v_consumption) then
+      v_findings := v_findings ||
+        format('control 9: the consumption evidence did not survive the mutation probes');
+    end if;
+  end if;
+
+  -- ========================================================================
+  -- CONTROL 10 — THE BOUNDARY. A digest function anyone can reach is a free
+  -- oracle for confirming a guessed affected set, so the canonicalizer and the
+  -- hash functions are held as closed as the verifier and the consumer. Six
+  -- roles try the calls; the catalogue then corroborates ownership, the PUBLIC
+  -- revoke and the pinned search_path.
+  -- ========================================================================
+  foreach v_role in array array[
+    'anon', 'authenticated', 'service_role', 'kitluy_worker_service',
+    'kitluy_issuance_service', 'kitluy_job_governor']
+  loop
+    if exists (select 1 from pg_roles where rolname = v_role) then
+      begin
+        execute format('set role %I', v_role);
+        begin
+          perform kitluy_devices.verify_revocation_scope_binding_v1(v_scope_ok, v_ap_ok, v_env);
+          v_findings := v_findings || format('control 10: %s executed the scope verifier', v_role);
+        exception when insufficient_privilege then
+          null;
+        end;
+        begin
+          perform kitluy_devices.revocation_scope_consumed_v1(v_scope_ok, v_ap_ok);
+          v_findings := v_findings || format('control 10: %s executed the single-use helper', v_role);
+        exception when insufficient_privilege then
+          null;
+        end;
+        begin
+          perform kitluy_devices.consume_revocation_scope_v1(
+            v_scope_ok, v_ap_ok, gen_random_uuid(), v_env, v_role);
+          v_findings := v_findings || format('control 10: %s consumed a recorded scope', v_role);
+        exception when insufficient_privilege then
+          null;
+        end;
+        begin
+          perform kitluy_devices.credential_revocation_approval_payload_hash_v1(v_ap_ok);
+          v_findings := v_findings ||
+            format('control 10: %s read an approval payload hash through the reader''s helper', v_role);
+        exception when insufficient_privilege then
+          null;
+        end;
+        begin
+          perform kitluy_devices.revocation_scope_digest_v1('probe');
+          v_findings := v_findings || format('control 10: %s has a free scope-digest oracle', v_role);
+        exception when insufficient_privilege then
+          null;
+        end;
+        begin
+          perform kitluy_devices.canonical_identifier_list_v1(array['probe']);
+          v_findings := v_findings ||
+            format('control 10: %s can canonicalize an identifier list', v_role);
+        exception when insufficient_privilege then
+          null;
+        end;
+        execute 'reset role';
+      exception when others then
+        get stacked diagnostics v_msg = message_text;
+        execute 'reset role';
+        v_findings := v_findings ||
+          format('control 10: the execute probe for %s did not complete: %s', v_role, v_msg);
+      end;
+    end if;
+  end loop;
+
+  v_n := 0;
+  for v_sig in
+    select p.oid::regprocedure::text
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'kitluy_devices'
+       and p.proname in ('canonical_identifier_list_v1', 'canonical_revocation_scope_v1',
+                         'revocation_scope_digest_v1', 'revocation_approval_payload_hash_v1',
+                         'bind_revocation_scope', 'credential_revocation_approval_payload_hash_v1',
+                         'verify_revocation_scope_binding_v1', 'revocation_scope_consumed_v1',
+                         'consume_revocation_scope_v1')
+  loop
+    v_n := v_n + 1;
+    if has_function_privilege('public', v_sig, 'execute') then
+      v_findings := v_findings || format('control 10: PUBLIC can execute %s', v_sig);
+    end if;
+    if not exists (
+      select 1 from pg_proc p where p.oid = v_sig::regprocedure
+         and p.proconfig is not null
+         and exists (select 1 from unnest(p.proconfig) c where c like 'search\_path=%')) then
+      v_findings := v_findings || format('control 10: %s does not pin its search_path', v_sig);
+    end if;
+  end loop;
+  if v_n <> 9 then
+    v_findings := v_findings ||
+      format('control 10: %s of the 9 group-0141 functions were found, so the boundary scan is incomplete', v_n);
+  end if;
+
+  -- THE SPLIT that lets Ruling 1 and Ruling 2 both hold. The verifier reads the
+  -- governor's own scope table, so the GOVERNOR owns it; the one fact it needs
+  -- from kitluy_auth is fetched through a definer owned by the NOLOGIN,
+  -- non-BYPASSRLS READER, which is the only identity Ruling 2 lets near that
+  -- schema. Reversing either ownership would either give the reader a table and
+  -- a policy in kitluy_devices or give the governor a reach into kitluy_auth —
+  -- both of which sections 41a/42/43 exist to refuse.
+  if not exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'kitluy_devices'
+       and p.proname = 'credential_revocation_approval_payload_hash_v1'
+       and p.prosecdef
+       and pg_get_userbyid(p.proowner) = 'kitluy_credential_approval_reader') then
+    v_findings := v_findings ||
+      format('control 10: the approval-hash helper is not a SECURITY DEFINER owned by kitluy_credential_approval_reader');
+  end if;
+  if exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'kitluy_devices'
+       and p.proname in ('verify_revocation_scope_binding_v1', 'consume_revocation_scope_v1',
+                         'revocation_scope_consumed_v1')
+       and (not p.prosecdef or pg_get_userbyid(p.proowner) <> 'kitluy_credential_issuer')) then
+    v_findings := v_findings ||
+      format('control 10: the verifier, the consumer or the single-use helper is not a governor-owned SECURITY DEFINER');
+  end if;
+  if not has_function_privilege('kitluy_credential_issuer',
+       'kitluy_devices.verify_revocation_scope_binding_v1(uuid, uuid, text)', 'execute')
+     or not has_function_privilege('kitluy_credential_issuer',
+       'kitluy_devices.consume_revocation_scope_v1(uuid, uuid, uuid, text, text)', 'execute') then
+    v_findings := v_findings ||
+      format('control 10: the credential governor cannot reach the verifier or the consumer it is required to call');
+  end if;
+  -- The reader still holds nothing on the scope or consumption evidence, and
+  -- the governor still holds nothing on the approvals aggregate: group 0141
+  -- widened neither side, it put ONE definer on each side of the line.
+  if has_table_privilege('kitluy_credential_approval_reader',
+                         'kitluy_devices.revocation_recorded_scopes', 'select')
+     or has_table_privilege('kitluy_credential_approval_reader',
+                            'kitluy_devices.revocation_scope_consumptions', 'select') then
+    v_findings := v_findings ||
+      format('control 10: the approval reader can read recorded scopes or consumption evidence directly');
+  end if;
+  if has_schema_privilege('kitluy_credential_issuer', 'kitluy_auth', 'usage')
+     or has_table_privilege('kitluy_credential_issuer', 'kitluy_auth.approval_requests', 'select') then
+    v_findings := v_findings ||
+      format('control 10: the credential governor now reaches the approvals aggregate directly');
+  end if;
+
+  -- The borrowed governor membership was handed back.
+  if exists (select 1 from pg_auth_members m
+              join pg_roles r on r.oid = m.member
+              join pg_roles g on g.oid = m.roleid
+             where g.rolname = 'kitluy_credential_issuer'
+               and not r.rolsuper) then
+    v_findings := v_findings ||
+      format('a non-superuser kept membership of the credential governor');
+  end if;
+
+  if cardinality(v_findings) > 0 then
+    raise exception 'ASSERT FAIL: % scope-binding finding(s): %',
+      cardinality(v_findings), array_to_string(v_findings, ' | ');
+  end if;
+
+  raise notice 'PASS ws11-revocation-scope-binding: the recorded affected set is a CRYPTOGRAPHIC TERM of the approval that authorizes it rather than a row that merely cites one (KLD-2026-07-29-DEVICE-REVOCATION-BOUNDARY-002 Ruling 1) — the canonical scope has ONE stable representation, so the same identifiers supplied in a different order, or repeated in a different arrangement, digest identically while swapping one device or changing one character of one key reference does not, and every term the ruling enumerates is bound: changing the exact scope digest, the reason, the environment, the subject type, the tenant, the digital store, the store location, the identifier count, the requester or the owner decision version each changes the approval payload hash, an absent tenancy is distinguishable from a named one, and the payload hash is domain-separated from the scope digest so neither can be replayed as the other; the binding is COMPUTED and never accepted — a row inserted with a deliberately wrong digest, a wrong payload hash and an identifier count of 9999 is stored carrying the values recomputed from the identifiers actually recorded — and it is then immutable, because group 0138''s append-only trigger refuses to update the affected set, to rewrite the digest and to delete the row, while an empty set, a wildcard token and unrestricted_wildcard = true are each still refused by CHECK; called AS kitluy_credential_issuer the verifier AUTHORIZES a scope whose approval carries the computed hash and FAILS CLOSED on every one of Ruling 1''s listed failures — an approval committing to another affected set (HASH-MISMATCH), an approval carrying a blank payload hash (refused, never read as nothing to check), a scope presented under an approval it is not bound to, a scope recorded in another environment, an approval granted in another environment, a correct pair presented under the wrong environment, a scope id naming nothing, no scope id at all and no approval at all; consumption is single use three ways — the scope, the approval and the revocation are each spent exactly once, every replay is refused as CONSUMED, a nonexistent scope cannot be consumed, the single-use helper answers true only for what was actually spent, the verifier itself then refuses the spent scope, and the evidence naming the consumed digest can be neither updated nor deleted; and the boundary holds — anon, authenticated, service_role, the worker, the issuance service and the job governor are each refused the verifier, the consumer, the single-use helper, the reader''s approval-hash helper, the digest oracle and the canonicalizer, PUBLIC holds EXECUTE on none of the nine group-0141 functions and all nine pin their search_path, the verifier, the consumer and the single-use helper are governor-owned SECURITY DEFINERs while the ONE function that touches kitluy_auth is owned by the NOLOGIN, non-BYPASSRLS kitluy_credential_approval_reader, the reader still holds nothing at all on the recorded scopes or the consumption evidence and the governor still holds nothing at all on the approvals aggregate, and the membership this section borrowed to call any of it was handed back';
+end
+$section44$;
+
+select 'assertions complete: groups 0010-0141 structural contract holds (incl. WS-11-T003 Step 4 approval gate bounded to a NOLOGIN non-BYPASSRLS reader per KLD-2026-07-29-DEVICE-REVOCATION-BOUNDARY-002 Ruling 2, and the Ruling 1 scope binding — the recorded affected set is a computed, immutable cryptographic term of the approval payload hash, verified fail-closed and consumed single-use)' as result;
