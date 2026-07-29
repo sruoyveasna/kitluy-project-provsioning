@@ -790,3 +790,5 @@ export * from "./issuance-adapter.js";
 export * from "./replacement-key-pop.js";
 export * from "./same-key-renewal-preflight.js";
 export * from "./same-key-renewal-issuance.js";
+export * from "./replacement-key-provider.js";
+export * from "./rotate-key-renewal-issuance.js";
