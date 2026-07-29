@@ -7648,3 +7648,364 @@ end
 $section41c$;
 
 select 'assertions complete: groups 0010-0138 structural contract holds (incl. WS-11-T003 Step 4 emergency revocation, decision §3 scope resolution and the §2.4 one-way rule)' as result;
+
+
+-- ============================================================================
+-- SECTION 42 — WS-11-T003 Step 4: the APPROVE-BEFORE-EXECUTE revocation
+-- actually executes (migration 0139).
+-- Authority: KLD-2026-07-29-DEVICE-CREDENTIAL-REVOCATION-001 §2.1; migration
+--   groups 0136 (the operation), 0125 (device_credentials_revoked_chk) and
+--   0139 (the fix).
+--
+-- Section 41 proves the EMERGENCY path. NOTHING proved the ordinary four-eyes
+-- path, and it could not complete a single revocation:
+--
+--   * group 0136 wrote `state = 'revoked'` without `revoked_at`, which
+--     device_credentials_revoked_chk refuses outright; and
+--   * its approval gate ran as `kitluy_credential_issuer` inside a SECURITY
+--     DEFINER, and that role holds neither USAGE on `kitluy_auth` nor SELECT on
+--     its tables, so the call died on `permission denied for schema kitluy_auth`
+--     before the CHECK was ever reached.
+--
+-- Group 0136's assertions inspected grants, constraints and triggers and NEVER
+-- CALLED THE FUNCTION, which is why a non-functional governed operation shipped.
+-- This section calls it, end to end, and is the reason that cannot happen again.
+-- ============================================================================
+do $section42$
+declare
+  v_findings text[] := array[]::text[];
+  v_fp text := encode(sha256(convert_to('t42-' || gen_random_uuid()::text, 'UTF8')), 'hex');
+  v_fp_other text := encode(sha256(convert_to('t42b-' || gen_random_uuid()::text, 'UTF8')), 'hex');
+  v_device uuid;
+  v_other_device uuid;
+  v_credential uuid;
+  v_requester constant uuid := '00000000-0000-4000-8000-000000000007';
+  v_approver constant uuid := '00000000-0000-4000-8000-000000000008';
+  v_policy_a4 uuid;
+  v_policy_a2 uuid;
+  v_ap_ok uuid;
+  v_ap_scope uuid;
+  v_ap_self uuid;
+  v_ap_a2 uuid;
+  v_ap_second uuid;
+  v_intent text := 's42-' || gen_random_uuid()::text;
+  v_res jsonb;
+  v_state text;
+  v_revoked_at timestamptz;
+  v_reason text;
+  v_revocation_id uuid;
+  v_rows integer;
+begin
+  v_device := pg_temp.ws11_renewable_device('t42', v_fp);
+  v_other_device := pg_temp.ws11_renewable_device('t42b', v_fp_other);
+  select credential_id into v_credential from kitluy_devices.device_credentials
+   where device_record_id = v_device and certificate_generation = 1;
+  if v_credential is null then
+    raise exception 'ASSERT FAIL: section 42 could not issue a credential to revoke';
+  end if;
+
+  -- ------------------------------------------------------------------------
+  -- The approval rows, in the SAME kitluy_auth aggregate group 0124 uses for a
+  -- time correction — not a parallel approval idea invented for revocation.
+  -- ------------------------------------------------------------------------
+  insert into kitluy_auth.approval_policies
+    (policy_key, version, permission_key, environment, quorum, status, risk_class)
+  values ('cred.revocation.a4.' || substr(md5(random()::text), 1, 8), 1,
+          'device.credential.revoke', 'development', 1, 'ACTIVE', 'A4')
+  returning id into v_policy_a4;
+  insert into kitluy_auth.approval_policies
+    (policy_key, version, permission_key, environment, quorum, status, risk_class)
+  values ('cred.revocation.a2.' || substr(md5(random()::text), 1, 8), 1,
+          'device.credential.revoke', 'development', 1, 'ACTIVE', 'A2')
+  returning id into v_policy_a2;
+
+  insert into kitluy_auth.approval_requests
+    (policy_id, requester_id, resource_type, resource_id, environment, action,
+     payload_hash, reason, status)
+  values (v_policy_a4, v_requester, 'device', v_device, 'development',
+          'device_credential_revocation',
+          encode(sha256(convert_to('42ok-' || v_intent, 'UTF8')), 'hex'),
+          'terminal permanently replaced', 'APPROVED')
+  returning id into v_ap_ok;
+  insert into kitluy_auth.approval_decisions (approval_request_id, approver_id, decision)
+  values (v_ap_ok, v_approver, 'APPROVE');
+
+  insert into kitluy_auth.approval_requests
+    (policy_id, requester_id, resource_type, resource_id, environment, action,
+     payload_hash, reason, status)
+  values (v_policy_a4, v_requester, 'device', v_other_device, 'development',
+          'device_credential_revocation',
+          encode(sha256(convert_to('42scope-' || v_intent, 'UTF8')), 'hex'),
+          'a different terminal entirely', 'APPROVED')
+  returning id into v_ap_scope;
+  insert into kitluy_auth.approval_decisions (approval_request_id, approver_id, decision)
+  values (v_ap_scope, v_approver, 'APPROVE');
+
+  insert into kitluy_auth.approval_requests
+    (policy_id, requester_id, resource_type, resource_id, environment, action,
+     payload_hash, reason, status)
+  values (v_policy_a4, v_requester, 'device', v_device, 'development',
+          'device_credential_revocation',
+          encode(sha256(convert_to('42self-' || v_intent, 'UTF8')), 'hex'),
+          'self-approval probe', 'APPROVED')
+  returning id into v_ap_self;
+  insert into kitluy_auth.approval_decisions (approval_request_id, approver_id, decision)
+  values (v_ap_self, v_approver, 'APPROVE');
+
+  insert into kitluy_auth.approval_requests
+    (policy_id, requester_id, resource_type, resource_id, environment, action,
+     payload_hash, reason, status)
+  values (v_policy_a2, v_requester, 'device', v_device, 'development',
+          'device_credential_revocation',
+          encode(sha256(convert_to('42a2-' || v_intent, 'UTF8')), 'hex'),
+          'risk class probe', 'APPROVED')
+  returning id into v_ap_a2;
+  insert into kitluy_auth.approval_decisions (approval_request_id, approver_id, decision)
+  values (v_ap_a2, v_approver, 'APPROVE');
+
+  -- ------------------------------------------------------------------------
+  -- The refusals, each through the REAL call. Every one of these returned
+  -- `permission denied for schema kitluy_auth` before migration 0139 — the
+  -- gate could not answer at all, so no refusal was reachable either.
+  -- ------------------------------------------------------------------------
+  -- No approval presented.
+  v_res := kitluy_devices.revoke_device_credential_v1(
+    's42-none-' || gen_random_uuid()::text, v_device, 'development', 'device_identity', 1,
+    'ADMINISTRATIVE_REPLACEMENT', 'no approval at all', 'REPROVISION_REQUIRED',
+    'requester@42', 'SECTION42', null, null, null);
+  if (v_res ->> 'outcome') <> 'REVOCATION_REFUSED'
+     or (v_res ->> 'refusal_code') <> 'KLUY-CRED-REVOCATION-UNAPPROVED' then
+    v_findings := v_findings || format('an unapproved revocation was not refused: %s', v_res);
+  end if;
+
+  -- An A2 policy is below the A3/A4 bar; an undeclared class would be too.
+  v_res := kitluy_devices.revoke_device_credential_v1(
+    's42-a2-' || gen_random_uuid()::text, v_device, 'development', 'device_identity', 1,
+    'ADMINISTRATIVE_REPLACEMENT', 'risk class probe', 'REPROVISION_REQUIRED',
+    'requester@42', 'SECTION42', v_ap_a2, 'approver@42', null);
+  if (v_res ->> 'refusal_code') <> 'KLUY-CRED-REVOCATION-RISK-CLASS' then
+    v_findings := v_findings || format('an A2 approval authorized a revocation: %s', v_res);
+  end if;
+
+  -- An approval naming ANOTHER device is not an approval for this one.
+  v_res := kitluy_devices.revoke_device_credential_v1(
+    's42-scope-' || gen_random_uuid()::text, v_device, 'development', 'device_identity', 1,
+    'ADMINISTRATIVE_REPLACEMENT', 'wrong-scope probe', 'REPROVISION_REQUIRED',
+    'requester@42', 'SECTION42', v_ap_scope, 'approver@42', null);
+  if (v_res ->> 'refusal_code') <> 'KLUY-CRED-REVOCATION-WRONG-SCOPE' then
+    v_findings := v_findings || format('an approval for another device authorized this one: %s', v_res);
+  end if;
+
+  -- The requester is not their own second person, under a perfectly valid
+  -- approval — so the refusal is about WHO acted, not about the approval.
+  v_res := kitluy_devices.revoke_device_credential_v1(
+    's42-self-' || gen_random_uuid()::text, v_device, 'development', 'device_identity', 1,
+    'ADMINISTRATIVE_REPLACEMENT', 'self-approval probe', 'REPROVISION_REQUIRED',
+    'requester@42', 'SECTION42', v_ap_self, 'requester@42', null);
+  if (v_res ->> 'refusal_code') <> 'KLUY-CRED-REVOCATION-SELF-APPROVED' then
+    v_findings := v_findings || format('a self-approved revocation was not refused: %s', v_res);
+  end if;
+
+  -- Not one of those refusals may have touched the credential, and none may
+  -- have written evidence.
+  select state::text into v_state from kitluy_devices.device_credentials
+   where credential_id = v_credential;
+  if v_state <> 'issued' then
+    v_findings := v_findings || format('a REFUSED revocation changed the credential to %s', v_state);
+  end if;
+  if exists (select 1 from kitluy_devices.device_credential_revocations
+              where credential_id = v_credential) then
+    v_findings := v_findings || 'a REFUSED revocation wrote evidence';
+  end if;
+
+  -- ------------------------------------------------------------------------
+  -- THE COMPLETE REVOCATION.
+  -- ------------------------------------------------------------------------
+  v_res := kitluy_devices.revoke_device_credential_v1(
+    v_intent, v_device, 'development', 'device_identity', 1,
+    'ADMINISTRATIVE_REPLACEMENT', 'terminal permanently replaced under change S42',
+    'REPROVISION_REQUIRED', 'requester@42', 'SECTION42',
+    v_ap_ok, 'approver@42', 'CHG-S42');
+  if (v_res ->> 'outcome') <> 'REVOKED' then
+    raise exception
+      'ASSERT FAIL: a fully approved four-eyes revocation did not complete: %', v_res;
+  end if;
+  v_revocation_id := (v_res ->> 'revocation_id')::uuid;
+
+  -- The EXACT pair device_credentials_revoked_chk requires. A `revoked` state
+  -- with a null timestamp is not a partial revocation, it is a REFUSED write.
+  select state::text, revoked_at, revocation_reason
+    into v_state, v_revoked_at, v_reason
+    from kitluy_devices.device_credentials where credential_id = v_credential;
+  if v_state <> 'revoked' then
+    v_findings := v_findings || format('the revoked credential is %s', v_state);
+  end if;
+  if v_revoked_at is null then
+    v_findings := v_findings || 'a revoked credential carries no revocation time';
+  end if;
+  if v_reason is null or v_reason not like 'ADMINISTRATIVE_REPLACEMENT:%' then
+    v_findings := v_findings ||
+      format('the credential row records no account of its revocation (%s)', coalesce(v_reason, 'null'));
+  end if;
+
+  -- Append-only evidence naming the reason, the requester and the approver.
+  if not exists (
+    select 1 from kitluy_devices.device_credential_revocations
+     where revocation_id = v_revocation_id
+       and credential_id = v_credential
+       and revocation_request_id = v_intent
+       and reason_code = 'ADMINISTRATIVE_REPLACEMENT'
+       and reason = 'terminal permanently replaced under change S42'
+       and requested_by = 'requester@42'
+       and approved_by = 'approver@42'
+       and approved_at is not null
+       and approval_request_id = v_ap_ok
+       and incident_reference = 'CHG-S42') then
+    v_findings := v_findings || 'the revocation wrote no complete append-only evidence row';
+  end if;
+
+  -- The durable obligation: a non-NO_RECOVERY disposition owes a case.
+  if not exists (
+    select 1 from kitluy_devices.device_recovery_cases
+     where revocation_id = v_revocation_id
+       and device_record_id = v_device
+       and disposition = 'REPROVISION_REQUIRED'
+       and state = 'open') then
+    v_findings := v_findings || 'a non-NO_RECOVERY revocation opened no recovery case';
+  end if;
+
+  -- ------------------------------------------------------------------------
+  -- Replaying the SAME intent is idempotent and writes no second row.
+  -- ------------------------------------------------------------------------
+  select count(*) into v_rows from kitluy_devices.device_credential_revocations
+   where credential_id = v_credential;
+  v_res := kitluy_devices.revoke_device_credential_v1(
+    v_intent, v_device, 'development', 'device_identity', 1,
+    'ADMINISTRATIVE_REPLACEMENT', 'terminal permanently replaced under change S42',
+    'REPROVISION_REQUIRED', 'requester@42', 'SECTION42',
+    v_ap_ok, 'approver@42', 'CHG-S42');
+  if (v_res ->> 'outcome') <> 'ALREADY_REVOKED'
+     or (v_res ->> 'revocation_id')::uuid <> v_revocation_id then
+    v_findings := v_findings || format('replaying the same intent was not idempotent: %s', v_res);
+  end if;
+  if (select count(*) from kitluy_devices.device_credential_revocations
+       where credential_id = v_credential) <> v_rows then
+    v_findings := v_findings || 'a replayed intent wrote a second revocation row';
+  end if;
+
+  -- ------------------------------------------------------------------------
+  -- A DIFFERENT intent against the revoked credential goes to review and does
+  -- NOT overwrite the first account of why it was repudiated.
+  -- ------------------------------------------------------------------------
+  insert into kitluy_auth.approval_requests
+    (policy_id, requester_id, resource_type, resource_id, environment, action,
+     payload_hash, reason, status)
+  values (v_policy_a4, v_requester, 'device', v_device, 'development',
+          'device_credential_revocation',
+          encode(sha256(convert_to('42conflict-' || v_intent, 'UTF8')), 'hex'),
+          'someone else calls it theft', 'APPROVED')
+  returning id into v_ap_second;
+  insert into kitluy_auth.approval_decisions (approval_request_id, approver_id, decision)
+  values (v_ap_second, v_approver, 'APPROVE');
+
+  v_res := kitluy_devices.revoke_device_credential_v1(
+    's42-conflict-' || gen_random_uuid()::text, v_device, 'development', 'device_identity', 1,
+    'DEVICE_STOLEN', 'a second person calls it theft', 'REPROVISION_REQUIRED',
+    'requester2@42', 'SECTION42', v_ap_second, 'approver2@42', 'INC-S42');
+  if (v_res ->> 'outcome') <> 'MANUAL_REVIEW_REQUIRED'
+     or (v_res ->> 'refusal_code') <> 'KLUY-REVOKE-CONFLICTING-REASON' then
+    v_findings := v_findings || format('a conflicting second intent did not go to review: %s', v_res);
+  end if;
+  if not exists (
+    select 1 from kitluy_devices.device_credential_revocations
+     where revocation_id = v_revocation_id
+       and reason_code = 'ADMINISTRATIVE_REPLACEMENT'
+       and requested_by = 'requester@42') then
+    v_findings := v_findings || 'the FIRST account of the revocation was overwritten';
+  end if;
+  if (select count(*) from kitluy_devices.device_credential_revocations
+       where credential_id = v_credential) <> v_rows then
+    v_findings := v_findings || 'a conflicting intent wrote a second revocation row';
+  end if;
+
+  -- Decision §2.4 holds over the approve-before-execute path too: the
+  -- credential governor ITSELF cannot put this credential back into service.
+  -- Requires the governor, borrowed and handed straight back so section 32's
+  -- containment assertion still holds on the next run.
+  execute format('grant kitluy_credential_issuer to %I', current_user);
+  execute 'set role kitluy_credential_issuer';
+  begin
+    update kitluy_devices.device_credentials
+       set state = 'issued', revoked_at = null
+     where credential_id = v_credential;
+    v_findings := v_findings || 'a four-eyes revocation was REVERSED by the governor';
+  exception when others then
+    if sqlerrm not like 'KLUY-REVOCATION-IS-ONE-WAY%' then
+      v_findings := v_findings || format('wrong refusal un-revoking a credential: %s', sqlerrm);
+    end if;
+  end;
+  execute 'reset role';
+  execute format('revoke kitluy_credential_issuer from %I', current_user);
+
+  -- ------------------------------------------------------------------------
+  -- The IDENTITY that makes the gate able to answer, asserted permanently.
+  --
+  -- The approval tables are RLS ENABLED and FORCED with SELECT policies only
+  -- `TO authenticated`; a role holding USAGE and SELECT but no BYPASSRLS reads
+  -- ZERO rows. Group 0124's gate reads them because it is SECURITY INVOKER and
+  -- runs as `service_role`, which carries the BYPASSRLS role ATTRIBUTE. Group
+  -- 0139 pins the revocation gate to that same identity — and to nothing wider.
+  -- ------------------------------------------------------------------------
+  if not exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'kitluy_devices'
+       and p.proname = 'evaluate_credential_revocation_approval_v1'
+       and p.prosecdef
+       and pg_get_userbyid(p.proowner) = 'service_role'
+       and p.proconfig is not null
+       and exists (select 1 from unnest(p.proconfig) c where c like 'search\_path=%')) then
+    v_findings := v_findings ||
+      'the revocation approval gate is not a service_role-owned SECURITY DEFINER with a fixed search_path';
+  end if;
+  if not (select rolbypassrls and not rolcanlogin from pg_roles where rolname = 'service_role') then
+    v_findings := v_findings ||
+      'service_role is no longer the NOLOGIN BYPASSRLS identity the gate depends on';
+  end if;
+  if has_function_privilege('public',
+       'kitluy_devices.evaluate_credential_revocation_approval_v1(uuid, uuid, text, text)', 'execute')
+     or has_function_privilege('anon',
+       'kitluy_devices.evaluate_credential_revocation_approval_v1(uuid, uuid, text, text)', 'execute')
+     or has_function_privilege('authenticated',
+       'kitluy_devices.evaluate_credential_revocation_approval_v1(uuid, uuid, text, text)', 'execute')
+     or has_function_privilege('kitluy_worker_service',
+       'kitluy_devices.evaluate_credential_revocation_approval_v1(uuid, uuid, text, text)', 'execute') then
+    v_findings := v_findings || 'the approval gate is reachable outside the governed revocation path';
+  end if;
+  if not has_function_privilege('kitluy_credential_issuer',
+       'kitluy_devices.evaluate_credential_revocation_approval_v1(uuid, uuid, text, text)', 'execute') then
+    v_findings := v_findings || 'the governed revocation path cannot reach its own approval gate';
+  end if;
+
+  -- ...and the governor still holds NOTHING on the approvals aggregate. A gate
+  -- that answered because the governor could read kitluy_auth would have been
+  -- the boundary change, not the fix.
+  if has_schema_privilege('kitluy_credential_issuer', 'kitluy_auth', 'usage')
+     or has_table_privilege('kitluy_credential_issuer', 'kitluy_auth.approval_requests', 'select')
+     or has_table_privilege('kitluy_credential_issuer', 'kitluy_auth.approval_policies', 'select')
+     or has_table_privilege('kitluy_credential_issuer', 'kitluy_auth.approval_decisions', 'select') then
+    v_findings := v_findings || 'the credential governor now reaches the approvals aggregate directly';
+  end if;
+  if has_schema_privilege('service_role', 'kitluy_devices', 'create') then
+    v_findings := v_findings || 'service_role kept CREATE on kitluy_devices after the ownership move';
+  end if;
+
+  if cardinality(v_findings) > 0 then
+    raise exception 'ASSERT FAIL: % revocation-execution finding(s): %',
+      cardinality(v_findings), array_to_string(v_findings, ' | ');
+  end if;
+
+  raise notice 'PASS ws11-revocation-executes: the approve-before-execute revocation COMPLETES end to end — an unapproved request, an A2 risk class, an approval naming another device and a self-approved request are each refused with their own code and change nothing, while a scoped A4 approval decided by a second person revokes the credential with `revoked_at` and `revocation_reason` written alongside the state (the pair device_credentials_revoked_chk requires and group 0136 never wrote), records complete append-only evidence naming reason, requester, approver and approval request, and opens an OPEN reprovision recovery case; replaying the same intent is idempotent with no second row, a DIFFERENT intent returns MANUAL_REVIEW_REQUIRED without overwriting the first account, the decision §2.4 one-way rule still refuses the governor itself, and the gate can answer at all only because it is pinned to the NOLOGIN BYPASSRLS service_role identity group 0124 already reads approvals with — the credential governor still holds nothing whatsoever on kitluy_auth';
+end
+$section42$;
+
+select 'assertions complete: groups 0010-0139 structural contract holds (incl. WS-11-T003 Step 4 approve-before-execute revocation executing end to end)' as result;
