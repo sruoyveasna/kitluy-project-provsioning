@@ -797,3 +797,4 @@ export * from "./credential-lifecycle.js";
 export * from "./credential-lifecycle-jobs.js";
 export * from "./credential-revocation.js";
 export * from "./key-destruction.js";
+export * from "./revocation-and-destruction-jobs.js";
