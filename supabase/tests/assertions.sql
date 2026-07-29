@@ -6808,3 +6808,843 @@ end
 $section40b$;
 
 select 'assertions complete: groups 0010-0135 structural contract holds' as result;
+
+-- ============================================================================
+-- SECTION 41 — emergency revocation, scope and the one-way rule (migration 0138).
+--
+-- Owner decision KLD-2026-07-29-DEVICE-CREDENTIAL-REVOCATION-001, OWNER-APPROVED
+-- 2026-07-29, closed `[REQUIRED: device_credential_revocation_approval_policy]`
+-- and `[REQUIRED: device_revocation_scope_policy]`. Group 0136 shipped
+-- revocation requiring a completed PRIOR approval for every reason, which was
+-- the fail-closed default; group 0138 refines it.
+--
+-- The behaviour these assertions exist for is §2.4: a late, missing or refused
+-- post-approval must NEVER restore the credential. An auto-reversing revocation
+-- would mean an attacker who merely delays the second approver gets the
+-- credential back — the emergency path would become a way to SCHEDULE
+-- un-revocation. Section 41c proves the credential is still `revoked` after an
+-- explicit refusal, after a lapsed deadline, and against a direct write by the
+-- credential governor itself.
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 41a — the policy is EXACTLY the approved one, and cannot be relaxed.
+-- ---------------------------------------------------------------------------
+do $section41a$
+declare
+  v_findings text[] := array[]::text[];
+  v_p kitluy_devices.credential_revocation_policy;
+  r record;
+begin
+  select * into v_p from kitluy_devices.credential_revocation_policy
+   where environment = 'development';
+
+  -- §2.2, verbatim. A rounded, reordered or "tidied" list is a different policy
+  -- from the one the owner approved.
+  if not (v_p.emergency_eligible_reasons @> array[
+            'KEY_COMPROMISE','DEVICE_LOST','DEVICE_STOLEN','PROVIDER_COMPROMISE',
+            'SECURITY_INCIDENT']::kitluy_devices.credential_revocation_reason[]
+          and cardinality(v_p.emergency_eligible_reasons) = 5) then
+    v_findings := v_findings || 'the emergency reason set is not decision §2.2 verbatim';
+  end if;
+  -- §2.1, verbatim.
+  if not (v_p.approve_before_execute_reasons @> array[
+            'ASSIGNMENT_INVALIDATED','CERTIFICATE_MISISSUANCE',
+            'ADMINISTRATIVE_REPLACEMENT','OTHER_APPROVED_REASON'
+          ]::kitluy_devices.credential_revocation_reason[]
+          and cardinality(v_p.approve_before_execute_reasons) = 4) then
+    v_findings := v_findings || 'the approve-before-execute reason set is not decision §2.1 verbatim';
+  end if;
+  if v_p.post_approval_window_hours is distinct from 4 then
+    v_findings := v_findings || 'the post-approval window is not the approved 4 hours';
+  end if;
+  if v_p.approved_by_decision_ref
+       is distinct from 'KLD-2026-07-29-DEVICE-CREDENTIAL-REVOCATION-001' then
+    v_findings := v_findings || 'the policy does not name the approving owner decision';
+  end if;
+  if v_p.required_owner_decision is not null then
+    v_findings := v_findings || 'the policy still names a missing owner decision';
+  end if;
+  -- Emergency is four-eyes DEFERRED, never four-eyes EXEMPT. Putting the five
+  -- emergency reasons into group 0136's exempt list would have produced
+  -- single-signature revocation with none of the §2.3 obligations attached.
+  if cardinality(v_p.four_eyes_exempt_reasons) <> 0 or not v_p.four_eyes_required then
+    v_findings := v_findings || 'an emergency reason was made four-eyes EXEMPT rather than DEFERRED';
+  end if;
+
+  -- DISJOINT and TOTAL, by constraint. A reason in neither set is a revocation
+  -- nobody can execute correctly; a reason in both is a revocation whose rule
+  -- depends on which function the caller happened to reach.
+  begin
+    update kitluy_devices.credential_revocation_policy
+       set emergency_eligible_reasons = emergency_eligible_reasons
+             || 'CERTIFICATE_MISISSUANCE'::kitluy_devices.credential_revocation_reason
+     where environment = 'development';
+    v_findings := v_findings || 'a reason was placed in BOTH reason sets';
+  exception when others then
+    if sqlerrm not like '%reason_sets_chk%' then
+      v_findings := v_findings || format('wrong refusal for overlapping reason sets: %s', sqlerrm);
+    end if;
+  end;
+  begin
+    update kitluy_devices.credential_revocation_policy
+       set emergency_eligible_reasons = array[
+             'KEY_COMPROMISE']::kitluy_devices.credential_revocation_reason[]
+     where environment = 'development';
+    v_findings := v_findings || 'revocation reasons were left in NEITHER set';
+  exception when others then
+    if sqlerrm not like '%reason_sets_chk%' then
+      v_findings := v_findings || format('wrong refusal for unclassified reasons: %s', sqlerrm);
+    end if;
+  end;
+
+  -- §2.3 gates and §2.5 cannot be switched off during an incident.
+  begin
+    update kitluy_devices.credential_revocation_policy
+       set emergency_requires_incident_reference = false where environment = 'development';
+    v_findings := v_findings || 'the mandatory incident reference was switched off';
+  exception when others then
+    if sqlerrm not like '%emergency_gates_chk%' then
+      v_findings := v_findings || format('wrong refusal relaxing the incident reference: %s', sqlerrm);
+    end if;
+  end;
+  begin
+    update kitluy_devices.credential_revocation_policy
+       set emergency_requires_reauthentication = false where environment = 'development';
+    v_findings := v_findings || 'the mandatory re-authentication was switched off';
+  exception when others then
+    if sqlerrm not like '%emergency_gates_chk%' then
+      v_findings := v_findings || format('wrong refusal relaxing re-authentication: %s', sqlerrm);
+    end if;
+  end;
+  -- §2.5: no automatic machine-generated revocation is approved for Phase 1.
+  begin
+    update kitluy_devices.credential_revocation_policy
+       set machine_initiated_revocation_permitted = true where environment = 'development';
+    v_findings := v_findings || 'machine-initiated revocation was permitted';
+  exception when others then
+    if sqlerrm not like '%no_machine_chk%' then
+      v_findings := v_findings || format('wrong refusal permitting machine revocation: %s', sqlerrm);
+    end if;
+  end;
+
+  -- §2.5, as authority rather than as a flag: the worker may detect, record and
+  -- escalate. It may not decide to revoke, and it holds no path that would let
+  -- it.
+  for r in
+    select p.oid::regprocedure as sig, p.proname
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'kitluy_devices'
+       and (p.proname like '%revoke%' or p.proname like '%revocation%')
+  loop
+    if has_function_privilege('kitluy_worker_service', r.sig, 'execute') then
+      v_findings := v_findings || format('the worker role can execute %s', r.proname);
+    end if;
+    if has_function_privilege('public', r.sig, 'execute') then
+      v_findings := v_findings || format('PUBLIC can execute %s', r.proname);
+    end if;
+  end loop;
+  if has_table_privilege('kitluy_worker_service', 'kitluy_devices.device_credentials', 'update')
+     or has_table_privilege('kitluy_worker_service',
+                            'kitluy_devices.device_credential_emergency_revocations', 'insert')
+     or has_table_privilege('kitluy_worker_service',
+                            'kitluy_devices.revocation_recorded_scopes', 'insert')
+     or has_table_privilege('kitluy_worker_service',
+                            'kitluy_devices.credential_revocation_policy', 'update') then
+    v_findings := v_findings || 'the worker holds direct authority over revocation state';
+  end if;
+  -- The named executor records only THROUGH the governed functions.
+  if has_table_privilege('kitluy_issuance_service',
+                         'kitluy_devices.device_credential_emergency_revocations', 'insert')
+     or has_table_privilege('kitluy_issuance_service',
+                            'kitluy_devices.revocation_recorded_scopes', 'insert') then
+    v_findings := v_findings || 'the issuance executor can write emergency evidence directly';
+  end if;
+
+  -- §3 row 7 is answered from kitluy_devices evidence, NOT by reaching into the
+  -- approvals aggregate. A credential governor that could write kitluy_auth
+  -- could manufacture the approval that authorizes its own broader scope, and
+  -- one that could read it would have crossed the boundary section 7's policy
+  -- census exists to hold.
+  if has_table_privilege('kitluy_credential_issuer', 'kitluy_auth.approval_requests', 'select')
+     or has_table_privilege('kitluy_credential_issuer', 'kitluy_auth.approval_requests', 'insert')
+     or has_table_privilege('kitluy_credential_issuer', 'kitluy_auth.approval_requests', 'update')
+     or has_table_privilege('kitluy_credential_issuer', 'kitluy_auth.approval_requests', 'delete') then
+    v_findings := v_findings || 'the credential governor reaches the approvals aggregate directly';
+  end if;
+
+  -- Shape: definer, fixed search_path, governor-owned, RLS ENABLED and FORCED.
+  for r in
+    select p.proname, p.prosecdef, p.proconfig, pg_get_userbyid(p.proowner) as owner
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'kitluy_devices'
+       and p.proname in ('resolve_revocation_scope_v1', 'record_revocation_scope_v1',
+                         'escalate_emergency_revocation_v1', 'revoke_device_credential_emergency_v1',
+                         'record_emergency_revocation_post_approval_v1',
+                         'lapse_emergency_revocation_post_approvals_v1')
+  loop
+    if not r.prosecdef or r.owner <> 'kitluy_credential_issuer'
+       or r.proconfig is null
+       or not exists (select 1 from unnest(r.proconfig) c where c like 'search_path=%') then
+      v_findings := v_findings ||
+        format('%s is not a governor-owned SECURITY DEFINER with a fixed search_path', r.proname);
+    end if;
+  end loop;
+  for r in
+    select c.relname, c.relrowsecurity, c.relforcerowsecurity
+      from pg_class c join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = 'kitluy_devices'
+       and c.relname in ('revocation_recorded_scopes', 'device_credential_emergency_revocations')
+  loop
+    if not r.relrowsecurity or not r.relforcerowsecurity then
+      v_findings := v_findings || format('%s does not have RLS ENABLED and FORCED', r.relname);
+    end if;
+  end loop;
+
+  -- §2.4 is structural, not merely intended: nothing can put a revoked
+  -- credential back into any other state.
+  if not exists (select 1 from pg_trigger t join pg_class c on c.oid = t.tgrelid
+                  where c.relname = 'device_credentials'
+                    and t.tgname = 'trg_device_credentials_revocation_one_way'
+                    and not t.tgisinternal) then
+    v_findings := v_findings || 'nothing prevents a revoked credential returning to service';
+  end if;
+  for r in
+    select p.proname, pg_get_functiondef(p.oid) as src
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'kitluy_devices'
+       and p.proname in ('record_emergency_revocation_post_approval_v1',
+                         'lapse_emergency_revocation_post_approvals_v1',
+                         'escalate_emergency_revocation_v1')
+  loop
+    if r.src ~* 'update\s+kitluy_devices\.device_credentials' then
+      v_findings := v_findings || format('%s writes device_credentials', r.proname);
+    end if;
+  end loop;
+
+  if cardinality(v_findings) > 0 then
+    raise exception 'ASSERT FAIL: % emergency-revocation policy finding(s): %',
+      cardinality(v_findings), array_to_string(v_findings, ' | ');
+  end if;
+
+  raise notice 'PASS ws11-emergency-revocation-policy: the revocation policy is EXACTLY owner decision KLD-2026-07-29-DEVICE-CREDENTIAL-REVOCATION-001 (the five §2.2 emergency reasons, the four §2.1 approve-before-execute reasons, a 4-hour §2.3 post-approval window, the decision named and the [REQUIRED] marker cleared), the two reason sets are DISJOINT and TOTAL by constraint so no reason is unclassified or doubly classified, the emergency reasons are four-eyes DEFERRED rather than EXEMPT, the mandatory incident reference and re-authentication cannot be switched off, §2.5 machine-initiated revocation cannot be permitted and the worker role can execute no revocation function and holds no direct authority over revocation state, PUBLIC can execute none of them, the issuance executor writes emergency evidence only through governed functions, every new function is a governor-owned SECURITY DEFINER with a fixed search_path over RLS ENABLED and FORCED tables, and §2.4 is structural — a one-way trigger guards device_credentials and no post-approval function contains a statement that writes it';
+end
+$section41a$;
+
+-- ---------------------------------------------------------------------------
+-- 41b — decision §3: the scope comes from the REASON, one probe per row.
+-- ---------------------------------------------------------------------------
+do $section41b$
+declare
+  v_findings text[] := array[]::text[];
+  v_dev uuid;
+  v_other uuid;
+  v_fp1 text := encode(sha256(convert_to('41b-fp1-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_fp2 text := encode(sha256(convert_to('41b-fp2-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_fpx text := encode(sha256(convert_to('41b-fpx-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_gen1 uuid;
+  v_gen2 uuid;
+  v_otherc uuid;
+  v_assign integer;
+  v_res jsonb;
+  v_ids uuid[];
+  v_attempt uuid;
+  v_req text := 'rq-41b-' || gen_random_uuid();
+  v_idem text := encode(sha256(convert_to('i41b-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_prep jsonb;
+  v_policy_a4 uuid;
+  v_approval uuid;
+  v_incident text := 'INC-41B-' || gen_random_uuid();
+  v_reason kitluy_devices.credential_revocation_reason;
+  v_links jsonb := jsonb_build_array(
+    jsonb_build_object('link_position',0,'role','root','subject_fingerprint',repeat('r',64),
+                       'issuer_key_id','rk','canonical_tbs','R','detached_signature_b64','qg=='),
+    jsonb_build_object('link_position',1,'role','intermediate','subject_fingerprint',repeat('i',64),
+                       'issuer_key_id','rk','canonical_tbs','I','detached_signature_b64','uw=='));
+begin
+  -- A device holding TWO credentials: generation 1 still inside its granted
+  -- overlap and generation 2 current, on DIFFERENT keys. Both halves of §3 need
+  -- it — "all active and overlapping" must reach both, and "every credential
+  -- bound to the key" must reach exactly one.
+  v_dev := pg_temp.ws11_renewable_device('t41b', v_fp1);
+  v_other := pg_temp.ws11_renewable_device('t41bo', v_fpx);
+
+  update kitluy_devices.renewal_policy
+     set allow_key_rotation = true, rotation_approved_by_decision_ref = 'TEST-ONLY-section41b'
+   where environment = 'development';
+  v_res := kitluy_devices.reserve_device_credential_renewal_v1(
+    v_dev, 'development', 'device_identity',
+    encode(sha256(convert_to('res-41b-' || gen_random_uuid(), 'UTF8')), 'hex'),
+    now(), 'trusted', 'rotate_key'::kitluy_devices.renewal_mode, 'SVC');
+  v_attempt := (v_res ->> 'renewal_attempt_id')::uuid;
+  perform kitluy_devices.register_generation_key_v2(v_attempt, 'handle-41b', 'PEM-41B', v_fp2, 2);
+  v_prep := kitluy_devices.prepare_device_credential_renewal_v2(
+    v_dev, 'development', 'device_identity', v_req, v_idem, repeat('7', 64),
+    'PEM-41B', v_fp2, 'ed25519', repeat('6', 64), decode('b2', 'hex'), true,
+    'ica-41b', now(), 'trusted', 'SVC', 'rotate_key');
+  perform kitluy_devices.record_device_credential_signature_v1(
+    v_req, v_prep ->> 'canonical_tbs_hash', decode('4141', 'hex'), true, 'SVC');
+  perform kitluy_devices.finalize_device_credential_issuance_v1(v_req, v_links, 'SVC');
+  update kitluy_devices.renewal_policy
+     set allow_key_rotation = false, rotation_approved_by_decision_ref = null
+   where environment = 'development';
+
+  select credential_id into v_gen1 from kitluy_devices.device_credentials
+   where device_record_id = v_dev and certificate_generation = 1;
+  select credential_id into v_gen2 from kitluy_devices.device_credentials
+   where device_record_id = v_dev and certificate_generation = 2;
+  select credential_id into v_otherc from kitluy_devices.device_credentials
+   where device_record_id = v_other and certificate_generation = 1;
+  select assignment_generation into v_assign from kitluy_devices.devices where id = v_dev;
+
+  -- §3 row 1/2: DEVICE_LOST and DEVICE_STOLEN — all ACTIVE AND OVERLAPPING
+  -- credentials for that device, and nothing belonging to another device.
+  foreach v_reason in array array['DEVICE_LOST','DEVICE_STOLEN']::kitluy_devices.credential_revocation_reason[] loop
+    v_res := kitluy_devices.resolve_revocation_scope_v1(v_reason, 'development', v_dev);
+    select array_agg(value::uuid) into v_ids from jsonb_array_elements_text(v_res -> 'credential_ids');
+    if not ((v_res ->> 'resolved')::boolean and v_ids @> array[v_gen1, v_gen2]
+            and cardinality(v_ids) = 2) then
+      v_findings := v_findings ||
+        format('%s did not reach exactly the active and overlapping credentials: %s', v_reason, v_res);
+    end if;
+  end loop;
+
+  -- §3 row 3: KEY_COMPROMISE — every credential bound to the compromised key,
+  -- and ONLY those. The device holds two credentials on two keys, so a scope
+  -- that returned both would be reaching by device rather than by key.
+  v_res := kitluy_devices.resolve_revocation_scope_v1(
+    'KEY_COMPROMISE', 'development', null, 'device_identity', null,
+    'no-such-provider-handle-41b', v_fp1);
+  select array_agg(value::uuid) into v_ids from jsonb_array_elements_text(v_res -> 'credential_ids');
+  if not ((v_res ->> 'resolved')::boolean and v_ids = array[v_gen1]) then
+    v_findings := v_findings ||
+      format('KEY_COMPROMISE did not reach exactly the credentials bound to the key: %s', v_res);
+  end if;
+
+  -- §3 row 4: ASSIGNMENT_INVALIDATED — all credentials issued under the
+  -- invalidated assignment generation.
+  v_res := kitluy_devices.resolve_revocation_scope_v1(
+    'ASSIGNMENT_INVALIDATED', 'development', v_dev, 'device_identity', null, null, null, v_assign);
+  select array_agg(value::uuid) into v_ids from jsonb_array_elements_text(v_res -> 'credential_ids');
+  if not ((v_res ->> 'resolved')::boolean and v_ids @> array[v_gen1, v_gen2]
+          and cardinality(v_ids) = 2) then
+    v_findings := v_findings ||
+      format('ASSIGNMENT_INVALIDATED did not reach the invalidated assignment generation: %s', v_res);
+  end if;
+  -- A generation nobody issued under reaches nothing rather than everything.
+  v_res := kitluy_devices.resolve_revocation_scope_v1(
+    'ASSIGNMENT_INVALIDATED', 'development', v_dev, 'device_identity', null, null, null, v_assign + 99);
+  if (v_res ->> 'credential_count')::int <> 0 then
+    v_findings := v_findings || 'an unused assignment generation reached credentials';
+  end if;
+
+  -- §3 row 5: CERTIFICATE_MISISSUANCE — the identified credential only, PLUS
+  -- explicitly linked duplicates...
+  v_res := kitluy_devices.resolve_revocation_scope_v1(
+    'CERTIFICATE_MISISSUANCE', 'development', v_dev, 'device_identity', 2,
+    null, null, null, null, array[v_gen1]);
+  select array_agg(value::uuid) into v_ids from jsonb_array_elements_text(v_res -> 'credential_ids');
+  if not ((v_res ->> 'resolved')::boolean and v_ids @> array[v_gen1, v_gen2]
+          and cardinality(v_ids) = 2) then
+    v_findings := v_findings ||
+      format('CERTIFICATE_MISISSUANCE did not reach the identified credential plus its linked duplicate: %s', v_res);
+  end if;
+  -- ...and "explicitly linked" is not a licence to reach ANOTHER device.
+  v_res := kitluy_devices.resolve_revocation_scope_v1(
+    'CERTIFICATE_MISISSUANCE', 'development', v_dev, 'device_identity', 2,
+    null, null, null, null, array[v_otherc]);
+  if (v_res ->> 'resolved')::boolean
+     or (v_res ->> 'refusal_code') is distinct from 'KLUY-REVOCATION-SCOPE-LINK-FOREIGN' then
+    v_findings := v_findings ||
+      format('a linked duplicate on another device was accepted: %s', v_res);
+  end if;
+
+  -- §3 row 6: ADMINISTRATIVE_REPLACEMENT — the identified credential ONLY. A
+  -- caller offering more is refused rather than silently trimmed, because a
+  -- silent trim leaves the caller believing the extras were revoked.
+  v_res := kitluy_devices.resolve_revocation_scope_v1(
+    'ADMINISTRATIVE_REPLACEMENT', 'development', v_dev, 'device_identity', 2);
+  select array_agg(value::uuid) into v_ids from jsonb_array_elements_text(v_res -> 'credential_ids');
+  if not ((v_res ->> 'resolved')::boolean and v_ids = array[v_gen2]) then
+    v_findings := v_findings ||
+      format('ADMINISTRATIVE_REPLACEMENT did not reach the identified credential only: %s', v_res);
+  end if;
+  v_res := kitluy_devices.resolve_revocation_scope_v1(
+    'ADMINISTRATIVE_REPLACEMENT', 'development', v_dev, 'device_identity', 2,
+    null, null, null, null, array[v_gen1]);
+  if (v_res ->> 'resolved')::boolean
+     or (v_res ->> 'refusal_code') is distinct from 'KLUY-REVOCATION-SCOPE-WIDENED' then
+    v_findings := v_findings ||
+      format('an administrative replacement was widened past the identified credential: %s', v_res);
+  end if;
+
+  -- §3 row 7: OTHER_APPROVED_REASON — the credential only, UNLESS the approved
+  -- request explicitly names a broader scope. Without an approval the broader
+  -- scope is refused, not quietly narrowed (§3.2 forbids guessing either way).
+  v_res := kitluy_devices.resolve_revocation_scope_v1(
+    'OTHER_APPROVED_REASON', 'development', v_dev, 'device_identity', 2);
+  select array_agg(value::uuid) into v_ids from jsonb_array_elements_text(v_res -> 'credential_ids');
+  if not ((v_res ->> 'resolved')::boolean and v_ids = array[v_gen2]) then
+    v_findings := v_findings ||
+      format('OTHER_APPROVED_REASON did not default to the credential only: %s', v_res);
+  end if;
+  v_res := kitluy_devices.resolve_revocation_scope_v1(
+    'OTHER_APPROVED_REASON', 'development', v_dev, 'device_identity', 2,
+    null, null, null, null, array[v_gen1], null);
+  if (v_res ->> 'resolved')::boolean
+     or (v_res ->> 'refusal_code') is distinct from 'KLUY-REVOCATION-SCOPE-UNAPPROVED-BROADENING' then
+    v_findings := v_findings ||
+      format('an unapproved broader scope was accepted: %s', v_res);
+  end if;
+  -- The approval exists in the kitluy_auth aggregate, and the scope it
+  -- authorizes is RECORDED in kitluy_devices citing it — because an approval
+  -- request carries a payload HASH and has no column in which to enumerate
+  -- credentials, and the credential governor holds no access to that schema.
+  insert into kitluy_auth.approval_policies
+    (policy_key, version, permission_key, environment, quorum, status, risk_class)
+  values ('cred.revocation.a4.' || substr(md5(random()::text), 1, 8), 1,
+          'device.credential.revoke', 'development', 1, 'ACTIVE', 'A4')
+  returning id into v_policy_a4;
+  insert into kitluy_auth.approval_requests
+    (policy_id, requester_id, resource_type, resource_id, environment, action,
+     payload_hash, reason, status)
+  values (v_policy_a4, '00000000-0000-4000-8000-000000000007', 'device', v_dev,
+          'development', 'device_credential_revocation', repeat('41', 32),
+          'section41b broader scope', 'APPROVED')
+  returning id into v_approval;
+  -- A recorded broader scope that cites no approval is not an approved one.
+  v_res := kitluy_devices.record_revocation_scope_v1(
+    v_incident || '-NOAPPROVAL', 'development', 'OTHER_APPROVED_REASON',
+    null, null, null, array[v_gen1], 'sec-a', 'sec-b', null, null);
+  if (v_res ->> 'refusal_code') is distinct from 'KLUY-REVOCATION-SCOPE-UNAPPROVED-BROADENING' then
+    v_findings := v_findings ||
+      format('a broader scope citing no approval was recorded: %s', v_res);
+  end if;
+  v_res := kitluy_devices.record_revocation_scope_v1(
+    v_incident || '-BROADER', 'development', 'OTHER_APPROVED_REASON',
+    null, null, null, array[v_gen1], 'sec-a', 'sec-b', null, v_approval);
+  if (v_res ->> 'outcome') <> 'RECORDED' then
+    v_findings := v_findings || format('an approved broader scope was refused: %s', v_res);
+  end if;
+  v_res := kitluy_devices.resolve_revocation_scope_v1(
+    'OTHER_APPROVED_REASON', 'development', v_dev, 'device_identity', 2,
+    null, null, null, null, array[v_gen1], v_approval);
+  select array_agg(value::uuid) into v_ids from jsonb_array_elements_text(v_res -> 'credential_ids');
+  if not ((v_res ->> 'resolved')::boolean and v_ids @> array[v_gen1, v_gen2]
+          and cardinality(v_ids) = 2) then
+    v_findings := v_findings ||
+      format('an APPROVED broader scope was not honoured: %s', v_res);
+  end if;
+  -- ...and the caller cannot reach past what the approval actually named.
+  v_res := kitluy_devices.resolve_revocation_scope_v1(
+    'OTHER_APPROVED_REASON', 'development', v_dev, 'device_identity', 2,
+    null, null, null, null, array[v_gen1, v_otherc], v_approval);
+  if (v_res ->> 'resolved')::boolean
+     or (v_res ->> 'refusal_code') is distinct from 'KLUY-REVOCATION-SCOPE-UNAPPROVED-BROADENING' then
+    v_findings := v_findings ||
+      format('a caller widened past the recorded approved scope: %s', v_res);
+  end if;
+
+  -- §3.1: PROVIDER_COMPROMISE and SECURITY_INCIDENT refuse a wildcard, refuse
+  -- an empty set, refuse a wildcard token, and refuse a self-approved blast
+  -- radius — by CONSTRAINT as well as by the governed function.
+  v_res := kitluy_devices.record_revocation_scope_v1(
+    v_incident || '-WILD', 'development', 'PROVIDER_COMPROMISE',
+    null, array['*'], null, null, 'sec-a', 'sec-b');
+  if (v_res ->> 'refusal_code') is distinct from 'KLUY-REVOCATION-SCOPE-WILDCARD-REFUSED' then
+    v_findings := v_findings || format('a provider-compromise wildcard was recorded: %s', v_res);
+  end if;
+  v_res := kitluy_devices.record_revocation_scope_v1(
+    v_incident || '-EMPTY', 'development', 'SECURITY_INCIDENT',
+    null, null, null, null, 'sec-a', 'sec-b');
+  if (v_res ->> 'refusal_code') is distinct from 'KLUY-REVOCATION-SCOPE-WILDCARD-REFUSED' then
+    v_findings := v_findings || format('an empty security-incident scope was recorded: %s', v_res);
+  end if;
+  begin
+    insert into kitluy_devices.revocation_recorded_scopes (
+      incident_reference, environment, reason_code, affected_device_ids,
+      unrestricted_wildcard, recorded_by, approved_by)
+    values (v_incident || '-RAWWILD', 'development', 'SECURITY_INCIDENT',
+            array[v_dev], true, 'sec-a', 'sec-b');
+    v_findings := v_findings || 'an unrestricted wildcard scope was written directly';
+  exception when others then
+    if sqlerrm not like '%no_wildcard_chk%' and sqlerrm not like '%permission denied%' then
+      v_findings := v_findings || format('wrong refusal for a raw wildcard: %s', sqlerrm);
+    end if;
+  end;
+  v_res := kitluy_devices.record_revocation_scope_v1(
+    v_incident || '-SELF', 'development', 'SECURITY_INCIDENT',
+    array[v_dev], null, null, null, 'sec-a', 'sec-a');
+  if (v_res ->> 'refusal_code') is distinct from 'KLUY-REVOCATION-SCOPE-SELF-APPROVED' then
+    v_findings := v_findings || format('one person recorded and approved a blast radius: %s', v_res);
+  end if;
+  -- Only the two incident-defined reasons take a recorded set at all.
+  v_res := kitluy_devices.record_revocation_scope_v1(
+    v_incident || '-LOST', 'development', 'DEVICE_LOST',
+    array[v_dev], null, null, null, 'sec-a', 'sec-b');
+  if (v_res ->> 'refusal_code') is distinct from 'KLUY-REVOCATION-SCOPE-REASON-NOT-RECORDABLE' then
+    v_findings := v_findings || format('a fleet-derived reason accepted a recorded scope: %s', v_res);
+  end if;
+
+  -- §3.2: an incident with NO recorded set fails closed. It does not guess
+  -- narrow, and it does not guess wide.
+  v_res := kitluy_devices.resolve_revocation_scope_v1(
+    'PROVIDER_COMPROMISE', 'development', null, 'device_identity', null, null, null, null,
+    v_incident || '-NEVER');
+  if (v_res ->> 'resolved')::boolean
+     or (v_res ->> 'refusal_code') is distinct from 'KLUY-REVOCATION-SCOPE-NOT-RECORDED' then
+    v_findings := v_findings || format('an unrecorded provider-compromise scope resolved: %s', v_res);
+  end if;
+  v_res := kitluy_devices.resolve_revocation_scope_v1(
+    'SECURITY_INCIDENT', 'development', null, 'device_identity', null, null, null, null,
+    v_incident || '-NEVER');
+  if (v_res ->> 'resolved')::boolean
+     or (v_res ->> 'refusal_code') is distinct from 'KLUY-REVOCATION-SCOPE-NOT-RECORDED' then
+    v_findings := v_findings || format('an unrecorded security-incident scope resolved: %s', v_res);
+  end if;
+
+  -- §3 row 8: PROVIDER_COMPROMISE — an explicitly recorded affected-KEY set.
+  v_res := kitluy_devices.record_revocation_scope_v1(
+    v_incident, 'development', 'PROVIDER_COMPROMISE',
+    null, array['no-such-provider-handle-41b'], array[v_fp1], null, 'sec-a', 'sec-b');
+  if (v_res ->> 'outcome') <> 'RECORDED' then
+    v_findings := v_findings || format('an approved affected-key set was refused: %s', v_res);
+  end if;
+  v_res := kitluy_devices.resolve_revocation_scope_v1(
+    'PROVIDER_COMPROMISE', 'development', null, 'device_identity', null, null, null, null, v_incident);
+  select array_agg(value::uuid) into v_ids from jsonb_array_elements_text(v_res -> 'credential_ids');
+  if not ((v_res ->> 'resolved')::boolean and v_ids = array[v_gen1]) then
+    v_findings := v_findings ||
+      format('PROVIDER_COMPROMISE did not reach exactly the recorded key set: %s', v_res);
+  end if;
+
+  -- §3 row 9: SECURITY_INCIDENT — an explicitly recorded device/key/credential
+  -- set, reaching that device and NOT the device next to it.
+  v_res := kitluy_devices.record_revocation_scope_v1(
+    v_incident, 'development', 'SECURITY_INCIDENT',
+    array[v_dev], null, null, null, 'sec-a', 'sec-b');
+  if (v_res ->> 'outcome') <> 'RECORDED' then
+    v_findings := v_findings || format('an approved affected set was refused: %s', v_res);
+  end if;
+  v_res := kitluy_devices.resolve_revocation_scope_v1(
+    'SECURITY_INCIDENT', 'development', null, 'device_identity', null, null, null, null, v_incident);
+  select array_agg(value::uuid) into v_ids from jsonb_array_elements_text(v_res -> 'credential_ids');
+  if not ((v_res ->> 'resolved')::boolean and v_ids @> array[v_gen1, v_gen2]
+          and cardinality(v_ids) = 2) then
+    v_findings := v_findings ||
+      format('SECURITY_INCIDENT did not reach exactly the recorded set: %s', v_res);
+  end if;
+  -- A recorded set is append-only: a changed blast radius is a new incident.
+  v_res := kitluy_devices.record_revocation_scope_v1(
+    v_incident, 'development', 'SECURITY_INCIDENT',
+    array[v_dev, v_other], null, null, null, 'sec-a', 'sec-b');
+  if (v_res ->> 'outcome') <> 'ALREADY_RECORDED' then
+    v_findings := v_findings || format('a recorded blast radius was rewritten: %s', v_res);
+  end if;
+
+  -- §2.1/§2.2: an approve-before-execute reason cannot be smuggled through the
+  -- emergency door, whichever of the four it is.
+  foreach v_reason in array array[
+      'ASSIGNMENT_INVALIDATED','CERTIFICATE_MISISSUANCE',
+      'ADMINISTRATIVE_REPLACEMENT','OTHER_APPROVED_REASON'
+    ]::kitluy_devices.credential_revocation_reason[]
+  loop
+    v_res := kitluy_devices.revoke_device_credential_emergency_v1(
+      's41b-ineligible-' || gen_random_uuid(), 'development', 'device_identity',
+      v_reason, 'dressed as an incident', 'REPROVISION_REQUIRED',
+      'ciso@41b', 'CISO', true, 'webauthn', v_incident, 'SECTION41B', v_dev, 2);
+    if (v_res ->> 'refusal_code') is distinct from 'KLUY-EMERGENCY-REASON-NOT-ELIGIBLE' then
+      v_findings := v_findings ||
+        format('%s executed through the emergency path: %s', v_reason, v_res);
+    end if;
+  end loop;
+
+  -- §2.3: an emergency without an incident reference, or without
+  -- re-authentication, or without a reason, is not an emergency.
+  v_res := kitluy_devices.revoke_device_credential_emergency_v1(
+    's41b-noinc-' || gen_random_uuid(), 'development', 'device_identity',
+    'KEY_COMPROMISE', 'private half seen off-device', 'REPROVISION_REQUIRED',
+    'ciso@41b', 'CISO', true, 'webauthn', '  ', 'SECTION41B', v_dev, 2);
+  if (v_res ->> 'refusal_code') is distinct from 'KLUY-EMERGENCY-NO-INCIDENT-REFERENCE' then
+    v_findings := v_findings || format('an emergency ran with no incident reference: %s', v_res);
+  end if;
+  v_res := kitluy_devices.revoke_device_credential_emergency_v1(
+    's41b-noreauth-' || gen_random_uuid(), 'development', 'device_identity',
+    'DEVICE_STOLEN', 'terminal taken', 'REPROVISION_REQUIRED',
+    'ciso@41b', 'CISO', false, 'webauthn', v_incident, 'SECTION41B', v_dev, 2);
+  if (v_res ->> 'refusal_code') is distinct from 'KLUY-EMERGENCY-NO-REAUTH' then
+    v_findings := v_findings || format('an emergency ran with no re-authentication: %s', v_res);
+  end if;
+  v_res := kitluy_devices.revoke_device_credential_emergency_v1(
+    's41b-noreason-' || gen_random_uuid(), 'development', 'device_identity',
+    'DEVICE_STOLEN', '   ', 'REPROVISION_REQUIRED',
+    'ciso@41b', 'CISO', true, 'webauthn', v_incident, 'SECTION41B', v_dev, 2);
+  if (v_res ->> 'refusal_code') is distinct from 'KLUY-EMERGENCY-NO-REASON' then
+    v_findings := v_findings || format('an emergency ran with no reason: %s', v_res);
+  end if;
+  -- §3.2, through the emergency path: an undeterminable scope revokes NOTHING.
+  v_res := kitluy_devices.revoke_device_credential_emergency_v1(
+    's41b-unknown-' || gen_random_uuid(), 'development', 'device_identity',
+    'KEY_COMPROMISE', 'a key we cannot name', 'REPROVISION_REQUIRED',
+    'ciso@41b', 'CISO', true, 'webauthn', v_incident, 'SECTION41B');
+  if (v_res ->> 'outcome') <> 'MANUAL_SECURITY_REVIEW'
+     or (v_res ->> 'refusal_code') is distinct from 'KLUY-REVOCATION-SCOPE-NO-KEY' then
+    v_findings := v_findings || format('an undeterminable scope did not fail closed: %s', v_res);
+  end if;
+
+  -- After all of that, NOTHING in this block revoked a credential.
+  if exists (select 1 from kitluy_devices.device_credentials
+              where device_record_id in (v_dev, v_other) and state = 'revoked') then
+    v_findings := v_findings || 'a refused emergency revoked a credential anyway';
+  end if;
+
+  if cardinality(v_findings) > 0 then
+    raise exception 'ASSERT FAIL: % revocation-scope finding(s): %',
+      cardinality(v_findings), array_to_string(v_findings, ' | ');
+  end if;
+
+  raise notice 'PASS ws11-revocation-scope-from-reason: every row of decision §3 resolves FROM THE REASON and never from the caller — DEVICE_LOST and DEVICE_STOLEN reach the active and overlapping credentials of that device and no other device, KEY_COMPROMISE reaches only the credentials bound to the compromised key even though the device holds two, ASSIGNMENT_INVALIDATED reaches the invalidated assignment generation and an unused one reaches nothing, CERTIFICATE_MISISSUANCE reaches the identified credential plus explicitly linked duplicates but refuses a link on another device, ADMINISTRATIVE_REPLACEMENT reaches the identified credential ONLY and refuses to be widened, OTHER_APPROVED_REASON defaults to the credential only and takes a broader scope only with an APPROVED request; §3.1 refuses a wildcard, an empty set, a wildcard token and a self-approved blast radius for both incident reasons, §3.2 fails closed on an unrecorded incident and on a key compromise that names no key, all four §2.1 approve-before-execute reasons are refused through the emergency door, an emergency without an incident reference, re-authentication or reason is refused, and none of these refusals revoked anything';
+end
+$section41b$;
+
+-- ---------------------------------------------------------------------------
+-- 41c — decision §2.4: the post-approval NEVER reverses the revocation.
+--
+-- The single most important behaviour in this group. An auto-reversing
+-- revocation would let an attacker who merely delays the approver get the
+-- credential back.
+-- ---------------------------------------------------------------------------
+do $section41c$
+declare
+  v_findings text[] := array[]::text[];
+  v_refused_dev uuid;
+  v_lapsed_dev uuid;
+  v_fp_r text := encode(sha256(convert_to('41c-r-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_fp_l text := encode(sha256(convert_to('41c-l-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_res jsonb;
+  v_em_refused uuid;
+  v_em_lapsed uuid;
+  v_cred_refused uuid;
+  v_cred_lapsed uuid;
+  v_due timestamptz;
+  v_state text;
+  v_n integer;
+begin
+  v_refused_dev := pg_temp.ws11_renewable_device('t41cr', v_fp_r);
+  v_lapsed_dev  := pg_temp.ws11_renewable_device('t41cl', v_fp_l);
+  select credential_id into v_cred_refused from kitluy_devices.device_credentials
+   where device_record_id = v_refused_dev and certificate_generation = 1;
+  select credential_id into v_cred_lapsed from kitluy_devices.device_credentials
+   where device_record_id = v_lapsed_dev and certificate_generation = 1;
+
+  -- §2.2/§2.3: the emergency executes IMMEDIATELY, with no prior approval.
+  v_res := kitluy_devices.revoke_device_credential_emergency_v1(
+    's41c-refused-' || gen_random_uuid(), 'development', 'device_identity',
+    'DEVICE_STOLEN', 'terminal taken from the store floor', 'REPROVISION_REQUIRED',
+    'ciso@41c', 'CISO', true, 'webauthn', 'INC-41C-REFUSED', 'SECTION41C',
+    v_refused_dev, 1);
+  if (v_res ->> 'outcome') <> 'REVOKED_IMMEDIATELY'
+     or (v_res ->> 'revoked_credential_count')::int <> 1 then
+    v_findings := v_findings || format('the emergency path did not execute immediately: %s', v_res);
+  end if;
+  v_em_refused := (v_res ->> 'emergency_revocation_id')::uuid;
+
+  select state::text into v_state from kitluy_devices.device_credentials
+   where credential_id = v_cred_refused;
+  if v_state <> 'revoked' then
+    v_findings := v_findings || format('the emergency left the credential %s', v_state);
+  end if;
+  -- Group 0125 pairs `revoked` with `revoked_at`; a state without its timestamp
+  -- would have been refused by the table, so this also proves the write is real.
+  if (select revoked_at from kitluy_devices.device_credentials
+       where credential_id = v_cred_refused) is null then
+    v_findings := v_findings || 'a revoked credential carries no revocation time';
+  end if;
+  -- The same append-only evidence group 0136 defined, linked to the declaration.
+  if not exists (select 1 from kitluy_devices.device_credential_revocations
+                  where emergency_revocation_id = v_em_refused
+                    and credential_id = v_cred_refused
+                    and incident_reference = 'INC-41C-REFUSED') then
+    v_findings := v_findings || 'the emergency wrote no append-only revocation evidence';
+  end if;
+  -- §2.3: the 4-hour deadline, PENDING and countable.
+  select post_approval_due_at into v_due
+    from kitluy_devices.device_credential_emergency_revocations
+   where emergency_revocation_id = v_em_refused;
+  if v_due is null or v_due <= now() then
+    v_findings := v_findings || 'the emergency opened no live post-approval deadline';
+  end if;
+
+  -- §2.4: THE DECLARER IS NOT THEIR OWN SECOND PERSON.
+  v_res := kitluy_devices.record_emergency_revocation_post_approval_v1(
+    v_em_refused, 'ciso@41c', 'REFUSE', true, 'marking my own homework');
+  if (v_res ->> 'refusal_code') is distinct from 'KLUY-EMERGENCY-SELF-POST-APPROVAL' then
+    v_findings := v_findings || format('a declarer post-approved their own emergency: %s', v_res);
+  end if;
+  if (select post_approval_decision from kitluy_devices.device_credential_emergency_revocations
+       where emergency_revocation_id = v_em_refused) <> 'PENDING' then
+    v_findings := v_findings || 'a refused self-post-approval still settled the case';
+  end if;
+
+  -- §2.4: AN EXPLICIT REFUSAL. The second person says the revocation should not
+  -- have happened — and the credential STAYS REVOKED.
+  v_res := kitluy_devices.record_emergency_revocation_post_approval_v1(
+    v_em_refused, 'ciso2@41c', 'REFUSE', true, 'insufficient evidence of theft');
+  if (v_res ->> 'outcome') <> 'MANUAL_SECURITY_REVIEW'
+     or (v_res ->> 'post_approval_decision') <> 'REFUSED' then
+    v_findings := v_findings || format('a refused post-approval did not escalate: %s', v_res);
+  end if;
+  select state::text into v_state from kitluy_devices.device_credentials
+   where credential_id = v_cred_refused;
+  if v_state <> 'revoked' then
+    v_findings := v_findings ||
+      format('A REFUSED POST-APPROVAL REVERSED THE REVOCATION: the credential is %s', v_state);
+  end if;
+  -- ...and the case is escalated rather than quietly closed.
+  select count(*) into v_n
+    from kitluy_devices.device_recovery_cases c
+    join kitluy_devices.device_credential_revocations r on r.revocation_id = c.revocation_id
+   where r.emergency_revocation_id = v_em_refused
+     and c.disposition = 'MANUAL_SECURITY_REVIEW';
+  if v_n < 1 then
+    v_findings := v_findings || 'a refused post-approval opened no manual security review';
+  end if;
+  if (select escalated_at from kitluy_devices.device_credential_emergency_revocations
+       where emergency_revocation_id = v_em_refused) is null then
+    v_findings := v_findings || 'a refused post-approval was not recorded as escalated';
+  end if;
+  -- One verdict, once. Re-deciding a settled case is a new incident.
+  v_res := kitluy_devices.record_emergency_revocation_post_approval_v1(
+    v_em_refused, 'ciso3@41c', 'APPROVE', true, 'second thoughts');
+  if (v_res ->> 'outcome') <> 'ALREADY_DECIDED'
+     or (v_res ->> 'post_approval_decision') <> 'REFUSED' then
+    v_findings := v_findings || format('a settled post-approval was re-decided: %s', v_res);
+  end if;
+
+  -- §2.4: A MISSING POST-APPROVAL. The deadline passes with nobody answering,
+  -- the sweep records LAPSED and escalates — and the credential STAYS REVOKED.
+  v_res := kitluy_devices.revoke_device_credential_emergency_v1(
+    's41c-lapsed-' || gen_random_uuid(), 'development', 'device_identity',
+    'KEY_COMPROMISE', 'private half recovered from a disposed disk', 'REPROVISION_REQUIRED',
+    'ic@41c', 'INCIDENT_COMMANDER', true, 'hardware token', 'INC-41C-LAPSED',
+    'SECTION41C', null, null, null, v_fp_l);
+  if (v_res ->> 'outcome') <> 'REVOKED_IMMEDIATELY' then
+    v_findings := v_findings || format('the key-compromise emergency did not execute: %s', v_res);
+  end if;
+  v_em_lapsed := (v_res ->> 'emergency_revocation_id')::uuid;
+
+  -- A deadline is brought FORWARD to make the lapse observable. The migration
+  -- refuses the other direction: an emergency deadline can never be EXTENDED,
+  -- because an attacker who can delay the approver must not also be able to buy
+  -- the delay back. Requires the governor, borrowed and handed straight back so
+  -- section 32's containment assertion still holds on the next run.
+  execute format('grant kitluy_credential_issuer to %I', current_user);
+  execute 'set role kitluy_credential_issuer';
+
+  begin
+    update kitluy_devices.device_credential_emergency_revocations
+       set post_approval_due_at = post_approval_due_at + interval '1 hour'
+     where emergency_revocation_id = v_em_lapsed;
+    v_findings := v_findings || 'an emergency post-approval deadline was EXTENDED';
+  exception when others then
+    if sqlerrm not like 'KLUY-EMERGENCY-DEADLINE-FIXED%' then
+      v_findings := v_findings || format('wrong refusal extending a deadline: %s', sqlerrm);
+    end if;
+  end;
+  -- The declaration itself is frozen.
+  begin
+    update kitluy_devices.device_credential_emergency_revocations
+       set declared_by = 'someone-else'
+     where emergency_revocation_id = v_em_lapsed;
+    v_findings := v_findings || 'the declaring authority on an emergency was rewritten';
+  exception when others then
+    if sqlerrm not like 'KLUY-EMERGENCY-IMMUTABLE%' then
+      v_findings := v_findings || format('wrong refusal rewriting a declaration: %s', sqlerrm);
+    end if;
+  end;
+
+  update kitluy_devices.device_credential_emergency_revocations
+     set post_approval_due_at = clock_timestamp() - interval '1 minute'
+   where emergency_revocation_id = v_em_lapsed;
+
+  -- THE HOSTILE WRITE. Not a function, not a service — the credential governor
+  -- itself, with every table privilege it holds, trying to put a revoked
+  -- credential back into service.
+  begin
+    update kitluy_devices.device_credentials
+       set state = 'issued', revoked_at = null
+     where credential_id = v_cred_refused;
+    v_findings := v_findings || 'THE CREDENTIAL GOVERNOR UN-REVOKED A REVOKED CREDENTIAL';
+  exception when others then
+    if sqlerrm not like 'KLUY-REVOCATION-IS-ONE-WAY%' then
+      v_findings := v_findings || format('wrong refusal un-revoking a credential: %s', sqlerrm);
+    end if;
+  end;
+  begin
+    update kitluy_devices.device_credentials
+       set state = 'superseded'
+     where credential_id = v_cred_refused;
+    v_findings := v_findings || 'a revoked credential was demoted to superseded';
+  exception when others then
+    if sqlerrm not like 'KLUY-REVOCATION-IS-ONE-WAY%' then
+      v_findings := v_findings || format('wrong refusal demoting a revoked credential: %s', sqlerrm);
+    end if;
+  end;
+
+  execute 'reset role';
+  execute format('revoke kitluy_credential_issuer from %I', current_user);
+
+  v_res := kitluy_devices.lapse_emergency_revocation_post_approvals_v1('development', 'SECTION41C');
+  if (v_res ->> 'lapsed_count')::int < 1 then
+    v_findings := v_findings || format('an overdue post-approval was not swept: %s', v_res);
+  end if;
+  if (select post_approval_decision from kitluy_devices.device_credential_emergency_revocations
+       where emergency_revocation_id = v_em_lapsed) <> 'LAPSED' then
+    v_findings := v_findings || 'an overdue post-approval was not recorded as LAPSED';
+  end if;
+  select state::text into v_state from kitluy_devices.device_credentials
+   where credential_id = v_cred_lapsed;
+  if v_state <> 'revoked' then
+    v_findings := v_findings ||
+      format('A LAPSED POST-APPROVAL REVERSED THE REVOCATION: the credential is %s', v_state);
+  end if;
+  select count(*) into v_n
+    from kitluy_devices.device_recovery_cases c
+    join kitluy_devices.device_credential_revocations r on r.revocation_id = c.revocation_id
+   where r.emergency_revocation_id = v_em_lapsed
+     and c.disposition = 'MANUAL_SECURITY_REVIEW';
+  if v_n < 1 then
+    v_findings := v_findings || 'a lapsed post-approval opened no manual security review';
+  end if;
+  -- LAPSED means NOBODY CAME: it carries no approver, and the distinction
+  -- between "refused" and "unanswered" survives.
+  if (select post_approved_by from kitluy_devices.device_credential_emergency_revocations
+       where emergency_revocation_id = v_em_lapsed) is not null then
+    v_findings := v_findings || 'a lapsed post-approval invented an approver';
+  end if;
+
+  -- Both revoked credentials survived every one of the paths above.
+  if (select state::text from kitluy_devices.device_credentials
+       where credential_id = v_cred_refused) <> 'revoked' then
+    v_findings := v_findings || 'the refused-case credential did not survive this section';
+  end if;
+
+  -- The borrowed governor membership was handed back.
+  if exists (select 1 from pg_auth_members m
+              join pg_roles r on r.oid = m.member
+              join pg_roles g on g.oid = m.roleid
+             where g.rolname = 'kitluy_credential_issuer'
+               and not r.rolsuper) then
+    v_findings := v_findings || 'a non-superuser kept membership of the credential governor';
+  end if;
+
+  if cardinality(v_findings) > 0 then
+    raise exception 'ASSERT FAIL: % post-approval finding(s): %',
+      cardinality(v_findings), array_to_string(v_findings, ' | ');
+  end if;
+
+  raise notice 'PASS ws11-emergency-post-approval-never-reverses: an emergency revocation executes IMMEDIATELY with no prior approval, writes the same append-only evidence with `revoked` paired to `revoked_at`, and opens a live 4-hour post-approval obligation; the declarer cannot be their own second person and a refused self-post-approval leaves the case PENDING; AN EXPLICIT REFUSAL LEAVES THE CREDENTIAL REVOKED and escalates to MANUAL_SECURITY_REVIEW; A LAPSED DEADLINE LEAVES THE CREDENTIAL REVOKED, records LAPSED with no invented approver and escalates; a settled verdict cannot be re-decided; a post-approval deadline can be brought forward but NEVER extended and the declaration itself is frozen; and the credential governor ITSELF cannot un-revoke a revoked credential or demote it to superseded — decision §2.4 holds against the function, against the operator and against the owner of the table';
+end
+$section41c$;
+
+select 'assertions complete: groups 0010-0138 structural contract holds (incl. WS-11-T003 Step 4 emergency revocation, decision §3 scope resolution and the §2.4 one-way rule)' as result;
