@@ -513,11 +513,12 @@ export interface RevokedCredentialRecord {
  * above, but "which revocation reasons condemn the device itself" is a security
  * policy an owner should rule on rather than inherit from an implementation.
  *
- * [REQUIRED: device_revocation_scope_policy — which credential-revocation
- * reasons additionally mark the DEVICE revoked, and what clears that state]
- *
- * Recorded in the open-decisions register. Until it is ruled, callers that need
- * a device-level verdict should pass one explicitly rather than rely on this.
+ * Owner decision KLD-2026-07-29-DEVICE-CREDENTIAL-REVOCATION-001
+ * (OWNER-APPROVED 2026-07-29) rules revocation SCOPE per reason — see its §3
+ * table. That ruling is NOT YET IMPLEMENTED: scope resolution is outstanding
+ * Phase 1 work, and this table is the narrower device-level read used today.
+ * When scope resolution lands, the decision §3 table becomes authoritative and
+ * this one should be re-derived from it rather than maintained in parallel.
  */
 const DEVICE_SCOPED_REASONS: Readonly<Record<CredentialRevocationReason, boolean>> = {
   KEY_COMPROMISE: false,
