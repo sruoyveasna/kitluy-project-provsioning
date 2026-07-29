@@ -111,7 +111,22 @@ export interface CredentialOverlap {
   readonly previousKeyFingerprint: string;
   /** From the head row. Trusted time past this ends the overlap. */
   readonly overlapEndsAt: Date;
+  /**
+   * The previous credential's PERSISTED state, read from
+   * `kitluy_devices.device_credentials`.
+   *
+   * Required, not optional. An overlap is a grant to a credential that is still
+   * `issued`; once the lifecycle retires it to `superseded` — or it is expired
+   * or revoked — the grant is spent, and a caller that kept passing the old
+   * overlap would otherwise keep it alive. Making the state a REQUIRED field
+   * means a caller cannot construct an overlap without having read the row it
+   * is vouching for, which is what stops this becoming a generic bypass.
+   */
+  readonly previousCredentialState: string;
 }
+
+/** The only previous-credential state an overlap may vouch for. */
+const OVERLAP_ELIGIBLE_PREVIOUS_STATE = "issued" as const;
 
 export interface CertificateValidity {
   readonly valid: boolean;
@@ -309,7 +324,12 @@ function overlapInEffect(
 ): CredentialOverlap | null {
   const overlap = context.permittedOverlap;
   if (overlap === undefined) return null;
-  if (now.getTime() > overlap.overlapEndsAt.getTime()) return null;
+  // HALF-OPEN, matching `retire_overlapped_credential_v1`: usable while
+  // trusted_now < overlapEndsAt, spent at and after it. Stated the same way in
+  // both layers so no millisecond gap can open between them.
+  if (now.getTime() >= overlap.overlapEndsAt.getTime()) return null;
+  // A retired, expired or revoked credential has no grant left to exercise.
+  if (overlap.previousCredentialState !== OVERLAP_ELIGIBLE_PREVIOUS_STATE) return null;
   return overlap;
 }
 
