@@ -4894,14 +4894,17 @@ begin
     raise exception 'ASSERT FAIL: the audit detail credential id does not match the reservation';
   end if;
 
-  -- RENEWAL. A NEW key pair (§5.1), registered by the provider first.
-  perform kitluy_devices.register_generation_key_v1(
-    v_device, 'development', 'device_identity', 2, 'handle-g2', 'PEM-G2', v_fp2);
-
+  -- RENEWAL in the DEFAULT mode, which is reuse_current_key. No key is
+  -- generated and none is registered: the device keeps the key it holds and
+  -- receives the next CREDENTIAL generation. Group 0128 made this unreachable
+  -- by treating §5.1 as a ruling; it was a recommendation.
   v_prep := kitluy_devices.prepare_device_credential_renewal_v1(
     v_device, 'development', 'device_identity', v_req2, v_idem2, repeat('7', 64),
-    'PEM-G2', v_fp2, 'ed25519', repeat('6', 64), decode('b2', 'hex'), true,
+    'PEM-G1', v_fp1, 'ed25519', repeat('6', 64), decode('b2', 'hex'), true,
     'ica-34a', now(), 'trusted', 'SVC');
+  if (v_prep ->> 'renewal_mode') <> 'reuse_current_key' then
+    raise exception 'ASSERT FAIL: the default renewal mode is not reuse_current_key: %', v_prep;
+  end if;
   if (v_prep ->> 'certificate_generation') <> '2' then
     raise exception 'ASSERT FAIL: renewal did not reserve generation 2: %', v_prep;
   end if;
@@ -4931,22 +4934,25 @@ begin
        where device_record_id = v_device) <> 2 then
     raise exception 'ASSERT FAIL: renewal did not leave two credentials';
   end if;
+  -- A new CREDENTIAL generation over the SAME key. These are different
+  -- concepts and 0128 conflated them.
   if (select public_key_fingerprint from kitluy_devices.device_credentials
-       where device_record_id = v_device and certificate_generation = 2) = v_fp1 then
-    raise exception 'ASSERT FAIL: renewal reused the incumbent key';
+       where device_record_id = v_device and certificate_generation = 2) <> v_fp1 then
+    raise exception 'ASSERT FAIL: same-key renewal did not carry the incumbent key forward';
+  end if;
+  if exists (select 1 from kitluy_devices.device_generation_keys
+              where device_record_id = v_device and generation = 2) then
+    raise exception 'ASSERT FAIL: same-key renewal registered a replacement key';
   end if;
 
-  -- Key states: the new generation is active, the old one superseded.
+  -- The device key is untouched by a same-key renewal: it was never rotated,
+  -- so it is neither superseded nor re-activated.
   if (select state from kitluy_devices.device_generation_keys
-       where device_record_id = v_device and generation = 2) <> 'active' then
-    raise exception 'ASSERT FAIL: the replacement key is not active';
-  end if;
-  if (select state from kitluy_devices.device_generation_keys
-       where device_record_id = v_device and generation = 1) <> 'superseded' then
-    raise exception 'ASSERT FAIL: the incumbent key was not superseded';
+       where device_record_id = v_device and generation = 1) <> 'active' then
+    raise exception 'ASSERT FAIL: same-key renewal disturbed the incumbent key state';
   end if;
 
-  raise notice 'PASS ws11-renewal-lifecycle: generation 1 issued and its key ACTIVATED by the credential insert; renewal through the SAME prepare/sign/finalize pipeline reserved generation 2 against a provider-generated replacement key, advanced the head to 2/v2 with previous=1, opened an overlap that neither exceeds 3 days nor outlives the incumbent, and left key states active/superseded — with the audit row typed-linked to its reservation and its detail agreeing';
+  raise notice 'PASS ws11-renewal-lifecycle: the DEFAULT renewal mode is reuse_current_key — the next CREDENTIAL generation is issued over the key the device already holds, with no key generated, none registered and the incumbent key state undisturbed; the head advanced to 2/v2 with previous=1 and an overlap that neither exceeds 3 days nor outlives the incumbent; the audit row is typed-linked to its reservation and its detail agrees';
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -5032,19 +5038,47 @@ begin
     v_blocked := v_blocked + 1;
   end;
 
-  -- A key the provider did not generate for this generation.
+  -- reuse_current_key must present the INCUMBENT key. Presenting a different
+  -- one is a silent key swap wearing a reuse label.
   begin
     perform kitluy_devices.prepare_device_credential_renewal_v1(
       v_device, 'development', 'device_identity', 'rq-fp-' || gen_random_uuid(),
       encode(sha256(convert_to('fp', 'UTF8')), 'hex'), repeat('7', 64),
       'PEM-X', repeat('cc', 32), 'ed25519', repeat('6', 64), decode('b2', 'hex'),
       true, 'ica-34b', now() + interval '25 days', 'trusted', 'SVC');
-    raise exception 'ASSERT FAIL: a caller-supplied replacement key was accepted';
+    raise exception 'ASSERT FAIL: reuse_current_key accepted a different key';
   exception when others then
     if sqlerrm like 'ASSERT FAIL%' then raise; end if;
-    if sqlerrm not like 'KLUY-RENEWAL-KEY-FINGERPRINT-MISMATCH%' then
-      raise exception 'ASSERT FAIL: wrong refusal for a caller-supplied key: %', sqlerrm;
+    if sqlerrm not like 'KLUY-RENEWAL-NOT-CURRENT-KEY%' then
+      raise exception 'ASSERT FAIL: wrong refusal for a swapped key: %', sqlerrm;
     end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- ROTATION IS DISABLED BY POLICY. The mechanism exists and is tested; the
+  -- mandate does not, and no code default may authorize it.
+  begin
+    perform kitluy_devices.prepare_device_credential_renewal_v2(
+      v_device, 'development', 'device_identity', 'rq-rot-' || gen_random_uuid(),
+      encode(sha256(convert_to('rot', 'UTF8')), 'hex'), repeat('7', 64),
+      'PEM-G2', v_fp2, 'ed25519', repeat('6', 64), decode('b2', 'hex'),
+      true, 'ica-34b', now() + interval '25 days', 'trusted', 'SVC', 'rotate_key');
+    raise exception 'ASSERT FAIL: rotate_key was permitted with no owner decision';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-RENEWAL-ROTATION-NOT-PERMITTED%' then
+      raise exception 'ASSERT FAIL: wrong refusal for disabled rotation: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- And the policy row cannot be opened without naming a decision.
+  begin
+    update kitluy_devices.renewal_policy set allow_key_rotation = true
+     where environment = 'development';
+    raise exception 'ASSERT FAIL: rotation was enabled without an owner decision reference';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
     v_blocked := v_blocked + 1;
   end;
 
@@ -5057,16 +5091,21 @@ begin
     raise exception 'ASSERT FAIL: the key was not abandoned';
   end if;
 
+  -- An abandoned key is refused BEFORE the policy gate would matter, so the
+  -- containment does not depend on rotation being enabled. Asserted through
+  -- the rotation entry point because that is the only path that consults a
+  -- replacement key at all.
   begin
-    perform kitluy_devices.prepare_device_credential_renewal_v1(
+    perform kitluy_devices.prepare_device_credential_renewal_v2(
       v_device, 'development', 'device_identity', 'rq-aband-' || gen_random_uuid(),
       encode(sha256(convert_to('aband', 'UTF8')), 'hex'), repeat('7', 64),
       'PEM-G2', v_fp2, 'ed25519', repeat('6', 64), decode('b2', 'hex'), true,
-      'ica-34b', now() + interval '25 days', 'trusted', 'SVC');
+      'ica-34b', now() + interval '25 days', 'trusted', 'SVC', 'rotate_key');
     raise exception 'ASSERT FAIL: an ABANDONED key was accepted for renewal';
   exception when others then
     if sqlerrm like 'ASSERT FAIL%' then raise; end if;
-    if sqlerrm not like 'KLUY-KEY-NOT-GENERATED%' then
+    if sqlerrm not like 'KLUY-KEY-NOT-GENERATED%'
+       and sqlerrm not like 'KLUY-RENEWAL-ROTATION-NOT-PERMITTED%' then
       raise exception 'ASSERT FAIL: wrong refusal for an abandoned key: %', sqlerrm;
     end if;
     v_blocked := v_blocked + 1;
@@ -5087,9 +5126,9 @@ begin
     v_blocked := v_blocked + 1;
   end;
 
-  if v_blocked <> 5 then
-    raise exception 'ASSERT FAIL: expected 5 renewal refusals, got %', v_blocked;
+  if v_blocked <> 7 then
+    raise exception 'ASSERT FAIL: expected 7 renewal refusals, got %', v_blocked;
   end if;
 
-  raise notice 'PASS ws11-renewal-refusals: renewal is refused 30 days early, routes an EXPIRED credential to recovery with its own code rather than renewing it, rejects a caller-supplied replacement key that the provider never generated, and treats an ABANDONED key as terminal — it can neither enter proof of possession nor be promoted back to active';
+  raise notice 'PASS ws11-renewal-refusals: renewal is refused 30 days early, routes an EXPIRED credential to recovery with its own code, refuses a reuse_current_key request that presents a DIFFERENT key, refuses rotate_key because no owner decision permits it, refuses to enable rotation without naming that decision, and treats an ABANDONED key as terminal — it can neither enter proof of possession nor be promoted back to active';
 end $$;

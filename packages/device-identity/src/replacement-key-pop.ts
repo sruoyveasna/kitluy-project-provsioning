@@ -1,8 +1,13 @@
 /**
  * Replacement-key proof of possession — WS-11-T003 Step 4, closure item 2.
  *
- * Authority: KLD-2026-07-28-002 §5.1; the owner's renewal instruction of
- * 2026-07-28.
+ * Authority: the owner renewal instruction of 2026-07-29.
+ *
+ * SCOPE: this is the mechanism for the OPTIONAL `rotate_key` renewal mode. Key
+ * rotation is NOT owner-approved policy — §5.1 was a recommendation, not a
+ * ruling, and `kitluy_devices.renewal_policy` disables rotation pending
+ * [REQUIRED: renewal_key_rotation_owner_decision]. This module is correct and
+ * tested; it is not evidence that renewal requires rotation.
  *
  * ===========================================================================
  * WHY THE CHALLENGE BINDS TWELVE FIELDS AND NOT ONE

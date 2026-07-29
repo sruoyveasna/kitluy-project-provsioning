@@ -944,3 +944,76 @@ Owed to closure item 3, together with the five crash points named in the ruling
 (after key generation before registration; after registration before PoP; after
 finalization before provider activation; after activation before
 acknowledgement; and during retry of each).
+
+---
+
+## CORRECTION — forced key rotation was never owner-approved (2026-07-29)
+
+**Supersedes** the renewal-rotation behaviour recorded for group 0128 above.
+
+§5.1 was treated as a ruling requiring every renewal to generate a new device
+key pair. The owner has corrected the record: it was a **recommendation**, and
+no versioned owner decision requires rotation. Group 0128 had encoded it as a
+database refusal (`KLUY-RENEWAL-KEY-REUSED`) and additionally refused to prepare
+any renewal without a registered replacement key — between them, those two rules
+made `reuse_current_key` **unreachable**, not merely discouraged.
+
+Encoding a recommendation as a refusal is the precise failure this register
+exists to prevent, so group 0129 undoes it rather than annotating it.
+
+### What group 0129 changes
+
+| Before (0128)                                             | After (0129)                                                         |
+| --------------------------------------------------------- | --------------------------------------------------------------------- |
+| Renewal always rotates                                     | Two modes: `reuse_current_key`, `rotate_key`                          |
+| Rotation implicit and mandatory                            | Mode is explicit; NULL resolves to environment policy                  |
+| `KLUY-RENEWAL-KEY-REUSED` refuses reuse                    | **Removed.** Reuse is a supported mode                                |
+| Replacement key required before any reservation            | Required **only** in `rotate_key` mode                                |
+| —                                                          | `KLUY-RENEWAL-NOT-CURRENT-KEY` — reuse must present the incumbent key |
+| —                                                          | `KLUY-RENEWAL-ROTATION-NOT-PERMITTED` — rotation is policy-gated      |
+
+Default for development: **`reuse_current_key`**, rotation **disabled**.
+
+`kitluy_devices.renewal_policy.allow_key_rotation` cannot be set true without
+naming an owner decision — a CHECK constraint, not a convention, because a
+boolean an operator can flip is exactly how a recommendation becomes policy
+again. The missing value is recorded as
+`[REQUIRED: renewal_key_rotation_owner_decision]`.
+
+### Classification of the PoP work
+
+```text
+Replacement-key renewal PoP — IMPLEMENTED-IN-DEV component
+```
+
+It is the correct mechanism **when rotation is selected**. It is **not** evidence
+that the canonical renewal lifecycle requires rotation, and must not be cited as
+such.
+
+### Noted for the review — refusal codes as an oracle
+
+Checking bindings before signature verification gives typed operational
+diagnosis, which is the right trade internally. It also means the refusal code
+distinguishes *which* binding was wrong. That is safe only while these functions
+are reachable exclusively by `kitluy_issuance_service`; if any renewal surface is
+ever exposed to an unauthenticated caller, the codes must be collapsed at the
+boundary. Recorded so the reviewer tests it rather than assumes it.
+
+### Still owed — the credential/key generation conflation
+
+`device_generation_keys` is keyed on `generation`, meaning the CREDENTIAL
+generation. Under `reuse_current_key` the credential generation advances while
+the key generation does not, so the two are now demonstrably different concepts
+sharing one field. A later additive migration needs a separate
+`key_generation`, and `renewal_attempt_id` alongside it for idempotent provider
+generation. **Not done.**
+
+### Still owed — provider activation reconciliation
+
+Unchanged from the entry above and now more visible: group 0128's trigger marks
+a key `active` on credential insert. Under `reuse_current_key` that trigger does
+not fire on a new key at all (there is none), so same-key renewal is unaffected —
+but the rotation path still asserts provider state the database cannot know.
+The ruled states (`credential_issued_pending_activation`, confirmation function,
+reconciliation) are **not built**, and a rotated credential must not be reported
+usable until they are.
