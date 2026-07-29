@@ -1839,3 +1839,186 @@ reconciliation audit for a human. Nothing regenerates a key to "fix" it.
 lifecycle.** Not begun. Scheduled workers, cron deployment, overlap-expiry time
 advancement, automatic destruction of superseded keys, credential revocation and
 independent hostile review all remain absent.
+
+---
+
+## Credential overlap expiry and superseded-key lifecycle — IMPLEMENTED-IN-DEV component
+
+`packages/device-identity/src/credential-lifecycle.ts` adds
+`advanceDeviceCredentialLifecycle`: it reads authoritative state, decides
+whether the §5 overlap is over, retires the previous credential through a
+governed function, and evaluates — but never performs — provider-key
+destruction.
+
+**Three lifecycles, kept apart.** Credential validity, credential-head status
+and provider private-key state are related and are NOT the same thing. A
+credential expiring does not prove its key can be destroyed: under every
+same-key renewal that key still backs the CURRENT credential. The first blocker
+`evaluateKeyDestruction` checks is exactly that, because getting it wrong would
+nominate a device's only working key for destruction as a routine consequence of
+a routine renewal.
+
+**The boundary is half-open and stated once per layer.**
+
+```
+overlap usable   while  trusted_now <  overlap_ends_at
+overlap expired  when   trusted_now >= overlap_ends_at
+```
+
+Written identically in `overlapIsActive`, in `evaluateCertificateValidity` and
+in `retire_overlapped_credential_v1`, and asserted at all three points — one
+millisecond before, exactly at, and after — in both the unit suite and SQL
+section 39b. A one-millisecond disagreement between the layer that verifies and
+the layer that retires is precisely the gap this discipline closes.
+
+---
+
+## KLRISK-DEVICE-010 — the previous credential could never be retired
+
+**Proven by execution, under both identities, before any code was written:**
+
+```
+postgres                -> permission denied for table device_credentials
+kitluy_issuance_service -> permission denied for table device_credentials
+```
+
+and no function in `kitluy_devices` performed the transition. Group 0125 defined
+`superseded` and `expired`; group 0127 advances the head with a
+`previous_generation` and an `overlap_ends_at`; nothing ever moved a credential
+into either state. Once the three-day overlap ended, the previous credential
+stayed `issued` for ever.
+
+Combined with the KLRISK-DEVICE-008 fix, that mattered: `permittedOverlap` lets
+a caller present the previous credential during the granted window, and without
+a durable RETIRED state the only thing standing between a lapsed overlap and a
+still-accepted credential was the caller remembering to stop supplying the
+overlap. A lifecycle fact has to be persisted, not remembered.
+
+**Disposition:** migration `0134` adds `retire_overlapped_credential_v1`. It
+selects the credential from the HEAD rather than from the caller, so the current
+credential cannot be retired; it is idempotent; it refuses on untrusted time;
+and it never overwrites a `revoked` credential, because revocation says more
+than supersession and must not be erased.
+
+**The head is deliberately not rewritten.** Bumping its `version` would
+invalidate the frozen `head_version_seen` of any renewal reservation in flight —
+retiring an old credential would break a concurrent renewal — and
+`overlap_ends_at` is the evidence that explains the retirement. Asserted in
+section 39b.
+
+---
+
+## KLRISK-DEVICE-008 hardened — the overlap grant is not a bypass
+
+The optional `permittedOverlap` added in Prompt 3A now carries a REQUIRED
+`previousCredentialState`, read from the credential row. An overlap vouches only
+for a credential that is still `issued`; once the lifecycle retires it the grant
+is spent, and a caller still holding the old overlap object cannot keep it
+alive. Making the state a required field means a caller cannot construct an
+overlap without having read the row it vouches for.
+
+The boundary comparison also moved from `>` to `>=`, matching the database
+exactly. Everything else was already refused and is now asserted: a generation
+gap, a fingerprint the credential never attested to, another device, another
+environment, a revoked credential and an expired one.
+
+`permittedOverlapFrom` is the only supported way to build a grant, and it
+returns null unless the previous generation is EXACTLY one behind the head and
+the window is still open.
+
+---
+
+## OWNER DECISION REQUIRED — device private-key destruction
+
+**`[REQUIRED: device_key_destruction_owner_decision]`**
+
+No owner decision governs private-key retention or destruction. Rather than
+invent a duration, migration `0134` creates
+`kitluy_devices.key_destruction_policy` with destruction DISABLED, both
+retention periods NULL, and the missing decision named — the same shape group
+0129 used for key rotation.
+
+`destruction_enabled` cannot be set true without naming an approving decision
+AND supplying both retention periods. Two CHECK constraints, not conventions,
+and section 39a proves both refuse.
+
+The decision must bind:
+
+- **minimum retention** — how long a superseded private key is kept before it
+  may be destroyed at all;
+- **recovery retention** — how long it must survive specifically so an
+  interrupted renewal can still be reconciled;
+- **incident and legal hold** — what suspends destruction, and who declares it;
+- **provider destruction authorization** — who may ask the provider to destroy;
+- **approval requirement** — whether destruction is automatic once eligible or
+  requires named operator approval (the table currently defaults
+  `requires_operator_approval` to true);
+- **evidence** — what must be recorded to prove a key was destroyed, and what
+  must survive its destruction.
+
+Until it exists, `advanceDeviceCredentialLifecycle` returns
+`KEY_DESTRUCTION_NOT_AUTHORIZED` for a fully unblocked key and destroys nothing.
+
+**Provider-key destruction — SPECIFIED / BLOCKED ON OWNER POLICY.**
+
+---
+
+## Findings recorded, not fixed
+
+1. **Destruction states were NOT added.** §10 lists `destruction_pending` and
+   `destruction_failed` as states a safe model *may* require. Execution proved
+   neither is required yet: with no policy, destruction never runs, so adding
+   them would be speculative schema for a path nothing can reach. `superseded`
+   and `destroyed` already exist and are untouched. To be added when the owner
+   decision lands and the flow can actually be exercised.
+
+2. **`abandoned` is not reused for a superseded historical key.** A key that
+   lost a race is `abandoned`; a key that served a generation and was replaced
+   is `superseded`. Keeping them distinct is what lets a reader tell "this key
+   never worked" from "this key worked and was retired".
+
+3. **True parallel executors are not exercised live.** Two executors cannot
+   share one `pg` client — interleaved queries corrupt the transaction the suite
+   needs for isolation. The live test runs them sequentially and proves the
+   second produces no second retirement; the unit suite covers the interleaved
+   case. Same limitation as Prompt 3A, unchanged.
+
+4. **The retirement refusal differs by mode, correctly.** After retirement a
+   same-key previous credential is refused with
+   `CERT_STALE_CERTIFICATE_GENERATION` — the two credentials share a fingerprint,
+   so the credential really does attest to a key the device holds and is simply a
+   superseded generation. Rotation refuses on the fingerprint instead. An early
+   test asserted the rotation code for both and was corrected; asserting the
+   wrong one would have hidden which check was doing the work.
+
+5. **`R&D_HSA_AI_Agent_MVP.md` still fails `prettier --check`**, as at every
+   prior head. Untouched and explicitly excluded.
+
+6. **Node 22.23.0 is still not installed.** Only v24.15.0. Aggregate
+   verification remains non-authoritative; every gate ran individually with the
+   documented override and no config file was changed.
+
+---
+
+## Risk register status after Prompt 3B
+
+**NEW:** `KLRISK-DEVICE-010` — the previous credential could never be retired.
+Corrected by migration 0134 with migration-local hostile assertions and
+permanent SQL section 39.
+
+**CORRECTED, pending independent-review disposition:** `KLRISK-DEVICE-008`
+(overlap unreachable — the grant is now additionally gated on the previous
+credential's persisted state) and `KLRISK-DEVICE-009` (rotation retry refused as
+a changed payload).
+
+**OPEN, unchanged and NOT closed:** `KLRISK-DEVICE-003` (OPTION B — this package
+is still the only cryptographic verifier), `KLRISK-DEVICE-007` (still no
+governed credential revocation; overlap RETIREMENT is not revocation and
+provider-key DESTRUCTION is not revocation — three different controls, and none
+of the other two was implemented as a stand-in), `KLRISK-REPO-001`,
+`KLRISK-REPO-002`.
+
+**Still pending: Prompt 3C — scheduled lifecycle/reconciliation execution and
+operational controls.** Not begun. Worker scheduling, cron and queue
+infrastructure, production key-provider durability, credential revocation and
+independent hostile review all remain absent.
