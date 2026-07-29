@@ -6216,3 +6216,222 @@ end
 $section38b$;
 
 select 'assertions complete: groups 0010-0133 structural contract holds' as result;
+
+-- ============================================================================
+-- SECTION 39 — credential overlap lifecycle (migration 0134).
+--
+-- Group 0125 gave device_credentials the states `superseded` and `expired` and
+-- group 0127 advances the head with a previous_generation and an
+-- overlap_ends_at. NOTHING moved a credential into either state, and neither
+-- postgres nor kitluy_issuance_service can write the table — so once the §5
+-- three-day overlap ended, the previous credential stayed `issued` for ever.
+--
+-- These assertions hold the correction: the retirement is governed, uses a
+-- HALF-OPEN boundary, never touches the current credential or the head, and
+-- key destruction stays impossible until an owner rules.
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 39a — destruction ships impossible, and cannot be enabled by halves.
+-- ---------------------------------------------------------------------------
+do $section39a$
+declare
+  v_findings text[] := array[]::text[];
+begin
+  if (select destruction_enabled from kitluy_devices.key_destruction_policy
+       where environment = 'development') then
+    v_findings := v_findings || 'key destruction is ENABLED in the shipped policy';
+  end if;
+  if (select approved_by_decision_ref is not null or minimum_retention_days is not null
+         or recovery_retention_days is not null
+        from kitluy_devices.key_destruction_policy where environment = 'development') then
+    v_findings := v_findings || 'a destruction decision or retention period was invented';
+  end if;
+  if (select coalesce(required_owner_decision, '') from kitluy_devices.key_destruction_policy
+       where environment = 'development') not like '%REQUIRED%' then
+    v_findings := v_findings || 'the missing destruction decision is not named';
+  end if;
+
+  -- Enabling by flipping the boolean is refused.
+  begin
+    update kitluy_devices.key_destruction_policy set destruction_enabled = true
+     where environment = 'development';
+    v_findings := v_findings || 'destruction was enabled without naming a decision';
+  exception when others then
+    if sqlerrm not like '%key_destruction_policy_needs_decision_chk%' then
+      v_findings := v_findings || format('wrong refusal enabling destruction: %s', sqlerrm);
+    end if;
+  end;
+
+  -- Naming a decision is still not enough: the durations must come with it.
+  begin
+    update kitluy_devices.key_destruction_policy
+       set destruction_enabled = true, approved_by_decision_ref = 'TEST-ONLY-section39a'
+     where environment = 'development';
+    v_findings := v_findings || 'destruction was enabled without retention periods';
+  exception when others then
+    if sqlerrm not like '%key_destruction_policy_needs_retention_chk%' then
+      v_findings := v_findings || format('wrong refusal for missing retention: %s', sqlerrm);
+    end if;
+  end;
+
+  -- The executor can neither enable destruction nor write lifecycle history.
+  if has_table_privilege('kitluy_issuance_service',
+                         'kitluy_devices.key_destruction_policy', 'update')
+     or has_table_privilege('kitluy_issuance_service',
+                            'kitluy_devices.device_credential_lifecycle_events', 'insert') then
+    v_findings := v_findings || 'the issuance executor holds direct authority it must not have';
+  end if;
+  if has_function_privilege(
+       'public',
+       'kitluy_devices.retire_overlapped_credential_v1(uuid, text, text, timestamptz, text, text)',
+       'execute') then
+    v_findings := v_findings || 'PUBLIC can retire a credential';
+  end if;
+  if not exists (
+    select 1 from pg_trigger t join pg_class c on c.oid = t.tgrelid
+    where c.relname = 'device_credential_lifecycle_events'
+      and t.tgname = 'trg_device_credential_lifecycle_events_append_only'
+      and not t.tgisinternal
+  ) then
+    v_findings := v_findings || 'the lifecycle audit is not append-only';
+  end if;
+
+  if cardinality(v_findings) > 0 then
+    raise exception 'ASSERT FAIL: % destruction-policy finding(s): %',
+      cardinality(v_findings), array_to_string(v_findings, ' | ');
+  end if;
+
+  raise notice 'PASS ws11-key-destruction-blocked: destruction ships DISABLED with every retention period NULL and the missing owner decision NAMED, it cannot be enabled by flipping a boolean nor by naming a decision without both retention periods, the issuance executor can neither enable it nor write lifecycle history directly, PUBLIC cannot retire a credential, and the lifecycle audit is append-only';
+end
+$section39a$;
+
+-- ---------------------------------------------------------------------------
+-- 39b — the half-open boundary, and what retirement refuses to touch.
+-- ---------------------------------------------------------------------------
+do $section39b$
+declare
+  v_findings text[] := array[]::text[];
+  v_device uuid;
+  v_head kitluy_devices.device_credential_heads;
+  v_res jsonb;
+  v_fp1 text := repeat('39', 32);
+  v_fp2 text := repeat('3a', 32);
+  v_idem text := encode(sha256(convert_to('i39b-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_req text := 'rq-39b-' || gen_random_uuid();
+  v_attempt uuid;
+  v_prep jsonb;
+  v_links jsonb := jsonb_build_array(
+    jsonb_build_object('link_position',0,'role','root','subject_fingerprint',repeat('r',64),
+                       'issuer_key_id','rk','canonical_tbs','R','detached_signature_b64','qg=='),
+    jsonb_build_object('link_position',1,'role','intermediate','subject_fingerprint',repeat('i',64),
+                       'issuer_key_id','rk','canonical_tbs','I','detached_signature_b64','uw=='));
+begin
+  v_device := pg_temp.ws11_renewable_device('t39b', v_fp1);
+
+  -- A ROTATION, so the previous and current credentials use DIFFERENT keys and
+  -- the retirement can be observed without the same-key shortcut.
+  update kitluy_devices.renewal_policy
+     set allow_key_rotation = true, rotation_approved_by_decision_ref = 'TEST-ONLY-section39b'
+   where environment = 'development';
+
+  v_res := kitluy_devices.reserve_device_credential_renewal_v1(
+    v_device, 'development', 'device_identity',
+    encode(sha256(convert_to('res-39b-' || gen_random_uuid(), 'UTF8')), 'hex'),
+    now(), 'trusted', 'rotate_key'::kitluy_devices.renewal_mode, 'SVC');
+  v_attempt := (v_res ->> 'renewal_attempt_id')::uuid;
+  perform kitluy_devices.register_generation_key_v2(v_attempt, 'handle-39b', 'PEM-39B', v_fp2, 2);
+
+  v_prep := kitluy_devices.prepare_device_credential_renewal_v2(
+    v_device, 'development', 'device_identity', v_req,
+    v_idem, repeat('7', 64), 'PEM-39B', v_fp2, 'ed25519', repeat('6', 64),
+    decode('b2', 'hex'), true, 'ica-39b', now(), 'trusted', 'SVC', 'rotate_key');
+  perform kitluy_devices.record_device_credential_signature_v1(
+    v_req, v_prep ->> 'canonical_tbs_hash', decode('3939', 'hex'), true, 'SVC');
+  perform kitluy_devices.finalize_device_credential_issuance_v1(v_req, v_links, 'SVC');
+
+  update kitluy_devices.renewal_policy
+     set allow_key_rotation = false, rotation_approved_by_decision_ref = null
+   where environment = 'development';
+
+  select * into v_head from kitluy_devices.device_credential_heads
+   where device_record_id = v_device;
+  if v_head.overlap_ends_at is null then
+    raise exception 'ASSERT FAIL: the renewal left no overlap to expire';
+  end if;
+
+  -- ONE MILLISECOND BEFORE the boundary: the overlap is still running.
+  v_res := kitluy_devices.retire_overlapped_credential_v1(
+    v_device, 'development', 'device_identity',
+    v_head.overlap_ends_at - interval '1 millisecond', 'trusted', 'SVC');
+  if (v_res ->> 'outcome') <> 'OVERLAP_ACTIVE' then
+    v_findings := v_findings ||
+      format('one millisecond before the boundary the overlap was %s', v_res ->> 'outcome');
+  end if;
+  if (select state from kitluy_devices.device_credentials
+       where device_record_id = v_device and certificate_generation = 1) <> 'issued' then
+    v_findings := v_findings || 'the previous credential was retired DURING its overlap';
+  end if;
+
+  -- EXACTLY AT the boundary: expired. Half-open, so there is no gap.
+  v_res := kitluy_devices.retire_overlapped_credential_v1(
+    v_device, 'development', 'device_identity',
+    v_head.overlap_ends_at, 'trusted', 'SVC');
+  if (v_res ->> 'outcome') <> 'RETIRED' then
+    v_findings := v_findings ||
+      format('exactly at the boundary the outcome was %s, not RETIRED', v_res ->> 'outcome');
+  end if;
+  if (select state from kitluy_devices.device_credentials
+       where device_record_id = v_device and certificate_generation = 1) <> 'superseded' then
+    v_findings := v_findings || 'the previous credential was not superseded at the boundary';
+  end if;
+
+  -- The CURRENT credential is untouched, and so is the head.
+  if (select state from kitluy_devices.device_credentials
+       where device_record_id = v_device and certificate_generation = 2) <> 'issued' then
+    v_findings := v_findings || 'retirement disturbed the CURRENT credential';
+  end if;
+  if (select version from kitluy_devices.device_credential_heads where device_record_id = v_device)
+     <> v_head.version then
+    v_findings := v_findings ||
+      'retirement bumped the head version, which would invalidate an in-flight renewal reservation';
+  end if;
+  if (select overlap_ends_at from kitluy_devices.device_credential_heads
+       where device_record_id = v_device) is null then
+    v_findings := v_findings || 'retirement erased the overlap evidence';
+  end if;
+
+  -- Idempotent, and the provider key is NOT destroyed by any of this.
+  v_res := kitluy_devices.retire_overlapped_credential_v1(
+    v_device, 'development', 'device_identity',
+    v_head.overlap_ends_at + interval '1 day', 'trusted', 'SVC');
+  if (v_res ->> 'outcome') <> 'ALREADY_RETIRED' then
+    v_findings := v_findings || format('a second retirement returned %s', v_res ->> 'outcome');
+  end if;
+  if exists (select 1 from kitluy_devices.device_generation_keys
+              where device_record_id = v_device
+                and (state = 'destroyed' or destroyed_at is not null)) then
+    v_findings := v_findings || 'a provider key was destroyed by credential retirement';
+  end if;
+
+  -- Untrusted time cannot advance the lifecycle.
+  begin
+    perform kitluy_devices.retire_overlapped_credential_v1(
+      v_device, 'development', 'device_identity', now(), 'uninitialized', 'SVC');
+    v_findings := v_findings || 'retirement proceeded on untrusted time';
+  exception when others then
+    if sqlerrm not like 'KLUY-LIFECYCLE-NO-TRUSTED-TIME%' then
+      v_findings := v_findings || format('wrong refusal for untrusted time: %s', sqlerrm);
+    end if;
+  end;
+
+  if cardinality(v_findings) > 0 then
+    raise exception 'ASSERT FAIL: % overlap-lifecycle finding(s): %',
+      cardinality(v_findings), array_to_string(v_findings, ' | ');
+  end if;
+
+  raise notice 'PASS ws11-overlap-retirement: the §5 overlap boundary is HALF-OPEN — active one millisecond before overlap_ends_at and RETIRED exactly at it, with no gap between the layers — retirement supersedes only the previous credential, leaves the CURRENT credential and the head version untouched so an in-flight renewal reservation survives, preserves overlap_ends_at as the evidence explaining itself, is idempotent, destroys no provider key, and refuses to run on untrusted time';
+end
+$section39b$;
+
+select 'assertions complete: groups 0010-0134 structural contract holds' as result;
