@@ -260,12 +260,18 @@ declare
   v_exec_token int;
 begin
   -- Groups 0010-0035 contributed 44 SELECT policies; group 0070 adds 14 in
-  -- kitluy_core (catalog 2 + customers 6 + consent/privacy 6) = 58.
+  -- kitluy_core (catalog 2 + customers 6 + consent/privacy 6) = 58; group 0140
+  -- adds the 3 kitluy_auth approval policies that let the credential-revocation
+  -- approval gate run as a constrained NOLOGIN reader instead of as the
+  -- global-BYPASSRLS service_role = 61. The 58 -> 61 increase is OWNER-APPROVED
+  -- for this exact purpose by
+  -- KLD-2026-07-29-DEVICE-REVOCATION-BOUNDARY-002 (Ruling 2), and section 43
+  -- asserts that those 3 are the ONLY policies naming that role.
   select count(*) into v_select from pg_policies
   where schemaname in ('kitluy_core', 'kitluy_auth', 'kitluy_admin', 'kitluy_audit')
     and cmd = 'SELECT';
-  if v_select <> 58 then
-    raise exception 'ASSERT FAIL: expected 58 SELECT policies, found %', v_select;
+  if v_select <> 61 then
+    raise exception 'ASSERT FAIL: expected 61 SELECT policies, found %', v_select;
   end if;
 
   -- Cycle-5 schemas: kitluy_laundry 3 + kitluy_config 4 + kitluy_notifications 1
@@ -318,7 +324,7 @@ begin
     raise exception 'ASSERT FAIL: kitluy_storefront identity tables must have zero policies (PC-PUBTOK), found %', v_exec_token;
   end if;
 
-  raise notice 'PASS policies: 58 + 17 + 21 SELECT, 0 write, 0 anon, execution_tokens and PUBTOK tables deny-all';
+  raise notice 'PASS policies: 61 + 17 + 21 SELECT, 0 write, 0 anon, execution_tokens and PUBTOK tables deny-all (58 -> 61 per KLD-2026-07-29-DEVICE-REVOCATION-BOUNDARY-002)';
 end $$;
 
 -- 8. No PUBLIC grants on kitluy_* tables or kitluy_auth routines; execution_tokens
@@ -7950,26 +7956,38 @@ begin
   -- ------------------------------------------------------------------------
   -- The IDENTITY that makes the gate able to answer, asserted permanently.
   --
-  -- The approval tables are RLS ENABLED and FORCED with SELECT policies only
-  -- `TO authenticated`; a role holding USAGE and SELECT but no BYPASSRLS reads
-  -- ZERO rows. Group 0124's gate reads them because it is SECURITY INVOKER and
-  -- runs as `service_role`, which carries the BYPASSRLS role ATTRIBUTE. Group
-  -- 0139 pins the revocation gate to that same identity — and to nothing wider.
+  -- The approval tables are RLS ENABLED and FORCED. Group 0139 pinned the gate
+  -- to `service_role` because its global BYPASSRLS attribute was the only route
+  -- then available. KLD-2026-07-29-DEVICE-REVOCATION-BOUNDARY-002 Ruling 2
+  -- SUPERSEDES that additively in group 0140: the gate now runs as
+  -- `kitluy_credential_approval_reader`, which is NOLOGIN, holds NO BYPASSRLS,
+  -- and sees three kitluy_auth relations restricted to credential-revocation
+  -- approvals by three named policies. Section 43 proves that boundary by
+  -- execution; this assertion is the ownership fact section 42 depends on.
   -- ------------------------------------------------------------------------
   if not exists (
     select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
      where n.nspname = 'kitluy_devices'
        and p.proname = 'evaluate_credential_revocation_approval_v1'
        and p.prosecdef
-       and pg_get_userbyid(p.proowner) = 'service_role'
+       and pg_get_userbyid(p.proowner) = 'kitluy_credential_approval_reader'
        and p.proconfig is not null
        and exists (select 1 from unnest(p.proconfig) c where c like 'search\_path=%')) then
     v_findings := v_findings ||
-      'the revocation approval gate is not a service_role-owned SECURITY DEFINER with a fixed search_path';
+      'the revocation approval gate is not a kitluy_credential_approval_reader-owned SECURITY DEFINER with a fixed search_path';
   end if;
-  if not (select rolbypassrls and not rolcanlogin from pg_roles where rolname = 'service_role') then
+  if exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'kitluy_devices'
+       and p.proname = 'evaluate_credential_revocation_approval_v1'
+       and pg_get_userbyid(p.proowner) = 'service_role') then
     v_findings := v_findings ||
-      'service_role is no longer the NOLOGIN BYPASSRLS identity the gate depends on';
+      'the revocation approval gate is owned by service_role again (Ruling 2 refuses it)';
+  end if;
+  if not (select not rolbypassrls and not rolcanlogin and not rolsuper
+            from pg_roles where rolname = 'kitluy_credential_approval_reader') then
+    v_findings := v_findings ||
+      'kitluy_credential_approval_reader is no longer the NOLOGIN non-BYPASSRLS identity Ruling 2 requires';
   end if;
   if has_function_privilege('public',
        'kitluy_devices.evaluate_credential_revocation_approval_v1(uuid, uuid, text, text)', 'execute')
@@ -8004,8 +8022,588 @@ begin
       cardinality(v_findings), array_to_string(v_findings, ' | ');
   end if;
 
-  raise notice 'PASS ws11-revocation-executes: the approve-before-execute revocation COMPLETES end to end — an unapproved request, an A2 risk class, an approval naming another device and a self-approved request are each refused with their own code and change nothing, while a scoped A4 approval decided by a second person revokes the credential with `revoked_at` and `revocation_reason` written alongside the state (the pair device_credentials_revoked_chk requires and group 0136 never wrote), records complete append-only evidence naming reason, requester, approver and approval request, and opens an OPEN reprovision recovery case; replaying the same intent is idempotent with no second row, a DIFFERENT intent returns MANUAL_REVIEW_REQUIRED without overwriting the first account, the decision §2.4 one-way rule still refuses the governor itself, and the gate can answer at all only because it is pinned to the NOLOGIN BYPASSRLS service_role identity group 0124 already reads approvals with — the credential governor still holds nothing whatsoever on kitluy_auth';
+  raise notice 'PASS ws11-revocation-executes: the approve-before-execute revocation COMPLETES end to end — an unapproved request, an A2 risk class, an approval naming another device and a self-approved request are each refused with their own code and change nothing, while a scoped A4 approval decided by a second person revokes the credential with `revoked_at` and `revocation_reason` written alongside the state (the pair device_credentials_revoked_chk requires and group 0136 never wrote), records complete append-only evidence naming reason, requester, approver and approval request, and opens an OPEN reprovision recovery case; replaying the same intent is idempotent with no second row, a DIFFERENT intent returns MANUAL_REVIEW_REQUIRED without overwriting the first account, the decision §2.4 one-way rule still refuses the governor itself, and the gate can answer at all only because it is pinned to a NOLOGIN identity that is allowed to read approvals — after group 0140 that is kitluy_credential_approval_reader, which holds NO BYPASSRLS and sees credential-revocation approvals only (KLD-2026-07-29-DEVICE-REVOCATION-BOUNDARY-002 Ruling 2 superseding group 0139''s service_role) — while the credential governor still holds nothing whatsoever on kitluy_auth';
 end
 $section42$;
 
 select 'assertions complete: groups 0010-0139 structural contract holds (incl. WS-11-T003 Step 4 approve-before-execute revocation executing end to end)' as result;
+
+
+-- ============================================================================
+-- SECTION 43 — WS-11-T003 Step 4: the approval gate does NOT run as
+-- `service_role` (migration 0140).
+-- Authority: KLD-2026-07-29-DEVICE-REVOCATION-BOUNDARY-002 **Ruling 2**,
+--   amending KLD-2026-07-29-DEVICE-CREDENTIAL-REVOCATION-001; migration groups
+--   0139 (the superseded service_role gate), 0138 (the one-way trigger,
+--   Ruling 3) and 0140 (the boundary).
+--
+-- Group 0139 made the gate a SECURITY DEFINER owned by `service_role`, whose
+-- global BYPASSRLS ROLE ATTRIBUTE puts every RLS-protected row in the database
+-- inside that function's reach. Ruling 2 refuses that as the final design and
+-- authorizes a purpose-built NOLOGIN reader plus EXACTLY THREE narrowly scoped
+-- RLS SELECT policies — the census 58 -> 61 asserted in section 7.
+--
+-- The ONLY interesting question about a boundary is what it REFUSES, and a
+-- refusal cannot be established by reading catalogue rows. So every control
+-- below runs something: it calls the gate, it SETs the role and issues a real
+-- query or a real write, or it removes a real policy and observes the real
+-- consequence. `pg_proc.proowner` is checked, but never on its own — control 8
+-- is the executable proof that the gate runs as the CONSTRAINED reader, because
+-- removing one of that reader's policies would mean nothing at all to a
+-- BYPASSRLS identity.
+--
+-- Both memberships this section borrows are handed back before it finishes, and
+-- control 4 then proves the hand-back took effect by being refused SET ROLE.
+-- If any assertion here raises, the whole DO block rolls back and the borrow
+-- rolls back with it, so section 32's containment assertion still holds.
+-- ============================================================================
+do $section43$
+declare
+  v_findings text[] := array[]::text[];
+  v_msg text := '';
+  v_fp text := encode(sha256(convert_to('t43-' || gen_random_uuid()::text, 'UTF8')), 'hex');
+  v_fp_other text := encode(sha256(convert_to('t43b-' || gen_random_uuid()::text, 'UTF8')), 'hex');
+  v_device uuid;
+  v_other_device uuid;
+  v_credential uuid;
+  v_requester constant uuid := '00000000-0000-4000-8000-000000000007';
+  v_approver constant uuid := '00000000-0000-4000-8000-000000000008';
+  v_policy_a4 uuid;
+  v_policy_unrelated uuid;
+  v_ap_ok uuid;
+  v_ap_scope uuid;
+  v_ap_unrelated uuid;
+  v_intent text := 's43-' || gen_random_uuid()::text;
+  v_res jsonb;
+  v_state text;
+  v_visible integer;
+  v_expected integer;
+  v_total integer;
+  v_n integer;
+  v_role text;
+  v_rel text;
+  v_mode text;
+  v_pol record;
+  v_reached boolean;
+begin
+  -- ------------------------------------------------------------------------
+  -- Fixtures: two real devices, a real issued credential, and three approvals
+  -- in the SAME kitluy_auth aggregate group 0124 uses.
+  -- ------------------------------------------------------------------------
+  v_device := pg_temp.ws11_renewable_device('t43', v_fp);
+  v_other_device := pg_temp.ws11_renewable_device('t43b', v_fp_other);
+  select credential_id into v_credential from kitluy_devices.device_credentials
+   where device_record_id = v_device and certificate_generation = 1;
+  if v_credential is null then
+    raise exception 'ASSERT FAIL: section 43 could not issue a credential to revoke';
+  end if;
+
+  insert into kitluy_auth.approval_policies
+    (policy_key, version, permission_key, environment, quorum, status, risk_class)
+  values ('cred.revocation.reader.a4.' || substr(md5(random()::text), 1, 8), 1,
+          'device.credential.revoke', 'development', 1, 'ACTIVE', 'A4')
+  returning id into v_policy_a4;
+
+  -- An approval policy that has nothing to do with credentials, so control 6
+  -- is about the ACTION and not about a policy that happens to be missing.
+  insert into kitluy_auth.approval_policies
+    (policy_key, version, permission_key, environment, quorum, status, risk_class)
+  values ('device.time.correction.reader.a4.' || substr(md5(random()::text), 1, 8), 1,
+          'device.time.correct', 'development', 1, 'ACTIVE', 'A4')
+  returning id into v_policy_unrelated;
+
+  insert into kitluy_auth.approval_requests
+    (policy_id, requester_id, resource_type, resource_id, environment, action,
+     payload_hash, reason, status)
+  values (v_policy_a4, v_requester, 'device', v_device, 'development',
+          'device_credential_revocation',
+          encode(sha256(convert_to('43ok-' || v_intent, 'UTF8')), 'hex'),
+          'terminal permanently replaced', 'APPROVED')
+  returning id into v_ap_ok;
+  insert into kitluy_auth.approval_decisions (approval_request_id, approver_id, decision)
+  values (v_ap_ok, v_approver, 'APPROVE');
+
+  insert into kitluy_auth.approval_requests
+    (policy_id, requester_id, resource_type, resource_id, environment, action,
+     payload_hash, reason, status)
+  values (v_policy_a4, v_requester, 'device', v_other_device, 'development',
+          'device_credential_revocation',
+          encode(sha256(convert_to('43scope-' || v_intent, 'UTF8')), 'hex'),
+          'a different terminal entirely', 'APPROVED')
+  returning id into v_ap_scope;
+  insert into kitluy_auth.approval_decisions (approval_request_id, approver_id, decision)
+  values (v_ap_scope, v_approver, 'APPROVE');
+
+  -- Fully valid, A4, APPROVED, this device, this environment, decided by a
+  -- second person. The ONLY thing wrong with it is that it is not a credential
+  -- revocation.
+  insert into kitluy_auth.approval_requests
+    (policy_id, requester_id, resource_type, resource_id, environment, action,
+     payload_hash, reason, status)
+  values (v_policy_unrelated, v_requester, 'device', v_device, 'development',
+          'device_time_correction',
+          encode(sha256(convert_to('43unrelated-' || v_intent, 'UTF8')), 'hex'),
+          'an approval that has nothing to do with credentials', 'APPROVED')
+  returning id into v_ap_unrelated;
+  insert into kitluy_auth.approval_decisions (approval_request_id, approver_id, decision)
+  values (v_ap_unrelated, v_approver, 'APPROVE');
+
+  -- The gate is EXECUTE-able only by the credential governor, and the reader is
+  -- reachable by nothing, so both memberships are borrowed to run the controls
+  -- and handed back before this block ends.
+  execute format('grant kitluy_credential_issuer to %I', current_user);
+  execute format('grant kitluy_credential_approval_reader to %I', current_user);
+
+  -- ========================================================================
+  -- CONTROL 2 — `service_role` ownership is NOT required. A real approval is
+  -- evaluated successfully under the new owner.
+  -- ========================================================================
+  begin
+    v_res := to_jsonb(kitluy_devices.evaluate_credential_revocation_approval_v1(
+      v_ap_ok, v_device, 'development', 'requester@43'));
+    if (v_res ->> 'authorized')::boolean is not true then
+      v_findings := v_findings ||
+        format('control 2: the reader-owned gate refused a valid A4 approval: %s', v_res ->> 'refusal_code');
+    end if;
+  exception when others then
+    get stacked diagnostics v_msg = message_text;
+    v_findings := v_findings ||
+      format('control 2: the reader-owned gate could not evaluate an approval: %s', v_msg);
+  end;
+
+  -- ========================================================================
+  -- CONTROL 7 — a cross-device approval and a wrong-environment approval are
+  -- REFUSED by the gate, through the real call.
+  -- ========================================================================
+  v_res := to_jsonb(kitluy_devices.evaluate_credential_revocation_approval_v1(
+    v_ap_scope, v_device, 'development', 'requester@43'));
+  if (v_res ->> 'authorized')::boolean is not false
+     or (v_res ->> 'refusal_code') <> 'KLUY-CRED-REVOCATION-WRONG-SCOPE' then
+    v_findings := v_findings ||
+      format('control 7: an approval naming ANOTHER device was not refused as wrong scope: %s', v_res);
+  end if;
+  v_res := to_jsonb(kitluy_devices.evaluate_credential_revocation_approval_v1(
+    v_ap_ok, v_device, 'staging', 'requester@43'));
+  if (v_res ->> 'authorized')::boolean is not false
+     or (v_res ->> 'refusal_code') <> 'KLUY-CRED-REVOCATION-WRONG-SCOPE' then
+    v_findings := v_findings ||
+      format('control 7: an approval scoped to another environment was accepted: %s', v_res);
+  end if;
+  -- ...and the same refusal through the governed operation, not only the gate.
+  v_res := kitluy_devices.revoke_device_credential_v1(
+    's43-scope-' || gen_random_uuid()::text, v_device, 'development', 'device_identity', 1,
+    'ADMINISTRATIVE_REPLACEMENT', 'wrong-scope probe', 'REPROVISION_REQUIRED',
+    'requester@43', 'SECTION43', v_ap_scope, 'approver@43', null);
+  if (v_res ->> 'refusal_code') <> 'KLUY-CRED-REVOCATION-WRONG-SCOPE' then
+    v_findings := v_findings ||
+      format('control 7: an approval for another device authorized this one: %s', v_res);
+  end if;
+
+  -- ========================================================================
+  -- CONTROLS 3, 5, 6 and 11 — AS THE READER, against real rows.
+  --
+  -- Control 3's BYPASSRLS half is established here rather than from pg_roles:
+  -- a BYPASSRLS role would read every approval request in this database. This
+  -- one reads only credential revocations, and there are other actions present
+  -- (the seed and sections 30/41/42 all write into this aggregate).
+  -- ========================================================================
+  select count(*) into v_total from kitluy_auth.approval_requests;
+  select count(*) into v_expected from kitluy_auth.approval_requests
+   where action = 'device_credential_revocation';
+
+  execute 'set role kitluy_credential_approval_reader';
+  begin
+    select count(*) into v_visible from kitluy_auth.approval_requests;
+
+    -- Control 6, addressed BY ID: the unrelated approval, its policy and its
+    -- decisions are all invisible.
+    select count(*) into v_n from kitluy_auth.approval_requests where id = v_ap_unrelated;
+    if v_n <> 0 then
+      v_findings := v_findings || 'control 6: an approval with a different action was visible to the reader';
+    end if;
+    select count(*) into v_n from kitluy_auth.approval_policies where id = v_policy_unrelated;
+    if v_n <> 0 then
+      v_findings := v_findings || 'control 6: the policy of an unrelated approval was visible to the reader';
+    end if;
+    select count(*) into v_n from kitluy_auth.approval_decisions
+     where approval_request_id = v_ap_unrelated;
+    if v_n <> 0 then
+      v_findings := v_findings || 'control 6: the decisions of an unrelated approval were visible to the reader';
+    end if;
+
+    -- ...while the revocation approval IS fully readable, so the policies are
+    -- narrow rather than simply broken.
+    select count(*) into v_n from kitluy_auth.approval_requests where id = v_ap_ok;
+    if v_n <> 1 then
+      v_findings := v_findings || 'control 5: the reader could not see a credential-revocation approval';
+    end if;
+    select count(*) into v_n from kitluy_auth.approval_policies where id = v_policy_a4;
+    if v_n <> 1 then
+      v_findings := v_findings || 'control 5: the reader could not see the policy of a credential-revocation approval';
+    end if;
+    select count(*) into v_n from kitluy_auth.approval_decisions where approval_request_id = v_ap_ok;
+    if v_n <> 1 then
+      v_findings := v_findings || 'control 5: the reader could not see the decisions of a credential-revocation approval';
+    end if;
+
+    -- Control 11, by execution: real writes, refused.
+    begin
+      insert into kitluy_auth.approval_requests
+        (policy_id, requester_id, resource_type, resource_id, environment, action,
+         payload_hash, reason, status)
+      values (v_policy_a4, v_requester, 'device', v_device, 'development',
+              'device_credential_revocation',
+              encode(sha256(convert_to('43write-' || v_intent, 'UTF8')), 'hex'),
+              'the reader writing', 'APPROVED');
+      v_findings := v_findings || 'control 11: the reader INSERTed an approval request';
+    exception when insufficient_privilege then
+      null;
+    end;
+    begin
+      update kitluy_auth.approval_requests set status = 'REJECTED' where id = v_ap_ok;
+      v_findings := v_findings || 'control 11: the reader UPDATEd an approval request';
+    exception when insufficient_privilege then
+      null;
+    end;
+    -- The removal privileges are asserted by the privilege scan below rather
+    -- than by a live statement: this file is also read by humans looking for
+    -- destructive SQL, and a refusal probe is not worth a false positive.
+
+    execute 'reset role';
+  exception when others then
+    get stacked diagnostics v_msg = message_text;
+    execute 'reset role';
+    v_findings := v_findings || format('control 5/6/11: the reader probe did not complete: %s', v_msg);
+  end;
+
+  if v_visible is distinct from v_expected then
+    v_findings := v_findings ||
+      format('control 5: the reader saw %s approval request(s) but %s are credential revocations',
+             coalesce(v_visible, -1), v_expected);
+  end if;
+  if coalesce(v_visible, 0) = 0 then
+    v_findings := v_findings || 'control 5: the reader saw NO approval requests, so nothing was proved';
+  end if;
+  if v_total <= coalesce(v_visible, 0) then
+    v_findings := v_findings ||
+      'control 3/6: every approval request in this database is a credential revocation, so invisibility was not tested';
+  end if;
+
+  -- Control 11, wider: no write privilege on ANY kitluy_auth relation, and
+  -- SELECT is the only privilege this role holds anywhere in the database.
+  for v_rel in
+    select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = 'kitluy_auth' and c.relkind in ('r', 'p', 'v', 'm')
+  loop
+    foreach v_mode in array array['insert', 'update', 'delete', 'references', 'trigger'] loop
+      if has_table_privilege('kitluy_credential_approval_reader',
+                             format('kitluy_auth.%I', v_rel), v_mode) then
+        v_findings := v_findings ||
+          format('control 11: the reader holds %s on kitluy_auth.%s', upper(v_mode), v_rel);
+      end if;
+    end loop;
+  end loop;
+  select count(*) into v_n
+    from (
+      select privilege_type from information_schema.role_table_grants
+       where grantee = 'kitluy_credential_approval_reader'
+      union all
+      select privilege_type from information_schema.role_column_grants
+       where grantee = 'kitluy_credential_approval_reader') g
+   where g.privilege_type <> 'SELECT';
+  if v_n <> 0 then
+    v_findings := v_findings ||
+      format('control 11: the reader holds %s non-SELECT table/column privilege(s)', v_n);
+  end if;
+
+  -- ...and it cannot read an approval PAYLOAD even on the relations it can see.
+  if has_column_privilege('kitluy_credential_approval_reader',
+                          'kitluy_auth.approval_requests', 'payload_hash', 'select')
+     or has_column_privilege('kitluy_credential_approval_reader',
+                             'kitluy_auth.approval_requests', 'reason', 'select')
+     or has_column_privilege('kitluy_credential_approval_reader',
+                             'kitluy_auth.approval_decisions', 'reason', 'select') then
+    v_findings := v_findings || 'control 11: the reader can read an approval payload or reason';
+  end if;
+
+  -- ========================================================================
+  -- CONTROL 8 — removing ANY ONE of the three policies makes the gate FAIL
+  -- CLOSED. Each drop lives in its own subtransaction and is rolled back;
+  -- DDL is transactional, so the policy is restored before the next probe.
+  --
+  -- This is also the executable half of CONTROL 1: a BYPASSRLS owner would be
+  -- entirely unaffected by the loss of a policy belonging to this reader.
+  -- ========================================================================
+  for v_pol in
+    select * from (values
+      ('kitluy_auth', 'approval_requests',  'approval_requests_credential_revocation_reader'),
+      ('kitluy_auth', 'approval_policies',  'approval_policies_credential_revocation_reader'),
+      ('kitluy_auth', 'approval_decisions', 'approval_decisions_credential_revocation_reader')
+    ) as t(sch, tbl, pol)
+  loop
+    begin
+      execute format('drop policy %I on %I.%I', v_pol.pol, v_pol.sch, v_pol.tbl);
+      begin
+        v_res := to_jsonb(kitluy_devices.evaluate_credential_revocation_approval_v1(
+          v_ap_ok, v_device, 'development', 'requester@43'));
+        if (v_res ->> 'authorized')::boolean is not false then
+          v_findings := v_findings || format(
+            'control 8: with policy %s removed the gate still AUTHORIZED the revocation', v_pol.pol);
+        end if;
+      exception when others then
+        -- A raised error is also fail-closed. Only silent authorization is not.
+        null;
+      end;
+      raise exception using errcode = 'P0001', message = 'KLUY-43-POLICY-PROBE';
+    exception when others then
+      get stacked diagnostics v_msg = message_text;
+      if v_msg <> 'KLUY-43-POLICY-PROBE' then
+        v_findings := v_findings ||
+          format('control 8: the fail-closed probe for %s did not complete: %s', v_pol.pol, v_msg);
+      end if;
+    end;
+  end loop;
+
+  -- All three restored by the rollbacks, and the gate answers again.
+  if (select count(*) from pg_policies
+       where 'kitluy_credential_approval_reader' = any (roles::text[])) <> 3 then
+    v_findings := v_findings || 'control 8: the three reader policies were not restored by the rollback';
+  end if;
+  v_res := to_jsonb(kitluy_devices.evaluate_credential_revocation_approval_v1(
+    v_ap_ok, v_device, 'development', 'requester@43'));
+  if (v_res ->> 'authorized')::boolean is not true then
+    v_findings := v_findings ||
+      format('control 8: the gate did not recover after the policies were restored: %s', v_res);
+  end if;
+
+  -- ========================================================================
+  -- CONTROLS 9 and 10 — who may EXECUTE the gate, proved by trying it.
+  -- `anon` and `authenticated` hold no grant on it, so they exercise the
+  -- PUBLIC path; `service_role` is included precisely because group 0139's
+  -- design would have let it through.
+  -- ========================================================================
+  foreach v_role in array array[
+    'anon', 'authenticated', 'service_role', 'kitluy_worker_service',
+    'kitluy_issuance_service', 'kitluy_job_governor']
+  loop
+    if exists (select 1 from pg_roles where rolname = v_role) then
+      begin
+        execute format('set role %I', v_role);
+        begin
+          perform kitluy_devices.evaluate_credential_revocation_approval_v1(
+            v_ap_ok, v_device, 'development', 'requester@43');
+          v_findings := v_findings || format('control 10: %s executed the approval gate', v_role);
+        exception when insufficient_privilege then
+          null;
+        end;
+        begin
+          perform kitluy_devices.credential_revocation_approval_consumed_v1(v_ap_ok);
+          v_findings := v_findings ||
+            format('control 10: %s executed the single-use helper', v_role);
+        exception when insufficient_privilege then
+          null;
+        end;
+        execute 'reset role';
+      exception when others then
+        get stacked diagnostics v_msg = message_text;
+        execute 'reset role';
+        v_findings := v_findings ||
+          format('control 10: the execute probe for %s did not complete: %s', v_role, v_msg);
+      end;
+    end if;
+  end loop;
+
+  if has_function_privilege('public',
+       'kitluy_devices.evaluate_credential_revocation_approval_v1(uuid, uuid, text, text)', 'execute')
+     or has_function_privilege('public',
+       'kitluy_devices.credential_revocation_approval_consumed_v1(uuid)', 'execute') then
+    v_findings := v_findings || 'control 9: PUBLIC can execute the approval gate or its single-use helper';
+  end if;
+  if not has_function_privilege('kitluy_credential_issuer',
+       'kitluy_devices.evaluate_credential_revocation_approval_v1(uuid, uuid, text, text)', 'execute') then
+    v_findings := v_findings || 'control 10: the governed revocation path cannot reach its own approval gate';
+  end if;
+  -- The single-use helper is reachable ONLY by the reader that needs it — the
+  -- reason the reader holds no policy on device_credential_revocations.
+  if has_function_privilege('kitluy_issuance_service',
+       'kitluy_devices.credential_revocation_approval_consumed_v1(uuid)', 'execute')
+     or has_function_privilege('service_role',
+       'kitluy_devices.credential_revocation_approval_consumed_v1(uuid)', 'execute') then
+    v_findings := v_findings || 'control 10: the single-use helper is reachable outside the gate';
+  end if;
+
+  -- ========================================================================
+  -- CONTROL 12 — a real revocation completes THROUGH the reader-owned gate,
+  -- and the revoked credential STAYS revoked (Ruling 3), with group 0138's
+  -- one-way trigger undisturbed by the boundary change.
+  -- ========================================================================
+  v_res := kitluy_devices.revoke_device_credential_v1(
+    v_intent, v_device, 'development', 'device_identity', 1,
+    'ADMINISTRATIVE_REPLACEMENT', 'terminal permanently replaced under change S43',
+    'REPROVISION_REQUIRED', 'requester@43', 'SECTION43',
+    v_ap_ok, 'approver@43', 'CHG-S43');
+  if (v_res ->> 'outcome') <> 'REVOKED' then
+    raise exception
+      'ASSERT FAIL: section 43 could not complete a four-eyes revocation through the reader-owned gate: %', v_res;
+  end if;
+
+  select state::text into v_state from kitluy_devices.device_credentials
+   where credential_id = v_credential;
+  if v_state <> 'revoked' then
+    v_findings := v_findings || format('control 12: the revoked credential is %s', v_state);
+  end if;
+
+  execute 'set role kitluy_credential_issuer';
+  begin
+    update kitluy_devices.device_credentials
+       set state = 'issued', revoked_at = null
+     where credential_id = v_credential;
+    v_findings := v_findings || 'control 12: a revoked credential was returned to issued';
+  exception when others then
+    get stacked diagnostics v_msg = message_text;
+    if v_msg not like 'KLUY-REVOCATION-IS-ONE-WAY%' then
+      v_findings := v_findings || format('control 12: wrong refusal un-revoking a credential: %s', v_msg);
+    end if;
+  end;
+  execute 'reset role';
+
+  if not exists (select 1 from pg_trigger t join pg_class c on c.oid = t.tgrelid
+                  where c.relname = 'device_credentials'
+                    and t.tgname = 'trg_device_credentials_revocation_one_way'
+                    and not t.tgisinternal) then
+    v_findings := v_findings || 'control 12: the one-way revocation trigger is gone';
+  end if;
+
+  -- Single use survives the move: the approval that authorized the completed
+  -- revocation is no longer authority for another, even though the reader
+  -- holds no grant and no policy on the evidence table it is derived from.
+  v_res := to_jsonb(kitluy_devices.evaluate_credential_revocation_approval_v1(
+    v_ap_ok, v_device, 'development', 'requester@43'));
+  if (v_res ->> 'authorized')::boolean is not false
+     or (v_res ->> 'refusal_code') <> 'KLUY-CRED-REVOCATION-APPROVAL-CONSUMED' then
+    v_findings := v_findings ||
+      format('control 12: a consumed approval was still authority for a revocation: %s', v_res);
+  end if;
+  if has_table_privilege('kitluy_credential_approval_reader',
+                         'kitluy_devices.device_credential_revocations', 'select') then
+    v_findings := v_findings ||
+      'the reader can read revocation evidence directly, which the three-policy boundary exists to avoid';
+  end if;
+
+  -- ========================================================================
+  -- CONTROL 1 — `service_role` no longer owns the gate. The executable proof
+  -- is control 8; these are the corroborating catalogue facts.
+  -- ========================================================================
+  if exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'kitluy_devices'
+       and p.proname = 'evaluate_credential_revocation_approval_v1'
+       and pg_get_userbyid(p.proowner) = 'service_role') then
+    v_findings := v_findings || 'control 1: service_role owns the approval gate again';
+  end if;
+  if not exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'kitluy_devices'
+       and p.proname = 'evaluate_credential_revocation_approval_v1'
+       and p.prosecdef
+       and pg_get_userbyid(p.proowner) = 'kitluy_credential_approval_reader'
+       and p.proconfig is not null
+       and exists (select 1 from unnest(p.proconfig) c where c like 'search\_path=%')) then
+    v_findings := v_findings ||
+      'control 1: the gate is not a reader-owned SECURITY DEFINER with a fixed search_path';
+  end if;
+
+  -- CONTROL 3, attribute half, beside the behavioural proof above.
+  if not exists (
+    select 1 from pg_roles
+     where rolname = 'kitluy_credential_approval_reader'
+       and not rolcanlogin and not rolbypassrls and not rolsuper
+       and not rolcreaterole and not rolcreatedb and not rolreplication) then
+    v_findings := v_findings || 'control 3: the approval reader holds login or elevated attributes';
+  end if;
+
+  -- Exactly three policies, all SELECT, all on the approval aggregate. Ruling 2
+  -- authorizes three; a fourth is a different decision.
+  if (select count(*) from pg_policies
+       where 'kitluy_credential_approval_reader' = any (roles::text[])) <> 3 then
+    v_findings := v_findings || 'the approval reader is named by other than exactly three policies';
+  end if;
+  if exists (select 1 from pg_policies
+              where 'kitluy_credential_approval_reader' = any (roles::text[])
+                and (cmd <> 'SELECT' or schemaname <> 'kitluy_auth')) then
+    v_findings := v_findings || 'the approval reader holds a non-SELECT policy or one outside kitluy_auth';
+  end if;
+
+  -- The credential governor STILL holds nothing on the approvals aggregate —
+  -- the invariant groups 0138/0139 and sections 41a/42 depend on.
+  if has_schema_privilege('kitluy_credential_issuer', 'kitluy_auth', 'usage')
+     or has_table_privilege('kitluy_credential_issuer', 'kitluy_auth.approval_requests', 'select')
+     or has_table_privilege('kitluy_credential_issuer', 'kitluy_auth.approval_policies', 'select')
+     or has_table_privilege('kitluy_credential_issuer', 'kitluy_auth.approval_decisions', 'select') then
+    v_findings := v_findings || 'the credential governor now reaches the approvals aggregate directly';
+  end if;
+  if has_schema_privilege('kitluy_credential_approval_reader', 'kitluy_devices', 'create') then
+    v_findings := v_findings || 'the approval reader kept CREATE on kitluy_devices after the ownership move';
+  end if;
+
+  -- ------------------------------------------------------------------------
+  -- Hand both memberships back BEFORE the last control, because the last
+  -- control is that the hand-back worked.
+  -- ------------------------------------------------------------------------
+  execute format('revoke kitluy_credential_issuer from %I', current_user);
+  execute format('revoke kitluy_credential_approval_reader from %I', current_user);
+
+  -- ========================================================================
+  -- CONTROL 4 — nothing can SET ROLE to the reader.
+  --
+  -- SET ROLE is decided by SESSION-user membership, so the executable probe
+  -- can only be run by this session — and this session is `postgres`, the most
+  -- privileged non-superuser identity in the stack (LOGIN, BYPASSRLS,
+  -- CREATEROLE, the role every migration runs as). If IT is refused, an
+  -- application, worker, issuer or service identity holding no membership at
+  -- all certainly is; the enumeration below is what establishes that none of
+  -- them holds one.
+  -- ========================================================================
+  v_reached := false;
+  begin
+    execute 'set role kitluy_credential_approval_reader';
+    v_reached := true;
+    execute 'reset role';
+  exception when others then
+    null;
+  end;
+  if v_reached then
+    v_findings := v_findings ||
+      'control 4: the test session can still SET ROLE to kitluy_credential_approval_reader after handing the membership back';
+  end if;
+
+  foreach v_role in array array[
+    'service_role', 'authenticated', 'anon', 'authenticator',
+    'kitluy_credential_issuer', 'kitluy_worker_service', 'kitluy_issuance_service',
+    'kitluy_activation_governor', 'kitluy_job_governor'] loop
+    if exists (select 1 from pg_roles where rolname = v_role)
+       and (pg_has_role(v_role, 'kitluy_credential_approval_reader', 'MEMBER')
+            or pg_has_role(v_role, 'kitluy_credential_approval_reader', 'USAGE')) then
+      v_findings := v_findings ||
+        format('control 4: %s can reach kitluy_credential_approval_reader', v_role);
+    end if;
+  end loop;
+  if exists (
+    select 1 from pg_auth_members m
+      join pg_roles r on r.oid = m.member
+      join pg_roles g on g.oid = m.roleid
+     where g.rolname = 'kitluy_credential_approval_reader'
+       and not r.rolsuper) then
+    v_findings := v_findings || 'control 4: a non-superuser role is a member of the approval reader';
+  end if;
+
+  if cardinality(v_findings) > 0 then
+    raise exception 'ASSERT FAIL: % approval-boundary finding(s): %',
+      cardinality(v_findings), array_to_string(v_findings, ' | ');
+  end if;
+
+  raise notice 'PASS ws11-approval-gate-boundary: the credential-revocation approval gate no longer runs as the global-BYPASSRLS service_role — it is a SECURITY DEFINER owned by the NOLOGIN, non-BYPASSRLS kitluy_credential_approval_reader, which no application, worker, issuer or service identity is a member of and which this session itself is refused SET ROLE to once the borrowed membership is handed back; that owner is not required to be service_role, because a real A4 approval decided by a second person is evaluated, authorized and executed into a completed revocation under it, while an approval naming another device and one scoped to another environment are refused as WRONG-SCOPE both at the gate and through revoke_device_credential_v1; the reader sees ONLY device_credential_revocation requests and their reachable policies and decisions — a fully valid A4 approval for a different action, its policy and its decisions are all invisible to it, which a BYPASSRLS identity could not reproduce — it holds SELECT and nothing else anywhere in the database, no INSERT/UPDATE/DELETE/REFERENCES/TRIGGER on any kitluy_auth relation (a live INSERT and UPDATE are both refused), and no read of payload_hash or reason at all; removing any ONE of the three OWNER-APPROVED policies (58 -> 61, KLD-2026-07-29-DEVICE-REVOCATION-BOUNDARY-002 Ruling 2) makes the gate FAIL CLOSED and the rollback restores it; PUBLIC, anon, authenticated, service_role, the worker, the issuance service and the job governor are each refused EXECUTE on both the gate and its single-use helper while kitluy_credential_issuer alone holds it; single use still refuses a consumed approval although the reader holds no grant and no policy on the revocation evidence; and Ruling 3 holds — the revoked credential stays revoked and group 0138''s one-way trigger is undisturbed';
+end
+$section43$;
+
+select 'assertions complete: groups 0010-0140 structural contract holds (incl. WS-11-T003 Step 4 approval gate bounded to a NOLOGIN non-BYPASSRLS reader per KLD-2026-07-29-DEVICE-REVOCATION-BOUNDARY-002 Ruling 2)' as result;
