@@ -8316,14 +8316,39 @@ begin
       format('control 11: the reader holds %s non-SELECT table/column privilege(s)', v_n);
   end if;
 
-  -- ...and it cannot read an approval PAYLOAD even on the relations it can see.
+  -- ...and it cannot read an approval PAYLOAD or REASON even on the relations
+  -- it can see.
+  --
+  -- `payload_hash` was in this refusal until group 0141. KLD-2026-07-29-DEVICE-
+  -- REVOCATION-BOUNDARY-002 Ruling 1 requires the recorded scope to be
+  -- cryptographically bound INTO that hash and the binding to be verified, and
+  -- a binding to a hash cannot be verified without reading the hash. Ruling 1
+  -- and Ruling 2 are the same owner decision, so the minimum that satisfies
+  -- both is taken: ONE more column, on rows already visible, with no new
+  -- policy (the section 7 census stays at Ruling 2's 61). Recorded as RC-015.
+  -- A hash is not a payload; `reason` remains unreadable on both relations and
+  -- is still refused here.
   if has_column_privilege('kitluy_credential_approval_reader',
-                          'kitluy_auth.approval_requests', 'payload_hash', 'select')
-     or has_column_privilege('kitluy_credential_approval_reader',
-                             'kitluy_auth.approval_requests', 'reason', 'select')
+                          'kitluy_auth.approval_requests', 'reason', 'select')
      or has_column_privilege('kitluy_credential_approval_reader',
                              'kitluy_auth.approval_decisions', 'reason', 'select') then
-    v_findings := v_findings || 'control 11: the reader can read an approval payload or reason';
+    v_findings := v_findings || 'control 11: the reader can read an approval reason';
+  end if;
+  -- The positive half, so the widening stays pinned to exactly what Ruling 1
+  -- needed and cannot drift wider unnoticed: the hash IS readable, and it is
+  -- the ONLY column of `approval_requests` beyond group 0140's eight.
+  if not has_column_privilege('kitluy_credential_approval_reader',
+                              'kitluy_auth.approval_requests', 'payload_hash', 'select') then
+    v_findings := v_findings ||
+      'control 11: the reader cannot read payload_hash, so group 0141 cannot verify a scope binding';
+  end if;
+  select count(*) into v_n
+    from information_schema.role_column_grants
+   where grantee = 'kitluy_credential_approval_reader'
+     and table_schema = 'kitluy_auth' and table_name = 'approval_requests';
+  if v_n <> 9 then
+    v_findings := v_findings ||
+      format('control 11: the reader holds %s column grants on approval_requests, expected exactly 9 (group 0140''s eight plus Ruling 1''s payload_hash)', v_n);
   end if;
 
   -- ========================================================================
@@ -8602,7 +8627,7 @@ begin
       cardinality(v_findings), array_to_string(v_findings, ' | ');
   end if;
 
-  raise notice 'PASS ws11-approval-gate-boundary: the credential-revocation approval gate no longer runs as the global-BYPASSRLS service_role — it is a SECURITY DEFINER owned by the NOLOGIN, non-BYPASSRLS kitluy_credential_approval_reader, which no application, worker, issuer or service identity is a member of and which this session itself is refused SET ROLE to once the borrowed membership is handed back; that owner is not required to be service_role, because a real A4 approval decided by a second person is evaluated, authorized and executed into a completed revocation under it, while an approval naming another device and one scoped to another environment are refused as WRONG-SCOPE both at the gate and through revoke_device_credential_v1; the reader sees ONLY device_credential_revocation requests and their reachable policies and decisions — a fully valid A4 approval for a different action, its policy and its decisions are all invisible to it, which a BYPASSRLS identity could not reproduce — it holds SELECT and nothing else anywhere in the database, no INSERT/UPDATE/DELETE/REFERENCES/TRIGGER on any kitluy_auth relation (a live INSERT and UPDATE are both refused), and no read of payload_hash or reason at all; removing any ONE of the three OWNER-APPROVED policies (58 -> 61, KLD-2026-07-29-DEVICE-REVOCATION-BOUNDARY-002 Ruling 2) makes the gate FAIL CLOSED and the rollback restores it; PUBLIC, anon, authenticated, service_role, the worker, the issuance service and the job governor are each refused EXECUTE on both the gate and its single-use helper while kitluy_credential_issuer alone holds it; single use still refuses a consumed approval although the reader holds no grant and no policy on the revocation evidence; and Ruling 3 holds — the revoked credential stays revoked and group 0138''s one-way trigger is undisturbed';
+  raise notice 'PASS ws11-approval-gate-boundary: the credential-revocation approval gate no longer runs as the global-BYPASSRLS service_role — it is a SECURITY DEFINER owned by the NOLOGIN, non-BYPASSRLS kitluy_credential_approval_reader, which no application, worker, issuer or service identity is a member of and which this session itself is refused SET ROLE to once the borrowed membership is handed back; that owner is not required to be service_role, because a real A4 approval decided by a second person is evaluated, authorized and executed into a completed revocation under it, while an approval naming another device and one scoped to another environment are refused as WRONG-SCOPE both at the gate and through revoke_device_credential_v1; the reader sees ONLY device_credential_revocation requests and their reachable policies and decisions — a fully valid A4 approval for a different action, its policy and its decisions are all invisible to it, which a BYPASSRLS identity could not reproduce — it holds SELECT and nothing else anywhere in the database, no INSERT/UPDATE/DELETE/REFERENCES/TRIGGER on any kitluy_auth relation (a live INSERT and UPDATE are both refused), and no read of any approval reason at all — it reads exactly nine columns of approval_requests, group 0140''s eight plus the payload_hash Ruling 1 requires it to verify a scope binding against (RC-015), and no payload anywhere; removing any ONE of the three OWNER-APPROVED policies (58 -> 61, KLD-2026-07-29-DEVICE-REVOCATION-BOUNDARY-002 Ruling 2) makes the gate FAIL CLOSED and the rollback restores it; PUBLIC, anon, authenticated, service_role, the worker, the issuance service and the job governor are each refused EXECUTE on both the gate and its single-use helper while kitluy_credential_issuer alone holds it; single use still refuses a consumed approval although the reader holds no grant and no policy on the revocation evidence; and Ruling 3 holds — the revoked credential stays revoked and group 0138''s one-way trigger is undisturbed';
 end
 $section43$;
 
