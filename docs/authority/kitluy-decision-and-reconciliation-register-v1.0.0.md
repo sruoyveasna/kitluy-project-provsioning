@@ -1017,3 +1017,67 @@ but the rotation path still asserts provider state the database cannot know.
 The ruled states (`credential_issued_pending_activation`, confirmation function,
 reconciliation) are **not built**, and a rotated credential must not be reported
 usable until they are.
+
+---
+
+## Group 0130 — reserve-before-generate, and provider activation truth
+
+### Task A — the ordering correction
+
+Group 0128 refused to prepare a renewal until a replacement key was already
+registered. That ordering **cannot be made retry-safe**: provider key generation
+must be idempotent on a stable identifier, and the only stable identifier is the
+renewal attempt — which did not exist yet. A retry that lost its response had
+nothing to key on and could generate a second key.
+
+`reserve_device_credential_renewal_v1` now creates the attempt **first**, with no
+key and none consulted. `register_generation_key_v2` is idempotent on
+`renewal_attempt_id`, and a *different* attempt can neither receive nor reuse
+that key.
+
+Retry is checked **before** eligibility is re-judged, deliberately: a legitimate
+retry must not be refused because the clock moved past the renewal window while
+the first response was lost.
+
+Concurrency keeps the two approved codes distinct. A partial unique index
+permits exactly one OPEN reservation per next generation while letting terminal
+attempts release the slot — so a refused renewal does not wedge the device.
+
+### Task D — what a credential row does and does not prove
+
+Group 0128 marked a rotated key `active` the instant a credential row was
+inserted. **PostgreSQL cannot observe the external provider.** A credential row
+proves a credential was issued; it proves nothing about whether the private half
+is loaded and usable.
+
+A rotated key now lands in `credential_issued_pending_activation` and leaves it
+only through `confirm_provider_key_activation_v1`, which compares **nine
+bindings** against what the database reserved rather than what the caller
+asserts about itself. Confirmation is idempotent for an identical success.
+
+**Initial issuance is not a rotation.** The enrollment key is already operational
+when the first credential is issued, so it still activates directly. The trigger
+distinguishes the two by whether the key carries a `renewal_attempt_id`.
+
+Operational usability is therefore two conditions, not one:
+
+```text
+credential cryptographically valid
+AND
+provider key active, or an already-active reused key
+```
+
+For `reuse_current_key` the second is satisfied on arrival — there is no
+replacement key to activate.
+
+### Still owed — cross-system reconciliation
+
+The states and the confirmation exist; the **reconciliation loop does not**.
+Nothing yet retries a rotation stranded in `activation_pending`, and no
+TypeScript orchestration drives reserve → generate → PoP → issue → confirm.
+Until that lands, a rotated credential must not be reported operationally usable
+on the strength of these states alone.
+
+`rotate_key` remains disabled in the shipped development policy. Section 35b
+enables it under a *named test decision* and restores it; assertion 35c proves
+the restore happened, so a leaked override cannot pass unnoticed.

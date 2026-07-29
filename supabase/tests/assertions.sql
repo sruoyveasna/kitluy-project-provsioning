@@ -5132,3 +5132,450 @@ begin
 
   raise notice 'PASS ws11-renewal-refusals: renewal is refused 30 days early, routes an EXPIRED credential to recovery with its own code, refuses a reuse_current_key request that presents a DIFFERENT key, refuses rotate_key because no owner decision permits it, refuses to enable rotation without naming that decision, and treats an ABANDONED key as terminal — it can neither enter proof of possession nor be promoted back to active';
 end $$;
+
+
+-- ============================================================================
+-- SECTION 35 — reserve-before-generate, and provider activation truth (0130).
+--
+-- TASK A: the renewal attempt exists BEFORE any key, because key generation
+-- must be idempotent on a stable identifier and there was none before.
+-- TASK D: a credential row proves a credential was issued. It proves NOTHING
+-- about whether the private half is loaded in the external provider.
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- Shared fixture: a device holding an issued generation-1 credential with
+-- nine days left, so it sits legitimately inside the 10-day renewal window.
+-- ---------------------------------------------------------------------------
+create or replace function pg_temp.ws11_renewable_device(p_tag text, p_fp text)
+returns uuid
+language plpgsql
+as $fixture$
+declare
+  v_profile uuid;
+  v_device uuid;
+  v_token text := encode(sha256(convert_to('t' || p_tag || gen_random_uuid(), 'UTF8')), 'hex');
+  v_payload text := encode(sha256(convert_to('p' || p_tag || gen_random_uuid(), 'UTF8')), 'hex');
+  v_idem text := encode(sha256(convert_to('i' || p_tag || gen_random_uuid(), 'UTF8')), 'hex');
+  v_req text := 'rq-' || p_tag || '-' || gen_random_uuid();
+  v_prep jsonb;
+  v_links jsonb := jsonb_build_array(
+    jsonb_build_object('link_position',0,'role','root','subject_fingerprint',repeat('r',64),
+                       'issuer_key_id','rk','canonical_tbs','R','detached_signature_b64','qg=='),
+    jsonb_build_object('link_position',1,'role','intermediate','subject_fingerprint',repeat('i',64),
+                       'issuer_key_id','rk','canonical_tbs','I','detached_signature_b64','uw=='));
+begin
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+  v_device := kitluy_devices.enroll_device_v1(
+    'WS11-' || upper(p_tag) || '-' || gen_random_uuid(), v_profile, now(), p_fp,
+    'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type','mac_address','signal_value',
+        substr(md5(random()::text),1,2) || ':' || substr(md5(random()::text),1,8)),
+      jsonb_build_object('signal_type','board_serial','signal_value','board-' || gen_random_uuid()),
+      jsonb_build_object('signal_type','storage_serial','signal_value','nvme-' || gen_random_uuid())));
+  perform kitluy_devices.create_device_claim_v1(
+    v_device, '00000000-0000-4000-8000-000000000011',
+    '00000000-0000-4000-8000-000000000015', '00000000-0000-4000-8000-000000000018',
+    v_token, v_payload, 900, 'OP-PROVISION');
+  perform kitluy_devices.redeem_device_claim_v1(v_token, v_payload, v_device, 'HUB-AGENT');
+
+  v_prep := kitluy_devices.prepare_device_credential_issuance_v1(
+    v_req, v_device, 'development', 'device_identity', 1, 'PEM-' || p_tag, p_fp,
+    v_idem, repeat('9', 64), 'ed25519', repeat('8', 64), decode('a1', 'hex'),
+    true, 'ica-' || p_tag, now() - interval '21 days', 'trusted', 'SVC');
+  perform kitluy_devices.record_device_credential_signature_v1(
+    v_req, v_prep ->> 'canonical_tbs_hash', decode('1111', 'hex'), true, 'SVC');
+  perform kitluy_devices.finalize_device_credential_issuance_v1(v_req, v_links, 'SVC');
+  return v_device;
+end;
+$fixture$;
+
+-- ---------------------------------------------------------------------------
+-- 35a — TASK A: reserve before generate.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_device uuid;
+  v_idem text := encode(sha256(convert_to('r35a-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_first jsonb;
+  v_retry jsonb;
+  v_blocked int := 0;
+begin
+  v_device := pg_temp.ws11_renewable_device('t35a', repeat('7a', 32));
+
+  -- A replacement key CANNOT exist before its reservation. This is the whole
+  -- ordering correction, asserted first.
+  begin
+    perform kitluy_devices.register_generation_key_v2(
+      gen_random_uuid(), 'handle-x', 'PEM-X', repeat('cd', 32), 2);
+    raise exception 'ASSERT FAIL: a replacement key was registered with no renewal reservation';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-RENEWAL-NO-RESERVATION%' then
+      raise exception 'ASSERT FAIL: wrong refusal for a key without a reservation: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- RESERVATION SUCCEEDS WITH NO KEY. Group 0128 could not do this.
+  v_first := kitluy_devices.reserve_device_credential_renewal_v1(
+    v_device, 'development', 'device_identity', v_idem, now(), 'trusted', null, 'SVC');
+  if v_first ->> 'outcome' <> 'RESERVED' then
+    raise exception 'ASSERT FAIL: reservation did not succeed without a key: %', v_first;
+  end if;
+  if (v_first ->> 'renewal_mode') <> 'reuse_current_key' then
+    raise exception 'ASSERT FAIL: the default reservation mode is not reuse_current_key';
+  end if;
+  -- Same-key needs no key generation, so it is ready to issue immediately.
+  if (v_first ->> 'status') <> 'issuance_pending' then
+    raise exception 'ASSERT FAIL: a same-key reservation is not issuance_pending: %', v_first;
+  end if;
+  if (v_first ->> 'next_credential_generation') <> '2' then
+    raise exception 'ASSERT FAIL: the reservation did not reserve generation 2';
+  end if;
+  if exists (select 1 from kitluy_devices.device_generation_keys
+              where device_record_id = v_device and generation = 2) then
+    raise exception 'ASSERT FAIL: a same-key reservation registered a replacement key';
+  end if;
+
+  -- RETRY ON THE SAME IDEMPOTENCY KEY returns the SAME attempt. Checked before
+  -- eligibility is re-judged, so a clock that moved cannot refuse a retry.
+  v_retry := kitluy_devices.reserve_device_credential_renewal_v1(
+    v_device, 'development', 'device_identity', v_idem,
+    now() + interval '5 days', 'trusted', null, 'SVC');
+  if v_retry ->> 'outcome' <> 'REPLAYED_RESERVATION'
+     or (v_retry ->> 'renewal_attempt_id') <> (v_first ->> 'renewal_attempt_id') then
+    raise exception 'ASSERT FAIL: a retry allocated a second renewal attempt: %', v_retry;
+  end if;
+  if (select count(*) from kitluy_devices.device_renewal_reservations
+       where device_record_id = v_device) <> 1 then
+    raise exception 'ASSERT FAIL: more than one reservation exists for the device';
+  end if;
+
+  -- A COMPETING attempt for the same next generation fast-fails. This is the
+  -- early code; RENEWAL_GENERATION_CONFLICT belongs to the late head swap.
+  begin
+    perform kitluy_devices.reserve_device_credential_renewal_v1(
+      v_device, 'development', 'device_identity',
+      encode(sha256(convert_to('other-' || gen_random_uuid(), 'UTF8')), 'hex'),
+      now(), 'trusted', null, 'SVC-B');
+    raise exception 'ASSERT FAIL: two reservations were taken for one next generation';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-RENEWAL-ALREADY-RESERVED%' then
+      raise exception 'ASSERT FAIL: wrong refusal for a competing reservation: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- A rotate_key attempt cannot claim the same next generation either, and it
+  -- is refused for the SAME reason rather than a rotation-specific one.
+  begin
+    perform kitluy_devices.reserve_device_credential_renewal_v1(
+      v_device, 'development', 'device_identity',
+      encode(sha256(convert_to('rot-' || gen_random_uuid(), 'UTF8')), 'hex'),
+      now(), 'trusted', 'rotate_key', 'SVC-C');
+    raise exception 'ASSERT FAIL: a rotation attempt reserved an already-reserved generation';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-RENEWAL-ALREADY-RESERVED%'
+       and sqlerrm not like 'KLUY-RENEWAL-ROTATION-NOT-PERMITTED%' then
+      raise exception 'ASSERT FAIL: wrong refusal for a competing rotation: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- A frozen identifier cannot be rewritten after reservation.
+  begin
+    update kitluy_devices.device_renewal_reservations
+       set next_credential_generation = 9
+     where renewal_attempt_id = (v_first ->> 'renewal_attempt_id')::uuid;
+    raise exception 'ASSERT FAIL: a frozen reservation identifier was rewritten';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  if v_blocked <> 4 then
+    raise exception 'ASSERT FAIL: expected 4 ordering refusals, got %', v_blocked;
+  end if;
+
+  raise notice 'PASS ws11-renewal-reserve-first: a replacement key CANNOT be registered before its renewal reservation; a reservation succeeds with no key at all and defaults to reuse_current_key/issuance_pending; a retry on the same idempotency key returns the SAME attempt without re-judging eligibility; a competing attempt fast-fails with KLUY-RENEWAL-ALREADY-RESERVED; and a frozen reservation identifier cannot be rewritten';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 35b — TASK D: a credential row is not evidence of provider activation.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_device uuid;
+  v_fp1 text := repeat('7b', 32);
+  v_fp2 text := repeat('7c', 32);
+  v_res jsonb;
+  v_attempt uuid;
+  v_req text := 'rq-35b-' || gen_random_uuid();
+  v_idem text := encode(sha256(convert_to('i35b-' || gen_random_uuid(), 'UTF8')), 'hex');
+  v_prep jsonb;
+  v_cred uuid;
+  v_blocked int := 0;
+  v_links jsonb := jsonb_build_array(
+    jsonb_build_object('link_position',0,'role','root','subject_fingerprint',repeat('r',64),
+                       'issuer_key_id','rk','canonical_tbs','R','detached_signature_b64','qg=='),
+    jsonb_build_object('link_position',1,'role','intermediate','subject_fingerprint',repeat('i',64),
+                       'issuer_key_id','rk','canonical_tbs','I','detached_signature_b64','uw=='));
+begin
+  v_device := pg_temp.ws11_renewable_device('t35b', v_fp1);
+
+  -- TEST-ONLY policy override. Rotation stays disabled in the shipped policy;
+  -- this names a test decision so the CHECK is satisfied honestly rather than
+  -- bypassed, and it is restored at the end of the block.
+  update kitluy_devices.renewal_policy
+     set allow_key_rotation = true,
+         rotation_approved_by_decision_ref = 'TEST-ONLY-ws11-section35b'
+   where environment = 'development';
+
+  v_res := kitluy_devices.reserve_device_credential_renewal_v1(
+    v_device, 'development', 'device_identity', v_idem, now(), 'trusted',
+    'rotate_key', 'SVC');
+  v_attempt := (v_res ->> 'renewal_attempt_id')::uuid;
+  -- A rotation reservation is NOT ready to issue: it owes a key first.
+  if (v_res ->> 'status') <> 'key_generation_pending' then
+    raise exception 'ASSERT FAIL: a rotation reservation is not key_generation_pending: %', v_res;
+  end if;
+
+  perform kitluy_devices.register_generation_key_v2(
+    v_attempt, 'provider-handle-35b', 'PEM-G2', v_fp2, 2);
+
+  -- Registration is idempotent on the ATTEMPT: a retry returns the same key.
+  if (kitluy_devices.register_generation_key_v2(
+        v_attempt, 'provider-handle-35b', 'PEM-G2', v_fp2, 2) ->> 'outcome')
+     <> 'ALREADY_REGISTERED' then
+    raise exception 'ASSERT FAIL: re-registering the same key was not idempotent';
+  end if;
+  if (select count(*) from kitluy_devices.device_generation_keys
+       where renewal_attempt_id = v_attempt) <> 1 then
+    raise exception 'ASSERT FAIL: a retry generated a second replacement key';
+  end if;
+
+  v_prep := kitluy_devices.prepare_device_credential_renewal_v2(
+    v_device, 'development', 'device_identity', v_req, encode(sha256(convert_to('issue35b-' || v_req, 'UTF8')), 'hex'), repeat('7', 64),
+    'PEM-G2', v_fp2, 'ed25519', repeat('6', 64), decode('b2', 'hex'), true,
+    'ica-35b', now(), 'trusted', 'SVC', 'rotate_key');
+  perform kitluy_devices.record_device_credential_signature_v1(
+    v_req, v_prep ->> 'canonical_tbs_hash', decode('2222', 'hex'), true, 'SVC');
+  perform kitluy_devices.finalize_device_credential_issuance_v1(v_req, v_links, 'SVC');
+
+  select credential_id into v_cred from kitluy_devices.device_credentials
+   where created_from_request_id = v_req;
+
+  -- THE CORE OF TASK D. The credential is issued; the provider has not been
+  -- asked; the key is therefore NOT active.
+  if (select state from kitluy_devices.device_generation_keys
+       where renewal_attempt_id = v_attempt) <> 'credential_issued_pending_activation' then
+    raise exception 'ASSERT FAIL: credential insertion marked a rotated key active';
+  end if;
+  if (select status from kitluy_devices.device_renewal_reservations
+       where renewal_attempt_id = v_attempt) <> 'activation_pending' then
+    raise exception 'ASSERT FAIL: the reservation is not activation_pending after issuance';
+  end if;
+
+  -- Nine bindings. Each wrong one is refused with its own code.
+  begin
+    perform kitluy_devices.confirm_provider_key_activation_v1(
+      gen_random_uuid(), v_cred, v_device, 'development', 'device_identity',
+      2, 2, 'provider-handle-35b', v_fp2, 'SVC');
+    raise exception 'ASSERT FAIL: activation confirmed against another renewal attempt';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-ACTIVATION-NO-RESERVATION%' then
+      raise exception 'ASSERT FAIL: wrong refusal for a foreign attempt: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  begin
+    perform kitluy_devices.confirm_provider_key_activation_v1(
+      v_attempt, v_cred, gen_random_uuid(), 'development', 'device_identity',
+      2, 2, 'provider-handle-35b', v_fp2, 'SVC');
+    raise exception 'ASSERT FAIL: activation confirmed for another device';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-ACTIVATION-WRONG-DEVICE%' then
+      raise exception 'ASSERT FAIL: wrong refusal for a foreign device: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  begin
+    perform kitluy_devices.confirm_provider_key_activation_v1(
+      v_attempt, v_cred, v_device, 'development', 'device_identity',
+      3, 2, 'provider-handle-35b', v_fp2, 'SVC');
+    raise exception 'ASSERT FAIL: activation confirmed for another credential generation';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-ACTIVATION-WRONG-GENERATION%' then
+      raise exception 'ASSERT FAIL: wrong refusal for a foreign generation: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  begin
+    perform kitluy_devices.confirm_provider_key_activation_v1(
+      v_attempt, v_cred, v_device, 'development', 'device_identity',
+      2, 2, 'a-different-provider-handle', v_fp2, 'SVC');
+    raise exception 'ASSERT FAIL: activation confirmed with the wrong provider key reference';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-ACTIVATION-WRONG-PROVIDER-KEY%' then
+      raise exception 'ASSERT FAIL: wrong refusal for a foreign provider key: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  begin
+    perform kitluy_devices.confirm_provider_key_activation_v1(
+      v_attempt, v_cred, v_device, 'development', 'device_identity',
+      2, 2, 'provider-handle-35b', repeat('ee', 32), 'SVC');
+    raise exception 'ASSERT FAIL: activation confirmed with the wrong fingerprint';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-ACTIVATION-WRONG-FINGERPRINT%' then
+      raise exception 'ASSERT FAIL: wrong refusal for a foreign fingerprint: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  begin
+    perform kitluy_devices.confirm_provider_key_activation_v1(
+      v_attempt, v_cred, v_device, 'development', 'device_identity',
+      2, 9, 'provider-handle-35b', v_fp2, 'SVC');
+    raise exception 'ASSERT FAIL: activation confirmed with the wrong KEY generation';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like 'KLUY-ACTIVATION-WRONG-KEY-GENERATION%' then
+      raise exception 'ASSERT FAIL: wrong refusal for a foreign key generation: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- The correct confirmation activates, supersedes and completes.
+  if (kitluy_devices.confirm_provider_key_activation_v1(
+        v_attempt, v_cred, v_device, 'development', 'device_identity',
+        2, 2, 'provider-handle-35b', v_fp2, 'PROVIDER-ADAPTER') ->> 'outcome')
+     <> 'ACTIVATED' then
+    raise exception 'ASSERT FAIL: a correct activation confirmation did not activate';
+  end if;
+  if (select state from kitluy_devices.device_generation_keys
+       where renewal_attempt_id = v_attempt) <> 'active' then
+    raise exception 'ASSERT FAIL: the key is not active after confirmation';
+  end if;
+  if (select status from kitluy_devices.device_renewal_reservations
+       where renewal_attempt_id = v_attempt) <> 'completed' then
+    raise exception 'ASSERT FAIL: the renewal did not complete after activation';
+  end if;
+
+  -- IDEMPOTENT: the adapter may confirm twice after a lost acknowledgement.
+  if (kitluy_devices.confirm_provider_key_activation_v1(
+        v_attempt, v_cred, v_device, 'development', 'device_identity',
+        2, 2, 'provider-handle-35b', v_fp2, 'PROVIDER-ADAPTER') ->> 'outcome')
+     <> 'ALREADY_ACTIVE' then
+    raise exception 'ASSERT FAIL: a duplicate activation confirmation was not idempotent';
+  end if;
+
+  update kitluy_devices.renewal_policy
+     set allow_key_rotation = false, rotation_approved_by_decision_ref = null
+   where environment = 'development';
+
+  if v_blocked <> 6 then
+    raise exception 'ASSERT FAIL: expected 6 activation refusals, got %', v_blocked;
+  end if;
+
+  raise notice 'PASS ws11-provider-activation-truth: finalizing a rotated credential leaves the provider key credential_issued_pending_activation and the renewal activation_pending — a credential row is NOT evidence the provider loaded the private half; six wrong bindings (attempt, device, credential generation, provider key reference, fingerprint, key generation) are each refused with their own code; the correct confirmation activates, supersedes and completes; and a duplicate confirmation is idempotent';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 35c — security hygiene for everything migration 0130 added.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  v_fn text;
+  v_owner text;
+  v_findings text[] := '{}';
+  v_app text;
+begin
+  foreach v_fn in array array[
+    'kitluy_devices.reserve_device_credential_renewal_v1(uuid, text, text, text, timestamptz, text, kitluy_devices.renewal_mode, text)',
+    'kitluy_devices.register_generation_key_v2(uuid, text, text, text, integer)',
+    'kitluy_devices.confirm_provider_key_activation_v1(uuid, uuid, uuid, text, text, integer, integer, text, text, text)']
+  loop
+    if has_function_privilege('public', v_fn, 'execute') then
+      v_findings := v_findings || format('%s is EXECUTE-able by PUBLIC', v_fn);
+    end if;
+    foreach v_app in array array['anon', 'authenticated'] loop
+      if exists (select 1 from pg_roles where rolname = v_app)
+         and has_function_privilege(v_app, v_fn, 'execute') then
+        v_findings := v_findings || format('%s is EXECUTE-able by %s', v_fn, v_app);
+      end if;
+    end loop;
+    if not has_function_privilege('kitluy_issuance_service', v_fn, 'execute') then
+      v_findings := v_findings || format('%s is not reachable by the named issuance service', v_fn);
+    end if;
+    select pg_get_userbyid(p.proowner) into v_owner from pg_proc p where p.oid = v_fn::regprocedure;
+    if v_owner <> 'kitluy_credential_issuer' then
+      v_findings := v_findings || format('%s is owned by %s', v_fn, v_owner);
+    end if;
+    if exists (select 1 from pg_roles where rolname = v_owner and rolcanlogin and not rolsuper) then
+      v_findings := v_findings || format('%s is owned by login-capable %s', v_fn, v_owner);
+    end if;
+    if not exists (
+      select 1 from pg_proc p where p.oid = v_fn::regprocedure and p.prosecdef
+        and p.proconfig is not null
+        and exists (select 1 from unnest(p.proconfig) c where c like 'search\_path=%')) then
+      v_findings := v_findings || format('%s lacks SECURITY DEFINER with a fixed search_path', v_fn);
+    end if;
+  end loop;
+
+  -- The new tables keep RLS ENABLE+FORCE, so their owner is bound by its own
+  -- named policies rather than exempt.
+  if not exists (
+    select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'kitluy_devices' and c.relname = 'device_renewal_reservations'
+      and c.relrowsecurity and c.relforcerowsecurity) then
+    v_findings := v_findings || 'device_renewal_reservations lacks RLS ENABLE+FORCE';
+  end if;
+
+  -- service_role may READ a reservation and a key row; it may write neither,
+  -- so it cannot activate a key or complete a renewal behind the governor.
+  if has_table_privilege('service_role', 'kitluy_devices.device_renewal_reservations', 'update')
+     or has_table_privilege('service_role', 'kitluy_devices.device_renewal_reservations', 'insert') then
+    v_findings := v_findings || 'service_role can write device_renewal_reservations directly';
+  end if;
+  if has_table_privilege('service_role', 'kitluy_devices.device_generation_keys', 'update') then
+    v_findings := v_findings || 'service_role can update provider key lifecycle state directly';
+  end if;
+
+  -- The migration membership was handed back before commit.
+  if exists (
+    select 1 from pg_auth_members m
+    join pg_roles r on r.oid = m.member
+    join pg_roles g on g.oid = m.roleid
+    where g.rolname = 'kitluy_credential_issuer' and not r.rolsuper) then
+    v_findings := v_findings || 'a non-superuser retains membership of kitluy_credential_issuer';
+  end if;
+
+  -- Rotation is DISABLED in the shipped policy. Section 35b enables it under a
+  -- named test decision and restores it; this proves the restore happened.
+  if (select allow_key_rotation from kitluy_devices.renewal_policy
+       where environment = 'development') then
+    v_findings := v_findings || 'key rotation is enabled in the shipped development policy';
+  end if;
+
+  if cardinality(v_findings) > 0 then
+    raise exception 'ASSERT FAIL: % finding(s): %',
+      cardinality(v_findings), array_to_string(v_findings, ' | ');
+  end if;
+
+  raise notice 'PASS ws11-renewal-activation-security: the three functions added by group 0130 are SECURITY DEFINER with pinned search_path, owned by the NOLOGIN kitluy_credential_issuer, executable only by the named issuance service and never by PUBLIC, anon or authenticated; the reservation table keeps RLS ENABLE+FORCE; service_role can write neither reservations nor provider-key lifecycle state; the migration membership was handed back; and rotation is still DISABLED in the shipped policy after the test override was restored';
+end $$;
