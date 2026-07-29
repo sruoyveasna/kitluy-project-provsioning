@@ -20,6 +20,7 @@ import {
   verifyDetachedSignature,
 } from "../../src/dev-crypto.js";
 import { runGovernedIssuance, type GovernedIssuanceGateway } from "../../src/issuance-adapter.js";
+import type { IncumbentDeviceKeySigner } from "../../src/same-key-renewal-issuance.js";
 import type {
   CredentialHeadRecord,
   IncumbentCredentialRecord,
@@ -106,10 +107,22 @@ export async function expectRefused(
 // The governed issuance gateway, over a real transaction
 // ---------------------------------------------------------------------------
 
-function pgIssuanceGateway(client: pg.PoolClient): GovernedIssuanceGateway {
+export function pgIssuanceGateway(client: pg.PoolClient): GovernedIssuanceGateway {
   const call = async (sql: string, params: unknown[]): Promise<Record<string, unknown>> => {
-    const result = await client.query<{ result: Record<string, unknown> }>(sql, params);
-    return result.rows[0]?.result ?? {};
+    // Each governed call is its own TRANSACTION in production, so a refusal
+    // rolls back only itself. The suite shares one transaction it must keep
+    // using, and a savepoint reproduces that isolation — without it a single
+    // expected refusal aborts every later assertion in the test.
+    const savepoint = `iss_${randomUUID().replace(/-/g, "")}`;
+    await client.query(`savepoint ${savepoint}`);
+    try {
+      const result = await client.query<{ result: Record<string, unknown> }>(sql, params);
+      await client.query(`release savepoint ${savepoint}`);
+      return result.rows[0]?.result ?? {};
+    } catch (error) {
+      await client.query(`rollback to savepoint ${savepoint}`).catch(() => undefined);
+      throw error;
+    }
   };
   return {
     async prepare(input) {
@@ -218,6 +231,15 @@ export interface IncumbentFixture {
   readonly keyGenerationCount: () => number;
   /** True only if some caller asked the provider for private key material. */
   readonly privateKeyWasExported: () => boolean;
+  /**
+   * The SAME provider key, wrapped for renewal. Proves possession without
+   * surrendering anything: the private half stays inside the provider vault.
+   */
+  readonly signer: IncumbentDeviceKeySigner;
+  /** Every possession proof this fixture's key was asked for. */
+  readonly possessionProofCount: () => number;
+  /** True if provider key ACTIVATION was ever requested. Must stay false. */
+  readonly activationWasCalled: () => boolean;
 }
 
 /**
@@ -242,6 +264,7 @@ export async function createIncumbentFixture(
   // a device_record_id exists — the private half is still unreachable either
   // way, which is the property this fixture must not weaken.
   let generations = 0;
+  let possessionProofs = 0;
   const provider = new DevelopmentDeviceKeyProvider();
   const keyHandleId = `fixture-${suffix}` as DeviceRecordId;
   await provider.generateDeviceKey(keyHandleId, DEVELOPMENT);
@@ -256,7 +279,18 @@ export async function createIncumbentFixture(
   );
   const hardwareProfileId = profile.rows[0]?.id;
   if (hardwareProfileId === undefined) {
-    throw new Error(`the seed hardware profile ${HARDWARE_PROFILE_KEY} is missing`);
+    // NOT a seed row: `supabase/seed/` creates no hardware profiles at all.
+    // This one is created by `supabase/tests/assertions.sql`, so these live
+    // suites require the canonical order. Said explicitly, because "profile is
+    // missing" on its own sends a reader hunting through the seed for
+    // something that was never there.
+    throw new Error(
+      `hardware profile ${HARDWARE_PROFILE_KEY} is absent. It is created by ` +
+        `supabase/tests/assertions.sql, NOT by the seed, so the live device-identity ` +
+        `suites require the canonical order: pnpm db:reset -> db:seed -> db:test -> test:rls ` +
+        `-> vitest. Inventing a profile here would mean guessing certification and ` +
+        `secure-element values that are owner decisions.`,
+    );
   }
 
   const enrolled = await client.query<{ id: string }>(
@@ -398,6 +432,23 @@ export async function createIncumbentFixture(
     notBefore: row.not_before,
     notAfter: row.not_after,
     ca,
+    signer: {
+      publicKeyPem: (reference) =>
+        reference === `dev-device:${keyHandleId}` ? publicKeyPem : null,
+      proveIncumbentPossession: (reference, payload) => {
+        if (reference !== `dev-device:${keyHandleId}`) {
+          throw new Error(`the provider holds no key under ${reference}`);
+        }
+        possessionProofs += 1;
+        // `provePossession` signs INSIDE the provider. There is no path here
+        // that could return key material even if a caller asked for it.
+        return provider.provePossession(keyHandleId, payload);
+      },
+    },
+    possessionProofCount: () => possessionProofs,
+    // Nothing in this fixture calls confirm_provider_key_activation_v1, and a
+    // same-key renewal must never need to.
+    activationWasCalled: () => false,
     keyGenerationCount: () => generations,
     // `DevelopmentDeviceKeyProvider` has no export method at all — not a
     // disabled one, none — so this can only ever be false. It is asserted
