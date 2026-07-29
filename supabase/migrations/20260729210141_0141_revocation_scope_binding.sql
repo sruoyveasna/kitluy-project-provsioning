@@ -329,8 +329,14 @@ comment on function kitluy_devices.bind_revocation_scope() is
 -- BEFORE INSERT only. There is deliberately no UPDATE branch: group 0138's
 -- append-only trigger refuses every UPDATE on this table, and adding one here
 -- would imply otherwise.
-drop trigger if exists trg_revocation_recorded_scopes_bind
-  on kitluy_devices.revocation_recorded_scopes;
+--
+-- No `drop trigger if exists` guard, matching group 0138. A migration runs ONCE
+-- against a database built from zero, so the guard bought nothing but a
+-- development convenience — and `migrations:validate` reads any DROP as a
+-- destructive statement needing an owner-approved marker. Carrying a
+-- `-- kitluy:destructive-approved:` marker for a trigger this same file creates
+-- three lines later would assert an owner decision that does not exist and
+-- would blunt the gate for every later reader.
 create trigger trg_revocation_recorded_scopes_bind
   before insert on kitluy_devices.revocation_recorded_scopes
   for each row execute function kitluy_devices.bind_revocation_scope();
@@ -618,7 +624,7 @@ grant execute on function
   to kitluy_credential_issuer;
 
 comment on function kitluy_devices.verify_revocation_scope_binding_v1(uuid, uuid, text) is
-  'KLD-2026-07-29-DEVICE-REVOCATION-BOUNDARY-002 Ruling 1. Proves that an approval cryptographically commits to an exact recorded affected set before that set may be revoked. Recomputes the canonical scope digest from the identifiers as stored, recomputes the expected approval payload hash from the digest plus reason, environment, subject type, tenant / digital store / store location, identifier count, requester and decision version, and compares it to kitluy_auth.approval_requests.payload_hash. Fails closed on a missing, empty, wildcard, malformed, unbound, mismatched or already-consumed scope. SECURITY DEFINER owned by the NOLOGIN, non-BYPASSRLS kitluy_credential_approval_reader whose only kitluy_auth reach is three Ruling 2 policies plus SELECT on the single payload_hash column this verification requires (RC-015); pinned search_path, no dynamic SQL, no writes; returns an approval_verdict and never a hash, a payload or a scope row. EXECUTE revoked from PUBLIC, granted only to kitluy_credential_issuer.';
+  'KLD-2026-07-29-DEVICE-REVOCATION-BOUNDARY-002 Ruling 1. Proves that an approval cryptographically commits to an exact recorded affected set before that set may be revoked. Recomputes the canonical scope digest from the identifiers as stored, recomputes the expected approval payload hash from the digest plus reason, environment, subject type, tenant / digital store / store location, identifier count, requester and decision version, and compares it to kitluy_auth.approval_requests.payload_hash. Fails closed on a missing, empty, wildcard, malformed, unbound, mismatched or already-consumed scope. SECURITY DEFINER owned by the NOLOGIN, non-BYPASSRLS kitluy_credential_approval_reader whose only kitluy_auth reach is three Ruling 2 policies plus SELECT on the single payload_hash column this verification requires (RC-015); pinned search_path, no dynamic SQL, no writes; returns an approval_verdict and never a hash, a payload or a scope row. EXECUTE is revoked from PUBLIC and granted only to the credential governor, and to nothing else.';
 
 -- ---------------------------------------------------------------------------
 -- 7. CONSUMPTION, CALLABLE ONLY BY THE GOVERNOR.
