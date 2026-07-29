@@ -437,6 +437,10 @@ importers:
         version: 5.7.3
 
   packages/device-identity:
+    dependencies:
+      '@kitluy/job-contracts':
+        specifier: workspace:*
+        version: link:../job-contracts
     devDependencies:
       '@types/node':
         specifier: 'catalog:'

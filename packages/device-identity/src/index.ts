@@ -794,3 +794,4 @@ export * from "./replacement-key-provider.js";
 export * from "./rotate-key-renewal-issuance.js";
 export * from "./renewal-reconciliation.js";
 export * from "./credential-lifecycle.js";
+export * from "./credential-lifecycle-jobs.js";
