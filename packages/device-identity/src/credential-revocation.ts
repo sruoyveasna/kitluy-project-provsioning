@@ -275,6 +275,28 @@ export interface GovernedRevocationCall {
   readonly approvalRequestId: string | null;
   readonly approvedBy: string | null;
   readonly incidentReference: string | null;
+  /**
+   * The RECORDED SCOPE this revocation spends — migration group 0141/0142.
+   *
+   * REQUIRED for PROVIDER_COMPROMISE, SECURITY_INCIDENT and
+   * OTHER_APPROVED_REASON, whose affected set decision §3 says cannot be
+   * derived from the fleet. Absent for those reasons the governed entry point
+   * refuses `KLUY-CRED-REVOCATION-SCOPE-MISSING`, which is the correct answer:
+   * a caller that cannot say what the incident reached is not asking for a
+   * scoped revocation, it is asking to skip the scope.
+   */
+  readonly incidentScopeId?: string | null;
+  /**
+   * Scope SELECTORS for the six fleet-derived reasons. These do not choose the
+   * scope — `resolve_revocation_scope_v1` derives it from the REASON — they
+   * tell the resolver which key, fingerprint or assignment generation the
+   * reason is about. KEY_COMPROMISE without a key reference resolves nothing
+   * and is refused `SCOPE-UNRESOLVED`, which is why they are carried here
+   * rather than left to the caller's imagination.
+   */
+  readonly providerKeyReference?: string | null;
+  readonly publicKeyFingerprint?: string | null;
+  readonly assignmentGeneration?: number | null;
 }
 
 /**
@@ -290,6 +312,15 @@ export interface GovernedRevocationCall {
  * assertion exists to make impossible. Adding one is not an optimisation.
  */
 export interface RevocationGateway {
+  /**
+   * Wraps `kitluy_devices.revoke_device_credential_governed_v1` — the ONE
+   * revocation entry point a runtime identity may execute since migration group
+   * 0145 (RC-019). It is NOT `revoke_device_credential_v1`: that function takes
+   * no scope argument, and EXECUTE on it was revoked from every runtime identity
+   * precisely because an implementation pointed at it would revoke without a
+   * binding. An adapter still aimed there now fails `permission denied`, which
+   * is the intended and safe outcome.
+   */
   revokeDeviceCredential(call: GovernedRevocationCall): Promise<RevocationOutcome>;
 }
 
@@ -330,6 +361,28 @@ export interface RevocationInput {
   readonly approvalRequestId?: string | null;
   readonly approvedBy?: string | null;
   readonly incidentReference?: string | null;
+  /**
+   * The RECORDED SCOPE this revocation spends — migration group 0141/0142.
+   *
+   * REQUIRED for PROVIDER_COMPROMISE, SECURITY_INCIDENT and
+   * OTHER_APPROVED_REASON, whose affected set decision §3 says cannot be
+   * derived from the fleet. Absent for those reasons the governed entry point
+   * refuses `KLUY-CRED-REVOCATION-SCOPE-MISSING`, which is the correct answer:
+   * a caller that cannot say what the incident reached is not asking for a
+   * scoped revocation, it is asking to skip the scope.
+   */
+  readonly incidentScopeId?: string | null;
+  /**
+   * Scope SELECTORS for the six fleet-derived reasons. These do not choose the
+   * scope — `resolve_revocation_scope_v1` derives it from the REASON — they
+   * tell the resolver which key, fingerprint or assignment generation the
+   * reason is about. KEY_COMPROMISE without a key reference resolves nothing
+   * and is refused `SCOPE-UNRESOLVED`, which is why they are carried here
+   * rather than left to the caller's imagination.
+   */
+  readonly providerKeyReference?: string | null;
+  readonly publicKeyFingerprint?: string | null;
+  readonly assignmentGeneration?: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -425,6 +478,10 @@ export async function revokeDeviceCredential(
       approvalRequestId: input.approvalRequestId ?? null,
       approvedBy: approver === "" ? null : approver,
       incidentReference: input.incidentReference ?? null,
+      incidentScopeId: input.incidentScopeId ?? null,
+      providerKeyReference: input.providerKeyReference ?? null,
+      publicKeyFingerprint: input.publicKeyFingerprint ?? null,
+      assignmentGeneration: input.assignmentGeneration ?? null,
     });
   } catch (error) {
     // A transport or constraint failure is a REFUSAL, never a silent success.
