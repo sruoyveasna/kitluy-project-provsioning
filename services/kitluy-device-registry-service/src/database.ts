@@ -208,14 +208,34 @@ export async function withHumanSession<T>(
  *
  * Exists so composition tests can ASSERT the session rather than trust it: a
  * wiring bug that silently ran the emergency door as `service_role` would still
- * revoke the credential, and the test that only checked the outcome would pass.
+ * revoke the credential, and a test that only checked the outcome would pass.
+ *
+ * THE ACTOR READ IS PRIVILEGE-SAFE, and it has to be. `kitluy_issuance_service`
+ * and `kitluy_worker_service` hold no USAGE on `kitluy_auth`, and schema USAGE is
+ * checked when a qualified name is RESOLVED — not when the function is called —
+ * so guarding the call with `has_schema_privilege` in a `CASE` does not help: the
+ * statement fails during parse analysis either way. A savepoint is the only thing
+ * that makes the failure recoverable without poisoning the caller's transaction.
+ *
+ * For those roles a null actor is the CORRECT answer rather than a degraded one:
+ * a service identity has no JWT, `auth.uid()` is null, and the governed emergency
+ * RPC refuses it before looking anything up. That is the RC-021 property.
  */
 export async function observeSessionIdentity(
   client: pg.PoolClient,
 ): Promise<{ readonly role: string; readonly actorId: string | null }> {
-  const { rows } = await client.query<{ role: string; actor_id: string | null }>(
-    `select current_user as role,
-            nullif(kitluy_auth.current_actor_context() ->> 'user_id', '') as actor_id`,
-  );
-  return { role: rows[0]?.role ?? "", actorId: rows[0]?.actor_id ?? null };
+  const roleResult = await client.query<{ role: string }>(`select current_user as role`);
+  const role = roleResult.rows[0]?.role ?? "";
+
+  await client.query("savepoint kitluy_observe_actor");
+  try {
+    const { rows } = await client.query<{ actor_id: string | null }>(
+      `select nullif(kitluy_auth.current_actor_context() ->> 'user_id', '') as actor_id`,
+    );
+    await client.query("release savepoint kitluy_observe_actor");
+    return { role, actorId: rows[0]?.actor_id ?? null };
+  } catch {
+    await client.query("rollback to savepoint kitluy_observe_actor");
+    return { role, actorId: null };
+  }
 }
