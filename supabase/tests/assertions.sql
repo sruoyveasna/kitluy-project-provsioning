@@ -9634,4 +9634,651 @@ begin
 end
 $section44$;
 
-select 'assertions complete: groups 0010-0141 structural contract holds (incl. WS-11-T003 Step 4 approval gate bounded to a NOLOGIN non-BYPASSRLS reader per KLD-2026-07-29-DEVICE-REVOCATION-BOUNDARY-002 Ruling 2, and the Ruling 1 scope binding — the recorded affected set is a computed, immutable cryptographic term of the approval payload hash, verified fail-closed and consumed single-use)' as result;
+
+-- ============================================================================
+-- SECTION 45 — WS-11-T003 Step 4: the binding is CALLED, and the scope is SPENT
+-- BY the revocation it authorizes (migration 0142).
+-- Authority: KLD-2026-07-29-DEVICE-REVOCATION-BOUNDARY-002 **Ruling 1** —
+--   "approval consumption must be single-use and ATOMIC WITH REVOCATION";
+--   migration groups 0139 (the revocation this path CALLS rather than rewrites),
+--   0141 (the binding, the verifier and the consumption row) and 0142 (the call
+--   site).
+--
+-- Section 44 proves the binding holds. NOTHING CALLED IT. A verifier nobody
+-- invokes is not a control, it is a function: Ruling 1 does not ask for the
+-- ABILITY to verify a scope binding, it asks that a scope be verified before the
+-- credentials it names are revoked and spent in the same transaction as the
+-- revocation. Both of those are properties of a CALL SITE, so this section
+-- exercises the call site instead of re-proving the verifier.
+--
+-- THE CHECK THAT IS EASY TO FORGET, AND IS THEREFORE THE ONE PROVED HARDEST.
+-- Verifying that an approval commits to a scope proves the SCOPE is genuine. It
+-- does not prove that the credential now being revoked is INSIDE it. Without a
+-- membership check a perfectly valid, correctly bound, unconsumed scope naming
+-- device A would authorize revoking device B: the binding verifies, the approval
+-- is real, the four-eyes gate passes on its own terms, and a device nobody
+-- reviewed loses its credential. Control 3 presents exactly that scope against
+-- exactly that other device. What makes its refusal mean something rather than a
+-- function that refuses everything is control 5, which revokes the MEMBER with
+-- the very same scope — and, run the other way round, control 3 aimed at the
+-- member does revoke it, which is how this section was checked for vacuity.
+--
+-- ORDER MATTERS, and the section is written in the order the property requires:
+-- every refusal is attempted BEFORE the scope is spent, so control 4 can assert
+-- the thing group 0142's own comment claims — "a refused revocation must not
+-- burn the authority for the one that will succeed" — and control 5 then
+-- succeeds on that same unburned scope.
+--
+-- WHAT THIS SECTION DOES NOT CLAIM. `revoke_device_credential_with_recorded_
+-- scope_v1` RAISES rather than returns when consumption loses, so the revocation
+-- written moments earlier rolls back with it. That branch is reachable only from
+-- a second session racing the first: single-threaded the verifier refuses a
+-- spent scope (control 6) long before consumption is attempted, so asserting it
+-- here would mean asserting dead code. The atomicity that IS provable is
+-- asserted instead — the consumption row names the very `revocation_id` the call
+-- returned, so the scope was spent BY that revocation rather than near it.
+--
+-- The calls are made AS `kitluy_issuance_service`, the one identity group 0142
+-- grants EXECUTE to, so the path is proved reachable by the role that must reach
+-- it and refused to the roles that must not. Nothing here borrows the credential
+-- governor: a call site that needed the governor to be borrowed would not be a
+-- call site.
+-- ============================================================================
+do $section45$
+declare
+  v_findings text[] := array[]::text[];
+  v_msg text := '';
+
+  v_fp       text := encode(sha256(convert_to('t45-'  || gen_random_uuid()::text, 'UTF8')), 'hex');
+  v_fp_other text := encode(sha256(convert_to('t45b-' || gen_random_uuid()::text, 'UTF8')), 'hex');
+  v_fp_named text := encode(sha256(convert_to('t45c-' || gen_random_uuid()::text, 'UTF8')), 'hex');
+  -- The device the scope NAMES, the device it names NOTHING of, and the device
+  -- it reaches only through its key fingerprint.
+  v_device uuid;
+  v_other_device uuid;
+  v_named_device uuid;
+  v_credential uuid;
+  v_other_credential uuid;
+  v_named_credential uuid;
+
+  -- The terms of the binding. They must agree exactly with the scope row, or the
+  -- approval below commits to a set this section did not record.
+  v_env constant text := 'development';
+  v_reason constant kitluy_devices.credential_revocation_reason := 'SECURITY_INCIDENT';
+  v_subject constant text := 'DEVICE';
+  v_tenant constant uuid := '00000000-0000-4000-8000-000000000011';
+  v_store constant uuid := '00000000-0000-4000-8000-000000000015';
+  v_location constant uuid := '00000000-0000-4000-8000-000000000018';
+  v_requester_ref constant text := 'sec-a@45';
+  v_dv constant text := 'KLD-2026-07-29-DEVICE-REVOCATION-BOUNDARY-002';
+  v_keys constant text[] := array['pk-45-alpha'];
+
+  v_requester_id constant uuid := '00000000-0000-4000-8000-000000000007';
+  v_approver_id constant uuid := '00000000-0000-4000-8000-000000000008';
+  v_incident text := 'INC-45-' || gen_random_uuid()::text;
+
+  v_policy uuid;
+  v_ap_ok uuid;
+  v_ap_hash uuid;
+  v_ap_named uuid;
+
+  v_scope_ok uuid;
+  v_scope_hash uuid;
+  v_scope_named uuid;
+  v_scope_missing uuid := gen_random_uuid();
+
+  v_digest_ok text;
+  v_payload_ok text;
+  v_digest_named text;
+  v_payload_named text;
+  v_stored_digest text;
+
+  v_bad kitluy_devices.credential_revocation_reason;
+  v_res jsonb;
+  v_res_binding jsonb;
+  v_res_nullscope jsonb;
+  v_res_noscope jsonb;
+  v_res_noapproval jsonb;
+  v_res_member jsonb;
+  v_res_self jsonb;
+  v_res_ok jsonb;
+  v_res_replay jsonb;
+  v_res_fp jsonb;
+  v_revocation_id uuid;
+  v_state text;
+  v_revoked_at timestamptz;
+  v_reason_text text;
+  v_role text;
+  v_sig text;
+  v_n integer;
+begin
+  -- ------------------------------------------------------------------------
+  -- Fixtures: three real devices holding three real issued credentials, so the
+  -- affected set names identifiers that exist and the revocations below are
+  -- revocations rather than arithmetic.
+  -- ------------------------------------------------------------------------
+  v_device       := pg_temp.ws11_renewable_device('t45',  v_fp);
+  v_other_device := pg_temp.ws11_renewable_device('t45b', v_fp_other);
+  v_named_device := pg_temp.ws11_renewable_device('t45c', v_fp_named);
+  select credential_id into v_credential from kitluy_devices.device_credentials
+   where device_record_id = v_device and certificate_generation = 1;
+  select credential_id into v_other_credential from kitluy_devices.device_credentials
+   where device_record_id = v_other_device and certificate_generation = 1;
+  select credential_id into v_named_credential from kitluy_devices.device_credentials
+   where device_record_id = v_named_device and certificate_generation = 1;
+  if v_credential is null or v_other_credential is null or v_named_credential is null then
+    raise exception 'ASSERT FAIL: section 45 could not issue the credentials it revokes';
+  end if;
+
+  -- The hash each approval must carry, computed from the terms the scope rows
+  -- are about to record — Ruling 1's whole point: an approver commits to a hash,
+  -- and the recorded scope must reproduce it exactly or it is not the set that
+  -- was approved.
+  v_digest_ok := kitluy_devices.revocation_scope_digest_v1(
+    kitluy_devices.canonical_revocation_scope_v1(
+      v_reason, v_env, v_subject, v_tenant, v_store, v_location, v_requester_ref, v_dv,
+      array[v_device], v_keys, array[]::text[], array[]::uuid[]));
+  v_payload_ok := kitluy_devices.revocation_approval_payload_hash_v1(
+    v_digest_ok, v_reason, v_env, v_subject, v_tenant, v_store, v_location,
+    1 + cardinality(v_keys), v_requester_ref, v_dv);
+
+  -- A set that names NO device at all — only a key fingerprint. Control 7 uses
+  -- it to prove membership is resolved through the CREDENTIAL and not merely
+  -- looked up in a list of device ids.
+  v_digest_named := kitluy_devices.revocation_scope_digest_v1(
+    kitluy_devices.canonical_revocation_scope_v1(
+      v_reason, v_env, v_subject, v_tenant, v_store, v_location, v_requester_ref, v_dv,
+      array[]::uuid[], array[]::text[], array[v_fp_named], array[]::uuid[]));
+  v_payload_named := kitluy_devices.revocation_approval_payload_hash_v1(
+    v_digest_named, v_reason, v_env, v_subject, v_tenant, v_store, v_location,
+    1, v_requester_ref, v_dv);
+
+  insert into kitluy_auth.approval_policies
+    (policy_key, version, permission_key, environment, quorum, status, risk_class)
+  values ('cred.revocation.scoped.a4.' || substr(md5(random()::text), 1, 8), 1,
+          'device.credential.revoke', v_env, 1, 'ACTIVE', 'A4')
+  returning id into v_policy;
+
+  insert into kitluy_auth.approval_requests
+    (policy_id, requester_id, resource_type, resource_id, environment, action,
+     payload_hash, reason, status)
+  values (v_policy, v_requester_id, 'device', v_device, v_env,
+          'device_credential_revocation', v_payload_ok,
+          'the affected set of incident 45', 'APPROVED')
+  returning id into v_ap_ok;
+  insert into kitluy_auth.approval_decisions (approval_request_id, approver_id, decision)
+  values (v_ap_ok, v_approver_id, 'APPROVE');
+
+  -- A perfectly good A4 approval, decided by a second person, that commits to
+  -- SOME OTHER affected set. Everything about it is right except the one thing
+  -- Ruling 1 makes decisive.
+  insert into kitluy_auth.approval_requests
+    (policy_id, requester_id, resource_type, resource_id, environment, action,
+     payload_hash, reason, status)
+  values (v_policy, v_requester_id, 'device', v_device, v_env,
+          'device_credential_revocation',
+          encode(sha256(convert_to('45-some-other-set-' || v_incident, 'UTF8')), 'hex'),
+          'an approval committing to another set', 'APPROVED')
+  returning id into v_ap_hash;
+  insert into kitluy_auth.approval_decisions (approval_request_id, approver_id, decision)
+  values (v_ap_hash, v_approver_id, 'APPROVE');
+
+  insert into kitluy_auth.approval_requests
+    (policy_id, requester_id, resource_type, resource_id, environment, action,
+     payload_hash, reason, status)
+  values (v_policy, v_requester_id, 'device', v_named_device, v_env,
+          'device_credential_revocation', v_payload_named,
+          'a set that names a key, not a device', 'APPROVED')
+  returning id into v_ap_named;
+  insert into kitluy_auth.approval_decisions (approval_request_id, approver_id, decision)
+  values (v_ap_named, v_approver_id, 'APPROVE');
+
+  -- The recorded scopes. The digest and the payload hash are COMPUTED by group
+  -- 0141's BEFORE INSERT trigger; the equality below only confirms that the row
+  -- this section is about to spend binds to the hash the approval carries.
+  insert into kitluy_devices.revocation_recorded_scopes (
+    incident_reference, environment, reason_code, approval_request_id,
+    affected_device_ids, affected_key_references, subject_type, tenant_id,
+    digital_store_id, store_location_id, requester_ref, decision_version,
+    recorded_by, approved_by)
+  values (v_incident || '-OK', v_env, v_reason, v_ap_ok, array[v_device], v_keys,
+          v_subject, v_tenant, v_store, v_location, v_requester_ref, v_dv,
+          'sec-a@45', 'sec-b@45')
+  returning incident_scope_id, scope_digest into v_scope_ok, v_stored_digest;
+  if v_stored_digest is distinct from v_digest_ok then
+    v_findings := v_findings ||
+      format('fixture: the recorded scope did not bind to the digest section 45 computed for it');
+  end if;
+
+  insert into kitluy_devices.revocation_recorded_scopes (
+    incident_reference, environment, reason_code, approval_request_id,
+    affected_device_ids, affected_key_references, subject_type, tenant_id,
+    digital_store_id, store_location_id, requester_ref, decision_version,
+    recorded_by, approved_by)
+  values (v_incident || '-HASH', v_env, v_reason, v_ap_hash, array[v_device], v_keys,
+          v_subject, v_tenant, v_store, v_location, v_requester_ref, v_dv,
+          'sec-a@45', 'sec-b@45')
+  returning incident_scope_id into v_scope_hash;
+
+  insert into kitluy_devices.revocation_recorded_scopes (
+    incident_reference, environment, reason_code, approval_request_id,
+    affected_fingerprints, subject_type, tenant_id,
+    digital_store_id, store_location_id, requester_ref, decision_version,
+    recorded_by, approved_by)
+  values (v_incident || '-FP', v_env, v_reason, v_ap_named, array[v_fp_named],
+          v_subject, v_tenant, v_store, v_location, v_requester_ref, v_dv,
+          'sec-a@45', 'sec-b@45')
+  returning incident_scope_id into v_scope_named;
+
+  -- ========================================================================
+  -- CONTROLS 1-4 — EVERYTHING THAT MUST BE REFUSED, ATTEMPTED FIRST.
+  --
+  -- Run AS kitluy_issuance_service, which is the identity group 0142 grants
+  -- EXECUTE to. The results are captured here and judged after `reset role`,
+  -- because judging them requires reading kitluy_devices tables the executor
+  -- deliberately holds no grant on.
+  -- ========================================================================
+  execute 'set role kitluy_issuance_service';
+  begin
+    -- CONTROL 1 — a reason whose scope decision §3 derives FROM THE FLEET may
+    -- not arrive here carrying a recorded set. Letting one through would be a
+    -- caller choosing scope by the back door, which is the exact thing §3
+    -- forbids; all six such reasons are tried, not one representative.
+    foreach v_bad in array array[
+      'KEY_COMPROMISE', 'DEVICE_LOST', 'DEVICE_STOLEN', 'ASSIGNMENT_INVALIDATED',
+      'CERTIFICATE_MISISSUANCE', 'ADMINISTRATIVE_REPLACEMENT'
+    ]::kitluy_devices.credential_revocation_reason[]
+    loop
+      v_res := kitluy_devices.revoke_device_credential_with_recorded_scope_v1(
+        's45-reason-' || v_bad::text || '-' || gen_random_uuid()::text,
+        v_device, v_env, 'device_identity', 1, v_bad,
+        'a reason whose scope decision 3 derives from the fleet', 'REPROVISION_REQUIRED',
+        'requester@45', 'SECTION45', v_scope_ok, v_ap_ok, 'approver@45', null);
+      if coalesce(v_res ->> 'outcome', 'nothing') <> 'REVOCATION_REFUSED'
+         or coalesce(v_res ->> 'refusal_code', 'nothing')
+            <> 'KLUY-CRED-REVOCATION-SCOPE-REASON-NOT-RECORDABLE' then
+        v_findings := v_findings ||
+          format('control 1: %s carried a RECORDED scope through the call site: %s', v_bad, v_res);
+      end if;
+    end loop;
+
+    -- CONTROL 2 — THE BINDING IS VERIFIED BEFORE ANYTHING IS REVOKED. The
+    -- approval below is real, A4, decided by a second person and names this very
+    -- device; it commits to another affected set, and that alone is fatal.
+    v_res_binding := kitluy_devices.revoke_device_credential_with_recorded_scope_v1(
+      's45-binding-' || gen_random_uuid()::text, v_device, v_env, 'device_identity', 1,
+      v_reason, 'an approval that commits to another affected set', 'REPROVISION_REQUIRED',
+      'requester@45', 'SECTION45', v_scope_hash, v_ap_hash, 'approver@45', null);
+    -- ...and the three ways a caller can arrive with no usable authority at all.
+    v_res_nullscope := kitluy_devices.revoke_device_credential_with_recorded_scope_v1(
+      's45-nullscope-' || gen_random_uuid()::text, v_device, v_env, 'device_identity', 1,
+      v_reason, 'no recorded scope at all', 'REPROVISION_REQUIRED',
+      'requester@45', 'SECTION45', null::uuid, v_ap_ok, 'approver@45', null);
+    v_res_noscope := kitluy_devices.revoke_device_credential_with_recorded_scope_v1(
+      's45-noscope-' || gen_random_uuid()::text, v_device, v_env, 'device_identity', 1,
+      v_reason, 'a scope id naming nothing', 'REPROVISION_REQUIRED',
+      'requester@45', 'SECTION45', v_scope_missing, v_ap_ok, 'approver@45', null);
+    v_res_noapproval := kitluy_devices.revoke_device_credential_with_recorded_scope_v1(
+      's45-noapproval-' || gen_random_uuid()::text, v_device, v_env, 'device_identity', 1,
+      v_reason, 'a recorded scope with no approval', 'REPROVISION_REQUIRED',
+      'requester@45', 'SECTION45', v_scope_ok, null::uuid, 'approver@45', null);
+
+    -- CONTROL 3 — MEMBERSHIP. The scope is genuine, correctly bound and unspent,
+    -- and the device presented is not in it. A verified binding does not make a
+    -- scope authority over a credential it does not name.
+    v_res_member := kitluy_devices.revoke_device_credential_with_recorded_scope_v1(
+      's45-member-' || gen_random_uuid()::text, v_other_device, v_env, 'device_identity', 1,
+      v_reason, 'a device the approvers never saw', 'REPROVISION_REQUIRED',
+      'requester@45', 'SECTION45', v_scope_ok, v_ap_ok, 'approver@45', null);
+
+    -- CONTROL 4 — a refusal RAISED BY THE INNER PATH, after the binding and the
+    -- membership have both passed, so the scope reaches the revocation and the
+    -- revocation declines it. Group 0139's four-eyes gate is not re-implemented
+    -- here and not bypassed: the requester is simply their own second person.
+    v_res_self := kitluy_devices.revoke_device_credential_with_recorded_scope_v1(
+      's45-self-' || gen_random_uuid()::text, v_device, v_env, 'device_identity', 1,
+      v_reason, 'the requester is their own second person', 'REPROVISION_REQUIRED',
+      'requester@45', 'SECTION45', v_scope_ok, v_ap_ok, 'requester@45', null);
+
+    execute 'reset role';
+  exception when others then
+    get stacked diagnostics v_msg = message_text;
+    execute 'reset role';
+    v_findings := v_findings ||
+      format('controls 1-4: the call-site probe did not complete: %s', v_msg);
+  end;
+
+  if coalesce(v_res_binding ->> 'outcome', 'nothing') <> 'REVOCATION_REFUSED'
+     or coalesce(v_res_binding ->> 'refusal_code', 'nothing') not like '%HASH-MISMATCH%' then
+    v_findings := v_findings ||
+      format('control 2: a scope whose approval commits to another set revoked a credential: %s',
+             v_res_binding);
+  end if;
+  if coalesce(v_res_nullscope ->> 'refusal_code', 'nothing') not like '%SCOPE-MISSING%'
+     or coalesce(v_res_noscope ->> 'refusal_code', 'nothing') not like '%SCOPE-MISSING%' then
+    v_findings := v_findings ||
+      format('control 2: a missing recorded scope did not fail closed: %s / %s',
+             v_res_nullscope, v_res_noscope);
+  end if;
+  if coalesce(v_res_noapproval ->> 'refusal_code', 'nothing') not like '%SCOPE-UNAPPROVED%' then
+    v_findings := v_findings ||
+      format('control 2: a recorded scope presented with no approval did not fail closed: %s',
+             v_res_noapproval);
+  end if;
+  if coalesce(v_res_member ->> 'outcome', 'nothing') <> 'REVOCATION_REFUSED'
+     or coalesce(v_res_member ->> 'refusal_code', 'nothing')
+        <> 'KLUY-CRED-REVOCATION-SCOPE-NOT-IN-SET' then
+    v_findings := v_findings ||
+      format('control 3: A GENUINE SCOPE REVOKED A DEVICE IT DOES NOT NAME: %s', v_res_member);
+  end if;
+  if coalesce(v_res_self ->> 'outcome', 'nothing') <> 'REVOCATION_REFUSED'
+     or coalesce(v_res_self ->> 'refusal_code', 'nothing')
+        <> 'KLUY-CRED-REVOCATION-SELF-APPROVED' then
+    v_findings := v_findings ||
+      format('control 4: the inner four-eyes gate did not refuse a self-approved scoped revocation: %s',
+             v_res_self);
+  end if;
+
+  -- Not one of those ten refusals touched a credential, wrote evidence, or —
+  -- the property group 0142 states in its own words — burned the scope.
+  if exists (select 1 from kitluy_devices.device_credentials
+              where credential_id in (v_credential, v_other_credential, v_named_credential)
+                and state::text <> 'issued') then
+    v_findings := v_findings ||
+      format('controls 1-4: a REFUSED scoped revocation changed a credential');
+  end if;
+  if exists (select 1 from kitluy_devices.device_credential_revocations
+              where credential_id in (v_credential, v_other_credential, v_named_credential)) then
+    v_findings := v_findings || format('controls 1-4: a REFUSED scoped revocation wrote evidence');
+  end if;
+  if exists (select 1 from kitluy_devices.revocation_scope_consumptions
+              where incident_scope_id in (v_scope_ok, v_scope_hash, v_scope_named)) then
+    v_findings := v_findings ||
+      format('control 4: A REFUSED REVOCATION BURNED THE SCOPE THAT WOULD HAVE AUTHORIZED THE NEXT ONE');
+  end if;
+
+  -- ========================================================================
+  -- CONTROLS 5-7 — THE SCOPED REVOCATION THAT MUST SUCCEED, ITS SINGLE USE,
+  -- and membership resolved through the credential rather than a device list.
+  -- The same scope, the same approval and the same device as control 4.
+  -- ========================================================================
+  execute 'set role kitluy_issuance_service';
+  begin
+    -- No incident reference is supplied, so the one written on the evidence must
+    -- come from the RECORDED SCOPE — the incident the approvers were shown.
+    v_res_ok := kitluy_devices.revoke_device_credential_with_recorded_scope_v1(
+      's45-ok-' || gen_random_uuid()::text, v_device, v_env, 'device_identity', 1,
+      v_reason, 'the incident the recorded scope was approved for', 'REPROVISION_REQUIRED',
+      'requester@45', 'SECTION45', v_scope_ok, v_ap_ok, 'approver@45', null);
+    v_res_replay := kitluy_devices.revoke_device_credential_with_recorded_scope_v1(
+      's45-replay-' || gen_random_uuid()::text, v_device, v_env, 'device_identity', 1,
+      v_reason, 'the same authority, a second time', 'REPROVISION_REQUIRED',
+      'requester@45', 'SECTION45', v_scope_ok, v_ap_ok, 'approver@45', null);
+    v_res_fp := kitluy_devices.revoke_device_credential_with_recorded_scope_v1(
+      's45-fp-' || gen_random_uuid()::text, v_named_device, v_env, 'device_identity', 1,
+      v_reason, 'a set that names this credential by its key fingerprint', 'REPROVISION_REQUIRED',
+      'requester@45', 'SECTION45', v_scope_named, v_ap_named, 'approver@45', null);
+    execute 'reset role';
+  exception when others then
+    get stacked diagnostics v_msg = message_text;
+    execute 'reset role';
+    v_findings := v_findings ||
+      format('controls 5-7: the scoped revocation did not complete: %s', v_msg);
+  end;
+
+  if coalesce(v_res_ok ->> 'outcome', 'nothing') <> 'REVOKED' then
+    v_findings := v_findings ||
+      format('control 5: A CORRECTLY BOUND, UNSPENT SCOPE COULD NOT REVOKE ITS OWN DEVICE: %s',
+             v_res_ok);
+  else
+    v_revocation_id := (v_res_ok ->> 'revocation_id')::uuid;
+    if (v_res_ok ->> 'scope_consumed')::boolean is not true
+       or (v_res_ok ->> 'incident_scope_id')::uuid is distinct from v_scope_ok
+       or (v_res_ok ->> 'scope_digest') is distinct from v_digest_ok then
+      v_findings := v_findings ||
+        format('control 5: the revocation does not report the scope it spent: %s', v_res_ok);
+    end if;
+
+    select state::text, revoked_at, revocation_reason
+      into v_state, v_revoked_at, v_reason_text
+      from kitluy_devices.device_credentials where credential_id = v_credential;
+    if v_state <> 'revoked' or v_revoked_at is null
+       or coalesce(v_reason_text, '') not like 'SECURITY_INCIDENT:%' then
+      v_findings := v_findings ||
+        format('control 5: the scoped revocation left the credential %s / %s',
+               v_state, coalesce(v_reason_text, 'no account'));
+    end if;
+
+    -- The evidence, and the incident reference taken from the recorded scope
+    -- because the caller supplied none.
+    if not exists (
+      select 1 from kitluy_devices.device_credential_revocations
+       where revocation_id = v_revocation_id
+         and credential_id = v_credential
+         and reason_code = 'SECURITY_INCIDENT'
+         and approval_request_id = v_ap_ok
+         and approved_by = 'approver@45'
+         and incident_reference = v_incident || '-OK') then
+      v_findings := v_findings ||
+        format('control 5: the scoped revocation wrote no evidence carrying the recorded incident reference');
+    end if;
+    if not exists (select 1 from kitluy_devices.device_recovery_cases
+                    where revocation_id = v_revocation_id and state = 'open') then
+      v_findings := v_findings || format('control 5: the scoped revocation opened no recovery case');
+    end if;
+
+    -- ATOMIC WITH THE REVOCATION, as far as a single session can prove it: the
+    -- consumption row names THIS revocation and THIS digest, so the scope was
+    -- spent BY the revocation rather than merely around the same time.
+    if not exists (
+      select 1 from kitluy_devices.revocation_scope_consumptions
+       where incident_scope_id = v_scope_ok
+         and approval_request_id = v_ap_ok
+         and revocation_id = v_revocation_id
+         and scope_digest = v_digest_ok) then
+      v_findings := v_findings ||
+        format('control 5: the spent scope is not tied to the revocation it authorized');
+    end if;
+  end if;
+
+  -- CONTROL 6 — the scope is now authority for nothing, including for itself.
+  if coalesce(v_res_replay ->> 'outcome', 'nothing') <> 'REVOCATION_REFUSED'
+     or coalesce(v_res_replay ->> 'refusal_code', 'nothing') not like '%SCOPE-CONSUMED%' then
+    v_findings := v_findings ||
+      format('control 6: A SPENT SCOPE AUTHORIZED A SECOND REVOCATION: %s', v_res_replay);
+  end if;
+  if (select count(*) from kitluy_devices.revocation_scope_consumptions
+       where incident_scope_id = v_scope_ok) <> 1 then
+    v_findings := v_findings || format('control 6: a scope was consumed more than once');
+  end if;
+
+  -- CONTROL 7 — membership resolved through the CREDENTIAL: a scope naming no
+  -- device at all still reaches the credential whose key fingerprint it names.
+  if coalesce(v_res_fp ->> 'outcome', 'nothing') <> 'REVOKED' then
+    v_findings := v_findings ||
+      format('control 7: a scope naming the credential by KEY FINGERPRINT could not revoke it: %s',
+             v_res_fp);
+  end if;
+  -- ...and after three successful and ten refused calls, the device no scope
+  -- ever named still holds its credential.
+  if (select state::text from kitluy_devices.device_credentials
+       where credential_id = v_other_credential) <> 'issued' then
+    v_findings := v_findings ||
+      format('control 7: the device the recorded scope never named lost its credential anyway');
+  end if;
+
+  -- ========================================================================
+  -- CONTROL 8 — THE BOUNDARY. The call site is the ONLY way a recorded-scope
+  -- reason may revoke, so who can execute it is the whole of the question.
+  -- Four roles really try it; the catalogue then corroborates the PUBLIC
+  -- revoke, the ownership and the pinned search_path. The probe is deliberately
+  -- given a nonexistent scope and a non-recordable reason so that a role which
+  -- WERE permitted would still change nothing while being caught.
+  -- ========================================================================
+  foreach v_role in array array[
+    'anon', 'authenticated', 'kitluy_worker_service', 'kitluy_job_governor']
+  loop
+    if exists (select 1 from pg_roles where rolname = v_role) then
+      begin
+        execute format('set role %I', v_role);
+        begin
+          perform kitluy_devices.revoke_device_credential_with_recorded_scope_v1(
+            's45-boundary-' || gen_random_uuid()::text, v_device, v_env, 'device_identity', 1,
+            'KEY_COMPROMISE', 'boundary probe', 'REPROVISION_REQUIRED',
+            v_role, 'SECTION45', v_scope_missing, v_ap_ok, 'approver@45', null);
+          v_findings := v_findings ||
+            format('control 8: %s executed the scope-bound revocation call site', v_role);
+        exception when insufficient_privilege then
+          null;
+        end;
+        execute 'reset role';
+      exception when others then
+        get stacked diagnostics v_msg = message_text;
+        execute 'reset role';
+        v_findings := v_findings ||
+          format('control 8: the execute probe for %s did not complete: %s', v_role, v_msg);
+      end;
+    end if;
+  end loop;
+
+  v_n := 0;
+  for v_sig in
+    select p.oid::regprocedure::text
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'kitluy_devices'
+       and p.proname in ('canonical_identifier_list_v1', 'canonical_revocation_scope_v1',
+                         'revocation_scope_digest_v1', 'revocation_approval_payload_hash_v1',
+                         'credential_revocation_approval_payload_hash_v1',
+                         'verify_revocation_scope_binding_v1', 'revocation_scope_consumed_v1',
+                         'consume_revocation_scope_v1',
+                         'revoke_device_credential_with_recorded_scope_v1')
+  loop
+    v_n := v_n + 1;
+    if has_function_privilege('public', v_sig, 'execute') then
+      v_findings := v_findings || format('control 8: PUBLIC can execute %s', v_sig);
+    end if;
+    if not exists (
+      select 1 from pg_proc p where p.oid = v_sig::regprocedure
+         and p.proconfig is not null
+         and exists (select 1 from unnest(p.proconfig) c where c like 'search\_path=%')) then
+      v_findings := v_findings || format('control 8: %s does not pin its search_path', v_sig);
+    end if;
+  end loop;
+  if v_n <> 9 then
+    v_findings := v_findings ||
+      format('control 8: %s of the 9 functions this path is built from were found, so the boundary scan is incomplete',
+             v_n);
+  end if;
+
+  -- OWNERSHIP, which is the split that lets Ruling 1 and Ruling 2 both hold: the
+  -- call site, the verifier, the consumer and the single-use helper belong to
+  -- the governor, and the ONE function that touches kitluy_auth belongs to the
+  -- NOLOGIN, non-BYPASSRLS approval reader.
+  if not exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'kitluy_devices'
+       and p.proname = 'revoke_device_credential_with_recorded_scope_v1'
+       and p.prosecdef
+       and pg_get_userbyid(p.proowner) = 'kitluy_credential_issuer') then
+    v_findings := v_findings ||
+      format('control 8: the call site is not a SECURITY DEFINER owned by kitluy_credential_issuer');
+  end if;
+  if exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'kitluy_devices'
+       and p.proname in ('verify_revocation_scope_binding_v1', 'consume_revocation_scope_v1',
+                         'revocation_scope_consumed_v1')
+       and (not p.prosecdef or pg_get_userbyid(p.proowner) <> 'kitluy_credential_issuer')) then
+    v_findings := v_findings ||
+      format('control 8: the verifier, the consumer or the single-use helper left the governor');
+  end if;
+  if not exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'kitluy_devices'
+       and p.proname = 'credential_revocation_approval_payload_hash_v1'
+       and p.prosecdef
+       and pg_get_userbyid(p.proowner) = 'kitluy_credential_approval_reader') then
+    v_findings := v_findings ||
+      format('control 8: the ONE function that touches kitluy_auth is not owned by the approval reader');
+  end if;
+
+  -- The four pure helpers stay closed to everything except the governor and the
+  -- reader: a digest function the executor could reach is a free oracle for
+  -- confirming a guessed affected set.
+  for v_sig in
+    select p.oid::regprocedure::text
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'kitluy_devices'
+       and p.proname in ('canonical_identifier_list_v1', 'canonical_revocation_scope_v1',
+                         'revocation_scope_digest_v1', 'revocation_approval_payload_hash_v1')
+  loop
+    if has_function_privilege('kitluy_issuance_service', v_sig, 'execute')
+       or has_function_privilege('service_role', v_sig, 'execute')
+       or has_function_privilege('anon', v_sig, 'execute') then
+      v_findings := v_findings ||
+        format('control 8: %s is reachable outside the governor and the approval reader', v_sig);
+    end if;
+  end loop;
+
+  if not has_function_privilege('kitluy_issuance_service',
+       'kitluy_devices.revoke_device_credential_with_recorded_scope_v1(text, uuid, text, text, integer, kitluy_devices.credential_revocation_reason, text, kitluy_devices.credential_recovery_disposition, text, text, uuid, uuid, text, text)',
+       'execute') then
+    v_findings := v_findings ||
+      format('control 8: the named executor cannot reach the only scoped revocation path');
+  end if;
+  -- ...and holding the call site is NOT holding its parts: neither the executor
+  -- nor service_role may verify or consume a scope on its own.
+  if has_function_privilege('kitluy_issuance_service',
+       'kitluy_devices.verify_revocation_scope_binding_v1(uuid, uuid, text)', 'execute')
+     or has_function_privilege('kitluy_issuance_service',
+       'kitluy_devices.consume_revocation_scope_v1(uuid, uuid, uuid, text, text)', 'execute')
+     or has_function_privilege('service_role',
+       'kitluy_devices.verify_revocation_scope_binding_v1(uuid, uuid, text)', 'execute')
+     or has_function_privilege('service_role',
+       'kitluy_devices.consume_revocation_scope_v1(uuid, uuid, uuid, text, text)', 'execute') then
+    v_findings := v_findings ||
+      format('control 8: the executor can verify or consume a scope outside the call site');
+  end if;
+  -- service_role reaches the call site, and ONLY as the issuance service group
+  -- 0127 recorded it may assume ("service_role IS the trusted issuance service
+  -- in this stack"). That membership is the whole of its reach here — it is not
+  -- a member of the credential governor, and the two checks above say it cannot
+  -- verify or consume on its own.
+  if not exists (select 1 from pg_auth_members m
+                  join pg_roles r on r.oid = m.member
+                  join pg_roles g on g.oid = m.roleid
+                 where r.rolname = 'service_role'
+                   and g.rolname = 'kitluy_issuance_service') then
+    v_findings := v_findings ||
+      format('control 8: service_role no longer reaches the call site through the recorded issuance membership');
+  end if;
+  if exists (select 1 from pg_auth_members m
+              join pg_roles r on r.oid = m.member
+              join pg_roles g on g.oid = m.roleid
+             where r.rolname = 'service_role'
+               and g.rolname = 'kitluy_credential_issuer') then
+    v_findings := v_findings ||
+      format('control 8: service_role became a member of the credential governor');
+  end if;
+
+  -- This section borrowed nothing, and nothing was left borrowed by the ones
+  -- before it.
+  if exists (select 1 from pg_auth_members m
+              join pg_roles r on r.oid = m.member
+              join pg_roles g on g.oid = m.roleid
+             where g.rolname in ('kitluy_credential_issuer', 'kitluy_credential_approval_reader')
+               and not r.rolsuper) then
+    v_findings := v_findings ||
+      format('control 8: a non-superuser holds membership of the credential governor or the approval reader');
+  end if;
+
+  if cardinality(v_findings) > 0 then
+    raise exception 'ASSERT FAIL: % scope-bound-revocation finding(s): %',
+      cardinality(v_findings), array_to_string(v_findings, ' | ');
+  end if;
+
+  raise notice 'PASS ws11-scope-bound-revocation: group 0141''s binding is CALLED, and nothing reaches a credential without it (KLD-2026-07-29-DEVICE-REVOCATION-BOUNDARY-002 Ruling 1, migration 0142) — every reason decision §3 derives from the fleet (KEY_COMPROMISE, DEVICE_LOST, DEVICE_STOLEN, ASSIGNMENT_INVALIDATED, CERTIFICATE_MISISSUANCE and ADMINISTRATIVE_REPLACEMENT) is refused a RECORDED set outright, so a caller cannot choose scope by the back door; a real A4 approval decided by a second person that commits to ANOTHER affected set is refused HASH-MISMATCH, and a call with no scope at all, a scope id naming nothing and a recorded scope presented with no approval each fail closed BEFORE any revocation; a genuine, correctly bound, unconsumed scope naming one device REFUSES to revoke a device it does not name (SCOPE-NOT-IN-SET) — the check a verified binding alone would never supply, and the one this section was checked against by aiming it at the member instead, which revokes; not one of those ten refusals changed a credential, wrote evidence or SPENT the scope, so the authority survived for the revocation that would succeed — and it did: the SAME scope, approval and device then revoked end to end, with `revoked_at` and `revocation_reason` written beside the state, append-only evidence naming the approval and carrying the incident reference taken from the recorded scope because the caller supplied none, an OPEN reprovision recovery case, and a consumption row naming the very `revocation_id` the call returned, which is what makes consumption ATOMIC WITH the revocation rather than adjacent to it; the scope is then authority for nothing, the replay is refused CONSUMED with no second consumption row and no second revocation, membership resolved through the CREDENTIAL revokes a device the scope names ONLY by key fingerprint, and the device no recorded scope ever named still holds its credential after three successful and ten refused calls; and the boundary holds — anon, authenticated, the worker service and the job governor are each refused EXECUTE on the call site while kitluy_issuance_service holds it and PROVED it by revoking, service_role reaches it only through the issuance membership group 0127 recorded and is a member of no credential governor, neither of them may verify or consume a scope on its own, PUBLIC holds EXECUTE on none of the nine functions this path is built from and all nine pin their search_path, the call site, the verifier, the consumer and the single-use helper are governor-owned SECURITY DEFINERs while the ONE function that touches kitluy_auth stays owned by the NOLOGIN, non-BYPASSRLS kitluy_credential_approval_reader, the four pure helpers are reachable by neither the executor nor service_role nor anon, and no non-superuser holds membership of the governor or the reader';
+end
+$section45$;
+
+select 'assertions complete: groups 0010-0142 structural contract holds (incl. WS-11-T003 Step 4 approval gate bounded to a NOLOGIN non-BYPASSRLS reader per KLD-2026-07-29-DEVICE-REVOCATION-BOUNDARY-002 Ruling 2, the Ruling 1 scope binding — the recorded affected set is a computed, immutable cryptographic term of the approval payload hash — and the call site that VERIFIES that binding, checks membership and spends the scope in the same transaction as the revocation it authorizes)' as result;
