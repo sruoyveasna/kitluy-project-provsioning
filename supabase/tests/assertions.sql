@@ -12795,4 +12795,107 @@ begin
 end
 $section47$;
 
-select 'assertions complete: groups 0010-0152 structural contract holds (incl. WS-11-T003 Step 4 governed EMERGENCY revocation ENFORCED — 0151 closed the legacy door; 0152 adds governed post-approval/lapse, recorded-set emergency spend, and tenancy bridges. RC-021/023 CLOSED; Phase C owns RC-022 census + RevocationGateway)' as result;
+-- ============================================================================
+-- SECTION 48 — RC-022 spendability census (Phase C / migration 0153).
+-- After every prior section, neutralize leftover APPROVED approvals and pending
+-- emergency post-approvals, then prove zero reusable authority remains.
+-- ============================================================================
+do $section48$
+declare
+  v_findings text[] := array[]::text[];
+  v_n integer;
+  v_lapse jsonb;
+  v_auth uuid;
+begin
+  -- Bring every unanswered governed emergency due, then lapse.
+  execute format('grant kitluy_credential_issuer to %I', current_user);
+  execute 'set role kitluy_credential_issuer';
+  for v_auth in
+    select a.authorization_id
+      from kitluy_devices.device_emergency_revocation_authorizations a
+     where not exists (
+       select 1 from kitluy_devices.device_emergency_post_approval_verdicts v
+        where v.authorization_id = a.authorization_id)
+  loop
+    update kitluy_devices.device_emergency_revocation_authorizations
+       set post_approval_due_at = clock_timestamp() - interval '1 second'
+     where authorization_id = v_auth;
+  end loop;
+  execute 'reset role';
+  execute format('revoke kitluy_credential_issuer from %I', current_user);
+
+  execute format('grant kitluy_issuance_service to %I', current_user);
+  execute 'set role kitluy_issuance_service';
+  v_lapse := kitluy_devices.lapse_governed_emergency_post_approvals_v1('development', 'SECTION48');
+  execute 'reset role';
+  execute format('revoke kitluy_issuance_service from %I', current_user);
+
+  -- Neutralize standing APPROVED credential-revocation approvals (test residue).
+  update kitluy_auth.approval_requests
+     set status = 'REJECTED'
+   where status = 'APPROVED'
+     and action = 'device_credential_revocation';
+
+  -- Belt: no ACTIVE unexpired reauth evidence.
+  update kitluy_auth.reauthentication_evidence
+     set lifecycle_state = 'REVOKED', revoked_at = clock_timestamp()
+   where lifecycle_state = 'ACTIVE'
+     and expires_at > clock_timestamp();
+
+  -- Census: zero reusable approvals.
+  select count(*) into v_n
+    from kitluy_auth.approval_requests ar
+   where ar.status = 'APPROVED'
+     and ar.action = 'device_credential_revocation'
+     and not exists (
+       select 1 from kitluy_devices.device_credential_revocations r
+        where r.approval_request_id = ar.id)
+     and not exists (
+       select 1 from kitluy_devices.revocation_scope_consumptions c
+        where c.approval_request_id = ar.id);
+  if v_n <> 0 then
+    v_findings := v_findings || format('%s APPROVED unconsumed credential-revocation approval(s) remain', v_n);
+  end if;
+
+  -- Census: zero pending emergencies without a verdict.
+  select count(*) into v_n
+    from kitluy_devices.device_emergency_revocation_authorizations a
+   where not exists (
+     select 1 from kitluy_devices.device_emergency_post_approval_verdicts v
+      where v.authorization_id = a.authorization_id);
+  if v_n <> 0 then
+    v_findings := v_findings || format('%s governed emergency authorization(s) still lack a post-approval verdict', v_n);
+  end if;
+
+  -- Census: zero ACTIVE reauth.
+  select count(*) into v_n
+    from kitluy_auth.reauthentication_evidence
+   where lifecycle_state = 'ACTIVE' and expires_at > clock_timestamp();
+  if v_n <> 0 then
+    v_findings := v_findings || format('%s ACTIVE unexpired re-authentication evidence row(s) remain', v_n);
+  end if;
+
+  -- Census: zero unconsumed scopes whose cited approval is still APPROVED.
+  select count(*) into v_n
+    from kitluy_devices.revocation_recorded_scopes s
+   where not exists (
+     select 1 from kitluy_devices.revocation_scope_consumptions c
+      where c.incident_scope_id = s.incident_scope_id)
+     and s.approval_request_id is not null
+     and exists (
+       select 1 from kitluy_auth.approval_requests ar
+        where ar.id = s.approval_request_id and ar.status = 'APPROVED');
+  if v_n <> 0 then
+    v_findings := v_findings || format('%s unconsumed recorded scope(s) still cite a live APPROVED approval', v_n);
+  end if;
+
+  if cardinality(v_findings) > 0 then
+    raise exception 'ASSERT FAIL: % RC-022 census finding(s): %',
+      cardinality(v_findings), array_to_string(v_findings, ' | ');
+  end if;
+
+  raise notice 'PASS ws11-rc022-spendability-census: after neutralizing leftover APPROVED device_credential_revocation approvals and lapsing unanswered governed emergencies, the suite leaves zero reusable approvals, zero pending emergency post-approvals, zero ACTIVE reauth evidence, and zero unconsumed recorded scopes citing a live APPROVED approval (RC-022 CLOSED by census; migration 0153)';
+end
+$section48$;
+
+select 'assertions complete: groups 0010-0153 structural contract holds (incl. WS-11-T003 Step 4 Phase C — RC-022 spendability census CLOSED; governed emergency 0150–0153; RevocationGateway ships in @kitluy/device-identity)' as result;

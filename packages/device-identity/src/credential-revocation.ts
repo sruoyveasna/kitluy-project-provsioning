@@ -326,13 +326,12 @@ export interface GovernedRevocationCall {
  */
 export interface RevocationGateway {
   /**
-   * Wraps `kitluy_devices.revoke_device_credential_governed_v1` — the ONE
+   * Wraps `kitluy_devices.revoke_device_credential_bound_v1` — the ONE normal
    * revocation entry point a runtime identity may execute since migration group
-   * 0145 (RC-019). It is NOT `revoke_device_credential_v1`: that function takes
-   * no scope argument, and EXECUTE on it was revoked from every runtime identity
-   * precisely because an implementation pointed at it would revoke without a
-   * binding. An adapter still aimed there now fails `permission denied`, which
-   * is the intended and safe outcome.
+   * 0147 (RC-019). It is NOT `revoke_device_credential_v1` and NOT the
+   * tautological `revoke_device_credential_governed_v1`: EXECUTE on both was
+   * revoked from every runtime identity. An adapter still aimed there fails
+   * `permission denied`, which is the intended and safe outcome.
    */
   revokeDeviceCredential(call: GovernedRevocationCall): Promise<RevocationOutcome>;
 }
