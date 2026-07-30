@@ -76,6 +76,22 @@ export {
 } from "./online-verifier.js";
 
 export {
+  UNSIGNED_SIGNER_KEY_ID,
+  buildRevocationSnapshot,
+  canonicalPayload,
+  enforcedRevocationUnion,
+  payloadDigest,
+  recomputePayloadDigest,
+  scopedDigest,
+  verifySnapshotScope,
+  type BuildSnapshotOptions,
+  type EnforcedRevocations,
+  type ScopedRevocationSnapshot,
+  type SnapshotScope,
+  type SnapshotScopeVerdict,
+} from "./revocation-snapshot-builder.js";
+
+export {
   EMERGENCY_LAPSE_JOB_KIND,
   createEmergencyLapseWorker,
   emergencyLapseDedupeKey,

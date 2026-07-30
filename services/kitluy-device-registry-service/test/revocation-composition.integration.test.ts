@@ -53,10 +53,23 @@ import {
   withServiceRole,
 } from "../src/database.js";
 import { RedactedRevocationError } from "../src/revocation-failures.js";
+import {
+  buildRevocationSnapshot,
+  recomputePayloadDigest,
+  verifySnapshotScope,
+} from "../src/revocation-snapshot-builder.js";
 import type { DeviceRevocationRuntime } from "../src/composition.js";
 
 const LOCAL_DSN = "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
 const RUN = randomUUID().slice(0, 8);
+
+/**
+ * The seeded scope the fixture device is assigned to. Read from the seed rather
+ * than invented, because `verifySnapshotScope` compares against a real Store.
+ */
+const TENANT_ID = "00000000-0000-4000-8000-000000000001";
+const DIGITAL_STORE_ID = "00000000-0000-4000-8000-000000000002";
+const STORE_LOCATION_ID = "00000000-0000-4000-8000-000000000003";
 const ENV = { DEVICE_REGISTRY_DATABASE_URL: LOCAL_DSN, KITLUY_ENV: "local" } as const;
 
 async function reachable(): Promise<boolean> {
@@ -361,6 +374,56 @@ describe.skipIf(!live)("the online verifier denies a revoked credential", () => 
       [...direct.revokedDeviceRecordIds].sort(),
     );
     expect(bridged.isCertificateRevoked(fixture.serialNumber)).toBe(true);
+  });
+
+  it("builds an offline snapshot POPULATED from authoritative state", async () => {
+    // RV-GW-003 was that `revokedCertificateSerials` was caller-supplied and
+    // nothing ever filled it, so an offline Hub enforced nothing while the code
+    // read as though it did. This is the producing half, against the real
+    // database: the fixture's serial was revoked by the test above, so it must
+    // appear here without anyone passing it in.
+    const built = await buildRevocationSnapshot(runtime.pool, {
+      scope: {
+        tenantId: TENANT_ID,
+        digitalStoreId: DIGITAL_STORE_ID,
+        storeLocationId: STORE_LOCATION_ID,
+        environment: DEVELOPMENT,
+      },
+      previousVersion: null,
+      issuedAt: new Date(),
+    });
+
+    expect(built.snapshot.revokedCertificateSerials).toContain(fixture.serialNumber);
+    expect(built.snapshot.snapshotVersion).toBe(1);
+    expect(built.snapshot.environment).toBe(DEVELOPMENT);
+    expect(built.snapshot.validUntil.getTime()).toBeGreaterThan(built.snapshot.issuedAt.getTime());
+    // The digest a Hub would recompute must match what the builder declared.
+    expect(recomputePayloadDigest(built.snapshot)).toBe(built.snapshot.payloadSha256);
+    expect(built.snapshot.payloadSha256).toBe(built.snapshot.computedPayloadSha256);
+
+    // Scope binding holds for this Store and fails for another.
+    expect(
+      verifySnapshotScope(built, {
+        tenantId: TENANT_ID,
+        digitalStoreId: DIGITAL_STORE_ID,
+        storeLocationId: STORE_LOCATION_ID,
+        environment: DEVELOPMENT,
+      }).accepted,
+    ).toBe(true);
+    expect(
+      verifySnapshotScope(built, {
+        tenantId: TENANT_ID,
+        digitalStoreId: "99999999-9999-4999-8999-999999999999",
+        storeLocationId: STORE_LOCATION_ID,
+        environment: DEVELOPMENT,
+      }).rejectionCode,
+    ).toBe("SNAPSHOT_SCOPE_MISMATCH");
+
+    // UNSIGNED, and it says so. No signer exists until Step 6, and
+    // `evaluateRevocationSnapshot` refuses this — which is the correct
+    // fail-closed behaviour, not a gap being papered over.
+    expect(built.snapshot.signatureValid).toBe(false);
+    expect(built.snapshot.signerKeyId).toContain("[REQUIRED:");
   });
 
   it("reads revocation without holding any table privilege", async () => {
