@@ -11564,3 +11564,898 @@ end
 $section46$;
 
 select 'assertions complete: groups 0010-0146 structural contract holds (incl. WS-11-T003 Step 4 approval gate bounded to a NOLOGIN non-BYPASSRLS reader per KLD-2026-07-29-DEVICE-REVOCATION-BOUNDARY-002 Ruling 2, the Ruling 1 scope binding — the recorded affected set is a computed, immutable cryptographic term of the approval payload hash — the call site that VERIFIES that binding, checks membership and spends the scope in the same transaction as the revocation it authorizes, and every revocation call site in this file re-homed onto revoke_device_credential_bound_v1: the affected set is derived from STORED ROWS by a governor-only resolver that takes a credential id and a reason and nothing else, and the approval''s payload_hash must equal the hash of THAT set, so the RC-019 payload hash authorizes nothing under any of the nine reasons while approvals carrying the database-derived hash revoke end to end. RC-019 is NOT closed by this file: group 0145''s entry point is still granted, and only a migration may take that grant away. RC-021 (the emergency path) is likewise OPEN)' as result;
+
+
+-- ============================================================================
+-- SECTION 47 — WS-11-T003 Step 4: RC-021. THE EMERGENCY PATH MUST VERIFY
+-- AUTHORITY, NOT ACCEPT IT (migration 0150).
+-- Authority: KLD-2026-07-29-DEVICE-CREDENTIAL-REVOCATION-001 §2.2/§2.3/§2.4;
+--   KLD-2026-07-29-DEVICE-REVOCATION-BOUNDARY-002 Ruling 1;
+--   KLD-2026-07-30-DEVICE-EMERGENCY-REAUTH-001; RC-021 and RC-023 in
+--   docs/authority/kitluy-decision-and-reconciliation-register-v1.0.0.md.
+--
+-- WHAT RC-021 IS. `revoke_device_credential_emergency_v1` takes the declaring
+-- authority as an enum and the re-authentication as a boolean, both from the
+-- caller. An independent reviewer drove it as `kitluy_issuance_service`,
+-- asserting CISO and re-authentication itself, and revoked two credentials with
+-- no approval and no recorded scope. A caller that can assert its own authority
+-- has not been authorized.
+--
+-- WHAT IS PROVED HERE. Migration 0150's entry point takes SIX parameters and
+-- not one of them is assertable: a credential id, a reason, an explanation, an
+-- incident reference, a re-authentication evidence id and an idempotency key.
+-- The actor comes from `auth.uid()`, the authority from
+-- `kitluy_auth.has_permission` evaluated in the CREDENTIAL'S environment, the
+-- freshness from evidence spent once inside the same transaction, and the blast
+-- radius from `authoritative_revocation_scope_v1`, which reads stored rows.
+-- Every probe below is EXECUTED against real issued credentials as a real
+-- authenticated session, and every refusal is checked to have changed nothing.
+--
+-- HOW AN AUTHENTICATED IDENTITY IS SET. `auth.uid()` reads
+-- `request.jwt.claim.sub`, falling back to `request.jwt.claims ->> 'sub'`
+-- (verified by reading its body, then by execution). So each probe sets
+-- `request.jwt.claims` transaction-locally through `set_config(..., true)` and
+-- runs `set role authenticated`, which is the role the RPC's EXECUTE grant
+-- names. Both are undone by the subtransaction that carries them, and the
+-- judging is done after `reset role`, because judging means reading tables the
+-- browser-facing role holds nothing on.
+--
+-- WHAT IS NOT CLAIMED. RC-021 IS NOT CLOSED HERE. Migration 0150 deliberately
+-- left group 0138's emergency function granted, because seven assertion sites
+-- in this file still drive it and revoking the grant before they are re-homed
+-- would turn this gate red without closing anything. This section therefore
+-- asserts NOTHING about who may execute that function, so removing its grant
+-- stays a migration's decision rather than a test's.
+--
+-- AND THIS SECTION LEAVES NOTHING SPENDABLE (the RC-022 discipline, applied
+-- here from the start). It creates one standing permission assignment and
+-- several re-authentication evidence rows; the assignment is removed and proved
+-- gone by execution, and every evidence row is either CONSUMED by a revocation
+-- that had to succeed, born already outside its window, or invalidated. The
+-- last control is a census that fails if any of it survives.
+-- ============================================================================
+do $section47$
+declare
+  v_findings text[] := array[]::text[];
+  v_env constant text := 'development';
+  v_key constant text := 'fleet.device_credential.emergency_revoke';
+  v_post_key constant text := 'fleet.device_credential.emergency_post_approve';
+  v_sig constant text :=
+    'kitluy_devices.revoke_device_credential_emergency_governed_v1(uuid, '
+    || 'kitluy_devices.credential_revocation_reason, text, text, uuid, text)';
+  v_rollback constant text := 'KLUY-S47-PROBE-ROLLBACK';
+
+  -- Three real humans out of the seeded synthetic users. The first is the only
+  -- one that will hold the emergency key, and it holds it for ONE environment.
+  v_ciso constant uuid := '00000000-0000-4000-8000-000000000007';
+  v_bystander constant uuid := '00000000-0000-4000-8000-000000000008';
+  v_other constant uuid := '00000000-0000-4000-8000-000000000009';
+
+  v_template constant uuid := '00000000-0000-4000-8000-000000004701';
+  v_assignment constant uuid := '00000000-0000-4000-8000-000000004702';
+
+  v_fp_ok        text := encode(sha256(convert_to('t47a-' || gen_random_uuid()::text, 'UTF8')), 'hex');
+  v_fp_untouched text := encode(sha256(convert_to('t47u-' || gen_random_uuid()::text, 'UTF8')), 'hex');
+  v_fp_refused   text := encode(sha256(convert_to('t47r-' || gen_random_uuid()::text, 'UTF8')), 'hex');
+  v_fp_conflict  text := encode(sha256(convert_to('t47c-' || gen_random_uuid()::text, 'UTF8')), 'hex');
+
+  v_dev_ok uuid;
+  v_dev_untouched uuid;
+  v_dev_refused uuid;
+  v_dev_conflict uuid;
+  v_cred_ok1 uuid;
+  v_cred_ok2 uuid;
+  v_cred_untouched uuid;
+  v_cred_refused uuid;
+  v_cred_conflict uuid;
+  v_absent constant uuid := gen_random_uuid();
+
+  v_req text;
+  v_idem text;
+  v_ren jsonb;
+  v_prep jsonb;
+  v_links constant jsonb := jsonb_build_array(
+    jsonb_build_object('link_position',0,'role','root','subject_fingerprint',repeat('r',64),
+                       'issuer_key_id','rk','canonical_tbs','R','detached_signature_b64','qg=='),
+    jsonb_build_object('link_position',1,'role','intermediate','subject_fingerprint',repeat('i',64),
+                       'issuer_key_id','rk','canonical_tbs','I','detached_signature_b64','uw=='));
+
+  -- The governed window, READ rather than typed. Nothing in this section
+  -- contains the number it holds.
+  v_window integer;
+  v_hours integer;
+
+  v_ev_rb uuid;          -- valid; survives a rolled-back emergency, then spends
+  v_ev_stale uuid;       -- born outside the governed window
+  v_ev_class uuid;       -- recorded for the POST-APPROVAL class
+  v_ev_foreign uuid;     -- another human's step-up
+  v_ev_conflict uuid;    -- valid; must survive the conflicting replay
+  v_ev_reuse uuid;       -- unused spare, invalidated at the end
+  v_ev_rb_expiry timestamptz;
+  v_ev_rb_expiry_after timestamptz;
+  v_ev_state text;
+
+  v_idem_ok text := 'S47-EMG-' || gen_random_uuid()::text;
+  v_idem_new text := 'S47-EMG-NEW-' || gen_random_uuid()::text;
+  v_incident text := 'INC-47-' || gen_random_uuid()::text;
+
+  v_scope_ok jsonb;
+  v_derived uuid[];
+
+  v_res jsonb;
+  v_res_noactor jsonb;
+  v_res_bystander jsonb;
+  v_res_reason jsonb;
+  v_res_blank jsonb;
+  v_res_blank_inc jsonb;
+  v_res_provider jsonb;
+  v_res_incident jsonb;
+  v_res_absent jsonb;
+  v_res_success jsonb;
+  v_res_replay jsonb;
+  v_res_conflict jsonb;
+
+  v_err_service text := 'not attempted';
+  v_err_stale text := 'not attempted';
+  v_err_class text := 'not attempted';
+  v_err_foreign text := 'not attempted';
+  v_err_reuse text := 'not attempted';
+  v_err_update text := 'not attempted';
+  v_err_delete text := 'not attempted';
+  v_err_scope_update text := 'not attempted';
+  v_err_scope_delete text := 'not attempted';
+
+  -- Observations taken INSIDE the rolled-back probe, because a rollback would
+  -- otherwise erase the very evidence they exist to inspect.
+  v_rb_outcome text := 'not observed';
+  v_rb_authorizations integer := -1;
+  v_rb_revoked integer := -1;
+
+  v_auth_id uuid;
+  v_auth kitluy_devices.device_emergency_revocation_authorizations;
+  v_state text;
+  v_n integer;
+  v_role text;
+begin
+  -- ------------------------------------------------------------------------
+  -- FIXTURES. Four real devices holding five real issued credentials, so every
+  -- refusal below is a refusal to revoke something rather than arithmetic.
+  -- ------------------------------------------------------------------------
+  select max_age_seconds into v_window from kitluy_auth.sensitive_action_reauth_policy
+   where action_class = v_key;
+  select post_approval_window_hours into v_hours
+    from kitluy_devices.credential_revocation_policy where environment = v_env;
+  if v_window is null or v_hours is null then
+    raise exception 'ASSERT FAIL: section 47 cannot read the governed re-auth window or post-approval window';
+  end if;
+
+  v_dev_ok        := pg_temp.ws11_renewable_device('t47a', v_fp_ok);
+  v_dev_untouched := pg_temp.ws11_renewable_device('t47u', v_fp_untouched);
+  v_dev_refused   := pg_temp.ws11_renewable_device('t47r', v_fp_refused);
+  v_dev_conflict  := pg_temp.ws11_renewable_device('t47c', v_fp_conflict);
+  select credential_id into v_cred_ok1 from kitluy_devices.device_credentials
+   where device_record_id = v_dev_ok and certificate_generation = 1;
+  select credential_id into v_cred_untouched from kitluy_devices.device_credentials
+   where device_record_id = v_dev_untouched and certificate_generation = 1;
+  select credential_id into v_cred_refused from kitluy_devices.device_credentials
+   where device_record_id = v_dev_refused and certificate_generation = 1;
+  select credential_id into v_cred_conflict from kitluy_devices.device_credentials
+   where device_record_id = v_dev_conflict and certificate_generation = 1;
+
+  -- A SECOND live generation on the success device, through the shipped renewal
+  -- default, so the affected set has TWO members and "exactly the derived set"
+  -- is a claim with something to be wrong about.
+  v_req := 'rq-47a2-' || gen_random_uuid()::text;
+  v_idem := encode(sha256(convert_to('i47a2-' || gen_random_uuid()::text, 'UTF8')), 'hex');
+  v_ren := kitluy_devices.reserve_device_credential_renewal_v1(
+    v_dev_ok, v_env, 'device_identity', v_idem, now(), 'trusted',
+    'reuse_current_key', 'SECTION47');
+  v_prep := kitluy_devices.prepare_device_credential_renewal_v2(
+    v_dev_ok, v_env, 'device_identity', v_req,
+    encode(sha256(convert_to('issue47-' || v_req, 'UTF8')), 'hex'), repeat('7', 64),
+    'PEM-47-G2', v_fp_ok, 'ed25519', repeat('6', 64), decode('b2', 'hex'), true,
+    'ica-47', now(), 'trusted', 'SECTION47', 'reuse_current_key');
+  perform kitluy_devices.record_device_credential_signature_v1(
+    v_req, v_prep ->> 'canonical_tbs_hash', decode('2222', 'hex'), true, 'SECTION47');
+  perform kitluy_devices.finalize_device_credential_issuance_v1(v_req, v_links, 'SECTION47');
+  select credential_id into v_cred_ok2 from kitluy_devices.device_credentials
+   where created_from_request_id = v_req;
+
+  if v_cred_ok1 is null or v_cred_ok2 is null or v_cred_untouched is null
+     or v_cred_refused is null or v_cred_conflict is null then
+    raise exception 'ASSERT FAIL: section 47 could not issue the credentials it revokes';
+  end if;
+
+  -- The humans. A profile is not authority — it grants nothing on its own —
+  -- but group 0149's recorder refuses a human without an ACTIVE one, so the
+  -- two humans that record evidence need one, and the bystander gets one so its
+  -- refusal is about the missing PERMISSION rather than the missing profile.
+  insert into kitluy_auth.admin_user_profiles (user_id, status, assurance_level, security_metadata)
+  values (v_ciso, 'ACTIVE', 'aal2', jsonb_build_object('fixture', 'section47')),
+         (v_bystander, 'ACTIVE', 'aal2', jsonb_build_object('fixture', 'section47')),
+         (v_other, 'ACTIVE', 'aal2', jsonb_build_object('fixture', 'section47'))
+  on conflict (user_id) do nothing;
+
+  -- THE STANDING ASSIGNMENT. Registered by group 0148 and granted to NOBODY by
+  -- that migration; this section creates the only one that exists, scoped to
+  -- ONE environment, and removes it before it finishes.
+  insert into kitluy_auth.role_templates (id, role_key, version, name, system_role, status)
+  values (v_template, 'S47_EMERGENCY_REVOKER', 1,
+          'Section 47 emergency revoker (test fixture)', false, 'ACTIVE');
+  insert into kitluy_auth.role_permission_grants (role_template_id, permission_id, effect)
+  select v_template, p.id, 'ALLOW' from kitluy_auth.permissions p
+   where p.permission_key = v_key and p.status = 'ACTIVE';
+  insert into kitluy_auth.role_assignments
+    (id, subject_type, subject_id, role_template_id, status, valid_from)
+  values (v_assignment, 'user', v_ciso, v_template, 'ACTIVE', now() - interval '1 hour');
+  insert into kitluy_auth.assignment_scopes
+    (role_assignment_id, scope_type, scope_id, environment)
+  values (v_assignment, 'platform', null, v_env);
+
+  -- ========================================================================
+  -- CONTROL 1 — THE DOOR IS THE HUMAN'S SESSION AND NOBODY ELSE'S.
+  -- ========================================================================
+  if not has_function_privilege('authenticated', v_sig, 'execute') then
+    v_findings := v_findings ||
+      format('control 1: the authenticated human cannot execute the governed emergency entry point');
+  end if;
+  foreach v_role in array array['public', 'anon', 'service_role',
+                                'kitluy_issuance_service', 'kitluy_worker_service',
+                                'kitluy_job_governor'] loop
+    if has_function_privilege(v_role, v_sig, 'execute') then
+      v_findings := v_findings ||
+        format('control 1: %s holds EXECUTE on the governed emergency entry point', v_role);
+    end if;
+  end loop;
+
+  -- ...and the census is corroborated by execution: the global-BYPASSRLS
+  -- service identity is turned away by the grant, not by a catalogue.
+  begin
+    execute 'set role service_role';
+    perform kitluy_devices.revoke_device_credential_emergency_governed_v1(
+      v_cred_refused, 'DEVICE_LOST', 'service probe', v_incident,
+      gen_random_uuid(), 'S47-SERVICE-' || gen_random_uuid()::text);
+    execute 'reset role';
+    v_err_service := 'no error';
+  exception when others then
+    v_err_service := sqlerrm;
+  end;
+  execute 'reset role';
+  if v_err_service !~* 'permission denied' then
+    v_findings := v_findings ||
+      format('control 1: service_role was not refused EXECUTE on the governed emergency RPC (%s)', v_err_service);
+  end if;
+
+  -- ========================================================================
+  -- CONTROL 2 — A SESSION WITH NO auth.uid() IS REFUSED BY THE FUNCTION.
+  --
+  -- Granted EXECUTE, running as `authenticated`, but carrying no JWT: exactly
+  -- the shape a machine identity reaching a PostgREST RPC would have.
+  -- ========================================================================
+  begin
+    execute 'set role authenticated';
+    v_res_noactor := kitluy_devices.revoke_device_credential_emergency_governed_v1(
+      v_cred_refused, 'DEVICE_LOST', 'no authenticated actor', v_incident,
+      gen_random_uuid(), 'S47-NOACTOR-' || gen_random_uuid()::text);
+    execute 'reset role';
+  end;
+  execute 'reset role';
+  if coalesce(v_res_noactor ->> 'refusal_code', 'nothing')
+     <> 'KLUY-EMERGENCY-NO-AUTHENTICATED-ACTOR' then
+    v_findings := v_findings ||
+      format('control 2: a session with no auth.uid() was not refused as an unauthenticated actor: %s',
+             v_res_noactor);
+  end if;
+
+  -- ========================================================================
+  -- CONTROL 3 — AN AUTHENTICATED HUMAN WITHOUT THE PERMISSION IS REFUSED.
+  --
+  -- A real human, a real session, an ACTIVE profile, a real credential, and no
+  -- assignment. This is the probe group 0138 had no way to fail.
+  -- ========================================================================
+  begin
+    perform set_config('request.jwt.claims',
+      format('{"sub":"%s","role":"authenticated"}', v_bystander), true);
+    execute 'set role authenticated';
+    v_res_bystander := kitluy_devices.revoke_device_credential_emergency_governed_v1(
+      v_cred_refused, 'DEVICE_LOST', 'a human with no emergency authority', v_incident,
+      gen_random_uuid(), 'S47-BYSTANDER-' || gen_random_uuid()::text);
+    execute 'reset role';
+  end;
+  execute 'reset role';
+  if coalesce(v_res_bystander ->> 'refusal_code', 'nothing') <> 'KLUY-EMERGENCY-UNAUTHORIZED' then
+    v_findings := v_findings ||
+      format('control 3: a human holding no emergency permission was not refused: %s', v_res_bystander);
+  end if;
+
+  -- ========================================================================
+  -- CONTROL 4 — THE INPUT REFUSALS, EACH WITH ITS OWN CODE, MADE AS THE
+  -- AUTHORIZED HUMAN so that the refusal is about the request and not the
+  -- requester.
+  -- ========================================================================
+  begin
+    perform set_config('request.jwt.claims',
+      format('{"sub":"%s","role":"authenticated"}', v_ciso), true);
+    execute 'set role authenticated';
+    v_res_reason := kitluy_devices.revoke_device_credential_emergency_governed_v1(
+      v_cred_refused, 'ADMINISTRATIVE_REPLACEMENT', 'an administrative replacement dressed as an emergency',
+      v_incident, gen_random_uuid(), 'S47-REASON-' || gen_random_uuid()::text);
+    v_res_blank := kitluy_devices.revoke_device_credential_emergency_governed_v1(
+      v_cred_refused, 'DEVICE_LOST', '   ', v_incident,
+      gen_random_uuid(), 'S47-BLANK-' || gen_random_uuid()::text);
+    v_res_blank_inc := kitluy_devices.revoke_device_credential_emergency_governed_v1(
+      v_cred_refused, 'DEVICE_LOST', 'no incident reference', '  ',
+      gen_random_uuid(), 'S47-BLANKINC-' || gen_random_uuid()::text);
+    v_res_provider := kitluy_devices.revoke_device_credential_emergency_governed_v1(
+      v_cred_refused, 'PROVIDER_COMPROMISE', 'a provider compromise', v_incident,
+      gen_random_uuid(), 'S47-PROVIDER-' || gen_random_uuid()::text);
+    v_res_incident := kitluy_devices.revoke_device_credential_emergency_governed_v1(
+      v_cred_refused, 'SECURITY_INCIDENT', 'a security incident', v_incident,
+      gen_random_uuid(), 'S47-INCIDENT-' || gen_random_uuid()::text);
+    v_res_absent := kitluy_devices.revoke_device_credential_emergency_governed_v1(
+      v_absent, 'DEVICE_LOST', 'a credential that does not exist', v_incident,
+      gen_random_uuid(), 'S47-ABSENT-' || gen_random_uuid()::text);
+    execute 'reset role';
+  end;
+  execute 'reset role';
+  if coalesce(v_res_reason ->> 'refusal_code', 'nothing') <> 'KLUY-EMERGENCY-REASON-NOT-ELIGIBLE' then
+    v_findings := v_findings ||
+      format('control 4: an approve-before-execute reason was not refused: %s', v_res_reason);
+  end if;
+  if coalesce(v_res_blank ->> 'refusal_code', 'nothing') <> 'KLUY-EMERGENCY-INCOMPLETE'
+     or coalesce(v_res_blank_inc ->> 'refusal_code', 'nothing') <> 'KLUY-EMERGENCY-INCOMPLETE' then
+    v_findings := v_findings ||
+      format('control 4: a blank explanation or incident reference was accepted: %s | %s',
+             v_res_blank, v_res_blank_inc);
+  end if;
+  if coalesce(v_res_provider ->> 'refusal_code', 'nothing') <> 'KLUY-EMERGENCY-SCOPE-NOT-FLEET-DERIVABLE'
+     or coalesce(v_res_incident ->> 'refusal_code', 'nothing') <> 'KLUY-EMERGENCY-SCOPE-NOT-FLEET-DERIVABLE' then
+    v_findings := v_findings ||
+      format('control 4: a recorded-set reason was not refused a fleet derivation: %s | %s',
+             v_res_provider, v_res_incident);
+  end if;
+  if coalesce(v_res_absent ->> 'refusal_code', 'nothing') <> 'KLUY-EMERGENCY-NO-CREDENTIAL' then
+    v_findings := v_findings ||
+      format('control 4: a credential id naming nothing was not refused: %s', v_res_absent);
+  end if;
+
+  -- Six refusals, and not one of them wrote anything.
+  select count(*) into v_n from kitluy_devices.device_emergency_revocation_authorizations;
+  if v_n <> 0 then
+    v_findings := v_findings ||
+      format('control 4: %s authorization(s) exist after refusals alone', v_n);
+  end if;
+  select state into v_state from kitluy_devices.device_credentials where credential_id = v_cred_refused;
+  if v_state is distinct from 'issued' then
+    v_findings := v_findings ||
+      format('control 4: the refusal target is %s rather than issued after eight refused calls', v_state);
+  end if;
+
+  -- ========================================================================
+  -- CONTROL 5 — THE EVIDENCE BINDINGS. Each of these RAISES, so the whole
+  -- emergency rolls back; each is judged on the error it raised AND on the
+  -- credential it did not touch.
+  -- ========================================================================
+  -- Born outside the governed window. Written directly, as postgres, because
+  -- the recorder computes `expires_at` from the policy and no caller can widen
+  -- it — which is exactly why a stale row cannot be obtained through the RPC.
+  -- The offset is the GOVERNED WINDOW read above, never a number typed here.
+  insert into kitluy_auth.reauthentication_evidence
+    (actor_user_id, environment, action_class, verified_at, expires_at,
+     authentication_method, session_reference)
+  values (v_ciso, v_env, v_key,
+          clock_timestamp() - make_interval(secs => v_window * 2),
+          clock_timestamp() - make_interval(secs => v_window),
+          'PASSWORD_TOTP', 's47-stale')
+  returning evidence_id into v_ev_stale;
+
+  begin
+    perform set_config('request.jwt.claims',
+      format('{"sub":"%s","role":"authenticated"}', v_ciso), true);
+    execute 'set role authenticated';
+    -- The POST-APPROVAL class, recorded honestly through the RPC by the same
+    -- human. It is a real, fresh, in-window step-up for the WRONG action.
+    v_ev_class := kitluy_auth.record_reauthentication_evidence_v1(
+      v_env, v_post_key, 'PASSWORD_TOTP', 's47-class');
+    v_ev_rb := kitluy_auth.record_reauthentication_evidence_v1(
+      v_env, v_key, 'PASSWORD_TOTP', 's47-rollback');
+    v_ev_conflict := kitluy_auth.record_reauthentication_evidence_v1(
+      v_env, v_key, 'PASSWORD_TOTP', 's47-conflict');
+    v_ev_reuse := kitluy_auth.record_reauthentication_evidence_v1(
+      v_env, v_key, 'PASSWORD_TOTP', 's47-spare');
+    execute 'reset role';
+  end;
+  execute 'reset role';
+
+  begin
+    perform set_config('request.jwt.claims',
+      format('{"sub":"%s","role":"authenticated"}', v_other), true);
+    execute 'set role authenticated';
+    v_ev_foreign := kitluy_auth.record_reauthentication_evidence_v1(
+      v_env, v_key, 'PASSWORD_TOTP', 's47-foreign');
+    execute 'reset role';
+  end;
+  execute 'reset role';
+
+  select expires_at into v_ev_rb_expiry from kitluy_auth.reauthentication_evidence
+   where evidence_id = v_ev_rb;
+
+  -- 5a — stale.
+  begin
+    perform set_config('request.jwt.claims',
+      format('{"sub":"%s","role":"authenticated"}', v_ciso), true);
+    execute 'set role authenticated';
+    perform kitluy_devices.revoke_device_credential_emergency_governed_v1(
+      v_cred_refused, 'DEVICE_LOST', 'stale step-up', v_incident,
+      v_ev_stale, 'S47-STALE-' || gen_random_uuid()::text);
+    execute 'reset role';
+    v_err_stale := 'no error';
+  exception when others then
+    v_err_stale := sqlerrm;
+  end;
+  execute 'reset role';
+
+  -- 5b — the right human, the right environment, the WRONG action class. This
+  -- is the binding that stops one step-up authorizing both an emergency
+  -- revocation and its own four-eyes post-approval.
+  begin
+    perform set_config('request.jwt.claims',
+      format('{"sub":"%s","role":"authenticated"}', v_ciso), true);
+    execute 'set role authenticated';
+    perform kitluy_devices.revoke_device_credential_emergency_governed_v1(
+      v_cred_refused, 'DEVICE_LOST', 'post-approval evidence spent on an execution', v_incident,
+      v_ev_class, 'S47-CLASS-' || gen_random_uuid()::text);
+    execute 'reset role';
+    v_err_class := 'no error';
+  exception when others then
+    v_err_class := sqlerrm;
+  end;
+  execute 'reset role';
+
+  -- 5c — somebody ELSE'S step-up. Fresh, in window, right class, right
+  -- environment, wrong human.
+  begin
+    perform set_config('request.jwt.claims',
+      format('{"sub":"%s","role":"authenticated"}', v_ciso), true);
+    execute 'set role authenticated';
+    perform kitluy_devices.revoke_device_credential_emergency_governed_v1(
+      v_cred_refused, 'DEVICE_LOST', 'another human''s step-up', v_incident,
+      v_ev_foreign, 'S47-FOREIGN-' || gen_random_uuid()::text);
+    execute 'reset role';
+    v_err_foreign := 'no error';
+  exception when others then
+    v_err_foreign := sqlerrm;
+  end;
+  execute 'reset role';
+
+  if v_err_stale !~ 'KLUY-EMERGENCY-REAUTHENTICATION-REFUSED' then
+    v_findings := v_findings ||
+      format('control 5a: evidence older than the governed window was not refused (%s)', v_err_stale);
+  end if;
+  if v_err_class !~ 'KLUY-EMERGENCY-REAUTHENTICATION-REFUSED' then
+    v_findings := v_findings ||
+      format('control 5b: post-approval evidence was spendable on an execution (%s)', v_err_class);
+  end if;
+  if v_err_foreign !~ 'KLUY-EMERGENCY-REAUTHENTICATION-REFUSED' then
+    v_findings := v_findings ||
+      format('control 5c: another human''s evidence was spendable (%s)', v_err_foreign);
+  end if;
+  select count(*) into v_n from kitluy_devices.device_emergency_revocation_authorizations;
+  if v_n <> 0 then
+    v_findings := v_findings ||
+      format('control 5: %s authorization(s) survived a refused re-authentication', v_n);
+  end if;
+  select state into v_state from kitluy_devices.device_credentials where credential_id = v_cred_refused;
+  if v_state is distinct from 'issued' then
+    v_findings := v_findings ||
+      format('control 5: the refusal target is %s after three refused re-authentications', v_state);
+  end if;
+  -- The foreign evidence was NOT spent by the human who tried to spend it.
+  select lifecycle_state into v_ev_state from kitluy_auth.reauthentication_evidence
+   where evidence_id = v_ev_foreign;
+  if v_ev_state is distinct from 'ACTIVE' then
+    v_findings := v_findings ||
+      format('control 5c: another human''s evidence is now %s, so the refused attempt spent it', v_ev_state);
+  end if;
+
+  -- ========================================================================
+  -- CONTROL 6 — A ROLLED-BACK EMERGENCY IS AN EMERGENCY THAT DID NOT HAPPEN,
+  -- AND IT BUYS NO TIME.
+  --
+  -- The call below SUCCEEDS and is then thrown away by its own subtransaction.
+  -- Afterwards the credentials must still be issued, no authorization may
+  -- survive, and the evidence must still be ACTIVE with its ORIGINAL expiry —
+  -- which the next control then spends, proving it really was unspent.
+  -- ========================================================================
+  begin
+    perform set_config('request.jwt.claims',
+      format('{"sub":"%s","role":"authenticated"}', v_ciso), true);
+    execute 'set role authenticated';
+    v_res := kitluy_devices.revoke_device_credential_emergency_governed_v1(
+      v_cred_ok1, 'DEVICE_LOST', 'rolled back before commit', v_incident,
+      v_ev_rb, 'S47-ROLLBACK-' || gen_random_uuid()::text);
+    execute 'reset role';
+    v_rb_outcome := coalesce(v_res ->> 'outcome', 'nothing');
+    select count(*) into v_rb_authorizations
+      from kitluy_devices.device_emergency_revocation_authorizations;
+    select count(*) into v_rb_revoked from kitluy_devices.device_credentials
+     where device_record_id = v_dev_ok and state = 'revoked';
+    raise exception '%', v_rollback;
+  exception when others then
+    if sqlerrm is distinct from v_rollback then
+      v_findings := v_findings ||
+        format('control 6: the rolled-back emergency probe did not complete: %s', sqlerrm);
+    end if;
+  end;
+  execute 'reset role';
+
+  if v_rb_outcome <> 'REVOKED_IMMEDIATELY' or v_rb_authorizations <> 1 or v_rb_revoked <> 2 then
+    v_findings := v_findings ||
+      format('control 6: the probe did not observe a real emergency before rolling it back (outcome %s, %s authorization(s), %s revoked)',
+             v_rb_outcome, v_rb_authorizations, v_rb_revoked);
+  end if;
+  select count(*) into v_n from kitluy_devices.device_emergency_revocation_authorizations;
+  if v_n <> 0 then
+    v_findings := v_findings ||
+      format('control 6: %s authorization(s) survived the rollback', v_n);
+  end if;
+  select count(*) into v_n from kitluy_devices.device_credentials
+   where device_record_id = v_dev_ok and state = 'revoked';
+  if v_n <> 0 then
+    v_findings := v_findings ||
+      format('control 6: %s credential(s) stayed revoked after the emergency rolled back', v_n);
+  end if;
+  select lifecycle_state, expires_at into v_ev_state, v_ev_rb_expiry_after
+    from kitluy_auth.reauthentication_evidence where evidence_id = v_ev_rb;
+  if v_ev_state is distinct from 'ACTIVE' then
+    v_findings := v_findings ||
+      format('control 6: a rolled-back emergency left its evidence %s rather than ACTIVE', v_ev_state);
+  end if;
+  if v_ev_rb_expiry_after is distinct from v_ev_rb_expiry then
+    v_findings := v_findings ||
+      format('control 6: the rolled-back attempt moved the evidence expiry from %s to %s',
+             v_ev_rb_expiry, v_ev_rb_expiry_after);
+  end if;
+
+  -- ========================================================================
+  -- CONTROL 7 — THE POSITIVE CONTROL. Without it everything above is a
+  -- function that refuses everything.
+  --
+  -- The affected set is ASKED FOR, not constructed here: a set this file could
+  -- build is a set a caller could build.
+  -- ========================================================================
+  execute format('grant kitluy_credential_issuer to %I', current_user);
+  execute 'set role kitluy_credential_issuer';
+  v_scope_ok := kitluy_devices.authoritative_revocation_scope_v1(v_cred_ok1, 'DEVICE_LOST');
+  execute 'reset role';
+  execute format('revoke kitluy_credential_issuer from %I', current_user);
+  if coalesce((v_scope_ok ->> 'resolved')::boolean, false) is not true
+     or coalesce((v_scope_ok ->> 'credential_count')::integer, 0) <> 2 then
+    v_findings := v_findings ||
+      format('control 7: the database did not derive the two-member set this control revokes: %s', v_scope_ok);
+  end if;
+  select array_agg(value::uuid order by value::uuid) into v_derived
+    from jsonb_array_elements_text(v_scope_ok -> 'credential_ids');
+
+  begin
+    perform set_config('request.jwt.claims',
+      format('{"sub":"%s","role":"authenticated"}', v_ciso), true);
+    execute 'set role authenticated';
+    v_res_success := kitluy_devices.revoke_device_credential_emergency_governed_v1(
+      v_cred_ok1, 'DEVICE_LOST', 'the device left the building', v_incident,
+      v_ev_rb, v_idem_ok);
+    execute 'reset role';
+  end;
+  execute 'reset role';
+
+  if coalesce(v_res_success ->> 'outcome', 'nothing') <> 'REVOKED_IMMEDIATELY'
+     or coalesce((v_res_success ->> 'revoked_credential_count')::integer, 0) <> 2 then
+    v_findings := v_findings ||
+      format('control 7: the authorized emergency did not execute: %s', v_res_success);
+  end if;
+  v_auth_id := (v_res_success ->> 'authorization_id')::uuid;
+
+  -- The return value says what it DID, never what it FOUND.
+  if v_res_success ? 'credential_ids' or v_res_success ? 'scope_digest'
+     or v_res_success ? 'revoked_credential_ids' or v_res_success ? 'scope_rule' then
+    v_findings := v_findings ||
+      format('control 7: the governed emergency returned scope internals to its caller: %s', v_res_success);
+  end if;
+
+  select * into v_auth from kitluy_devices.device_emergency_revocation_authorizations
+   where authorization_id = v_auth_id;
+  if not found then
+    v_findings := v_findings || format('control 7: no immutable authorization was written');
+  else
+    if v_auth.actor_user_id is distinct from v_ciso then
+      v_findings := v_findings ||
+        format('control 7: the authorization names %s rather than the acting human', v_auth.actor_user_id);
+    end if;
+    if v_auth.permission_key is distinct from v_key
+       or v_auth.reauth_evidence_id is distinct from v_ev_rb
+       or v_auth.environment is distinct from v_env
+       or v_auth.identifier_count <> 2
+       or v_auth.incident_reference is distinct from v_incident
+       or v_auth.lifecycle_state is distinct from 'EXECUTED_PENDING_POST_APPROVAL' then
+      v_findings := v_findings ||
+        format('control 7: the authorization does not carry the terms it was granted under');
+    end if;
+    if v_auth.scope_digest !~ '^[0-9a-f]{64}$' then
+      v_findings := v_findings ||
+        format('control 7: the authorization carries no well-formed scope digest (%s)', v_auth.scope_digest);
+    end if;
+    -- §2.3's deadline, from the governed policy rather than from a literal.
+    if v_auth.post_approval_due_at is distinct from v_auth.executed_at + make_interval(hours => v_hours) then
+      v_findings := v_findings ||
+        format('control 7: the post-approval deadline is not the governed window after execution (%s vs %s)',
+               v_auth.post_approval_due_at, v_auth.executed_at + make_interval(hours => v_hours));
+    end if;
+  end if;
+
+  -- EXACTLY the derived set, recorded relationally and revoked.
+  select count(*) into v_n from kitluy_devices.device_emergency_revocation_scope
+   where authorization_id = v_auth_id;
+  if v_n <> 2 then
+    v_findings := v_findings ||
+      format('control 7: the authorization records %s scope row(s) rather than the two it derived', v_n);
+  end if;
+  select count(*) into v_n from kitluy_devices.device_emergency_revocation_scope s
+   where s.authorization_id = v_auth_id
+     and not (s.credential_id = any (v_derived));
+  if v_n <> 0 then
+    v_findings := v_findings ||
+      format('control 7: %s recorded scope member(s) are outside the set the database derived', v_n);
+  end if;
+  select count(*) into v_n from unnest(v_derived) d(id)
+   where not exists (select 1 from kitluy_devices.device_credentials c
+                      where c.credential_id = d.id and c.state = 'revoked'
+                        and c.revoked_at is not null);
+  if v_n <> 0 then
+    v_findings := v_findings ||
+      format('control 7: %s member(s) of the derived set are not revoked with a revocation time', v_n);
+  end if;
+  -- Append-only evidence, one account per credential, naming this path.
+  select count(*) into v_n from kitluy_devices.device_credential_revocations r
+   where r.credential_id = any (v_derived) and r.source = 'GOVERNED_EMERGENCY_RPC';
+  if v_n <> 2 then
+    v_findings := v_findings ||
+      format('control 7: the governed emergency wrote %s revocation evidence row(s) rather than two', v_n);
+  end if;
+
+  -- AND NOTHING OUTSIDE IT. Three other devices, five other live credentials.
+  select count(*) into v_n from kitluy_devices.device_credentials
+   where credential_id in (v_cred_untouched, v_cred_refused, v_cred_conflict)
+     and state <> 'issued';
+  if v_n <> 0 then
+    v_findings := v_findings ||
+      format('control 7: %s credential(s) outside the derived set changed state', v_n);
+  end if;
+
+  -- The evidence was SPENT, once, and says what it authorized.
+  select lifecycle_state into v_ev_state from kitluy_auth.reauthentication_evidence
+   where evidence_id = v_ev_rb and consumed_for_authorization = v_auth_id;
+  if v_ev_state is distinct from 'CONSUMED' then
+    v_findings := v_findings ||
+      format('control 7: the evidence is not CONSUMED against this authorization (%s)',
+             coalesce(v_ev_state, 'not bound'));
+  end if;
+
+  -- ========================================================================
+  -- CONTROL 8 — THE RETRY AND THE CONFLICT.
+  --
+  -- A successful emergency CHANGES the fleet its set was derived from, so a
+  -- genuine retry must be recognised as a retry rather than refused as an empty
+  -- scope. The same key aimed at a DIFFERENT credential must be refused.
+  -- ========================================================================
+  begin
+    perform set_config('request.jwt.claims',
+      format('{"sub":"%s","role":"authenticated"}', v_ciso), true);
+    execute 'set role authenticated';
+    v_res_replay := kitluy_devices.revoke_device_credential_emergency_governed_v1(
+      v_cred_ok1, 'DEVICE_LOST', 'the device left the building', v_incident,
+      v_ev_rb, v_idem_ok);
+    v_res_conflict := kitluy_devices.revoke_device_credential_emergency_governed_v1(
+      v_cred_conflict, 'DEVICE_LOST', 'a different device under the same key', v_incident,
+      v_ev_conflict, v_idem_ok);
+    execute 'reset role';
+  end;
+  execute 'reset role';
+
+  if coalesce(v_res_replay ->> 'outcome', 'nothing') <> 'ALREADY_AUTHORIZED'
+     or (v_res_replay ->> 'authorization_id')::uuid is distinct from v_auth_id then
+    v_findings := v_findings ||
+      format('control 8: the identical retry did not answer with the SAME authorization: %s', v_res_replay);
+  end if;
+  if coalesce(v_res_conflict ->> 'refusal_code', 'nothing') <> 'KLUY-EMERGENCY-CONFLICTING-REPLAY' then
+    v_findings := v_findings ||
+      format('control 8: the same idempotency key aimed at another affected set was not refused: %s',
+             v_res_conflict);
+  end if;
+  select count(*) into v_n from kitluy_devices.device_emergency_revocation_authorizations;
+  if v_n <> 1 then
+    v_findings := v_findings ||
+      format('control 8: %s authorization(s) exist after a retry and a conflict, expected exactly one', v_n);
+  end if;
+  select state into v_state from kitluy_devices.device_credentials where credential_id = v_cred_conflict;
+  if v_state is distinct from 'issued' then
+    v_findings := v_findings ||
+      format('control 8: the conflicting replay revoked its target (%s)', v_state);
+  end if;
+  -- ...and it spent nothing on the way to being refused.
+  select lifecycle_state into v_ev_state from kitluy_auth.reauthentication_evidence
+   where evidence_id = v_ev_conflict;
+  if v_ev_state is distinct from 'ACTIVE' then
+    v_findings := v_findings ||
+      format('control 8: the refused conflicting replay spent its evidence (%s)', v_ev_state);
+  end if;
+
+  -- ========================================================================
+  -- CONTROL 9 — SPENT EVIDENCE IS SPENT. The same evidence, a NEW idempotency
+  -- key and a live credential: everything up to the spend succeeds, and the
+  -- spend is what refuses.
+  -- ========================================================================
+  begin
+    perform set_config('request.jwt.claims',
+      format('{"sub":"%s","role":"authenticated"}', v_ciso), true);
+    execute 'set role authenticated';
+    perform kitluy_devices.revoke_device_credential_emergency_governed_v1(
+      v_cred_conflict, 'DEVICE_LOST', 'reusing a spent step-up', v_incident,
+      v_ev_rb, v_idem_new);
+    execute 'reset role';
+    v_err_reuse := 'no error';
+  exception when others then
+    v_err_reuse := sqlerrm;
+  end;
+  execute 'reset role';
+  if v_err_reuse !~ 'KLUY-EMERGENCY-REAUTHENTICATION-REFUSED' then
+    v_findings := v_findings ||
+      format('control 9: consumed evidence was spendable a second time (%s)', v_err_reuse);
+  end if;
+  select count(*) into v_n from kitluy_devices.device_emergency_revocation_authorizations;
+  if v_n <> 1 then
+    v_findings := v_findings ||
+      format('control 9: %s authorization(s) exist after the reuse attempt, expected exactly one', v_n);
+  end if;
+  select state into v_state from kitluy_devices.device_credentials where credential_id = v_cred_conflict;
+  if v_state is distinct from 'issued' then
+    v_findings := v_findings ||
+      format('control 9: the reuse attempt revoked its target (%s)', v_state);
+  end if;
+
+  -- ========================================================================
+  -- CONTROL 10 — THE AUTHORIZATION AND ITS SCOPE ARE IMMUTABLE. Each probe
+  -- lives in its own subtransaction and is rolled back, so the attempt is real
+  -- and its damage is not.
+  -- ========================================================================
+  begin
+    update kitluy_devices.device_emergency_revocation_authorizations
+       set incident_reference = 'rewritten-after-the-fact'
+     where authorization_id = v_auth_id;
+    v_err_update := 'no error';
+    raise exception '%', v_rollback;
+  exception when others then
+    if sqlerrm is distinct from v_rollback then v_err_update := sqlerrm; end if;
+  end;
+  begin
+    delete from kitluy_devices.device_emergency_revocation_authorizations
+     where authorization_id = v_auth_id;
+    v_err_delete := 'no error';
+    raise exception '%', v_rollback;
+  exception when others then
+    if sqlerrm is distinct from v_rollback then v_err_delete := sqlerrm; end if;
+  end;
+  begin
+    update kitluy_devices.device_emergency_revocation_scope
+       set credential_id = v_cred_untouched
+     where authorization_id = v_auth_id;
+    v_err_scope_update := 'no error';
+    raise exception '%', v_rollback;
+  exception when others then
+    if sqlerrm is distinct from v_rollback then v_err_scope_update := sqlerrm; end if;
+  end;
+  begin
+    delete from kitluy_devices.device_emergency_revocation_scope
+     where authorization_id = v_auth_id;
+    v_err_scope_delete := 'no error';
+    raise exception '%', v_rollback;
+  exception when others then
+    if sqlerrm is distinct from v_rollback then v_err_scope_delete := sqlerrm; end if;
+  end;
+  if v_err_update = 'no error' or v_err_delete = 'no error'
+     or v_err_scope_update = 'no error' or v_err_scope_delete = 'no error' then
+    v_findings := v_findings ||
+      format('control 10: the immutable authorization or its scope accepted a rewrite (%s | %s | %s | %s)',
+             v_err_update, v_err_delete, v_err_scope_update, v_err_scope_delete);
+  end if;
+  select count(*) into v_n from kitluy_devices.device_emergency_revocation_scope
+   where authorization_id = v_auth_id;
+  if v_n <> 2 then
+    v_findings := v_findings ||
+      format('control 10: the recorded scope holds %s row(s) after the rewrite attempts', v_n);
+  end if;
+
+  -- ========================================================================
+  -- CONTROL 11 — THE BOUNDARY THE BRIDGES WERE BUILT NOT TO MOVE.
+  -- ========================================================================
+  foreach v_role in array array['public', 'anon', 'authenticated', 'service_role',
+                                'kitluy_issuance_service', 'kitluy_worker_service'] loop
+    if has_function_privilege(v_role, 'kitluy_devices.emergency_revocation_actor_v1()', 'execute')
+       or has_function_privilege(v_role, 'kitluy_devices.emergency_revocation_permitted_v1(uuid, text)', 'execute')
+       or has_function_privilege(v_role,
+            'kitluy_devices.emergency_revocation_reauth_spend_v1(uuid, text, uuid)', 'execute') then
+      v_findings := v_findings ||
+        format('control 11: %s can reach a kitluy_auth bridge directly', v_role);
+    end if;
+  end loop;
+  if has_schema_privilege('kitluy_credential_issuer', 'kitluy_auth', 'usage')
+     or has_table_privilege('kitluy_credential_issuer', 'kitluy_auth.approval_requests', 'select') then
+    v_findings := v_findings ||
+      format('control 11: the credential governor now reaches kitluy_auth directly');
+  end if;
+  if (select count(*) from pg_policies
+       where 'kitluy_credential_approval_reader' = any (roles::text[])) <> 3 then
+    v_findings := v_findings ||
+      format('control 11: the approval reader is named by policies other than Ruling 2''s three');
+  end if;
+
+  -- ========================================================================
+  -- CONTROL 12 — THIS SECTION LEAVES NO STANDING AUTHORITY (the RC-022
+  -- discipline). The assignment is removed, and then PROVED gone by asking the
+  -- evaluator rather than by asserting the rows are absent.
+  -- ========================================================================
+  delete from kitluy_auth.assignment_scopes where role_assignment_id = v_assignment;
+  delete from kitluy_auth.role_assignments where id = v_assignment;
+  delete from kitluy_auth.role_permission_grants where role_template_id = v_template;
+  delete from kitluy_auth.role_templates where id = v_template;
+
+  -- Every evidence row this section created is CONSUMED, born expired, or
+  -- invalidated here. `reauthentication_evidence` refuses a removal by trigger,
+  -- so invalidation is a lifecycle state, which is the shape group 0149 built.
+  update kitluy_auth.reauthentication_evidence
+     set lifecycle_state = 'REVOKED', revoked_at = clock_timestamp()
+   where session_reference like 's47-%' and lifecycle_state = 'ACTIVE';
+
+  delete from kitluy_auth.admin_user_profiles
+   where security_metadata ->> 'fixture' = 'section47';
+
+  perform set_config('request.jwt.claims',
+    format('{"sub":"%s","role":"authenticated"}', v_ciso), true);
+  if kitluy_auth.has_permission(v_key, 'device_credential', v_cred_untouched, v_env) then
+    v_findings := v_findings ||
+      format('control 12: the emergency permission survives this section');
+  end if;
+  perform set_config('request.jwt.claims', '', true);
+
+  select count(*) into v_n from kitluy_auth.role_permission_grants g
+    join kitluy_auth.permissions p on p.id = g.permission_id
+   where p.permission_key like 'fleet.device_credential.emergency_%';
+  if v_n <> 0 then
+    v_findings := v_findings ||
+      format('control 12: %s emergency permission grant(s) survive this section', v_n);
+  end if;
+  select count(*) into v_n from kitluy_auth.reauthentication_evidence
+   where session_reference like 's47-%' and lifecycle_state = 'ACTIVE'
+     and expires_at > clock_timestamp();
+  if v_n <> 0 then
+    v_findings := v_findings ||
+      format('control 12: %s spendable re-authentication evidence row(s) survive this section', v_n);
+  end if;
+  if exists (select 1 from pg_auth_members m
+              join pg_roles r on r.oid = m.member
+              join pg_roles g on g.oid = m.roleid
+             where g.rolname in ('kitluy_credential_issuer', 'kitluy_credential_approval_reader')
+               and not r.rolsuper) then
+    v_findings := v_findings ||
+      format('control 12: a non-superuser still holds membership of the credential governor or the approval reader');
+  end if;
+
+  if cardinality(v_findings) > 0 then
+    raise exception 'ASSERT FAIL: % rc021-governed-emergency finding(s): %',
+      cardinality(v_findings), array_to_string(v_findings, ' | ');
+  end if;
+
+  raise notice 'PASS ws11-rc021-governed-emergency: the emergency path now VERIFIES authority instead of accepting it (migration 0150) — the entry point takes a credential id, a reason, an explanation, an incident reference, a re-authentication evidence id and an idempotency key, and NOTHING a caller could assert: no actor, no declaring authority, no re-authenticated boolean, no fingerprint, no key reference, no assignment generation and no affected-set array; EXECUTE belongs to the human session alone and PUBLIC, anon, service_role, the issuance service, the worker and the job governor each hold none of it — service_role proved it by being refused permission denied on a live call — while a granted session carrying NO JWT is refused KLUY-EMERGENCY-NO-AUTHENTICATED-ACTOR and a real authenticated human with an ACTIVE profile and no assignment is refused KLUY-EMERGENCY-UNAUTHORIZED against a real issued credential; an approve-before-execute reason, a blank explanation, a blank incident reference, a credential id naming nothing and the two reasons decision §3 gives a RECORDED set are each refused with their own code, and after those eight refusals zero authorizations exist and the target is still issued; the re-authentication bindings hold in all three directions — evidence older than the governed window (read from sensitive_action_reauth_policy, never typed here), evidence recorded for the POST-APPROVAL class, and another human''s fresh in-window evidence are each refused KLUY-EMERGENCY-REAUTHENTICATION-REFUSED with nothing written and the other human''s evidence still ACTIVE, which is what stops one step-up authorizing both an emergency revocation and its own four-eyes post-approval; an emergency that ROLLS BACK is an emergency that did not happen — the probe watched a real REVOKED_IMMEDIATELY with one authorization and two revoked credentials inside its own subtransaction, and afterwards there are zero authorizations, zero revoked credentials and the evidence is still ACTIVE with its ORIGINAL expiry, which the positive control then spends, proving it truly was unspent; that positive control revoked EXACTLY the two-member set authoritative_revocation_scope_v1 derived from stored rows and asked for rather than constructed here, wrote one immutable authorization naming the acting human, the permission key, the evidence and a well-formed scope digest with the §2.3 deadline read from the governed policy, one relational scope row per credential, one append-only revocation account per credential, and changed not one of the five credentials outside the set, while returning no credential ids, no digest and no scope rule to its caller; the identical retry answers with the SAME authorization and opens no second emergency, the same key aimed at another affected set is refused KLUY-EMERGENCY-CONFLICTING-REPLAY without spending its evidence, and the consumed evidence is refused a second use with a fresh key against a live credential that stays issued; the authorization and its scope refuse UPDATE and DELETE; the boundary the bridges were built not to move is intact — no application, worker or service identity can reach a kitluy_auth bridge, the credential governor still holds nothing at all on kitluy_auth, and the approval reader is still named by exactly Ruling 2''s three policies; and this section leaves NO standing authority — the one assignment it created is removed and the evaluator itself now answers false for the human that held it, no emergency permission grant survives, no spendable evidence survives, and no non-superuser holds membership of the governor or the reader. RC-021 is NOT closed here: group 0138''s emergency function is still granted, and only a migration that re-homes the seven sites that drive it may take that grant away';
+end
+$section47$;
+
+select 'assertions complete: groups 0010-0150 structural contract holds (incl. WS-11-T003 Step 4 governed EMERGENCY revocation — migration 0150''s entry point resolves the actor from auth.uid(), evaluates fleet.device_credential.emergency_revoke in the credential''s own environment through a NOLOGIN non-BYPASSRLS bridge, spends single-use re-authentication evidence bound to the action class inside the same transaction, revokes exactly the set authoritative_revocation_scope_v1 derives from stored rows, and records an immutable authorization with one relational scope row per credential. RC-021 is NOT closed: group 0138''s emergency function is still granted, and only a migration may take that grant away)' as result;
