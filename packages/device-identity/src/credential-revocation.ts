@@ -6,9 +6,13 @@
  * (`revoke_device_credential_v1`). KLRISK-DEVICE-007 named the ABSENCE of a
  * governed revocation; group 0136 supplied one, but the risk is NOT closed and
  * this module does not close it. Its gate additionally requires live
- * integration evidence, concurrency evidence and an independent review, and no
- * shipped code implements `RevocationGateway` at all — the only implementations
- * are test fakes. An earlier version of this line said "which closes
+ * integration evidence, concurrency evidence and an independent review.
+ * Phase C shipped `createPgRevocationGateway` as a library adapter; Phase E
+ * independent review (RV-GW-001) established it is **library-available-but-
+ * uncalled** — zero production apps/services import it. An earlier version of
+ * this header said no shipped `RevocationGateway` existed at all (test fakes
+ * only); that was true before Phase C and is now false for the library, and
+ * true for production composition. An even earlier line said "which closes
  * KLRISK-DEVICE-007"; that was wrong and contradicted the register.
  *
  * ===========================================================================

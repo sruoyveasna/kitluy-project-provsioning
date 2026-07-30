@@ -30,28 +30,30 @@ four-eyes, append-only revocation did not stop the credential authenticating.**
 `packages/device-identity/test/governed-emergency-concurrency.integration.test.ts`
 (14 tests: 13 scenarios + a closing membership census).
 
-Each scenario opens **genuinely separate `pg` connections** (`kitluy-race-alpha`,
-`kitluy-race-beta`, plus a `kitluy-race-keeper` observer), parks one inside the
-contended lock, releases the other into it, and records backend PID, the barrier
-that proved the overlap, the winner, the loser's SQLSTATE and the final state.
-Shared machinery lives in `test/support/race-harness.ts` so the scenarios cannot
-drift apart in how they prove overlap.
+Thirteen scenarios. **Not all are Lock-barrier races** (Phase E RV-CE-002).
+Nine (1–7, 9) park one session inside a contended lock on genuinely separate
+`pg` connections (`kitluy-race-alpha` / `kitluy-race-beta`, plus
+`kitluy-race-keeper`) and record backend PID, the barrier that proved the
+overlap, the winner, the loser's SQLSTATE and the final state. Two (8, 10) are
+true concurrent `SKIP LOCKED` races whose null barrier is by design. Two (11, 12) are sequential / single-backend proofs (stale lease; audit-failure
+atomicity) — real properties, not Lock races. Shared machinery lives in
+`test/support/race-harness.ts`.
 
-| #   | Race                                       | Result                                                               |
-| --- | ------------------------------------------ | -------------------------------------------------------------------- |
-| 1   | Double-spend of one re-auth evidence row   | Exactly one emergency; loser refused, evidence consumed once         |
-| 2   | Evidence expires while lock-parked         | Refused after the lock is granted — freshness is not pre-checked     |
-| 3   | Permission revoked during execution        | Queued emergency stops; authority is evaluated **after** the lock    |
-| 4   | Duplicate idempotency key                  | One authorization; the second collides on the unique constraint      |
-| 5   | Two overlapping recorded scopes            | Credential revoked exactly once; the second scope spends nothing     |
-| 6   | Normal vs emergency revocation             | Exactly one revocation account, not two                              |
-| 7   | Device ownership changes mid-flight        | Still revokes; governed assignment-revocation **serializes** (57014) |
-| 8   | Post-approval vs lapse sweeper             | Exactly one verdict                                                  |
-| 9   | Two competing post-approvers               | Exactly one verdict                                                  |
-| 10  | Two concurrent lapse workers               | Lapsed exactly once (`FOR UPDATE SKIP LOCKED`)                       |
-| 11  | Stale worker after its lease was replaced  | Completion refused                                                   |
-| 12  | Audit-write failure                        | Every write unmade, including the audit trail                        |
-| 13  | Legacy entry point racing the governed one | Cannot race: **no runtime role may call it** (42501)                 |
+| #   | Kind                         | What is raced / proven                                               | Result                                                               |
+| --- | ---------------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| 1   | Lock race                    | Double-spend of one re-auth evidence row                             | Exactly one emergency; loser refused, evidence consumed once         |
+| 2   | Lock race                    | Evidence **REVOKED** while lock-parked (not clock expiry; RV-CE-001) | Refused after the lock is granted — freshness is not pre-checked     |
+| 3   | Lock race                    | Permission revoked during execution                                  | Queued emergency stops; authority is evaluated **after** the lock    |
+| 4   | Lock race                    | Duplicate idempotency key                                            | One authorization; the second collides on the unique constraint      |
+| 5   | Lock race                    | Two overlapping recorded scopes                                      | Credential revoked exactly once; the second scope spends nothing     |
+| 6   | Lock race                    | Normal vs emergency revocation                                       | Exactly one revocation account, not two                              |
+| 7   | Lock race                    | Device ownership changes mid-flight                                  | Still revokes; governed assignment-revocation **serializes** (57014) |
+| 8   | Concurrent SKIP LOCKED       | Post-approval vs lapse sweeper                                       | Exactly one verdict                                                  |
+| 9   | Lock race                    | Two competing post-approvers                                         | Exactly one verdict                                                  |
+| 10  | Concurrent SKIP LOCKED       | Two concurrent lapse workers                                         | Lapsed exactly once (`FOR UPDATE SKIP LOCKED`)                       |
+| 11  | Sequential (not a Lock race) | Stale worker after its lease was replaced                            | Completion refused                                                   |
+| 12  | Single-backend atomicity     | Audit-write failure                                                  | Every write unmade, including the audit trail                        |
+| 13  | Permission, not Lock         | Legacy entry point racing the governed one                           | Cannot race: **no runtime role may call it** (42501)                 |
 
 Scenario 13 derives the legacy function's 18-argument signature from
 `pg_get_function_identity_arguments` at runtime. A hand-written signature had
