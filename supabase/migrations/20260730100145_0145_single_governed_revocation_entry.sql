@@ -3,7 +3,9 @@
 --
 -- Authority: KLD-2026-07-29-DEVICE-REVOCATION-BOUNDARY-002 Ruling 1;
 --            KLD-2026-07-29-DEVICE-CREDENTIAL-REVOCATION-001 §3.
--- Closes:    RC-019 (BLOCKING), raised by independent hostile review 2026-07-30
+-- Remediates: RC-019 (BLOCKING), raised by independent hostile review 2026-07-30.
+--            NOT "closes": the register's own rule reserves closure for an
+--            independent reviewer verifying the boundary against live grants.
 --            and reproduced again immediately before this migration was written.
 --
 -- Additive. Groups 0136-0144 are COMMITTED and are NOT edited.
@@ -45,9 +47,12 @@
 -- discouraged.
 --
 --   * `revoke_device_credential_v1` keeps EXECUTE for exactly ONE grantee,
---     `kitluy_credential_issuer` — which is NOLOGIN, which nothing may SET ROLE
---     to, and which exists only as the definer identity of the governed
---     wrappers. It survives as an INTERNAL HELPER and holds no independent
+--     `kitluy_credential_issuer` — which is NOLOGIN, which no runtime, worker,
+--     service or application identity is a member of or may SET ROLE to, and
+--     which exists only as the definer identity of the governed wrappers.
+--     (`postgres` holds CREATEROLE and can self-grant it; that is a property
+--     of the migration-running superuser-adjacent role, not a runtime path,
+--     and the census below is written knowing it.) It survives as an INTERNAL HELPER and holds no independent
 --     external mutation authority.
 --
 --   * `kitluy_issuance_service` — the runtime identity, and the one

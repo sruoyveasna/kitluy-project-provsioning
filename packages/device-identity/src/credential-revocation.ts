@@ -3,7 +3,13 @@
  * migration group 0136.
  *
  * Authority: KLD-2026-07-28-002 §5.4, §6; migration group 0136
- * (`revoke_device_credential_v1`), which closes KLRISK-DEVICE-007.
+ * (`revoke_device_credential_v1`). KLRISK-DEVICE-007 named the ABSENCE of a
+ * governed revocation; group 0136 supplied one, but the risk is NOT closed and
+ * this module does not close it. Its gate additionally requires live
+ * integration evidence, concurrency evidence and an independent review, and no
+ * shipped code implements `RevocationGateway` at all — the only implementations
+ * are test fakes. An earlier version of this line said "which closes
+ * KLRISK-DEVICE-007"; that was wrong and contradicted the register.
  *
  * ===========================================================================
  * REVOCATION IS NOT FOUR OTHER THINGS
@@ -216,6 +222,7 @@ export type RevocationRefusalCode =
   | "REVOCATION_SELF_APPROVED"
   | "REVOCATION_RECOVERY_DOWNGRADED"
   | "REVOCATION_GATEWAY_FAILED"
+  | "REVOCATION_NOT_AUTHORIZED"
   | "REVOCATION_UNKNOWN_OUTCOME";
 
 /**
@@ -254,7 +261,10 @@ export interface RevocationOutcome {
 // ---------------------------------------------------------------------------
 
 /**
- * The exact argument list of `kitluy_devices.revoke_device_credential_v1`.
+ * The exact argument list of `kitluy_devices.revoke_device_credential_governed_v1`
+ * — the ONE revocation a runtime identity may execute since group 0145
+ * (RC-019). NOT `revoke_device_credential_v1`: EXECUTE on that was revoked from
+ * every runtime identity precisely because it takes no scope argument.
  *
  * There is no `credentialId` here either, for the same reason there is none on
  * {@link RevocationInput}: the governed function resolves the credential from
@@ -304,7 +314,10 @@ export interface GovernedRevocationCall {
  *
  * There is deliberately NO method that writes `device_credential_revocations`,
  * sets `device_credentials.state`, or opens a `device_recovery_cases` row
- * directly. Group 0136 grants the issuance executor EXECUTE on the function and
+ * directly. Group 0136 granted the issuance executor EXECUTE on the unscoped
+ * function; group 0145 REVOKED that — it was the RC-019 bypass — and the
+ * repository still withholds INSERT on the evidence table and UPDATE on the
+ * credential, and
  * withholds INSERT on the evidence table and UPDATE on the credential — and
  * asserts both, so a migration that loosened it would fail. A convenience
  * method here would be a second path to the same rows that skips the four-eyes
@@ -391,6 +404,23 @@ export interface RevocationInput {
 
 const blank = (value: string | null | undefined): boolean => (value ?? "").trim() === "";
 const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
+/** CLASS only. A driver message can carry the statement and its bound values. */
+const errorClass = (e: unknown): string =>
+  e instanceof Error
+    ? `the revocation gateway call failed (${e.name})`
+    : "the revocation gateway call failed";
+
+/**
+ * PostgreSQL `42501 insufficient_privilege`, however the driver surfaces it.
+ * Checked by SQLSTATE first because that is the stable signal; the message is
+ * only a fallback for drivers that do not expose `code`.
+ */
+function isAuthorizationDenied(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (code === "42501") return true;
+  return /permission denied|insufficient.privilege/i.test(errorText(error));
+}
 
 /**
  * Attempts one governed revocation.
@@ -487,7 +517,24 @@ export async function revokeDeviceCredential(
     // A transport or constraint failure is a REFUSAL, never a silent success.
     // The credential's state is unknown from here; reporting anything else
     // would assert a revocation that may not have happened.
-    return refuse("REVOCATION_GATEWAY_FAILED", errorText(error));
+    // A PRIVILEGE denial is not a transient outage, and the difference decides
+    // whether a worker retries. Since group 0145 an adapter still aimed at the
+    // unscoped `revoke_device_credential_v1` gets SQLSTATE 42501 — permanent,
+    // and retrying it five times only burns the attempt budget before
+    // dead-lettering it as a database problem instead of the authorization
+    // problem it is.
+    //
+    // The message is NOT carried through. `key-destruction.ts` redacts provider
+    // errors to a class for exactly this reason, and a driver message routinely
+    // repeats the failing statement and sometimes its bound values; the two
+    // modules should not disagree about that.
+    if (isAuthorizationDenied(error)) {
+      return refuse(
+        "REVOCATION_NOT_AUTHORIZED",
+        "the revocation gateway is not authorized to execute the governed revocation; this is permanent and must not be retried",
+      );
+    }
+    return refuse("REVOCATION_GATEWAY_FAILED", errorClass(error));
   }
 
   // The governed outcome is returned AS IT CAME. `ALREADY_REVOKED` is not

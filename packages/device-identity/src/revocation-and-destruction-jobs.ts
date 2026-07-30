@@ -411,6 +411,10 @@ const REVOCATION_REFUSAL_ROUTING: Readonly<Record<RevocationRefusalCode, JobRout
   REVOCATION_RECOVERY_DOWNGRADED: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.RECOVERY_DOWNGRADED),
   // The only retryable one, and only because nothing was decided.
   REVOCATION_GATEWAY_FAILED: failed("DATABASE_UNAVAILABLE"),
+  // NOT retryable. A privilege denial is permanent: retrying it burns the
+  // attempt budget and then dead-letters an AUTHORIZATION failure as a database
+  // outage, which sends whoever reads it looking at the wrong thing.
+  REVOCATION_NOT_AUTHORIZED: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.REVOCATION_MANUAL_REVIEW),
   REVOCATION_UNKNOWN_OUTCOME: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.REVOCATION_MANUAL_REVIEW),
 };
 

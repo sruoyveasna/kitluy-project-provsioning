@@ -507,7 +507,35 @@ describe("replay and conflict are not successes", () => {
     const outcome = await revokeDeviceCredential(input(), h.gateway);
     expect(outcome.outcome).toBe("REVOCATION_REFUSED");
     expect(outcome.refusalCode).toBe("REVOCATION_GATEWAY_FAILED");
-    expect(outcome.detail).toContain("connection terminated");
+    // The driver MESSAGE does not travel. It used to, and this test asserted
+    // that it did — which made the leak a guarantee rather than an oversight. A
+    // pg driver message routinely repeats the failing statement and sometimes
+    // its bound values, and `key-destruction.ts` redacts provider errors to a
+    // class for exactly that reason; the two modules should not disagree.
+    expect(outcome.detail).not.toContain("connection terminated");
+    expect(outcome.detail).toContain("the revocation gateway call failed");
+  });
+
+  it("refuses a PRIVILEGE denial permanently, not as a retryable outage", async () => {
+    // Since migration group 0145 an adapter still aimed at the unscoped
+    // revoke_device_credential_v1 gets SQLSTATE 42501. That is permanent. Mapped
+    // to REVOCATION_GATEWAY_FAILED it became DATABASE_UNAVAILABLE, which IS in
+    // RETRYABLE_FAILURE_CODES — so a worker would retry an authorization
+    // failure until the budget burnt out and then dead-letter it as a database
+    // problem, sending whoever reads it to the wrong system.
+    const denied = Object.assign(
+      new Error("permission denied for function revoke_device_credential_v1"),
+      {
+        code: "42501",
+      },
+    );
+    const gateway: RevocationGateway = {
+      revokeDeviceCredential: () => Promise.reject(denied),
+    };
+    const outcome = await revokeDeviceCredential(input(), gateway);
+    expect(outcome.outcome).toBe("REVOCATION_REFUSED");
+    expect(outcome.refusalCode).toBe("REVOCATION_NOT_AUTHORIZED");
+    expect(outcome.detail).not.toContain("revoke_device_credential_v1");
   });
 
   it("fails an unrecognised outcome towards review, not towards success", async () => {
