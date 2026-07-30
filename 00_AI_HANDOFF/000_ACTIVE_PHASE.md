@@ -281,6 +281,24 @@ duplicate-evidence behavior is MORE restrictive than the ruling, so it fails
 safe in the interim, but it is not the approved policy and must not be described
 as such.
 
+### WS-11-T003 Step 4 position (2026-07-30) — the fence is unchanged
+
+Step 4 (governed credential revocation) has run Phases A–D. Migrations 0148–0154
+are applied LOCALLY ONLY; the governed emergency path is the sole runtime door;
+second-person post-approval, the lapse sweeper, thirteen true-concurrency
+scenarios and the end-to-end containment matrix all execute.
+
+**Nothing is promoted, and Step 4 stays open.** Phase E — three independent
+reviewers and the Step 4 promotion gate — has not run, so the maximum promotion
+this fence allows is still the one stated above and Step 4 has not reached it.
+
+Phase D also found that **the revocation write side and the certificate verifier
+were each complete and nothing joined them**, so until it ran, a fully governed
+four-eyes revocation did not stop the credential authenticating (RC-027). The
+ONLINE path is closed; **the OFFLINE Store Hub snapshot path is still unjoined**,
+which matters directly to this fence's "offline local authority" step and is
+recorded rather than quietly carried.
+
 **Carried from Cycle 9.** KLREQ-029 and KLREQ-030 may remain open during core
 WS-11 work, but they MUST be resolved before any synchronization-repair action
 is exposed through Admin, Partner, Chain or support interfaces. KLREQ-024 and

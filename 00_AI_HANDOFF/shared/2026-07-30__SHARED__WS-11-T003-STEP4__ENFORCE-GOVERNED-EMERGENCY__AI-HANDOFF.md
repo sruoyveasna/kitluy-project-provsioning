@@ -59,13 +59,13 @@
 
 ## Commands executed (actual)
 
-| Command | Result |
-| ------- | ------ |
-| `pnpm db:reset` (via `npx pnpm@9.15.9`, engine-strict override) | exit 0; migrations through **0151** |
-| `pnpm db:seed` | exit 0 |
-| `pnpm db:test` | exit 0; **193 PASS** |
-| `pnpm test:rls` | exit 0; **104 PASS** |
-| Live exploit after 0151 | `permission denied for function revoke_device_credential_emergency_v1` |
+| Command                                                         | Result                                                                 |
+| --------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `pnpm db:reset` (via `npx pnpm@9.15.9`, engine-strict override) | exit 0; migrations through **0151**                                    |
+| `pnpm db:seed`                                                  | exit 0                                                                 |
+| `pnpm db:test`                                                  | exit 0; **193 PASS**                                                   |
+| `pnpm test:rls`                                                 | exit 0; **104 PASS**                                                   |
+| Live exploit after 0151                                         | `permission denied for function revoke_device_credential_emergency_v1` |
 
 ## Environment conditions (recorded, not hidden)
 
