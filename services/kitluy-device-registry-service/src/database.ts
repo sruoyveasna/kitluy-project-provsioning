@@ -159,9 +159,10 @@ export async function withServiceRole<T>(
  *     the duration, so the governed RPC cannot be satisfied by the service's own
  *     privileges.
  *
- * Ordering matters and is not incidental: claims are set BEFORE the role drop,
- * because `set_config` on `request.jwt.claims` must happen while the session can
- * still perform it.
+ * Claims are set before the role drop. NOT, as an earlier version of this comment
+ * claimed, because `authenticated` could not set them afterwards — a reviewer
+ * checked and it can. The order is simply the one that keeps the assertion below
+ * meaningful: identity is established, then dropped to, then verified.
  */
 export async function withHumanSession<T>(
   source: ClientSource,
@@ -188,10 +189,52 @@ export async function withHumanSession<T>(
   const client = await source.connect();
   try {
     await client.query("begin");
-    await client.query("select set_config('request.jwt.claims', $1, true)", [
-      JSON.stringify(claims),
-    ]);
+    // BOTH GUCs, and the singular one is not optional.
+    //
+    // `auth.uid()` in this database is:
+    //
+    //     coalesce(nullif(current_setting('request.jwt.claim.sub', true), ''),
+    //              current_setting('request.jwt.claims', true)::jsonb ->> 'sub')
+    //
+    // The LEGACY SINGULAR GUC WINS. The first version of this function set only
+    // `request.jwt.claims`, so anything that had already pinned
+    // `request.jwt.claim.sub` decided `auth.uid()` instead of this call — and an
+    // independent reviewer demonstrated it live using nothing but the one
+    // operator-controlled input this module reads, a DSN carrying
+    // `?options=-c request.jwt.claim.sub=<other uuid>` (honoured by `pg`).
+    // `ALTER ROLE/DATABASE ... SET` and a leftover session GUC on a pooled backend
+    // reach the same place.
+    //
+    // The consequences were the two that matter most: every emergency revocation
+    // silently evaluated against a DIFFERENT subject and failed as
+    // PERMANENT_AUTHORIZATION — the emergency door off during an incident, with
+    // redaction hiding why — or, if the pinned subject held the permission and
+    // spendable evidence, an immutable authorization row naming an innocent human
+    // as the actor. That is the RC-021 property this module exists to hold.
+    //
+    // Both are set transaction-locally so neither can outlive the call, and the
+    // result is asserted below rather than assumed.
+    await client.query(
+      `select set_config('request.jwt.claims', $1, true),
+              set_config('request.jwt.claim.sub', $2, true)`,
+      [JSON.stringify(claims), userId],
+    );
     await client.query(`set local role ${REGISTRY_ROLES.human}`);
+
+    // FAIL CLOSED IF THE SESSION IS NOT WHO WE ASKED FOR.
+    //
+    // Cheap (one round trip on a path that is already several) and it converts any
+    // future GUC-precedence surprise from a silent misattribution into a refusal.
+    const { rows } = await client.query<{ actual: string | null }>(
+      `select auth.uid()::text as actual`,
+    );
+    const actual = rows[0]?.actual ?? null;
+    if (actual !== userId) {
+      throw new InvalidHumanSessionError(
+        "the database resolved a different subject than the verified one; refusing to act",
+      );
+    }
+
     const result = await fn(client);
     await client.query("commit");
     return result;

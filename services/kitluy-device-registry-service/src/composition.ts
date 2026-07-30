@@ -62,10 +62,14 @@ export interface DeviceRevocationRuntime {
 /**
  * Builds the production runtime, or refuses to start.
  *
- * Fails closed on a missing DSN (`ConfigError` from `requireString`) and on any
- * attempt to select an implementation. Both are startup-time refusals: a service
- * that came up healthy and only revealed a misconfigured revocation path during
- * an actual incident is the failure mode worth paying a restart to avoid.
+ * Fails closed at startup on a MISSING DSN and on any attempt to select an
+ * implementation.
+ *
+ * A DSN that is present but WRONG is not caught here, and saying otherwise would
+ * be the failure this function exists to prevent: `new pg.Pool` does not connect
+ * eagerly, so a bad host or credential surfaces on first use — during the
+ * incident. Closing that needs a startup connectivity probe, which is recorded as
+ * an open condition.
  */
 export function resolveDeviceRevocationService(env: Env = process.env): DeviceRevocationRuntime {
   for (const name of FORBIDDEN_IMPLEMENTATION_OVERRIDES) {

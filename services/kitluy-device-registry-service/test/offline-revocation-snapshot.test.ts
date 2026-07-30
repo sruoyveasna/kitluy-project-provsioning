@@ -111,7 +111,14 @@ const scoped = (
   scopedDigest: scopedDigest(scope, snapshot.payloadSha256),
 });
 
-describe("a revoked credential is denied while the Store Hub is offline", () => {
+// NAMED FOR WHAT IT PROVES. This block was called "a revoked credential is denied
+// while the Store Hub is offline", which overclaims: the shipped builder emits
+// `signatureValid: false`, and `evaluateRevocationSnapshot` refuses an unsigned
+// snapshot with `enforceKnownRevocations: false`. So offline containment is NOT in
+// force today, and these fixtures set the flag explicitly to exercise the
+// behaviour that becomes real once Step 6 lands a signer. The shipped `false` case
+// is covered honestly by "refuses an unsigned snapshot" below.
+describe("once a snapshot is signed, a revoked credential is denied offline", () => {
   it("refuses the revoked serial from the snapshot alone", () => {
     const snapshot = snapshotOf({ serials: [REVOKED_SERIAL], devices: [REVOKED_DEVICE] });
     const verdict = evaluateRevocationSnapshot({
@@ -343,10 +350,16 @@ describe("later synchronization cannot restore a revoked credential", () => {
     expect(union.revokedCertificateSerials).toEqual([LIVE_SERIAL, REVOKED_SERIAL].sort());
   });
 
-  it("survives a reboot: the same persisted snapshot yields the same denial", () => {
-    // A reboot is modelled as what actually happens — the snapshot is read back
-    // from storage and re-evaluated. Serialization through JSON is part of the
-    // test because that is what persistence does to a Date.
+  it("round-trips through serialization without losing its denial", () => {
+    // RENAMED. This was called "survives a reboot", which overclaimed: there is no
+    // Hub-side persistence, so nothing here is read back from storage and no
+    // reboot is modelled. What it actually proves is narrower and still worth
+    // having — a snapshot that has been through JSON keeps its digest and its
+    // denial once `Date` fields are rehydrated, which is the part a future
+    // persistence layer would otherwise get silently wrong.
+    //
+    // Reboot survival, atomic apply and last-known-good retention remain NOT
+    // implemented and are recorded as outstanding.
     const snapshot = snapshotOf({ serials: [REVOKED_SERIAL], devices: [REVOKED_DEVICE] });
     const persisted = JSON.parse(JSON.stringify(snapshot)) as Record<string, unknown>;
     const rehydrated: RevocationSnapshot = {
@@ -397,6 +410,34 @@ describe("the canonical payload is reproducible", () => {
     // Without a separator, `certs:['ab'] devices:[]` and `certs:['a'] devices:['b']`
     // would digest identically, and a device id could be smuggled in as a serial.
     expect(payloadDigest(["ab"], [])).not.toBe(payloadDigest(["a"], ["b"]));
+  });
+
+  it("is unambiguous WITHIN a kind", () => {
+    // The attack this closes: replace two revoked serials with their
+    // concatenation, leave `payloadSha256` untouched, and every integrity check
+    // still passes — so two real credentials are silently un-revoked, and
+    // `enforcedRevocationUnion` cannot help because a first-sync Hub has nothing
+    // to union against.
+    //
+    // This is also the case an independent reviewer reported as BROKEN, having
+    // read the U+001F separator as an empty string — the byte is invisible in most
+    // diffs. It is asserted here so the question is settled by a test rather than
+    // by reading.
+    expect(payloadDigest(["DEV-CERT-A", "DEV-CERT-B"], [])).not.toBe(
+      payloadDigest(["DEV-CERT-ADEV-CERT-B"], []),
+    );
+    expect(payloadDigest([], ["11111111-1111-4111-8111-111111111111"])).not.toBe(
+      payloadDigest([], ["11111111-1111-4111-8111-11111111111", "1"]),
+    );
+  });
+
+  it("distinguishes an empty set from a set holding one empty string", () => {
+    // Termination rather than joining. Neither value is reachable from the
+    // database and both mean "nothing revoked", so this was an edge case rather
+    // than a live hole — but a digest with any ambiguity is the wrong thing to
+    // hand a future signer.
+    expect(payloadDigest([], [])).not.toBe(payloadDigest([""], []));
+    expect(payloadDigest([], [])).not.toBe(payloadDigest([], [""]));
   });
 
   it("binds the scope into the scoped digest", () => {

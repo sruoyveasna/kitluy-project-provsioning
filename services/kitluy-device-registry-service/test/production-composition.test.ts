@@ -163,7 +163,11 @@ describe("the production composition selects the real implementation", () => {
   it("ships no test double in dist", () => {
     // `tsconfig.json` includes `src` only, so `test/` cannot be emitted. Asserted
     // rather than assumed, because widening `include` is a one-line change.
-    if (!existsSync(DIST)) return;
+    //
+    // A missing `dist/` FAILS rather than skips. The first version returned early,
+    // which meant the one check whose whole purpose is to catch a widened `include`
+    // silently passed on any checkout that had not been built.
+    expect(existsSync(DIST), "dist/ is absent — build before asserting its contents").toBe(true);
     const emitted = readdirSync(DIST);
     expect(emitted.filter((f) => /fake|stub|mock|test/i.test(f))).toEqual([]);
   });

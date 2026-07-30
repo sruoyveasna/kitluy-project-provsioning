@@ -87,6 +87,8 @@ interface VerificationState {
   readonly previousKeyFingerprint: string | null;
   readonly previousCredentialState: string | null;
   readonly overlapEndsAt: string | null;
+  /** The PRESENTED credential's own stored fingerprint, read from the database. */
+  readonly publicKeyFingerprint: string | null;
   readonly revoked: boolean;
 }
 
@@ -114,6 +116,7 @@ function readState(raw: unknown): VerificationState | null {
     previousKeyFingerprint: text("previous_key_fingerprint"),
     previousCredentialState: text("previous_credential_state"),
     overlapEndsAt: text("overlap_ends_at"),
+    publicKeyFingerprint: text("public_key_fingerprint"),
     revoked: row.revoked === true,
   };
 }
@@ -163,6 +166,18 @@ export function createOnlineCredentialVerifier(source: ClientSource): OnlineCred
           if (state === null) {
             return { known: false, reason: "CREDENTIAL_NOT_ISSUED_HERE" };
           }
+          // Hoisted so the narrowing is visible to the type system as well as to a
+          // reader: this refusal is the ONLY thing standing between an absent
+          // database fact and the presenter's own value.
+          const authoritativeFingerprint =
+            state.currentKeyFingerprint ?? state.publicKeyFingerprint;
+          if (authoritativeFingerprint === null) {
+            // Neither the head nor the credential row yielded a fingerprint. There
+            // is no database fact to compare against, and the one thing that must
+            // NOT happen is substituting the presenter's own value — so this is a
+            // refusal, not a fallback.
+            return { known: false, reason: "CREDENTIAL_NOT_ISSUED_HERE" };
+          }
 
           // THE JOIN. The revocation set comes from the authoritative tables
           // through the governed bridge, in the same transaction as the state
@@ -182,8 +197,22 @@ export function createOnlineCredentialVerifier(source: ClientSource): OnlineCred
             // has no row yet, the presented generation is the only generation, so
             // it is its own current — but the fingerprint still comes from the
             // stored credential rather than the presentation.
-            currentKeyFingerprint:
-              state.currentKeyFingerprint ?? request.chain.device.tbs.subjectFingerprint,
+            // FROM THE DATABASE, NEVER FROM THE PRESENTER.
+            //
+            // This previously fell back to `request.chain.device.tbs.subjectFingerprint`
+            // under a comment claiming the fingerprint came from the stored
+            // credential. It did not. `evaluateCertificateValidity` checks
+            // `tbs.subjectFingerprint === currentKeyFingerprint`, so when the head
+            // row was absent the comparison became `x === x`,
+            // CERT_KEY_FINGERPRINT_MISMATCH became unreachable, and a credential
+            // attesting to a key the device no longer holds would be admitted.
+            //
+            // The stored value was available all along: the group 0155 bridge
+            // returns `public_key_fingerprint` for the presented serial and
+            // `readState` never read it. It does now, so when the head is unknown
+            // the credential's OWN stored fingerprint is used — still a database
+            // fact rather than the presentation.
+            currentKeyFingerprint: authoritativeFingerprint,
             currentCertificateGeneration: state.currentGeneration ?? state.certificateGeneration,
             revocations,
             trustedRootFingerprints: request.trustedRootFingerprints,

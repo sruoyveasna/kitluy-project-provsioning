@@ -11,9 +11,10 @@
  * healthy and only revealed a misconfigured revocation path during an actual
  * incident is the failure worth paying a restart to avoid.
  *
- * Readiness reports `unavailable` while the authoritative database is
- * unreachable, so a Hub or operator console is never routed to an instance that
- * cannot answer a revocation question.
+ * Readiness does NOT probe the database. An earlier version of this comment
+ * claimed it did; `ready` is `true` from startup until shutdown. Adding a real
+ * probe is worthwhile and is recorded as an open condition rather than described
+ * as done.
  */
 import { createServer } from "node:http";
 import { createLogger } from "@kitluy/observability";

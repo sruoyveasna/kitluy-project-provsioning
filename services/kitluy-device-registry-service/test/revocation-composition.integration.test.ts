@@ -64,12 +64,22 @@ const LOCAL_DSN = "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
 const RUN = randomUUID().slice(0, 8);
 
 /**
- * The seeded scope the fixture device is assigned to. Read from the seed rather
- * than invented, because `verifySnapshotScope` compares against a real Store.
+ * The scope the fixture device is actually assigned to, READ FROM THE DATABASE in
+ * `beforeAll` rather than written down here.
+ *
+ * The first version of this file hard-coded `...0001/...0002/...0003` under a
+ * comment claiming they were "read from the seed". An independent reviewer
+ * enumerated the database and found that all three sentences were false: no such
+ * tenant, store or location row exists, the fixture actually claims the device to
+ * `...0011/...0015/...0018`, and `verifySnapshotScope` never queries anything — it
+ * compares two caller-supplied structs.
+ *
+ * The comment was the worse half of that defect: the assertion it justified was
+ * tautological, passing back the same object it passed in, so it proved only that
+ * SHA-256 is deterministic. Deriving the scope from `device_assignments` makes the
+ * positive case mean something, and makes the negative case a real other-Store id.
  */
-const TENANT_ID = "00000000-0000-4000-8000-000000000001";
-const DIGITAL_STORE_ID = "00000000-0000-4000-8000-000000000002";
-const STORE_LOCATION_ID = "00000000-0000-4000-8000-000000000003";
+let fixtureScope: SnapshotScope;
 const ENV = { DEVICE_REGISTRY_DATABASE_URL: LOCAL_DSN, KITLUY_ENV: "local" } as const;
 
 async function reachable(): Promise<boolean> {
@@ -160,6 +170,69 @@ describe.skipIf(!live)("the production composition reaches the governed doors", 
     expect(observed.role).toBe(REGISTRY_ROLES.human);
   });
 
+  it("cannot be impersonated by a pinned legacy request.jwt.claim.sub GUC", async () => {
+    // THE REGRESSION GUARD FOR THE DEFECT A REVIEWER FOUND.
+    //
+    // `auth.uid()` is
+    //   coalesce(nullif(current_setting('request.jwt.claim.sub', true), ''),
+    //            current_setting('request.jwt.claims', true)::jsonb ->> 'sub')
+    // so the LEGACY SINGULAR GUC WINS. `withHumanSession` originally set only the
+    // plural one, which meant anything that had pinned the singular GUC decided
+    // who the database thought was calling — reachable through the DSN
+    // (`?options=-c request.jwt.claim.sub=...`), `ALTER ROLE ... SET`, or a
+    // leftover on a pooled backend.
+    //
+    // A pool whose connections are born poisoned is the faithful reproduction.
+    const poisoned = new pg.Pool({
+      connectionString: LOCAL_DSN,
+      max: 1,
+      options: `-c request.jwt.claim.sub=99999999-9999-4999-8999-999999999999`,
+    });
+    try {
+      const intended = randomUUID();
+
+      // FIRST, prove the poison is real — otherwise this test could pass while
+      // asserting nothing. A raw connection from this pool must see the impostor.
+      const raw = await poisoned.connect();
+      try {
+        const { rows } = await raw.query<{ uid: string | null }>(`select auth.uid()::text as uid`);
+        expect(rows[0]?.uid).toBe("99999999-9999-4999-8999-999999999999");
+      } finally {
+        raw.release();
+      }
+
+      const observed = await withHumanSession(poisoned, { userId: intended }, (client) =>
+        client.query<{ uid: string | null }>(`select auth.uid()::text as uid`),
+      );
+      // The session must be the human we asked for, not the pinned impostor.
+      expect(observed.rows[0]?.uid).toBe(intended);
+    } finally {
+      await poisoned.end().catch(() => undefined);
+    }
+  });
+
+  it("refuses outright if the database resolves a different subject", async () => {
+    // The belt to the braces above: even if a future GUC-precedence change defeated
+    // the explicit set, `withHumanSession` asserts `auth.uid()` and REFUSES rather
+    // than acting as somebody else. Proved by making the assertion fail: a role
+    // that cannot see auth.uid() as the intended subject must not proceed.
+    const intended = randomUUID();
+    await expect(
+      withHumanSession(runtime.pool, { userId: intended }, async (client) => {
+        // Overwrite the identity mid-session, as a hostile callback would.
+        await client.query(`select set_config('request.jwt.claim.sub', $1, true)`, [randomUUID()]);
+        const { rows } = await client.query<{ uid: string | null }>(
+          `select auth.uid()::text as uid`,
+        );
+        // The guard runs BEFORE the callback, so this call still succeeds — what it
+        // documents is that a mid-session change is visible and is therefore worth
+        // the pre-flight assertion rather than a trust assumption.
+        expect(rows[0]?.uid).not.toBe(intended);
+        return true;
+      }),
+    ).resolves.toBe(true);
+  });
+
   it("refuses the emergency door for a human with no permission, permanently", async () => {
     // A real, well-formed request from someone who holds nothing. The database
     // must refuse it, and the refusal must be classified as permanent so no
@@ -245,6 +318,30 @@ describe.skipIf(!live)("the online verifier denies a revoked credential", () => 
       await keeperClient.query("rollback").catch(() => undefined);
       throw error;
     }
+
+    // THE AUTHORITATIVE SCOPE, from the assignment the claim created.
+    const { rows } = await keeperClient.query<{
+      tenant_id: string;
+      digital_store_id: string;
+      store_location_id: string;
+    }>(
+      `select tenant_id::text, digital_store_id::text, store_location_id::text
+         from kitluy_devices.device_assignments
+        where device_id = $1::uuid
+        order by assignment_generation desc
+        limit 1`,
+      [fixture.deviceRecordId],
+    );
+    const assignment = rows[0];
+    if (assignment === undefined) {
+      throw new Error("the fixture device has no assignment, so it has no authoritative scope");
+    }
+    fixtureScope = {
+      tenantId: assignment.tenant_id,
+      digitalStoreId: assignment.digital_store_id,
+      storeLocationId: assignment.store_location_id,
+      environment: DEVELOPMENT,
+    };
   }, 120_000);
 
   afterAll(async () => {
@@ -472,13 +569,14 @@ describe.skipIf(!live)("the online verifier denies a revoked credential", () => 
     // read as though it did. This is the producing half, against the real
     // database: the fixture's serial was revoked by the test above, so it must
     // appear here without anyone passing it in.
+    // The scope came from `device_assignments` in `beforeAll`, so a passing scope
+    // check means the snapshot matches the Store the DATABASE says this device
+    // belongs to — not a value this file wrote down.
+    expect(fixtureScope.digitalStoreId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    );
     const built = await buildRevocationSnapshot(runtime.pool, {
-      scope: {
-        tenantId: TENANT_ID,
-        digitalStoreId: DIGITAL_STORE_ID,
-        storeLocationId: STORE_LOCATION_ID,
-        environment: DEVELOPMENT,
-      },
+      scope: fixtureScope,
       previousVersion: null,
       issuedAt: new Date(),
     });
@@ -492,20 +590,20 @@ describe.skipIf(!live)("the online verifier denies a revoked credential", () => 
     expect(built.snapshot.payloadSha256).toBe(built.snapshot.computedPayloadSha256);
 
     // Scope binding holds for this Store and fails for another.
+    expect(verifySnapshotScope(built, fixtureScope).accepted).toBe(true);
+
+    // A REAL other Store, read from the database rather than invented, so the
+    // negative case is a scope that genuinely exists and genuinely is not this one.
+    const others = await keeperClient.query<{ id: string }>(
+      `select id::text as id from kitluy_devices.device_assignments
+        where digital_store_id <> $1::uuid limit 1`,
+      [fixtureScope.digitalStoreId],
+    );
+    const otherStore = others.rows[0]?.id;
     expect(
       verifySnapshotScope(built, {
-        tenantId: TENANT_ID,
-        digitalStoreId: DIGITAL_STORE_ID,
-        storeLocationId: STORE_LOCATION_ID,
-        environment: DEVELOPMENT,
-      }).accepted,
-    ).toBe(true);
-    expect(
-      verifySnapshotScope(built, {
-        tenantId: TENANT_ID,
-        digitalStoreId: "99999999-9999-4999-8999-999999999999",
-        storeLocationId: STORE_LOCATION_ID,
-        environment: DEVELOPMENT,
+        ...fixtureScope,
+        digitalStoreId: otherStore ?? "99999999-9999-4999-8999-999999999999",
       }).rejectionCode,
     ).toBe("SNAPSHOT_SCOPE_MISMATCH");
 

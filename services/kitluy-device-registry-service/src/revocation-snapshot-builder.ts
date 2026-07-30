@@ -88,19 +88,41 @@ const MS_PER_HOUR = 3_600_000;
 /**
  * Canonical payload bytes.
  *
- * Sorted, then joined with a separator that cannot occur inside a serial or a
- * uuid. Sorting is what makes the digest reproducible: two builds that read the
- * same revocations in a different row order must produce the same snapshot, or a
- * Hub would see a "new" snapshot on every poll and the monotonic version check
- * would be doing all the work.
+ * Sorted, then TERMINATED with ASCII control separators: U+001F (Unit Separator)
+ * after every element, U+001E (Record Separator) between the two identifier kinds.
+ * Both are named as constants below rather than written as literals, because as raw
+ * bytes in a string they are INVISIBLE in most diffs and review tools — an
+ * independent reviewer of this file read `join(US)` as `join("")` and reported a
+ * concatenation collision that does not exist. The property is now also locked by
+ * test ("is unambiguous within a kind").
+ *
+ * Why a separator at all: without one, `["A","B"]` and `["AB"]` would digest
+ * identically, and an attacker on the transport could replace two revoked serials
+ * with their concatenation while every integrity check still passed. Neither U+001F
+ * nor U+001E can occur in a certificate serial or a uuid, so no element can absorb
+ * its neighbour.
+ *
+ * Sorting is what makes the digest reproducible: two builds that read the same
+ * revocations in a different row order must produce the same snapshot, or a Hub
+ * would see a "new" snapshot on every poll and the monotonic version check would be
+ * doing all the work.
  */
+/** U+001F. Terminates every element within one identifier kind. */
+const US = "";
+
 export function canonicalPayload(
   serials: readonly string[],
   deviceRecordIds: readonly string[],
 ): string {
-  const certs = [...serials].sort().join("");
-  const devices = [...deviceRecordIds].sort().join("");
-  return `certs:${certs}devices:${devices}`;
+  // TERMINATED, not merely joined. A trailing US after EVERY element is what
+  // distinguishes `[]` from `[""]`; joining alone made both encode to the empty
+  // string. Neither value is reachable from the database (`serial_number` is NOT
+  // NULL and no credential carries an empty serial) and both mean "nothing
+  // revoked", so this was an edge case rather than a live hole — but a digest with
+  // any ambiguity in it is the wrong thing to hand a future signer.
+  const encode = (values: readonly string[]): string =>
+    [...values].sort().reduce((acc, value) => acc + value + US, "");
+  return `certs:${US}${encode(serials)}devices:${US}${encode(deviceRecordIds)}`;
 }
 
 export function payloadDigest(

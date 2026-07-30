@@ -2,11 +2,19 @@
  * kitluy-device-registry-service — Device registry — HET-enrolled device identity, hardware manifests, certificate records (Hub spec Appendix A)
  *
  * STATUS: runtime kernel (health/readiness/version, config validation, graceful
- * shutdown) BUILT + TESTED. Governed device-credential REVOCATION is now
- * production-wired here (WS-11-T003 Step 4 remediation §2/§3, migration group
- * 0155): this service is the composition root that calls the governed database
- * doors and the online credential verifier. No other business behavior is
- * implemented. Boundary and ownership: see README.md.
+ * shutdown) BUILT + TESTED.
+ *
+ * Governed device-credential revocation is COMPOSED here (WS-11-T003 Step 4
+ * remediation §2/§3, migration group 0155): `main.ts` resolves the real service
+ * over a real pool at startup and fails closed if it cannot.
+ *
+ * WHAT IS NOT YET TRUE, stated because an earlier version of this comment said
+ * otherwise: no HTTP route, queue subscriber or scheduled process INVOKES any of
+ * the four governed doors. `http.ts` still serves only health and version. The
+ * online verifier and the lapse worker have no runtime caller at all, and no
+ * producer enqueues the lapse job kind. So the doors are reachable and proven
+ * against the real database BY TESTS, and a deployed process would call none of
+ * them. RV-GW-002 is NOT closed; see the handoff for the exact open conditions.
  */
 import type { HealthReport } from "@kitluy/observability";
 
