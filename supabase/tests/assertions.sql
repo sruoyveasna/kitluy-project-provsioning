@@ -7775,7 +7775,7 @@ begin
   -- gate could not answer at all, so no refusal was reachable either.
   -- ------------------------------------------------------------------------
   -- No approval presented.
-  v_res := kitluy_devices.revoke_device_credential_v1(
+  v_res := kitluy_devices.revoke_device_credential_governed_v1(
     's42-none-' || gen_random_uuid()::text, v_device, 'development', 'device_identity', 1,
     'ADMINISTRATIVE_REPLACEMENT', 'no approval at all', 'REPROVISION_REQUIRED',
     'requester@42', 'SECTION42', null, null, null);
@@ -7785,7 +7785,7 @@ begin
   end if;
 
   -- An A2 policy is below the A3/A4 bar; an undeclared class would be too.
-  v_res := kitluy_devices.revoke_device_credential_v1(
+  v_res := kitluy_devices.revoke_device_credential_governed_v1(
     's42-a2-' || gen_random_uuid()::text, v_device, 'development', 'device_identity', 1,
     'ADMINISTRATIVE_REPLACEMENT', 'risk class probe', 'REPROVISION_REQUIRED',
     'requester@42', 'SECTION42', v_ap_a2, 'approver@42', null);
@@ -7794,7 +7794,7 @@ begin
   end if;
 
   -- An approval naming ANOTHER device is not an approval for this one.
-  v_res := kitluy_devices.revoke_device_credential_v1(
+  v_res := kitluy_devices.revoke_device_credential_governed_v1(
     's42-scope-' || gen_random_uuid()::text, v_device, 'development', 'device_identity', 1,
     'ADMINISTRATIVE_REPLACEMENT', 'wrong-scope probe', 'REPROVISION_REQUIRED',
     'requester@42', 'SECTION42', v_ap_scope, 'approver@42', null);
@@ -7804,7 +7804,7 @@ begin
 
   -- The requester is not their own second person, under a perfectly valid
   -- approval — so the refusal is about WHO acted, not about the approval.
-  v_res := kitluy_devices.revoke_device_credential_v1(
+  v_res := kitluy_devices.revoke_device_credential_governed_v1(
     's42-self-' || gen_random_uuid()::text, v_device, 'development', 'device_identity', 1,
     'ADMINISTRATIVE_REPLACEMENT', 'self-approval probe', 'REPROVISION_REQUIRED',
     'requester@42', 'SECTION42', v_ap_self, 'requester@42', null);
@@ -7827,7 +7827,7 @@ begin
   -- ------------------------------------------------------------------------
   -- THE COMPLETE REVOCATION.
   -- ------------------------------------------------------------------------
-  v_res := kitluy_devices.revoke_device_credential_v1(
+  v_res := kitluy_devices.revoke_device_credential_governed_v1(
     v_intent, v_device, 'development', 'device_identity', 1,
     'ADMINISTRATIVE_REPLACEMENT', 'terminal permanently replaced under change S42',
     'REPROVISION_REQUIRED', 'requester@42', 'SECTION42',
@@ -7885,7 +7885,7 @@ begin
   -- ------------------------------------------------------------------------
   select count(*) into v_rows from kitluy_devices.device_credential_revocations
    where credential_id = v_credential;
-  v_res := kitluy_devices.revoke_device_credential_v1(
+  v_res := kitluy_devices.revoke_device_credential_governed_v1(
     v_intent, v_device, 'development', 'device_identity', 1,
     'ADMINISTRATIVE_REPLACEMENT', 'terminal permanently replaced under change S42',
     'REPROVISION_REQUIRED', 'requester@42', 'SECTION42',
@@ -7914,7 +7914,7 @@ begin
   insert into kitluy_auth.approval_decisions (approval_request_id, approver_id, decision)
   values (v_ap_second, v_approver, 'APPROVE');
 
-  v_res := kitluy_devices.revoke_device_credential_v1(
+  v_res := kitluy_devices.revoke_device_credential_governed_v1(
     's42-conflict-' || gen_random_uuid()::text, v_device, 'development', 'device_identity', 1,
     'DEVICE_STOLEN', 'a second person calls it theft', 'REPROVISION_REQUIRED',
     'requester2@42', 'SECTION42', v_ap_second, 'approver2@42', 'INC-S42');
@@ -8190,7 +8190,7 @@ begin
       format('control 7: an approval scoped to another environment was accepted: %s', v_res);
   end if;
   -- ...and the same refusal through the governed operation, not only the gate.
-  v_res := kitluy_devices.revoke_device_credential_v1(
+  v_res := kitluy_devices.revoke_device_credential_governed_v1(
     's43-scope-' || gen_random_uuid()::text, v_device, 'development', 'device_identity', 1,
     'ADMINISTRATIVE_REPLACEMENT', 'wrong-scope probe', 'REPROVISION_REQUIRED',
     'requester@43', 'SECTION43', v_ap_scope, 'approver@43', null);
@@ -8462,7 +8462,7 @@ begin
   -- and the revoked credential STAYS revoked (Ruling 3), with group 0138's
   -- one-way trigger undisturbed by the boundary change.
   -- ========================================================================
-  v_res := kitluy_devices.revoke_device_credential_v1(
+  v_res := kitluy_devices.revoke_device_credential_governed_v1(
     v_intent, v_device, 'development', 'device_identity', 1,
     'ADMINISTRATIVE_REPLACEMENT', 'terminal permanently replaced under change S43',
     'REPROVISION_REQUIRED', 'requester@43', 'SECTION43',

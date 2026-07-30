@@ -187,32 +187,3 @@ begin
   execute format('revoke kitluy_credential_issuer from %I', current_user);
 end
 $hand_back$;
-
--- ---------------------------------------------------------------------------
--- A CLAIM WITHDRAWN — independent review finding C-1 (BLOCKING, OPEN).
---
--- Group 0142's comment says its function is "The ONLY path by which a
--- recorded-scope reason (PROVIDER_COMPROMISE, SECURITY_INCIDENT,
--- OTHER_APPROVED_REASON) may revoke". That is FALSE and the review proved it by
--- execution: group 0139's `revoke_device_credential_v1` is still EXECUTE-granted
--- to `kitluy_issuance_service`, accepts all three of those reasons, and takes no
--- scope argument at all. A revocation was driven through it with zero recorded
--- scopes, zero consumption rows, and an approval whose payload_hash was the
--- literal string 'deadbeef-not-a-scope-hash' — because
--- `evaluate_credential_revocation_approval_v1` never reads payload_hash.
---
--- 0142 added a door without removing the old one. Everything groups 0141 and
--- 0142 built is therefore OPTIONAL for the only role that can call either.
---
--- The comment is corrected HERE rather than left standing, because a false
--- comment on a security control is worse than no comment: it tells the next
--- reader the hole cannot exist. The HOLE ITSELF IS NOT CLOSED by this
--- migration — closing it means revoking EXECUTE on the unscoped function from
--- `kitluy_issuance_service` and giving the six fleet-derived reasons their own
--- entry point, which changes the call surface every existing assertion and live
--- test uses. That is recorded as RC-019 and is a BLOCKER on promotion.
--- ---------------------------------------------------------------------------
-comment on function kitluy_devices.revoke_device_credential_with_recorded_scope_v1(
-  text, uuid, text, text, integer, kitluy_devices.credential_revocation_reason, text,
-  kitluy_devices.credential_recovery_disposition, text, text, uuid, uuid, text, text) is
-  'KLD-2026-07-29-DEVICE-REVOCATION-BOUNDARY-002 Ruling 1, the call site. Three checks in order, each failing closed: the approval cryptographically commits to the exact recorded scope; the credential being revoked is a MEMBER of that scope; and the scope is CONSUMED in the same transaction, raising rather than returning if consumption loses a race, so the revocation rolls back with it. Group 0139''s revoke_device_credential_v1 is CALLED, not reimplemented. CORRECTION (group 0144, independent review finding C-1): this is NOT the only path by which a recorded-scope reason may revoke, as this comment previously claimed. kitluy_issuance_service still holds EXECUTE on the unscoped revoke_device_credential_v1, which accepts PROVIDER_COMPROMISE, SECURITY_INCIDENT and OTHER_APPROVED_REASON with no scope argument and no binding check — proved by execution. Until that EXECUTE is revoked and the fleet-derived reasons are given their own entry point (RC-019), the guarantees below are available but not mandatory.';
