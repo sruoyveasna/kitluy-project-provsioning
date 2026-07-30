@@ -13,12 +13,16 @@
   },
   "dependencies": {
     "@kitluy/api-errors": "workspace:*",
+    "@kitluy/device-identity": "workspace:*",
+    "@kitluy/job-contracts": "workspace:*",
     "@kitluy/observability": "workspace:*",
-    "@kitluy/shared-config": "workspace:*"
+    "@kitluy/shared-config": "workspace:*",
+    "pg": "catalog:"
   },
   "devDependencies": {
     "typescript": "catalog:",
     "@types/node": "catalog:",
+    "@types/pg": "catalog:",
     "vitest": "catalog:"
   }
 }

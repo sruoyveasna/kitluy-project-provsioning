@@ -990,16 +990,28 @@ importers:
       '@kitluy/api-errors':
         specifier: workspace:*
         version: link:../../packages/api-errors
+      '@kitluy/device-identity':
+        specifier: workspace:*
+        version: link:../../packages/device-identity
+      '@kitluy/job-contracts':
+        specifier: workspace:*
+        version: link:../../packages/job-contracts
       '@kitluy/observability':
         specifier: workspace:*
         version: link:../../packages/observability
       '@kitluy/shared-config':
         specifier: workspace:*
         version: link:../../packages/shared-config
+      pg:
+        specifier: 'catalog:'
+        version: 8.22.0
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
         version: 22.20.1
+      '@types/pg':
+        specifier: 'catalog:'
+        version: 8.20.0
       typescript:
         specifier: 'catalog:'
         version: 5.7.3

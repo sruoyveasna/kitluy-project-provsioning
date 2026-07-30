@@ -169,6 +169,63 @@ export async function loadRevocations(
 }
 
 /**
+ * The same facts, read through the group 0155 definer bridges.
+ *
+ * ===========================================================================
+ * WHY THERE ARE TWO LOADERS
+ * ===========================================================================
+ * {@link loadRevocations} reads `device_credentials` and `devices` DIRECTLY. The
+ * SELECT grantees on those tables are:
+ *
+ *     device_credentials  <- kitluy_credential_issuer, service_role
+ *     devices             <- kitluy_activation_governor, kitluy_credential_issuer,
+ *                            postgres, service_role
+ *
+ * `kitluy_credential_issuer` is NOLOGIN, so the only identity a running service
+ * could connect as and use it is `service_role` — which is globally BYPASSRLS.
+ * Wiring the online verifier that way would have worked, and would have given the
+ * component that answers one yes/no question the right to read every row in the
+ * database. Group 0140 already moved the approval gate off `service_role` for
+ * exactly this reason.
+ *
+ * So production uses THIS function, which needs no table privilege and no
+ * BYPASSRLS — only EXECUTE on two definer bridges that return revoked
+ * identifiers and nothing else.
+ *
+ * {@link loadRevocations} remains, and is not deprecated: it is the privileged
+ * administrative reader, and it is what
+ * `revocation-bridge-conformance.integration.test.ts` compares this against, so
+ * the two are proven to return the same set rather than assumed to.
+ */
+export async function loadRevocationsViaGovernedBridge(
+  client: RevocationReadExecutor,
+  scope: RevocationLookupScope,
+): Promise<LoadedRevocations> {
+  const credentials = await client.query<{ serial_number: string }>(
+    `select s as serial_number
+       from kitluy_devices.revoked_certificate_serials_v1($1::text, $2::uuid) as s`,
+    [scope.environment, scope.deviceRecordId ?? null],
+  );
+
+  const devices = await client.query<{ id: string }>(
+    `select d::text as id
+       from kitluy_devices.revoked_device_records_v1($1::text, $2::uuid) as d`,
+    [scope.environment, scope.deviceRecordId ?? null],
+  );
+
+  const serials = new Set(credentials.rows.map((row) => row.serial_number));
+  const deviceIds = new Set(devices.rows.map((row) => row.id));
+
+  return {
+    revokedCertificateSerials: [...serials],
+    revokedDeviceRecordIds: [...deviceIds],
+    loadedAt: new Date(),
+    isCertificateRevoked: (serial) => serials.has(serial),
+    isDeviceRevoked: (deviceRecordId) => deviceIds.has(deviceRecordId),
+  };
+}
+
+/**
  * A lookup that asks the database on EVERY question rather than caching.
  *
  * Correct by construction and slow by construction, so it is offered for the

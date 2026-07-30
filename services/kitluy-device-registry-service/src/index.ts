@@ -1,8 +1,11 @@
 /**
  * kitluy-device-registry-service — Device registry — HET-enrolled device identity, hardware manifests, certificate records (Hub spec Appendix A)
  *
- * STATUS: SCAFFOLDED. Runtime kernel (health/readiness/version, config
- * validation, graceful shutdown) is BUILT + TESTED; no business behavior is
+ * STATUS: runtime kernel (health/readiness/version, config validation, graceful
+ * shutdown) BUILT + TESTED. Governed device-credential REVOCATION is now
+ * production-wired here (WS-11-T003 Step 4 remediation §2/§3, migration group
+ * 0155): this service is the composition root that calls the governed database
+ * doors and the online credential verifier. No other business behavior is
  * implemented. Boundary and ownership: see README.md.
  */
 import type { HealthReport } from "@kitluy/observability";
@@ -18,3 +21,65 @@ export function buildHealthReport(ready: boolean): HealthReport {
     checks: { startup: ready ? "ok" : "failed" },
   };
 }
+
+export {
+  DEVICE_REGISTRY_DATABASE_URL,
+  InvalidHumanSessionError,
+  REGISTRY_ROLES,
+  createRegistryPool,
+  deviceRegistryDatabaseUrl,
+  observeSessionIdentity,
+  withHumanSession,
+  withServiceRole,
+  type ClientSource,
+  type RegistryRole,
+  type VerifiedHumanSession,
+} from "./database.js";
+
+export {
+  FORBIDDEN_IMPLEMENTATION_OVERRIDES,
+  resolveDeviceRevocationService,
+  type DeviceRevocationRuntime,
+} from "./composition.js";
+
+export {
+  EMERGENCY_REASON_CODES,
+  createDeviceRevocationService,
+  type DeviceRevocationService,
+  type EmergencyAuthorizationStatus,
+  type EmergencyOutcomeCode,
+  type EmergencyReasonCode,
+  type EmergencyRevocationRequest,
+  type EmergencyRevocationResult,
+  type LapseResult,
+  type PostApprovalDecision,
+  type PostApprovalOutcomeCode,
+  type PostApprovalRequest,
+  type PostApprovalResult,
+} from "./revocation-service.js";
+
+export {
+  INSUFFICIENT_PRIVILEGE,
+  RedactedRevocationError,
+  UNDEFINED_FUNCTION,
+  classifyRevocationFailure,
+  throwRedacted,
+  type RedactedRevocationFailure,
+  type RevocationFailureClass,
+} from "./revocation-failures.js";
+
+export {
+  createOnlineCredentialVerifier,
+  type OnlineCredentialVerifier,
+  type OnlineVerificationOutcome,
+  type OnlineVerificationRequest,
+} from "./online-verifier.js";
+
+export {
+  EMERGENCY_LAPSE_JOB_KIND,
+  createEmergencyLapseWorker,
+  emergencyLapseDedupeKey,
+  emergencyLapseJobHandler,
+  readLapseAuthorizationId,
+  type EmergencyLapseWorker,
+} from "./lapse-worker.js";
