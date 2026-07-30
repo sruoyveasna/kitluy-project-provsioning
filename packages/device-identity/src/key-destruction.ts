@@ -59,10 +59,33 @@ import {
 // The governed vocabulary, mirrored exactly
 // ---------------------------------------------------------------------------
 
-/** `kitluy_devices.key_hold_type`. */
-export type KeyHoldType = "INCIDENT" | "LEGAL" | "AUDIT";
+/**
+ * `kitluy_devices.key_hold_type`, mirrored EXACTLY — same spelling, same case,
+ * same four members, in the migration's order.
+ *
+ * The first version of this type said `"INCIDENT" | "LEGAL" | "AUDIT"`. Every
+ * one of those was wrong in a way that only shows up against a real database:
+ * the enum labels are lower case, `AUDIT` is actually `audit_preservation`, and
+ * `regulatory` was missing altogether — so a regulatory hold, which KLREQ-031
+ * says suspends eligibility, execution, approval use and retry, could not even
+ * be NAMED from TypeScript. A value from that union would have been rejected by
+ * the enum cast, which is fail-closed and therefore survivable, but a hold type
+ * nobody can express is a hold nobody can place.
+ *
+ * NOT YET GUARDED BY A TEST. A live conformance check against `pg_enum` is the
+ * right guard and does not exist: nothing here fails if the enum changes again.
+ * The values below were read from `pg_enum` on the development database on
+ * 2026-07-29 and are correct as of migration group 0137; treat them as a
+ * transcription until that check is written.
+ */
+export type KeyHoldType = "incident" | "legal" | "regulatory" | "audit_preservation";
 
-export const KEY_HOLD_TYPES: readonly KeyHoldType[] = ["INCIDENT", "LEGAL", "AUDIT"] as const;
+export const KEY_HOLD_TYPES: readonly KeyHoldType[] = [
+  "incident",
+  "legal",
+  "regulatory",
+  "audit_preservation",
+] as const;
 
 /**
  * Outcomes this module can report.
