@@ -270,8 +270,25 @@ begin
   select count(*) into v_select from pg_policies
   where schemaname in ('kitluy_core', 'kitluy_auth', 'kitluy_admin', 'kitluy_audit')
     and cmd = 'SELECT';
-  if v_select <> 61 then
-    raise exception 'ASSERT FAIL: expected 61 SELECT policies, found %', v_select;
+  -- 61 -> 62 at group 0149, recorded as RC-025.
+  --
+  -- The 62nd is `sensitive_action_reauth_policy_read`: SELECT, TO authenticated,
+  -- on `kitluy_auth.sensitive_action_reauth_policy`, which holds the governed
+  -- sensitive-action re-authentication window (300 seconds, KLD-2026-07-30-
+  -- DEVICE-EMERGENCY-REAUTH-001). Every table in these schemas must carry RLS
+  -- ENABLED AND FORCED — this census's sibling assertion refuses one that does
+  -- not, and it caught this table — and FORCE applies to the owner too, so a
+  -- forced table with NO policy is readable by nobody, including the SECURITY
+  -- DEFINER that must look the window up.
+  --
+  -- The row is the PUBLISHED RULE, not a secret: it says how fresh a
+  -- re-authentication must be. Reading it discloses nothing an authenticated
+  -- user should not know, and it carries no tenancy, no subject and no
+  -- evidence. The 58 -> 61 movement was Ruling 2's OWNER-APPROVED widening of
+  -- the approval-reader surface; this one touches a different table for a
+  -- different reason and is recorded rather than folded into that number.
+  if v_select <> 62 then
+    raise exception 'ASSERT FAIL: expected 62 SELECT policies, found %', v_select;
   end if;
 
   -- Cycle-5 schemas: kitluy_laundry 3 + kitluy_config 4 + kitluy_notifications 1
