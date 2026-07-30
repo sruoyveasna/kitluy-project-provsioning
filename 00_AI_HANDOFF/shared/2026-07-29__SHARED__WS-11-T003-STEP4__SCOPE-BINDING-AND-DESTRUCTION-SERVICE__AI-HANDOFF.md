@@ -7,9 +7,9 @@
 | Prompt | WS-11-T003 Step 4 — issuance/renewal/revocation/recovery/destruction completion |
 | Authority | KLD-2026-07-29-DEVICE-REVOCATION-BOUNDARY-002 Rulings 1-4 (KLREQ-033); KLD-2026-07-29-DEVICE-KEY-DESTRUCTION-001 (KLREQ-031); KLD-2026-07-29-DEVICE-CREDENTIAL-REVOCATION-001 (KLREQ-032) |
 | Starting HEAD | `9ff77fa` |
-| Commits added | `932dcf2`, `9c0c288` |
+| Commits added | `932dcf2`, `9c0c288`, `c7366f5`, `cb8dbb6`, `7f8ff99`, `d79f3c3`, `e2aed5b`, `371beea` |
 | Migrations added | 0141 `revocation_scope_binding`, 0142 `scope_bound_revocation` |
-| Status | **PARTIAL** — see "What is NOT done" |
+| Status | **PARTIAL — NOT PROMOTED.** See "What is NOT done". |
 
 ## What was built
 
@@ -106,9 +106,9 @@ Clean `db:reset` → `db:seed` → `db:test` → `test:rls`, all exit 0:
 
 | Gate | Result |
 | --- | --- |
-| `pnpm db:test` | exit 0, **189** `NOTICE: PASS` (190 loose, unchanged from the pre-change baseline) |
+| `pnpm db:test` | exit 0, **191** `NOTICE: PASS` (baseline 189; +1 SECTION 44, +1 SECTION 45) |
 | `pnpm test:rls` | exit 0, **104** PASS |
-| `@kitluy/device-identity` unit tests | exit 0, **628** PASS / 0 skipped at baseline; **+32** for destruction |
+| `@kitluy/device-identity` | exit 0, 28 files, **739** tests, **0 skipped**, live DB up (baseline 628; +32 destruction, +79 worker jobs) |
 | `typecheck` | exit 0 |
 
 Nine-step live probe of the binding chain (rolled back), all passing:
@@ -120,21 +120,35 @@ cannot execute the verifier, only the governor can.
 
 ## What is NOT done — do not read this handoff as completion
 
-- **§7 assertion block for 0141/0142 is NOT written.** The binding is proved by
-  the live probe above and by `db:test` not regressing, but there is no
-  permanent assertion section covering the 23 Ruling 1 requirements. Until there
-  is, a future migration could weaken the binding without a gate noticing.
-- **Worker job kinds are NOT added** (revocation execute, recovery disposition,
-  destruction execute, destruction reconcile, post-approval lapse).
-- **Live destruction integration tests are NOT written.** Retention windows,
-  holds, four eyes, approval expiry and the attempt budget are enforced in 0137
-  and are exercised only by unit tests against stubs, which prove the service's
-  ordering but not the database's policy.
-- **True-concurrency tests (§12) are NOT written.** No two-connection evidence
-  exists for scope consumption, destruction execution or lease replacement.
-- **Independent hostile review (§16) has NOT happened.**
-- `lapse_emergency_revocation_post_approvals_v1` still has **no caller** — a
-  PENDING post-approval stays PENDING for ever.
+- **Live destruction integration tests are ABSENT.** Retention windows, holds,
+  four eyes, approval expiry and the attempt budget are enforced in group 0137
+  and are exercised only by unit tests against stubs. Those prove the SERVICE's
+  ordering; they do not prove the DATABASE's policy.
+- **True two-connection concurrency evidence is ABSENT.** This has one concrete
+  consequence, recorded in SECTION 45's own header: group 0142's
+  RAISE-rather-than-return rollback is **UNPROVEN**. Single-threaded, the
+  verifier refuses a spent scope long before consumption is attempted, so the
+  branch is unreachable without a real race. The atomicity claim rests on
+  PostgreSQL's transaction semantics and on reading the code — not on evidence.
+- **No independent hostile review has completed.** Three review attempts died on
+  API stalls. What exists instead is one reviewing agent's incidental finding
+  (the `KeyHoldType` enum defect, fixed in `371beea`) and the mutation checks the
+  assertion sections ran on themselves. That is not a review.
+- **`lapse_emergency_revocation_post_approvals_v1` still has no caller.** The
+  lapse DISCOVERY exists in `revocation-and-destruction-jobs.ts`, but nothing
+  schedules it, so a PENDING post-approval still stays PENDING for ever.
+- **The four job kinds have no database adapter.** Their ports are typed only;
+  nothing is scheduled in a running system.
+- **`KeyHoldType` has no live conformance guard.** The values were transcribed
+  from `pg_enum` by hand; nothing fails if the enum changes again.
+
+## What IS now done that this handoff previously listed as missing
+
+- SECTION 44 (`ws11-revocation-scope-binding`, 1004 lines) and SECTION 45
+  (`ws11-scope-bound-revocation`, 648 lines) are the permanent gate for groups
+  0141 and 0142. Both were mutation-checked rather than assumed.
+- The four worker job kinds exist, reuse the durable runtime rather than
+  duplicating it, and refuse to forge an approval. 79 tests.
 
 ## Risk status — unchanged
 
