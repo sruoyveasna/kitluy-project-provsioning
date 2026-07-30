@@ -291,10 +291,24 @@ $serials$;
 alter function kitluy_devices.revoked_certificate_serials_v1(text, uuid)
   owner to kitluy_credential_issuer;
 revoke all on function kitluy_devices.revoked_certificate_serials_v1(text, uuid) from public;
+-- ISSUANCE ONLY, and NOT `kitluy_worker_service`.
+--
+-- The first version of this migration granted it to the worker as well, for
+-- symmetry with the other bridges. `supabase/tests/assertions.sql` refused it:
+--
+--     ASSERT FAIL: the worker role can execute revoked_certificate_serials_v1
+--
+-- Decision §2.5, asserted as authority rather than as a flag, is that the worker
+-- may DETECT, RECORD and ESCALATE but may not decide to revoke and must hold no
+-- path that would let it — and the assertion enforces that by sweeping every
+-- function in `kitluy_devices` whose name matches `%revoke%`/`%revocation%`.
+--
+-- The grant was also simply unnecessary: the online verifier and the snapshot
+-- builder both run as `kitluy_issuance_service`. Nothing the worker does reads the
+-- revocation set. Symmetry was the only argument for it, and "the role does not
+-- need it" is the better one.
 grant execute on function kitluy_devices.revoked_certificate_serials_v1(text, uuid)
   to kitluy_issuance_service;
-grant execute on function kitluy_devices.revoked_certificate_serials_v1(text, uuid)
-  to kitluy_worker_service;
 
 comment on function kitluy_devices.revoked_certificate_serials_v1(text, uuid) is
   'Group 0155. Narrow definer bridge: revoked certificate serials for one environment (optionally one device). Exists so the online verifier need not connect as globally-BYPASSRLS service_role to answer a revocation question (the arrangement group 0140 moved away from). Returns serials only — no tenancy, fingerprints or explanations.';
@@ -327,10 +341,9 @@ $devices$;
 alter function kitluy_devices.revoked_device_records_v1(text, uuid)
   owner to kitluy_credential_issuer;
 revoke all on function kitluy_devices.revoked_device_records_v1(text, uuid) from public;
+-- ISSUANCE ONLY. Same §2.5 reason as the serial bridge above.
 grant execute on function kitluy_devices.revoked_device_records_v1(text, uuid)
   to kitluy_issuance_service;
-grant execute on function kitluy_devices.revoked_device_records_v1(text, uuid)
-  to kitluy_worker_service;
 
 comment on function kitluy_devices.revoked_device_records_v1(text, uuid) is
   'Group 0155. Narrow definer bridge: device record ids whose lifecycle_state denies certificate validation (retired only, matching DEVICE_REVOKING_LIFECYCLE_STATES). Widening the set is an owner decision. Returns ids only.';
@@ -428,12 +441,23 @@ declare
   v_oid oid;
   v_leaked text;
   v_legacy record;
+  -- Everything group 0155 creates.
   c_created constant text[] := array[
     'lapse_governed_emergency_post_approval_v1',
     'governed_emergency_status_v1',
     'revoked_certificate_serials_v1',
     'revoked_device_records_v1',
     'credential_verification_state_v1'];
+  -- The subset the WORKER may reach. The two revocation READERS are deliberately
+  -- absent: decision §2.5 gives the worker detection and escalation but no
+  -- revocation path, and `assertions.sql` enforces it by name pattern.
+  c_worker_reachable constant text[] := array[
+    'lapse_governed_emergency_post_approval_v1',
+    'governed_emergency_status_v1'];
+  -- ... and the subset it must NOT reach, asserted rather than left implied.
+  c_worker_forbidden constant text[] := array[
+    'revoked_certificate_serials_v1',
+    'revoked_device_records_v1'];
 begin
   v_created := array[]::oid[];
   foreach v_name in array c_created loop
@@ -459,13 +483,35 @@ begin
     raise exception 'KLUY-MIGRATION-0155: kitluy_issuance_service lacks USAGE on kitluy_devices'
       using errcode = 'P0001';
   end if;
+  -- Issuance drives all five: normal revocation, the online verifier's read, the
+  -- snapshot build, and both emergency bridges.
   foreach v_oid in array v_created loop
-    if not has_function_privilege('kitluy_worker_service', v_oid, 'execute') then
-      raise exception 'KLUY-MIGRATION-0155: the worker cannot execute %', v_oid::regprocedure
-        using errcode = 'P0001';
-    end if;
     if not has_function_privilege('kitluy_issuance_service', v_oid, 'execute') then
       raise exception 'KLUY-MIGRATION-0155: issuance cannot execute %', v_oid::regprocedure
+        using errcode = 'P0001';
+    end if;
+  end loop;
+
+  foreach v_name in array c_worker_reachable loop
+    select p.oid into v_oid
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'kitluy_devices' and p.proname = v_name;
+    if not has_function_privilege('kitluy_worker_service', v_oid, 'execute') then
+      raise exception 'KLUY-MIGRATION-0155: the worker cannot execute %', v_name
+        using errcode = 'P0001';
+    end if;
+  end loop;
+
+  -- §2.5 held as a REFUSAL, not a comment: if a later change grants the worker a
+  -- revocation reader, this migration stops applying.
+  foreach v_name in array c_worker_forbidden loop
+    select p.oid into v_oid
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'kitluy_devices' and p.proname = v_name;
+    if has_function_privilege('kitluy_worker_service', v_oid, 'execute') then
+      raise exception
+        'KLUY-MIGRATION-0155: the worker can execute %, but decision §2.5 gives it no revocation path',
+        v_name
         using errcode = 'P0001';
     end if;
   end loop;
@@ -536,7 +582,7 @@ begin
   end loop;
 
   raise notice
-    'KLUY-MIGRATION-0155: per-authorization lapse + status bridge reachable by kitluy_worker_service; zero table privileges; legacy doors shut for worker/issuance/authenticated/service_role/anon';
+    'KLUY-MIGRATION-0155: lapse + status reachable by kitluy_worker_service; the two revocation READERS are issuance-only per decision §2.5; worker holds zero table privileges; legacy doors shut for worker/issuance/authenticated/service_role/anon';
 end
 $census$;
 
@@ -652,3 +698,27 @@ begin
     v_after;
 end
 $smoke$;
+
+-- ---------------------------------------------------------------------------
+-- 5. HAND THE MEMBERSHIP BACK
+-- ---------------------------------------------------------------------------
+-- Groups 0147-0153 each end this way, and the first version of THIS migration
+-- did not — which `supabase/tests/assertions.sql` caught immediately:
+--
+--     ERROR: ASSERT FAIL: the current login-capable role can SET ROLE
+--            kitluy_credential_issuer
+--
+-- That is not a tidiness failure. `kitluy_credential_issuer` is the NOLOGIN owner
+-- of every governed door INCLUDING the legacy ones group 0151 shut, so a
+-- login-capable role left holding the membership could `set role` to it and
+-- execute `revoke_device_credential_v1` directly. The census in section 3 would
+-- still have passed, because it asks whether the RUNTIME roles hold EXECUTE — not
+-- whether someone can become the owner.
+--
+-- The borrow is therefore returned unconditionally, and the assertion stays the
+-- guard that proves it happened.
+do $hand_back$
+begin
+  execute format('revoke kitluy_credential_issuer from %I', current_user);
+end
+$hand_back$;

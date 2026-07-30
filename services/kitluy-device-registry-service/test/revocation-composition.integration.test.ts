@@ -283,6 +283,93 @@ describe.skipIf(!live)("the online verifier denies a revoked credential", () => 
     });
   }
 
+  /**
+   * Revokes generation 1 through the PRODUCTION service, then verifies again.
+   *
+   * The affected set and its digest are ASKED FOR, never constructed here: the
+   * approval's `payload_hash` must be the one the database derived or the binding
+   * refuses (RC-019, group 0146).
+   */
+  async function revokeThroughProductionAndVerify() {
+    // The scope resolver is governor-only. The membership is BORROWED inside this
+    // transaction and returned by the rollback that ends it — `grant role` is
+    // catalog state and catalog state is transactional. `postgres` is deliberately
+    // not a standing member, which is the property migration 0155 now preserves.
+    await keeperClient.query("begin");
+    let scope: Record<string, unknown>;
+    try {
+      await keeperClient.query(
+        `do $borrow$ begin execute format('grant kitluy_credential_issuer to %I', current_user); end $borrow$;`,
+      );
+      await keeperClient.query("set local role kitluy_credential_issuer");
+      const { rows } = await keeperClient.query<{ result: Record<string, unknown> }>(
+        `select kitluy_devices.authoritative_revocation_scope_v1(
+           $1::uuid, 'ADMINISTRATIVE_REPLACEMENT') as result`,
+        [fixture.credentialId],
+      );
+      scope = rows[0]?.result ?? {};
+      await keeperClient.query("reset role");
+      await keeperClient.query("commit");
+    } catch (error) {
+      await keeperClient.query("rollback").catch(() => undefined);
+      throw error;
+    }
+    expect(
+      scope.resolved,
+      `the database would not derive the affected set: ${JSON.stringify(scope)}`,
+    ).toBe(true);
+
+    const { rows: policyRows } = await keeperClient.query<{ id: string }>(
+      `insert into kitluy_auth.approval_policies
+         (policy_key, version, permission_key, environment, quorum, status, risk_class)
+       values ($1, 1, 'device.credential.revoke', $2, 1, 'ACTIVE', 'A4')
+       returning id`,
+      [`cred.revocation.a4.prodcomp.${randomUUID().slice(0, 8)}`, DEVELOPMENT],
+    );
+    const { rows: approvalRows } = await keeperClient.query<{ id: string }>(
+      `insert into kitluy_auth.approval_requests
+         (policy_id, requester_id, resource_type, resource_id, environment, action,
+          payload_hash, reason, status)
+       values ($1::uuid, '00000000-0000-4000-8000-000000000007', 'device', $2::uuid, $3,
+               'device_credential_revocation', $4, 'production composition fixture', 'APPROVED')
+       returning id`,
+      [policyRows[0]?.id, fixture.deviceRecordId, DEVELOPMENT, String(scope.payload_hash ?? "")],
+    );
+    const approvalId = approvalRows[0]?.id ?? "";
+    await keeperClient.query(
+      `insert into kitluy_auth.approval_decisions (approval_request_id, approver_id, decision)
+       values ($1::uuid, '00000000-0000-4000-8000-000000000009', 'APPROVE')`,
+      [approvalId],
+    );
+
+    // THE PRODUCTION CALL. `revokeNormal` -> `createPgRevocationGateway` ->
+    // `revoke_device_credential_bound_v1`, as `kitluy_issuance_service`.
+    const result = await runtime.service.revokeNormal({
+      revocationRequestId: `prodcomp-${randomUUID()}`,
+      deviceRecordId: fixture.deviceRecordId,
+      environment: DEVELOPMENT,
+      purpose: DEVICE_IDENTITY,
+      credentialGeneration: 1,
+      reasonCode: "ADMINISTRATIVE_REPLACEMENT",
+      reason: "revoked so the production verifier can be asked whether it still opens",
+      recoveryDisposition: "REPROVISION_REQUIRED",
+      requestedBy: "requester@prodcomp",
+      source: "PRODUCTION_COMPOSITION_SUITE",
+      approvalRequestId: approvalId,
+      approvedBy: "approver@prodcomp",
+      incidentReference: `INC-PRODCOMP-${RUN}`,
+      // NULL, not "". ADMINISTRATIVE_REPLACEMENT is a FLEET-derived reason (group
+      // 0146), so the resolver returns no recorded incident scope at all.
+      incidentScopeId: typeof scope.incident_scope_id === "string" ? scope.incident_scope_id : null,
+    });
+    expect(
+      result.outcome,
+      `the governed revocation did not complete: ${JSON.stringify(result)}`,
+    ).toBe("REVOKED");
+
+    return verifyThroughProduction(new Date(issuedAt.getTime() + 120_000));
+  }
+
   it("accepts the credential BEFORE revocation", async () => {
     const outcome = await verifyThroughProduction(new Date(issuedAt.getTime() + 60_000));
     expect(outcome.known).toBe(true);
@@ -325,19 +412,22 @@ describe.skipIf(!live)("the online verifier denies a revoked credential", () => 
   });
 
   it("DENIES the credential the moment it is revoked, as CERT_REVOKED", async () => {
-    // Revoked directly on the credential row via the privileged keeper, because
-    // what is under test here is the VERIFIER's join to revocation state, not the
-    // governed write path — that has its own suites (groups 0146-0155) and its own
-    // four-eyes fixtures. The row reached is the same row the governed door writes.
-    await keeperClient.query(
-      `update kitluy_devices.device_credentials
-          set state = 'revoked', revoked_at = now(),
-              revocation_reason = 'ADMINISTRATIVE_REPLACEMENT'
-        where credential_id = $1::uuid`,
-      [fixture.credentialId],
-    );
-
-    const outcome = await verifyThroughProduction(new Date(issuedAt.getTime() + 120_000));
+    // Revoked through the PRODUCTION SERVICE's normal governed door, with a real
+    // four-eyes approval bound to the digest the DATABASE derived.
+    //
+    // The first version of this test issued a direct `update ... set state =
+    // 'revoked'` as the keeper. It passed, and it passed for a bad reason: an
+    // earlier iteration of migration 0155 had leaked `kitluy_credential_issuer`
+    // membership to `postgres`, which silently conferred the table privilege.
+    // Handing that membership back — the correct fix — turned the UPDATE into
+    // `permission denied for table device_credentials` and exposed the test as
+    // having depended on a privilege escalation.
+    //
+    // Going through the governed door is the stronger proof anyway: it exercises
+    // `revokeNormal` -> `createPgRevocationGateway` ->
+    // `revoke_device_credential_bound_v1`, so this single test now covers both the
+    // write wiring (§2) and the verifier's join to revocation state (§3).
+    const outcome = await revokeThroughProductionAndVerify();
     expect(outcome.known).toBe(true);
     if (!outcome.known) return;
     expect(outcome.validity.valid).toBe(false);
