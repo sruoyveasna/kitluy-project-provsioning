@@ -8,7 +8,7 @@
 | Authority | KLD-2026-07-29-DEVICE-REVOCATION-BOUNDARY-002 Rulings 1-4 (KLREQ-033); KLD-2026-07-29-DEVICE-KEY-DESTRUCTION-001 (KLREQ-031); KLD-2026-07-29-DEVICE-CREDENTIAL-REVOCATION-001 (KLREQ-032) |
 | Starting HEAD | `9ff77fa` |
 | Commits added | `932dcf2`, `9c0c288`, `c7366f5`, `cb8dbb6`, `7f8ff99`, `d79f3c3`, `e2aed5b`, `371beea` |
-| Migrations added | 0141 `revocation_scope_binding`, 0142 `scope_bound_revocation` |
+| Migrations added | 0141 `revocation_scope_binding`, 0142 `scope_bound_revocation`, 0143 `destruction_eligibility_blocker_fix` |
 | Status | **PARTIAL — NOT PROMOTED.** See "What is NOT done". |
 
 ## What was built
@@ -108,7 +108,7 @@ Clean `db:reset` → `db:seed` → `db:test` → `test:rls`, all exit 0:
 | --- | --- |
 | `pnpm db:test` | exit 0, **191** `NOTICE: PASS` (baseline 189; +1 SECTION 44, +1 SECTION 45) |
 | `pnpm test:rls` | exit 0, **104** PASS |
-| `@kitluy/device-identity` | exit 0, 28 files, **739** tests, **0 skipped**, live DB up (baseline 628; +32 destruction, +79 worker jobs) |
+| `@kitluy/device-identity` | exit 0, **30 files, 758 tests, 0 skipped**, live DB up (session baseline 739; +12 live destruction, +7 concurrency) |
 | `typecheck` | exit 0 |
 
 Nine-step live probe of the binding chain (rolled back), all passing:
@@ -118,37 +118,107 @@ consumption is single use; a spent scope stops verifying; the scope is
 immutable. The probe also confirmed the boundary by being *refused* — `postgres`
 cannot execute the verifier, only the governor can.
 
+## Gate results (2026-07-30)
+
+### Gate 1 — live provider-key destruction: PASSED
+12 tests against the REAL group-0137 functions under `SET LOCAL ROLE
+kitluy_issuance_service`, through a gateway that is five
+`select kitluy_devices.<fn>(...)` calls and nothing else. Self-approval is
+refused by the DATABASE, not merely by the service pre-check. All four hold
+types block, and releasing a hold does not resurrect the approval. The attempt
+ceiling routes to manual review. A provider result that is neither `DESTROYED`
+nor `ALREADY_DESTROYED` is refused. The provider is called BEFORE confirmation
+and is not called at all when `begin` refuses. A lost provider answer retried
+three times leaves `destructionCount` at 1 and confirms on the FIRST receipt.
+
+**Defect found and fixed — migration 0143.** Seven of 0137's eight blocker
+appends used `v_blockers := v_blockers || 'HOLD_ACTIVE'` with an untyped
+literal, which PostgreSQL resolves to `array_cat`, not `array_append`: the
+evaluator raised `22P02 malformed array literal` instead of reporting its
+blockers. It FAILED CLOSED, so nothing was ever wrongly destroyed — what was
+lost was the ANSWER. 0143 is exactly seven `::text` casts over the LIVE 0137
+body pulled from `pg_get_functiondef`, so nothing could drift. A held key now
+answers `eligible=false` with a named blocker list.
+
+### Gate 2 — true concurrency: PASSED
+7 tests. Two separate `pg.Client` connections, each recording `pg_backend_pid`,
+with a THIRD observer connection reading `pg_stat_activity`/`pg_locks` to prove
+the loser is genuinely lock-parked rather than merely slower.
+
+**The previously unproven condition is now proved.** Both connections call
+`revoke_device_credential_with_recorded_scope_v1` for the same scope: the winner
+commits, the loser fails with SQLSTATE `23505` carrying
+`KLUY-CRED-REVOCATION-SCOPE-CONSUMED`, and leaves **no residue** — zero
+revocation rows, no consumption row, no credential state change. Group 0142's
+`RAISE` does what it was written to do.
+
+**Defect found and fixed.** The suite must borrow `kitluy_credential_issuer`,
+which is a CLUSTER-WIDE fact, and vitest runs files in parallel by default.
+While the borrow was held, `same-key-renewal-preflight` watched a statement it
+asserts is REFUSED succeed instead — a privilege test made VACUOUS, not merely
+failing. Live suites now run one file at a time, and the borrow is re-taken
+idempotently at the point of use. `expectRefused` is what caught it.
+
+## Gate 3 — independent hostile review: **BLOCKED**
+
+Three independent reviewers, none with implementation ownership, run as three
+perspectives after the earlier single-reviewer attempts died on API stalls.
+
+| Reviewer | Scope | Verdict |
+| --- | --- | --- |
+| A — saboteur | database: 0136-0144, grants, roles, RLS | **BLOCKED** |
+| B — security auditor + new maintainer | TypeScript, provider, worker | APPROVED-WITH-CONDITIONS |
+| C — evidence and claim honesty | tests, assertions, registers, handoff | APPROVED-WITH-CONDITIONS |
+
+**Consolidated verdict: BLOCKED.** The most severe governs, and reviewer A
+demonstrated two BLOCKING defects by execution. Both were independently
+re-verified before being accepted.
+
+**C-1 — BLOCKING, OPEN (RC-019).** Group 0142's comment claimed it is "The ONLY
+path" by which a recorded-scope reason may revoke. It is not.
+`kitluy_issuance_service` still holds EXECUTE on group 0139's unscoped
+`revoke_device_credential_v1`, which accepts all three recorded-scope reasons
+and takes no scope argument. A completed revocation was driven through it with
+zero scope rows, zero consumption rows, and an approval whose `payload_hash` was
+the literal string `deadbeef-not-a-scope-hash`. Everything 0141 and 0142 built
+is OPTIONAL for the only role that can call either. The false comment is
+withdrawn in 0144; **the hole is not closed**, because closing it changes the
+call surface every assertion section and live test uses.
+
+**C-2 — BLOCKING, FIXED (RC-020, migration 0144).**
+`confirm_key_destruction_v1` recorded a confirmed destruction on a NULL provider
+result: `NULL not in (...)` is NULL, not TRUE, so the rejecting branch never
+fired. The backstop CHECK failed open identically. Unlike 0143 and RC-017 —
+the same PostgreSQL trap — this one **failed OPEN**: a provider returning no
+result at all was recorded as a confirmed erasure of a private key, the exact
+outcome the service was written to prevent. Fixed and verified.
+
+Reviewer B's conditions (not blocking, recorded): `ALREADY_DESTROYED` is
+accepted without comparing prior evidence outside the development provider; the
+receipt's `destructionRequestId` is not checked; `attestationKind` never reaches
+the database, so a simulated erasure is recorded indistinguishably from an
+attested one; one worker test cannot fail; the package's tests are excluded
+from typecheck; two concurrent provider destroy calls are possible on lease
+expiry because at-most-one erasure rests on provider-side idempotence the
+interface never requires.
+
+Reviewer C confirmed every RESOLVED register entry by live SQL (RC-015's nine
+column grants, `reason` unreadable, census exactly 61; RC-018's exact privilege
+triple), confirmed no claim that PostgreSQL verifies Ed25519, confirmed
+`pgsodium` absent, and caught the handoff's stale counts — corrected here.
+
 ## What is NOT done — do not read this handoff as completion
 
-- **Live destruction integration tests are ABSENT.** Retention windows, holds,
-  four eyes, approval expiry and the attempt budget are enforced in group 0137
-  and are exercised only by unit tests against stubs. Those prove the SERVICE's
-  ordering; they do not prove the DATABASE's policy.
-- **True two-connection concurrency evidence is ABSENT.** This has one concrete
-  consequence, recorded in SECTION 45's own header: group 0142's
-  RAISE-rather-than-return rollback is **UNPROVEN**. Single-threaded, the
-  verifier refuses a spent scope long before consumption is attempted, so the
-  branch is unreachable without a real race. The atomicity claim rests on
-  PostgreSQL's transaction semantics and on reading the code — not on evidence.
-- **No independent hostile review has completed.** Three review attempts died on
-  API stalls. What exists instead is one reviewing agent's incidental finding
-  (the `KeyHoldType` enum defect, fixed in `371beea`) and the mutation checks the
-  assertion sections ran on themselves. That is not a review.
 - **`lapse_emergency_revocation_post_approvals_v1` still has no caller.** The
-  lapse DISCOVERY exists in `revocation-and-destruction-jobs.ts`, but nothing
+  lapse DISCOVERY exists in `revocation-and-destruction-jobs.ts`; nothing
   schedules it, so a PENDING post-approval still stays PENDING for ever.
 - **The four job kinds have no database adapter.** Their ports are typed only;
-  nothing is scheduled in a running system.
-- **`KeyHoldType` has no live conformance guard.** The values were transcribed
-  from `pg_enum` by hand; nothing fails if the enum changes again.
-
-## What IS now done that this handoff previously listed as missing
-
-- SECTION 44 (`ws11-revocation-scope-binding`, 1004 lines) and SECTION 45
-  (`ws11-scope-bound-revocation`, 648 lines) are the permanent gate for groups
-  0141 and 0142. Both were mutation-checked rather than assumed.
-- The four worker job kinds exist, reuse the durable runtime rather than
-  duplicating it, and refuse to forge an approval. 79 tests.
+  nothing is scheduled in a running system, so the worker lease/stale-worker
+  scenarios are proved at the contract level and not against `kitluy_ops`.
+- **`KeyHoldType` conformance is now guarded** (Gate 1 item 1) but the other
+  mirrored vocabularies are not.
+- Independent review: see the review record; a verdict is required before any
+  promotion.
 
 ## Risk status — unchanged
 
