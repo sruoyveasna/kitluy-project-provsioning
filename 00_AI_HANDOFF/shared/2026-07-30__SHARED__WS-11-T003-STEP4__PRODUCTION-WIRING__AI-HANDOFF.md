@@ -6,8 +6,8 @@
 | Date / timezone | 2026-07-30 · Asia/Phnom_Penh                                       |
 | Repository root | C:/Users/Hello-Evo-PC/Desktop/HET-KITLUY-PROJECT                   |
 | Start SHA       | `d1a35f3` (34 ahead, clean)                                        |
-| End SHA         | `56f8e6f` (38 ahead, clean)                                        |
-| Status          | **PARTIAL — Step 4 NOT promoted.** §2/§3/§4-producing/§5 done; §4-Hub, §6, §7 NOT done |
+| End SHA         | `48d9378` + this note (40 ahead, clean)                            |
+| Status          | **PARTIAL — Step 4 NOT promoted.** Both independent reviewers returned `BLOCKED`; three blocking findings fixed, the rest open. See §Independent review |
 
 ## Sources inspected
 
@@ -54,8 +54,8 @@ Service (`services/kitluy-device-registry-service/`):
 - `src/lapse-worker.ts` — durable-job handler + worker composition
 - `src/revocation-snapshot-builder.ts` — offline snapshot producer + scope binding + union
 - `src/main.ts`, `src/index.ts`, `package.json` — wiring and exports
-- `test/production-composition.test.ts` (25) · `test/revocation-composition.integration.test.ts` (16)
-  · `test/offline-revocation-snapshot.test.ts` (21)
+- `test/production-composition.test.ts` (25) · `test/revocation-composition.integration.test.ts` (18)
+  · `test/offline-revocation-snapshot.test.ts` (23)
 
 Package:
 
@@ -87,7 +87,7 @@ Canonical order, local cloud database `postgresql://…@127.0.0.1:54322/postgres
 | `db:test`                         | exit 0 — **196 PASS**                                      |
 | `test:rls`                        | exit 0 — **104 PASS**                                      |
 | `@kitluy/device-identity` vitest  | **780 passed / 0 skipped (33 files)** — baseline unchanged  |
-| device-registry-service vitest    | **67 passed (4 files)** — 21 offline, 25 structural, 16 live, 5 http |
+| device-registry-service vitest    | **71 passed (4 files)** — 23 offline, 25 structural, 18 live, 5 http (final, after review fixes) |
 | `typecheck` (both)                | exit 0                                                     |
 | `lint`                            | 0 errors, 2 pre-existing warnings                          |
 | `secret:scan`                     | clean, 1210 tracked files                                  |
@@ -175,3 +175,83 @@ Recorded because both would have shipped green:
 3. §7 lifecycle through the production composition.
 4. A granted-permission emergency success + post-approval + lapse chain through the service.
 5. Install Node 22.23.0 and re-run the canonical suite before any pinned-toolchain claim.
+
+---
+
+## Independent review (§9) — BOTH REVIEWERS RETURNED `BLOCKED`
+
+Two fresh reviewers, neither the writer. Reviewed `cc6e2cf`, `184006c`, `f1c617d`
+(Reviewer A also saw `56f8e6f` land mid-session).
+
+| Reviewer | Lens                                    | Verdict   |
+| -------- | --------------------------------------- | --------- |
+| A        | production composition and worker       | `BLOCKED` |
+| B        | offline snapshot and evidence integrity | `BLOCKED` |
+
+### Blocking findings ACCEPTED and FIXED in `48d9378`
+
+| #    | Finding                                                                                                                                                                                                                                                                        | Why it mattered                                                                                                                                                                                                                                                                                                                                                             |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A-B1 | **`withHumanSession` did not control `auth.uid()`.** `auth.uid()` coalesces `request.jwt.claim.sub` FIRST; only the plural `request.jwt.claims` was set. Demonstrated live via `DEVICE_REGISTRY_DATABASE_URL` carrying `?options=-c request.jwt.claim.sub=<other uuid>`. | Every emergency revocation evaluated against a different subject → `PERMANENT_AUTHORIZATION`, i.e. the emergency door **off during an incident** with redaction hiding why; or, if the pinned subject held permission plus evidence, an immutable authorization naming an **innocent human** as actor. The exact RC-021 property the module claimed. `observeSessionIdentity` could not catch it — it read the same poisoned value. |
+| A-B2 | **The online verifier fell back to the PRESENTER's fingerprint** when the head row was absent, making `CERT_KEY_FINGERPRINT_MISMATCH` unreachable (`x === x`). The comment claimed the opposite.                                                                            | A credential attesting to a key the device no longer holds would be admitted. The stored fingerprint was in the 0155 bridge payload all along and `readState` never read it.                                                                                                                                                                                            |
+| B-B3 | **Invented scope UUIDs under a comment claiming they were "read from the seed".** All three sentences false: the UUIDs exist in no table, the fixture's real scope is `…0011/…0015/…0018`, and `verifySnapshotScope` queries nothing. The positive assertion was tautological. | False evidence committed in the file cited as proof of the scope property.                                                                                                                                                                                                                                                                                             |
+| A/B  | Overstated comments: `index.ts` ("calls … the online credential verifier"), `main.ts` (readiness probes the DB), `composition.ts` (bad DSN is a startup failure), `production-composition.test.ts` (dist check skipped when dist absent), offline suite ("survives a reboot", "denied while offline"). | Each corrected to what the code does.                                                                                                                                                                                                                                                                                                                                 |
+
+### One finding CHECKED and DISPROVED
+
+**B-B1 — claimed digest collision in `canonicalPayload`** ("joined with the empty
+string"; `["A","B"]` colliding with `["AB"]`). The code uses **U+001F** between
+elements and **U+001E** between kinds; those bytes are invisible in most diffs,
+which is how they were read as absent. Verified empirically — the concatenation
+collision does not exist. The `[]` vs `[""]` case **did** collide; unreachable from
+the database (`serial_number` NOT NULL, non-empty) and meaning "nothing revoked"
+either way, but fixed by terminating rather than joining. Both properties are now
+locked by test, the separators are named constants, and the misreading is recorded
+in the source so it is not repeated.
+
+### Blocking findings ACCEPTED and NOT fixed — these keep Step 4 unpromoted
+
+| #           | Finding                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A-B5 / B-B5 | **Nothing invokes any governed door at runtime.** Both reviewers found this independently. `main.ts` resolves the composition and calls no method; `http.ts` serves only health/version; `createOnlineCredentialVerifier`, `createEmergencyLapseWorker` and `buildRevocationSnapshot` have no production caller; the lapse job kind is never enqueued. **RV-GW-001 moved from "library-available-but-uncalled" to "service-method-available-but-uninvoked"; RV-GW-002 is NOT closed.** Comments corrected to say so; the gap itself is real and OPEN. |
+| B-B2        | **Scope sits OUTSIDE the object carrying the signature fields**, and `scopedDigest` is a keyless public hash — so it detects accidental relabelling, not an attacker. Cross-Store replay stays open until scope moves inside the signed structure (Step 6).                                                                                                                                                                                                             |
+| B-B4        | **The snapshot payload is environment-wide, not tenant-scoped**, so a snapshot labelled for one Store carries every tenant's revoked serials and retired device ids. Needs an owner decision recorded in the decision-and-reconciliation register.                                                                                                                                                                                                                      |
+| B-N1        | **Monotonic version is vacuous**: no snapshot ledger exists, `previousVersion` is caller-supplied and the only caller passes `null`, so every snapshot is version 1 and `SNAPSHOT_VERSION_ROLLBACK` can never fire.                                                                                                                                                                                                                                                     |
+| B-N4        | **Nothing forces scope verification.** `revocationLookupFrom` accepts a bare snapshot and returns a working lookup; ordering is documented, not type-enforced.                                                                                                                                                                                                                                                                                                          |
+| A-3         | The lapse door is granted to `kitluy_issuance_service` as well as the worker — least-privilege drift; "four doors, four identities" is imprecise.                                                                                                                                                                                                                                                                                                                       |
+| A-N7        | `credential_verification_state_v1` returns 14 fields, not the "five facts" the comment claims.                                                                                                                                                                                                                                                                                                                                                                          |
+| A/B         | Integration suite has **no teardown** and commits fixtures; one undeclared test-order dependency. Reviewer B confirmed **no spendable residue** (approvals, evidence, permissions, role memberships all absent; revocation and emergency tables at 0 rows).                                                                                                                                                                                                             |
+
+Reviewer A additionally recorded that `cc6e2cf`'s claim "migration 0155 applies with
+all three assertions passing" described a file that was **not** in that commit — the
+corrected text (hand-back plus §2.5 census) was still uncommitted when it was
+verified. That is accurate, and is why `56f8e6f` exists.
+
+### Re-review
+
+**NOT obtained.** `48d9378` fixes A-B1, A-B2 and B-B3 and corrects the overstated
+comments, but no fresh reviewer has seen it. §9 requires re-review after fixes, so
+no verdict has advanced past `BLOCKED`.
+
+## FINAL STATUS
+
+```text
+WS-11-T003 Step 4 — NOT PROMOTED
+(remains IMPLEMENTED-IN-DEV WITH RECORDED ENVIRONMENT CONDITION,
+ unchanged from the Phase E gate)
+```
+
+Promotion gate (§11) mapped:
+
+| Criterion                          | Result                                                                     |
+| ---------------------------------- | -------------------------------------------------------------------------- |
+| Production RevocationGateway wired | **PARTIAL** — composed and proven live by test; no runtime caller (A-B5)    |
+| Live revocation lookup wired       | **PARTIAL** — same                                                         |
+| Store Hub offline snapshot         | **NO** — producer only; unsigned and therefore refused; no Hub persistence  |
+| Production lapse worker            | **NO** — handler exists, never constructed, queue never fed (RV-GW-002)     |
+| Missing concurrency cases pass     | **NO** — not written                                                       |
+| Online AND offline revoked denied  | **ONLINE YES** (proven `CERT_REVOKED`), **OFFLINE NO**                     |
+| Pinned Node verification passes    | **NO** — Node v24.14.1; pin 22.23.0 not installed, no version manager      |
+| Independent reviewers no blockers  | **NO** — both `BLOCKED`; fixes not re-reviewed                              |
+| Evidence and handoff current       | YES (this note)                                                            |
+| Tree clean                         | YES                                                                        |
