@@ -73,8 +73,28 @@
  * outright that no non-superuser retains membership of
  * `kitluy_credential_issuer` ("a non-superuser retains membership of
  * kitluy_credential_issuer"), so a leaked membership would fail the next
- * `db:test`. `afterAll` therefore revokes it in a `finally` and VERIFIES the
- * revoke landed.
+ * `db:test`. The LAST test in this file performs the revoke and asserts it
+ * landed; `afterAll` repeats it as a net for the case where the suite never
+ * reached that test.
+ *
+ * ONE THING THIS SUITE CANNOT DO FOR ITSELF: that membership is GLOBAL catalog
+ * state. Two sessions borrowing it at once would each hand back the other's
+ * borrow. `beforeAll` therefore REFUSES to start when the membership is already
+ * held, with a message saying so — a legible refusal rather than an
+ * intermittent failure three scenarios later.
+ *
+ * AND A SECOND THING, WHICH IS WORSE AND IS NOT THIS FILE'S TO FIX. While the
+ * borrow is held, `postgres` really is a member of the credential governor, for
+ * every connection to the cluster. Any OTHER live suite running at the same
+ * time whose assertion depends on `postgres` NOT holding that privilege stops
+ * asserting anything — it does not fail, it goes vacuous, which is the worse
+ * outcome because a vacuous test is still counted as evidence. Live database
+ * suites in this package must therefore run ONE FILE AT A TIME
+ * (`fileParallelism: false`), and that is a property of the package's test
+ * configuration rather than of this file. Narrowing the borrow is not
+ * available: the two racing transactions need the role SIMULTANEOUSLY, so a
+ * per-transaction grant would serialise them on the `pg_auth_members` row and
+ * destroy the very contention the suite exists to observe.
  */
 import { randomUUID } from "node:crypto";
 
@@ -88,9 +108,6 @@ import {
 } from "./support/dev-database.js";
 
 const SUITE = "@kitluy/device-identity scope-consumption concurrency";
-
-/** Set by teardown when the borrowed governor membership could not be returned. */
-let handBackFailure: string | null = null;
 
 // A skip is never evidence. Copied from the other *.integration.test.ts files
 // so an unreachable stack reports SKIPPED rather than a green run.
@@ -214,6 +231,25 @@ async function openBackend(label: string): Promise<Backend> {
 async function beginTransaction(backend: Backend, role?: string): Promise<bigint> {
   await backend.client.query("begin");
   if (role !== undefined) {
+    // Re-borrow AT THE POINT OF USE, idempotently.
+    //
+    // The governor is NOLOGIN and `postgres` is not a member, so this suite has
+    // to borrow the membership to drive the governor-only functions at all. A
+    // borrow taken once in `beforeAll` and relied on for the whole file turned
+    // out to be an assumption about SCHEDULING rather than a fact: the suite
+    // passes alone and in pairs, and lost the membership mid-run inside the
+    // full 30-file suite, failing with `permission denied to set role`.
+    //
+    // Rather than model whichever ordering removes it, the membership is
+    // ensured immediately before each use. GRANT of an existing membership is a
+    // no-op, so this costs one statement and removes the dependency entirely.
+    // It is still handed back at the end and the hand-back is still asserted —
+    // what changed is that the suite no longer assumes nothing disturbed it.
+    if (role === GOVERNOR_ROLE) {
+      await backend.client.query(
+        `do $ensure$ begin execute format('grant ${GOVERNOR_ROLE} to %I', current_user); end $ensure$;`,
+      );
+    }
     // SET LOCAL, never a plain role switch: it is undone by commit/rollback,
     // so a leaked role cannot make a later assertion pass under the wrong
     // identity.
@@ -363,6 +399,39 @@ let governorBorrowed = false;
  * aborted" — one real failure wearing five unrelated costumes, and a cleanup
  * that cannot run either.
  */
+/**
+ * Returns the borrowed governor membership and reports whether it landed.
+ *
+ * IDEMPOTENT on purpose, because it is called twice for two different reasons:
+ * by the last test in the file, which is the CHECK and can therefore fail the
+ * suite; and by `afterAll`, which is the NET and runs even when the suite blew
+ * up before reaching that test. Revoking a membership that is already gone is
+ * a no-op, so the net costs nothing when the check already succeeded.
+ */
+async function handBackGovernorMembership(): Promise<string | null> {
+  if (!governorBorrowed || keeper === undefined) {
+    return null;
+  }
+  try {
+    // A failed test can leave this connection mid-transaction, and an aborted
+    // transaction would refuse the REVOKE.
+    await keeper.client.query("rollback").catch(() => undefined);
+    await keeper.client.query(
+      `do $hand_back$ begin execute format('revoke ${GOVERNOR_ROLE} from %I', current_user); end $hand_back$;`,
+    );
+    const { rows } = await keeper.client.query<{ still: boolean }>(
+      `select pg_has_role(current_user, '${GOVERNOR_ROLE}', 'MEMBER') as still`,
+    );
+    if (rows[0]?.still === true) {
+      return `the borrowed ${GOVERNOR_ROLE} membership was NOT handed back`;
+    }
+    governorBorrowed = false;
+    return null;
+  } catch (error) {
+    return `hand-back failed: ${toFailure(error).message}`;
+  }
+}
+
 async function inKeeperTransaction<T>(fn: () => Promise<T>, role?: string): Promise<T> {
   await keeper.client.query("begin");
   try {
@@ -696,8 +765,30 @@ describe.skipIf(!reachable)("scope consumption under real concurrency", () => {
   beforeAll(async () => {
     keeper = await openBackend("keeper");
 
-    // The borrow. Mirrors group 0142's own $borrow$ block; handed back in
-    // afterAll, because assertions.sql fails if it is not.
+    // REFUSE TO BORROW WHAT SOMEBODY ELSE IS ALREADY HOLDING.
+    //
+    // Role membership is GLOBAL catalog state, not session state: one
+    // `pg_auth_members` row, shared by every connection to this cluster. If
+    // another session has already borrowed the governor — a parallel run of
+    // this suite, or a migration mid-flight — then borrowing again is a no-op
+    // and HANDING BACK at the end would revoke THEIR borrow underneath them,
+    // failing their run somewhere far away from this file.
+    //
+    // So this fails closed and says why, rather than racing. It is the one
+    // precondition this suite cannot satisfy for itself.
+    const already = await keeper.client.query<{ held: boolean }>(
+      `select pg_has_role(current_user, '${GOVERNOR_ROLE}', 'MEMBER') as held`,
+    );
+    if (already.rows[0]?.held === true) {
+      throw new Error(
+        `${SUITE}: ${GOVERNOR_ROLE} is ALREADY granted to this login, so another session ` +
+          `has borrowed it. Running now would hand back somebody else's borrow. Wait for ` +
+          `that session to finish and re-run; do not revoke the membership by hand.`,
+      );
+    }
+
+    // The borrow. Mirrors group 0142's own $borrow$ block; returned by the last
+    // test in this file, because assertions.sql fails if it is not.
     await keeper.client.query(
       `do $borrow$ begin execute format('grant ${GOVERNOR_ROLE} to %I', current_user); end $borrow$;`,
     );
@@ -773,22 +864,13 @@ describe.skipIf(!reachable)("scope consumption under real concurrency", () => {
       console.warn(`${SUITE}: fixture cleanup failed: ${toFailure(error).message}`);
       await keeper?.client.query("rollback").catch(() => undefined);
     } finally {
-      let handBackError: string | null = null;
-      if (governorBorrowed && keeper !== undefined) {
-        try {
-          await keeper.client.query(
-            `do $hand_back$ begin execute format('revoke ${GOVERNOR_ROLE} from %I', current_user); end $hand_back$;`,
-          );
-          const { rows } = await keeper.client.query<{ still: boolean }>(
-            `select pg_has_role(current_user, '${GOVERNOR_ROLE}', 'MEMBER') as still`,
-          );
-          if (rows[0]?.still === true) {
-            handBackError = `the borrowed ${GOVERNOR_ROLE} membership was NOT handed back`;
-          }
-        } catch (error) {
-          handBackError = `hand-back failed: ${toFailure(error).message}`;
-        }
-      }
+      // THE NET, not the check. The check is the last test in the file: it
+      // performs the hand-back itself and asserts it landed, so a leaked
+      // membership fails the suite. An assertion HERE could never fail —
+      // `afterAll` runs after every test has already been reported — and a
+      // `throw` here would replace whatever exception was already propagating,
+      // erasing the failure a reader actually needs.
+      const handBackError = await handBackGovernorMembership();
 
       if (evidence.length > 0) {
         console.info(
@@ -814,27 +896,15 @@ describe.skipIf(!reachable)("scope consumption under real concurrency", () => {
         );
       }
 
+      if (handBackError !== null) {
+        console.error(`${SUITE}: ${handBackError}`);
+      }
+
       for (const backend of [alpha, beta, observer, keeper]) {
         await backend?.client.end().catch(() => undefined);
       }
-      // Recorded, NOT thrown. A `throw` inside `finally` replaces whatever
-      // exception was already propagating, so a failed hand-back would erase
-      // the test failure that caused it — the one thing a reader needs. The
-      // dedicated assertion below fails the suite instead, and cannot hide
-      // anything.
-      if (handBackError !== null) {
-        handBackFailure = `${SUITE}: ${handBackError}`;
-        console.error(handBackFailure);
-      }
     }
   }, LONG_TEST_MS);
-
-  // A retained governor membership is exactly what section 32's containment
-  // assertion refuses, so it must fail the suite — but as its own assertion,
-  // never as a throw from `finally`.
-  it("hands the borrowed governor membership back", () => {
-    expect(handBackFailure).toBeNull();
-  });
 
   // -------------------------------------------------------------------------
   // SCENARIO 1 — two connections consume the SAME recorded scope.
@@ -1541,6 +1611,37 @@ describe.skipIf(!reachable)("scope consumption under real concurrency", () => {
           quiet_scope_still_spendable: text(afterwards, "outcome") === "CONSUMED",
         },
       });
+    },
+    LONG_TEST_MS,
+  );
+
+  // -------------------------------------------------------------------------
+  // THE HAND-BACK, as the LAST test rather than as teardown.
+  //
+  // `supabase/tests/assertions.sql` refuses outright to let a non-superuser
+  // retain membership of the credential governor ("a non-superuser retains
+  // membership of kitluy_credential_issuer"), so a suite that borrowed it and
+  // kept it would fail the NEXT `pnpm db:test` — far from its cause, and in
+  // somebody else's run.
+  //
+  // Deliberately a TEST and deliberately LAST. `afterAll` still hands the
+  // membership back as a net, but it cannot be where this is CHECKED: it runs
+  // after every test has been reported, so an assertion there could never fail
+  // and a throw there would erase whatever error was already propagating. This
+  // one performs the revoke itself and fails the suite when it does not land.
+  // -------------------------------------------------------------------------
+  it(
+    "hands the borrowed governor membership back",
+    async () => {
+      expect(governorBorrowed).toBe(true);
+      const failure = await handBackGovernorMembership();
+      expect(failure).toBeNull();
+
+      // Asked again, on a connection that never borrowed anything.
+      const { rows } = await observer.client.query<{ still: boolean }>(
+        `select pg_has_role(current_user, '${GOVERNOR_ROLE}', 'MEMBER') as still`,
+      );
+      expect(rows[0]?.still).toBe(false);
     },
     LONG_TEST_MS,
   );
