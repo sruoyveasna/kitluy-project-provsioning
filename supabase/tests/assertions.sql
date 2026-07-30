@@ -12796,6 +12796,790 @@ end
 $section47$;
 
 -- ============================================================================
+-- SECTION 47b — WS-11-T003 Step 4, PHASE D: LIFECYCLE AND CONTAINMENT.
+-- WHAT A REVOKED CREDENTIAL CAN NEVER DO AGAIN, WHICHEVER DOOR KILLED IT.
+--
+-- Every section up to here proves a DOOR behaves: who may open it, what it
+-- checks, what it records. None of them asks the question that matters
+-- afterwards — once a credential is revoked, is it actually DEAD? A revocation
+-- that is recorded perfectly and then quietly walked back by a renewal, an
+-- overlap window, a head advance or a restore is not containment; it is
+-- paperwork.
+--
+-- So this section revokes three credentials through THREE DIFFERENT DOORS and
+-- then applies the SAME containment matrix to all three, because containment
+-- that depends on which door was used is containment with a gap in it:
+--
+--   A. the NORMAL bound path      (revoke_device_credential_bound_v1)
+--   B. a GOVERNED EMERGENCY that a second human APPROVED
+--   C. a GOVERNED EMERGENCY that nobody answered, swept to LAPSED
+--
+-- The matrix, applied to each:
+--   C1  cannot be RENEWED — the reservation refuses
+--   C2  cannot be RENEWED past the reservation either — prepare refuses
+--   C3  cannot be RESTORED, by any writer including the credential governor
+--   C4  its revocation evidence cannot be edited or deleted
+--   C5  cannot become CURRENT — see the census below, which is the honest form
+--   C6  cannot be resurrected by the OVERLAP window
+--   C7  its post-approval verdict, once given, is final
+--
+-- ---------------------------------------------------------------------------
+-- C5 NEEDS ITS OWN EXPLANATION, BECAUSE THE OBVIOUS ASSERTION IS FALSE.
+-- ---------------------------------------------------------------------------
+-- "No revoked credential may become current" cannot be asserted as
+-- `device_credential_heads.current_generation` never points at a revoked
+-- generation. IT DOES, ROUTINELY: revoking generation 1 of a single-generation
+-- device leaves the head saying generation 1, because `enforce_head_authority`
+-- makes the head strictly MONOTONIC and refuses KLUY-CRED-HEAD-ROLLBACK. That
+-- is deliberate — the head is a generation COUNTER that orders issuance, and a
+-- counter that could move backwards would let a replayed request re-issue a
+-- generation that already existed.
+--
+-- The head is therefore NOT a validity oracle, and the containment property is
+-- the one that follows: NOTHING MAY RESOLVE A USABLE CREDENTIAL FROM THE HEAD
+-- ALONE. That is a census, and it is checkable:
+--
+--   * no VIEW or MATERIALIZED VIEW anywhere may read the heads table — a view is
+--     how a head would reach a reader that never thought about state, and
+--     PostgREST exposes views;
+--   * every FUNCTION that reads it must also constrain credential state.
+--
+-- Asserted by execution against the catalog below, so a future migration that
+-- adds an unfiltered head reader fails here rather than in the field.
+-- ---------------------------------------------------------------------------
+--
+-- ALREADY COVERED ELSEWHERE, AND DELIBERATELY NOT REPEATED: enrollment, claim,
+-- redemption and issuance (sections 33-35, and the shared fixture below uses
+-- the real path for all four); rotation and renewal mechanics (35-39); overlap
+-- retirement (39b); key destruction eligibility (40); the approve-before-execute
+-- revocation gate (43-46); the governed emergency door itself (47); the
+-- leftover-authority census (48). This section adds the AFTERWARDS.
+--
+-- Device ACTIVATION is not exercised here and the reason is recorded rather
+-- than hidden: `activate_device_v1` refuses without a row in
+-- `device_certificates` (KLUY-DEVICE-NO-CERTIFICATE, KLD-2026-07-21-003), which
+-- belongs to a different aggregate than `device_credentials`, so the credential
+-- fixture cannot reach an `active` assignment without fabricating certificate
+-- rows. Containment of an ACTIVE device's credential is therefore asserted
+-- through the credential state machine, which is where it is enforced, and not
+-- through activation.
+--
+-- LEAVES NOTHING SPENDABLE: one standing assignment, removed and proved gone;
+-- every re-authentication evidence row consumed by a revocation that had to
+-- succeed or by a post-approval that had to succeed.
+-- ============================================================================
+do $section47b$
+declare
+  v_findings text[] := array[]::text[];
+  v_env constant text := 'development';
+  v_key constant text := 'fleet.device_credential.emergency_revoke';
+  v_post_key constant text := 'fleet.device_credential.emergency_post_approve';
+
+  -- The declarer and the SECOND human who answers. Distinct, because a
+  -- post-approval by the declarer is not four eyes.
+  v_ciso constant uuid := '00000000-0000-4000-8000-000000000007';
+  v_approver constant uuid := '00000000-0000-4000-8000-000000000009';
+
+  v_template constant uuid := '00000000-0000-4000-8000-0000000047b1';
+  v_template_post constant uuid := '00000000-0000-4000-8000-0000000047b2';
+  v_assignment constant uuid := '00000000-0000-4000-8000-0000000047b3';
+  v_assignment_post constant uuid := '00000000-0000-4000-8000-0000000047b4';
+
+  v_links constant jsonb := jsonb_build_array(
+    jsonb_build_object('link_position',0,'role','root','subject_fingerprint',repeat('r',64),
+                       'issuer_key_id','rk','canonical_tbs','R','detached_signature_b64','qg=='),
+    jsonb_build_object('link_position',1,'role','intermediate','subject_fingerprint',repeat('i',64),
+                       'issuer_key_id','rk','canonical_tbs','I','detached_signature_b64','uw=='));
+
+  -- One device per door, plus one that is never touched, so "revoked" is a
+  -- statement about these credentials and not about the fixture.
+  v_dev_norm uuid;
+  v_dev_appr uuid;
+  v_dev_lapse uuid;
+  v_dev_live uuid;
+  v_cred_norm uuid;
+  v_cred_appr uuid;
+  v_cred_lapse uuid;
+  v_cred_live uuid;
+
+  -- The overlap device carries TWO live generations, so C6 has a real window.
+  v_dev_ovl uuid;
+  v_cred_ovl1 uuid;
+  v_cred_ovl2 uuid;
+  v_head_before integer;
+  v_head_after integer;
+  v_prev_before integer;
+  v_overlap_ends timestamptz;
+
+  v_fp text;
+  v_req text;
+  v_idem text;
+  v_ren jsonb;
+  v_prep jsonb;
+
+  v_ev uuid;
+  v_ev_post uuid;
+  v_scope jsonb;
+  v_res jsonb;
+  v_auth_appr uuid;
+  v_auth_lapse uuid;
+  v_verdict jsonb;
+  v_lapse jsonb;
+
+  -- Door A's four-eyes approval, built in the SAME kitluy_auth aggregate the
+  -- shipped path uses. A revocation with no approval is refused
+  -- KLUY-CRED-REVOCATION-UNAPPROVED, so there is no shortcut here.
+  v_policy_a4 uuid;
+  v_requester constant uuid := '00000000-0000-4000-8000-000000000007';
+  v_approver_a4 constant uuid := '00000000-0000-4000-8000-000000000009';
+  v_ap_norm uuid;
+  v_ap_ovl uuid;
+
+  -- The matrix loop's working variables.
+  v_case text;
+  v_cred uuid;
+  v_dev uuid;
+  v_err text;
+  v_state text;
+  v_n integer;
+  v_views text;
+  v_unfiltered text;
+begin
+  -- ========================================================================
+  -- FIXTURES. Five devices carrying six real issued credentials, through the
+  -- shipped enrollment -> claim -> redemption -> issuance path.
+  -- ========================================================================
+  v_dev_norm  := pg_temp.ws11_renewable_device('t47bn', encode(sha256(convert_to('47bn-' || gen_random_uuid()::text, 'UTF8')), 'hex'));
+  v_dev_appr  := pg_temp.ws11_renewable_device('t47ba', encode(sha256(convert_to('47ba-' || gen_random_uuid()::text, 'UTF8')), 'hex'));
+  v_dev_lapse := pg_temp.ws11_renewable_device('t47bl', encode(sha256(convert_to('47bl-' || gen_random_uuid()::text, 'UTF8')), 'hex'));
+  v_dev_live  := pg_temp.ws11_renewable_device('t47bv', encode(sha256(convert_to('47bv-' || gen_random_uuid()::text, 'UTF8')), 'hex'));
+  v_fp        := encode(sha256(convert_to('47bo-' || gen_random_uuid()::text, 'UTF8')), 'hex');
+  v_dev_ovl   := pg_temp.ws11_renewable_device('t47bo', v_fp);
+
+  select credential_id into v_cred_norm from kitluy_devices.device_credentials
+   where device_record_id = v_dev_norm and certificate_generation = 1;
+  select credential_id into v_cred_appr from kitluy_devices.device_credentials
+   where device_record_id = v_dev_appr and certificate_generation = 1;
+  select credential_id into v_cred_lapse from kitluy_devices.device_credentials
+   where device_record_id = v_dev_lapse and certificate_generation = 1;
+  select credential_id into v_cred_live from kitluy_devices.device_credentials
+   where device_record_id = v_dev_live and certificate_generation = 1;
+  select credential_id into v_cred_ovl1 from kitluy_devices.device_credentials
+   where device_record_id = v_dev_ovl and certificate_generation = 1;
+
+  -- A SECOND generation on the overlap device, through the shipped renewal, so
+  -- generation 1 is a live PREVIOUS generation inside a real overlap window.
+  v_req := 'rq-47bo2-' || gen_random_uuid()::text;
+  v_idem := encode(sha256(convert_to('i47bo2-' || gen_random_uuid()::text, 'UTF8')), 'hex');
+  v_ren := kitluy_devices.reserve_device_credential_renewal_v1(
+    v_dev_ovl, v_env, 'device_identity', v_idem, now(), 'trusted',
+    'reuse_current_key', 'SECTION47B');
+  v_prep := kitluy_devices.prepare_device_credential_renewal_v2(
+    v_dev_ovl, v_env, 'device_identity', v_req,
+    encode(sha256(convert_to('issue47b-' || v_req, 'UTF8')), 'hex'), repeat('5', 64),
+    'PEM-47B-G2', v_fp, 'ed25519', repeat('4', 64), decode('c3', 'hex'), true,
+    'ica-47b', now(), 'trusted', 'SECTION47B', 'reuse_current_key');
+  perform kitluy_devices.record_device_credential_signature_v1(
+    v_req, v_prep ->> 'canonical_tbs_hash', decode('3333', 'hex'), true, 'SECTION47B');
+  perform kitluy_devices.finalize_device_credential_issuance_v1(v_req, v_links, 'SECTION47B');
+  select credential_id into v_cred_ovl2 from kitluy_devices.device_credentials
+   where created_from_request_id = v_req;
+
+  if v_cred_norm is null or v_cred_appr is null or v_cred_lapse is null
+     or v_cred_live is null or v_cred_ovl1 is null or v_cred_ovl2 is null then
+    raise exception 'ASSERT FAIL: section 47b could not issue the credentials it contains';
+  end if;
+
+  -- The overlap window must be REAL, or C6 tests nothing.
+  select current_generation, previous_generation, overlap_ends_at
+    into v_head_before, v_prev_before, v_overlap_ends
+    from kitluy_devices.device_credential_heads
+   where device_record_id = v_dev_ovl and environment = v_env and purpose = 'device_identity';
+  if v_head_before <> 2 or v_prev_before <> 1 or v_overlap_ends is null then
+    v_findings := v_findings || format(
+      'fixture: the overlap device is not in a real overlap (current %s, previous %s, ends %s)',
+      v_head_before, v_prev_before, v_overlap_ends);
+  end if;
+
+  -- The two humans, and the two standing assignments this section creates and
+  -- then removes. Emergency declaration for one, post-approval for the other:
+  -- the same human holding both would make the four-eyes assertion vacuous.
+  insert into kitluy_auth.admin_user_profiles (user_id, status, assurance_level, security_metadata)
+  values (v_ciso, 'ACTIVE', 'aal2', jsonb_build_object('fixture', 'section47b')),
+         (v_approver, 'ACTIVE', 'aal2', jsonb_build_object('fixture', 'section47b'))
+  on conflict (user_id) do nothing;
+
+  insert into kitluy_auth.role_templates (id, role_key, version, name, system_role, status)
+  values (v_template, 'S47B_EMERGENCY_REVOKER', 1,
+          'Section 47b emergency revoker (test fixture)', false, 'ACTIVE'),
+         (v_template_post, 'S47B_EMERGENCY_POST_APPROVER', 1,
+          'Section 47b emergency post-approver (test fixture)', false, 'ACTIVE');
+  insert into kitluy_auth.role_permission_grants (role_template_id, permission_id, effect)
+  select v_template, p.id, 'ALLOW' from kitluy_auth.permissions p
+   where p.permission_key = v_key and p.status = 'ACTIVE';
+  insert into kitluy_auth.role_permission_grants (role_template_id, permission_id, effect)
+  select v_template_post, p.id, 'ALLOW' from kitluy_auth.permissions p
+   where p.permission_key = v_post_key and p.status = 'ACTIVE';
+  insert into kitluy_auth.role_assignments
+    (id, subject_type, subject_id, role_template_id, status, valid_from)
+  values (v_assignment, 'user', v_ciso, v_template, 'ACTIVE', now() - interval '1 hour'),
+         (v_assignment_post, 'user', v_approver, v_template_post, 'ACTIVE', now() - interval '1 hour');
+  insert into kitluy_auth.assignment_scopes
+    (role_assignment_id, scope_type, scope_id, environment)
+  values (v_assignment, 'platform', null, v_env),
+         (v_assignment_post, 'platform', null, v_env);
+
+  -- ========================================================================
+  -- DOOR A — THE NORMAL BOUND PATH.
+  --
+  -- The affected set is ASKED FOR, never constructed here: a set this file
+  -- could build is a set a caller could build. The resolver is governor-only,
+  -- so the membership is borrowed and handed straight back.
+  -- ========================================================================
+  execute format('grant kitluy_credential_issuer to %I', current_user);
+  execute 'set role kitluy_credential_issuer';
+  v_scope := kitluy_devices.authoritative_revocation_scope_v1(
+    v_cred_norm, 'ADMINISTRATIVE_REPLACEMENT');
+  execute 'reset role';
+  execute format('revoke kitluy_credential_issuer from %I', current_user);
+  if coalesce((v_scope ->> 'resolved')::boolean, false) is not true then
+    v_findings := v_findings ||
+      format('door A: the database would not derive the set for the normal revocation: %s', v_scope);
+  end if;
+
+  -- The approval must carry the hash the DATABASE derived (RC-019, group 0146):
+  -- an approval whose payload_hash this file computed would be an approval a
+  -- caller could compute.
+  insert into kitluy_auth.approval_policies
+    (policy_key, version, permission_key, environment, quorum, status, risk_class)
+  values ('cred.revocation.a4.47b.' || substr(md5(random()::text), 1, 8), 1,
+          'device.credential.revoke', v_env, 1, 'ACTIVE', 'A4')
+  returning id into v_policy_a4;
+  insert into kitluy_auth.approval_requests
+    (policy_id, requester_id, resource_type, resource_id, environment, action,
+     payload_hash, reason, status)
+  values (v_policy_a4, v_requester, 'device', v_dev_norm, v_env,
+          'device_credential_revocation', v_scope ->> 'payload_hash',
+          'the normal door, for the containment matrix', 'APPROVED')
+  returning id into v_ap_norm;
+  insert into kitluy_auth.approval_decisions (approval_request_id, approver_id, decision)
+  values (v_ap_norm, v_approver_a4, 'APPROVE');
+
+  execute format('grant kitluy_issuance_service to %I', current_user);
+  execute 'set role kitluy_issuance_service';
+  v_res := kitluy_devices.revoke_device_credential_bound_v1(
+    'rq-47b-norm-' || gen_random_uuid()::text, v_dev_norm, v_env, 'device_identity', 1,
+    'ADMINISTRATIVE_REPLACEMENT', 'the normal door, for the containment matrix',
+    'REPROVISION_REQUIRED', 'requester@47b', 'SECTION47B',
+    v_ap_norm, 'approver@47b', 'CHG-47B', (v_scope ->> 'incident_scope_id')::uuid);
+  execute 'reset role';
+  execute format('revoke kitluy_issuance_service from %I', current_user);
+  if coalesce(v_res ->> 'outcome', 'nothing') <> 'REVOKED' then
+    v_findings := v_findings ||
+      format('door A: the four-eyes bound revocation did not complete: %s', v_res);
+  end if;
+
+  -- ========================================================================
+  -- DOOR B — GOVERNED EMERGENCY, THEN A SECOND HUMAN APPROVES.
+  -- ========================================================================
+  perform set_config('request.jwt.claims',
+    format('{"sub":"%s","role":"authenticated"}', v_ciso), true);
+  execute 'set role authenticated';
+  v_ev := kitluy_auth.record_reauthentication_evidence_v1(
+    v_env, v_key, 'PASSWORD_TOTP', 's47b-appr');
+  v_res := kitluy_devices.revoke_device_credential_emergency_governed_v1(
+    v_cred_appr, 'DEVICE_STOLEN', 'the approved emergency, for the containment matrix',
+    'INC-47B-' || gen_random_uuid()::text, v_ev,
+    'S47B-APPR-' || gen_random_uuid()::text);
+  execute 'reset role';
+  execute 'reset role';
+  if coalesce(v_res ->> 'outcome', 'nothing') <> 'REVOKED_IMMEDIATELY' then
+    v_findings := v_findings ||
+      format('door B: the governed emergency did not execute: %s', v_res);
+  end if;
+  v_auth_appr := (v_res ->> 'authorization_id')::uuid;
+
+  perform set_config('request.jwt.claims',
+    format('{"sub":"%s","role":"authenticated"}', v_approver), true);
+  execute 'set role authenticated';
+  v_ev_post := kitluy_auth.record_reauthentication_evidence_v1(
+    v_env, v_post_key, 'PASSWORD_TOTP', 's47b-verdict');
+  v_verdict := kitluy_devices.record_governed_emergency_post_approval_v1(
+    v_auth_appr, 'APPROVE', v_ev_post, 'the second human agrees');
+  execute 'reset role';
+  execute 'reset role';
+  if coalesce(v_verdict ->> 'post_approval_decision', 'nothing') <> 'APPROVED' then
+    v_findings := v_findings ||
+      format('door B: the second human''s APPROVE was not recorded: %s', v_verdict);
+  end if;
+
+  -- ========================================================================
+  -- DOOR C — GOVERNED EMERGENCY THAT NOBODY ANSWERS, SWEPT TO LAPSED.
+  --
+  -- The deadline is brought FORWARD (never extended — the trigger refuses that
+  -- direction) so the sweeper has something overdue to find.
+  -- ========================================================================
+  perform set_config('request.jwt.claims',
+    format('{"sub":"%s","role":"authenticated"}', v_ciso), true);
+  execute 'set role authenticated';
+  v_ev := kitluy_auth.record_reauthentication_evidence_v1(
+    v_env, v_key, 'PASSWORD_TOTP', 's47b-lapse');
+  v_res := kitluy_devices.revoke_device_credential_emergency_governed_v1(
+    v_cred_lapse, 'KEY_COMPROMISE', 'the unanswered emergency, for the containment matrix',
+    'INC-47B-' || gen_random_uuid()::text, v_ev,
+    'S47B-LAPSE-' || gen_random_uuid()::text);
+  execute 'reset role';
+  execute 'reset role';
+  if coalesce(v_res ->> 'outcome', 'nothing') <> 'REVOKED_IMMEDIATELY' then
+    v_findings := v_findings ||
+      format('door C: the governed emergency did not execute: %s', v_res);
+  end if;
+  v_auth_lapse := (v_res ->> 'authorization_id')::uuid;
+
+  execute format('grant kitluy_credential_issuer to %I', current_user);
+  execute 'set role kitluy_credential_issuer';
+  update kitluy_devices.device_emergency_revocation_authorizations
+     set post_approval_due_at = clock_timestamp() - interval '1 second'
+   where authorization_id = v_auth_lapse;
+  execute 'reset role';
+  execute format('revoke kitluy_credential_issuer from %I', current_user);
+
+  -- SWEPT BY THE WORKER, not by the issuance service.
+  --
+  -- The worker is the role the durable job actually runs under, and until
+  -- migration 0154 it could not reach this function at all: group 0152 granted
+  -- it EXECUTE and verified that grant, but `kitluy_worker_service` held USAGE
+  -- on `kitluy_ops` only, so every call failed 42501 `permission denied for
+  -- schema kitluy_devices` before the body ran. Found by the Phase D
+  -- concurrency suite. Sweeping AS THE WORKER here is what keeps it found.
+  execute format('grant kitluy_worker_service to %I', current_user);
+  execute 'set role kitluy_worker_service';
+  v_lapse := kitluy_devices.lapse_governed_emergency_post_approvals_v1(v_env, 'SECTION47B');
+  execute 'reset role';
+  execute format('revoke kitluy_worker_service from %I', current_user);
+  if coalesce(v_lapse ->> 'outcome', 'nothing') <> 'LAPSED'
+     or not (v_lapse -> 'authorization_ids' @> to_jsonb(v_auth_lapse)) then
+    v_findings := v_findings ||
+      format('door C: the worker''s sweep did not lapse the unanswered emergency: %s', v_lapse);
+  end if;
+
+  -- All three doors closed, and the untouched credential is still live.
+  for v_case, v_cred in
+    select * from (values ('A normal', v_cred_norm), ('B approved', v_cred_appr),
+                          ('C lapsed', v_cred_lapse)) as t(c, i)
+  loop
+    select state::text into v_state from kitluy_devices.device_credentials
+     where credential_id = v_cred;
+    if v_state <> 'revoked' then
+      v_findings := v_findings ||
+        format('door %s: the credential is %s rather than revoked', v_case, v_state);
+    end if;
+  end loop;
+  select state::text into v_state from kitluy_devices.device_credentials
+   where credential_id = v_cred_live;
+  if v_state <> 'issued' then
+    v_findings := v_findings ||
+      format('the untouched credential is %s; the fixture revoked more than it aimed at', v_state);
+  end if;
+
+  -- ========================================================================
+  -- THE CONTAINMENT MATRIX — C1 to C4 AND C7, APPLIED TO ALL THREE DOORS.
+  --
+  -- One loop, because a matrix written out three times is a matrix that will
+  -- disagree with itself. Whichever door killed the credential, the answers
+  -- must be identical.
+  -- ========================================================================
+  for v_case, v_cred, v_dev in
+    select * from (values ('A normal', v_cred_norm, v_dev_norm),
+                          ('B approved', v_cred_appr, v_dev_appr),
+                          ('C lapsed', v_cred_lapse, v_dev_lapse)) as t(c, i, d)
+  loop
+    -- C1 — CANNOT BE RENEWED. Recovery is a NEW credential, not a renewal of a
+    -- dead one, so the reservation is where this must stop.
+    --
+    -- The membership is borrowed OUTSIDE the `begin`, deliberately. A GRANT
+    -- issued inside a block with an exception handler is undone by that
+    -- handler's sub-transaction rollback when the probe raises — which is
+    -- exactly what these probes are for — leaving the matching REVOKE to warn
+    -- "role is not a member" and the borrow accounting to drift.
+    execute format('grant kitluy_issuance_service to %I', current_user);
+    begin
+      execute 'set role kitluy_issuance_service';
+      perform kitluy_devices.reserve_device_credential_renewal_v1(
+        v_dev, v_env, 'device_identity',
+        encode(sha256(convert_to('c1-' || gen_random_uuid()::text, 'UTF8')), 'hex'),
+        now(), 'trusted', 'reuse_current_key', 'SECTION47B');
+      v_err := 'no error';
+    exception when others then
+      v_err := sqlerrm;
+    end;
+    execute 'reset role';
+    execute format('revoke kitluy_issuance_service from %I', current_user);
+    if v_err !~ 'KLUY-RENEWAL-REVOKED-REQUIRES-RECOVERY' then
+      v_findings := v_findings ||
+        format('C1/%s: a revoked credential could be reserved for renewal (%s)', v_case, v_err);
+    end if;
+
+    -- C2 — CANNOT BE RENEWED PAST THE RESERVATION EITHER. A caller that skips
+    -- the reservation and goes straight to prepare must hit the same wall;
+    -- otherwise C1 is a check in one code path rather than a rule.
+    execute format('grant kitluy_issuance_service to %I', current_user);
+    begin
+      execute 'set role kitluy_issuance_service';
+      perform kitluy_devices.prepare_device_credential_renewal_v2(
+        v_dev, v_env, 'device_identity', 'rq-c2-' || gen_random_uuid()::text,
+        encode(sha256(convert_to('c2-' || gen_random_uuid()::text, 'UTF8')), 'hex'),
+        repeat('3', 64), 'PEM-C2', repeat('c2', 32), 'ed25519', repeat('2', 64),
+        decode('d4', 'hex'), true, 'ica-c2', now(), 'trusted', 'SECTION47B',
+        'reuse_current_key');
+      v_err := 'no error';
+    exception when others then
+      v_err := sqlerrm;
+    end;
+    execute 'reset role';
+    execute format('revoke kitluy_issuance_service from %I', current_user);
+    if v_err = 'no error' then
+      v_findings := v_findings ||
+        format('C2/%s: prepare_device_credential_renewal_v2 renewed a revoked credential', v_case);
+    end if;
+
+    -- C3 — CANNOT BE RESTORED, BY THE MOST PRIVILEGED IDENTITY ON THE PATH.
+    --
+    -- `kitluy_credential_issuer` is one of only two roles holding UPDATE on
+    -- this table, and it owns every function that writes it. If containment
+    -- held only for runtime roles it would be a grant, not a rule — so the
+    -- attempt is made as the governor and the trigger is what refuses.
+    execute format('grant kitluy_credential_issuer to %I', current_user);
+    execute 'set role kitluy_credential_issuer';
+    begin
+      update kitluy_devices.device_credentials
+         set state = 'issued', revoked_at = null
+       where credential_id = v_cred;
+      v_err := 'no error';
+    exception when others then
+      v_err := sqlerrm;
+    end;
+    -- ...and clearing only the TIME, leaving the state alone, is refused too.
+    begin
+      update kitluy_devices.device_credentials
+         set revoked_at = null
+       where credential_id = v_cred;
+      v_state := 'no error';
+    exception when others then
+      v_state := sqlerrm;
+    end;
+    execute 'reset role';
+    execute format('revoke kitluy_credential_issuer from %I', current_user);
+    if v_err !~ 'KLUY-REVOCATION-IS-ONE-WAY' then
+      v_findings := v_findings ||
+        format('C3/%s: the credential governor could un-revoke the credential (%s)', v_case, v_err);
+    end if;
+    if v_state !~ 'KLUY-REVOCATION-IS-ONE-WAY' then
+      v_findings := v_findings ||
+        format('C3/%s: the revocation TIME could be cleared while the state stayed revoked (%s)',
+               v_case, v_state);
+    end if;
+
+    -- C4 — THE EVIDENCE IS APPEND-ONLY. A revocation that can be edited away
+    -- leaves a revoked credential with nothing explaining why, and a deleted
+    -- one leaves no revocation at all.
+    begin
+      update kitluy_devices.device_credential_revocations
+         set reason = 'rewritten after the fact'
+       where credential_id = v_cred;
+      v_err := 'no error';
+    exception when others then
+      v_err := sqlerrm;
+    end;
+    if v_err !~ 'APPEND-ONLY' then
+      v_findings := v_findings ||
+        format('C4/%s: a revocation record could be UPDATED (%s)', v_case, v_err);
+    end if;
+    begin
+      delete from kitluy_devices.device_credential_revocations where credential_id = v_cred;
+      v_err := 'no error';
+    exception when others then
+      v_err := sqlerrm;
+    end;
+    if v_err !~ 'APPEND-ONLY' then
+      v_findings := v_findings ||
+        format('C4/%s: a revocation record could be DELETED (%s)', v_case, v_err);
+    end if;
+
+    -- Still revoked after every attempt on it. The refusals above are about
+    -- statements; this is about the row.
+    select state::text into v_state from kitluy_devices.device_credentials
+     where credential_id = v_cred;
+    if v_state <> 'revoked' then
+      v_findings := v_findings ||
+        format('C1-C4/%s: the credential ended as %s after the containment probes', v_case, v_state);
+    end if;
+    select count(*) into v_n from kitluy_devices.device_credential_revocations
+     where credential_id = v_cred;
+    if v_n < 1 then
+      v_findings := v_findings ||
+        format('C4/%s: the credential is revoked with no revocation record to explain it', v_case);
+    end if;
+  end loop;
+
+  -- C7 — A VERDICT, ONCE GIVEN, IS FINAL. Both settled authorizations are
+  -- probed: the APPROVED one must not become LAPSED, and the LAPSED one must
+  -- not be talked into APPROVED afterwards. A lapse that could be upgraded to
+  -- an approval is a four-eyes rule with a timer for a back door.
+  execute format('grant kitluy_credential_issuer to %I', current_user);
+  execute 'set role kitluy_credential_issuer';
+  begin
+    update kitluy_devices.device_emergency_revocation_authorizations
+       set post_approval_decision = 'LAPSED'
+     where authorization_id = v_auth_appr;
+    v_err := 'no error';
+  exception when others then
+    v_err := sqlerrm;
+  end;
+  begin
+    update kitluy_devices.device_emergency_revocation_authorizations
+       set post_approval_decision = 'APPROVED'
+     where authorization_id = v_auth_lapse;
+    v_state := 'no error';
+  exception when others then
+    v_state := sqlerrm;
+  end;
+  execute 'reset role';
+  execute format('revoke kitluy_credential_issuer from %I', current_user);
+  if v_err = 'no error' then
+    v_findings := v_findings ||
+      format('C7: an APPROVED post-approval verdict could be rewritten to LAPSED');
+  end if;
+  if v_state = 'no error' then
+    v_findings := v_findings ||
+      format('C7: a LAPSED post-approval verdict could be rewritten to APPROVED');
+  end if;
+
+  -- A lapse NEVER restores (decision §2.4). Asserted on the row, after the
+  -- sweep and after the rewrite attempts.
+  select state::text into v_state from kitluy_devices.device_credentials
+   where credential_id = v_cred_lapse;
+  if v_state <> 'revoked' then
+    v_findings := v_findings ||
+      format('C7: the lapsed emergency left its credential %s; a lapse never restores', v_state);
+  end if;
+
+  -- ========================================================================
+  -- C5 — THE HEAD IS NOT A VALIDITY ORACLE, AND NOTHING TREATS IT AS ONE.
+  --
+  -- First the fact that makes the naive assertion impossible, stated as an
+  -- assertion of its own so nobody later "fixes" it: the head DOES point at a
+  -- revoked generation, because it is monotonic.
+  -- ========================================================================
+  select h.current_generation into v_head_after
+    from kitluy_devices.device_credential_heads h
+   where h.device_record_id = v_dev_norm and h.environment = v_env
+     and h.purpose = 'device_identity';
+  select certificate_generation into v_n from kitluy_devices.device_credentials
+   where credential_id = v_cred_norm;
+  if v_head_after is distinct from v_n then
+    v_findings := v_findings || format(
+      'C5: the head moved off the revoked generation (head %s, revoked generation %s). '
+      || 'If revocation now demotes the head, this section''s reasoning is stale and the '
+      || 'census below must be re-derived rather than deleted',
+      v_head_after, v_n);
+  end if;
+
+  -- NO VIEW MAY READ THE HEADS TABLE. A view is how a monotonic counter reaches
+  -- a reader that never considered state, and PostgREST publishes views.
+  select coalesce(string_agg(n.nspname || '.' || cl.relname, ', ' order by cl.relname), '')
+    into v_views
+    from pg_class cl
+    join pg_namespace n on n.oid = cl.relnamespace
+   where cl.relkind in ('v', 'm')
+     and pg_get_viewdef(cl.oid) ~ 'device_credential_heads';
+  if v_views <> '' then
+    v_findings := v_findings || format(
+      'C5: view(s) read device_credential_heads and so can present a revoked generation as '
+      || 'current: %s', v_views);
+  end if;
+
+  -- EVERY FUNCTION THAT READS IT MUST ALSO CONSTRAIN CREDENTIAL STATE.
+  -- A head reader that never mentions `state` cannot be distinguishing a live
+  -- generation from a revoked one.
+  select coalesce(string_agg(n.nspname || '.' || p.proname, ', ' order by p.proname), '')
+    into v_unfiltered
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname like 'kitluy%'
+     and p.prosrc ~ 'device_credential_heads'
+     and p.prosrc !~ '\mstate\M';
+  if v_unfiltered <> '' then
+    v_findings := v_findings || format(
+      'C5: function(s) read device_credential_heads without constraining credential state: %s',
+      v_unfiltered);
+  end if;
+
+  -- And the census is not vacuous: there ARE head readers to check.
+  select count(*) into v_n
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname like 'kitluy%' and p.prosrc ~ 'device_credential_heads';
+  if v_n < 5 then
+    v_findings := v_findings || format(
+      'C5: only %s function(s) read the heads table; the census has lost its subject and '
+      || 'would pass whatever the answer', v_n);
+  end if;
+
+  -- ========================================================================
+  -- C6 — THE OVERLAP WINDOW DOES NOT RESURRECT A REVOKED GENERATION.
+  --
+  -- The overlap device holds generation 2 current and generation 1 live behind
+  -- it. Generation 1 is revoked WHILE the window is open — the one moment when
+  -- a "still accept the previous generation" rule could keep a dead credential
+  -- alive — and then the window is retired through the shipped path.
+  -- ========================================================================
+  execute format('grant kitluy_credential_issuer to %I', current_user);
+  execute 'set role kitluy_credential_issuer';
+  v_scope := kitluy_devices.authoritative_revocation_scope_v1(
+    v_cred_ovl1, 'ADMINISTRATIVE_REPLACEMENT');
+  execute 'reset role';
+  execute format('revoke kitluy_credential_issuer from %I', current_user);
+
+  insert into kitluy_auth.approval_requests
+    (policy_id, requester_id, resource_type, resource_id, environment, action,
+     payload_hash, reason, status)
+  values (v_policy_a4, v_requester, 'device', v_dev_ovl, v_env,
+          'device_credential_revocation', v_scope ->> 'payload_hash',
+          'the previous generation, killed mid-overlap', 'APPROVED')
+  returning id into v_ap_ovl;
+  insert into kitluy_auth.approval_decisions (approval_request_id, approver_id, decision)
+  values (v_ap_ovl, v_approver_a4, 'APPROVE');
+
+  execute format('grant kitluy_issuance_service to %I', current_user);
+  execute 'set role kitluy_issuance_service';
+  v_res := kitluy_devices.revoke_device_credential_bound_v1(
+    'rq-47b-ovl-' || gen_random_uuid()::text, v_dev_ovl, v_env, 'device_identity', 1,
+    'ADMINISTRATIVE_REPLACEMENT', 'the previous generation, killed mid-overlap',
+    'REPROVISION_REQUIRED', 'requester@47b', 'SECTION47B',
+    v_ap_ovl, 'approver@47b', 'CHG-47B-OVL', (v_scope ->> 'incident_scope_id')::uuid);
+  if coalesce(v_res ->> 'outcome', 'nothing') <> 'REVOKED' then
+    v_findings := v_findings ||
+      format('C6: the mid-overlap revocation of generation 1 did not complete: %s', v_res);
+  end if;
+
+  -- Retiring the overlap must not bring it back, and must not take the CURRENT
+  -- generation with it.
+  begin
+    perform kitluy_devices.retire_overlapped_credential_v1(
+      v_dev_ovl, v_env, 'device_identity', now(), 'trusted', 'SECTION47B');
+    v_err := 'no error';
+  exception when others then
+    v_err := sqlerrm;
+  end;
+  execute 'reset role';
+  execute format('revoke kitluy_issuance_service from %I', current_user);
+
+  select state::text into v_state from kitluy_devices.device_credentials
+   where credential_id = v_cred_ovl1;
+  if v_state <> 'revoked' then
+    v_findings := v_findings || format(
+      'C6: the revoked previous generation is %s after the overlap was retired (%s)',
+      v_state, v_err);
+  end if;
+  select state::text into v_state from kitluy_devices.device_credentials
+   where credential_id = v_cred_ovl2;
+  if v_state <> 'issued' then
+    v_findings := v_findings || format(
+      'C6: retiring the overlap took the CURRENT generation with it (now %s)', v_state);
+  end if;
+
+  -- The head never moved backwards onto the revoked generation.
+  select current_generation, previous_generation
+    into v_head_after, v_prev_before
+    from kitluy_devices.device_credential_heads
+   where device_record_id = v_dev_ovl and environment = v_env and purpose = 'device_identity';
+  if v_head_after < v_head_before then
+    v_findings := v_findings || format(
+      'C6: the head moved backwards from %s to %s during overlap retirement',
+      v_head_before, v_head_after);
+  end if;
+
+  -- ========================================================================
+  -- LEAVES NOTHING SPENDABLE. The assignments are removed, and the removal is
+  -- proved by execution rather than by having run the DELETE.
+  -- ========================================================================
+  delete from kitluy_auth.assignment_scopes
+   where role_assignment_id in (v_assignment, v_assignment_post);
+  delete from kitluy_auth.role_assignments where id in (v_assignment, v_assignment_post);
+  delete from kitluy_auth.role_permission_grants
+   where role_template_id in (v_template, v_template_post);
+  delete from kitluy_auth.role_templates where id in (v_template, v_template_post);
+
+  perform set_config('request.jwt.claims',
+    format('{"sub":"%s","role":"authenticated"}', v_ciso), true);
+  execute 'set role authenticated';
+  v_res := kitluy_devices.revoke_device_credential_emergency_governed_v1(
+    v_cred_live, 'DEVICE_STOLEN', 'the authority census, after the hand-back',
+    'INC-47B-CENSUS-' || gen_random_uuid()::text, gen_random_uuid(),
+    'S47B-CENSUS-' || gen_random_uuid()::text);
+  execute 'reset role';
+  execute 'reset role';
+  perform set_config('request.jwt.claims', '', true);
+  if coalesce(v_res ->> 'refusal_code', 'nothing') <> 'KLUY-EMERGENCY-UNAUTHORIZED' then
+    v_findings := v_findings || format(
+      'census: the declarer still holds emergency authority after this section removed it: %s',
+      v_res);
+  end if;
+  -- ...and the credential it was aimed at is untouched, which is what makes the
+  -- refusal above a refusal rather than a no-op.
+  select state::text into v_state from kitluy_devices.device_credentials
+   where credential_id = v_cred_live;
+  if v_state <> 'issued' then
+    v_findings := v_findings ||
+      format('census: the probe revoked the live credential it was only meant to fail on (%s)', v_state);
+  end if;
+
+  -- No re-authentication evidence left unspent by this section.
+  select count(*) into v_n
+    from kitluy_auth.reauthentication_evidence
+   where session_reference like 's47b-%' and lifecycle_state = 'ACTIVE';
+  if v_n > 0 then
+    v_findings := v_findings ||
+      format('census: %s section 47b re-authentication evidence row(s) are still ACTIVE', v_n);
+  end if;
+
+  -- NO BORROWED MEMBERSHIP SURVIVES THIS SESSION.
+  --
+  -- Scoped to `current_user` on purpose. `service_role` holds
+  -- kitluy_issuance_service and kitluy_worker_service PERMANENTLY, granted by
+  -- the migrations that built those runtime paths; a census that flagged every
+  -- non-superuser holder would fail on the platform's own design rather than on
+  -- anything this section did. What must be true is narrower and is the actual
+  -- risk: THIS session borrowed three memberships and must be holding none of
+  -- them now. The governor and the approval reader are separately required to
+  -- have no non-superuser members at all, and section 47 control 12 owns that.
+  --
+  -- Named rather than merely detected: "a membership survived" sends the next
+  -- reader through six borrow sites to work out which one.
+  select coalesce(string_agg(g.rolname, ', ' order by g.rolname), '')
+    into v_views
+    from pg_auth_members m
+    join pg_roles r on r.oid = m.member
+    join pg_roles g on g.oid = m.roleid
+   where g.rolname in ('kitluy_credential_issuer', 'kitluy_issuance_service',
+                       'kitluy_worker_service')
+     and r.rolname = current_user;
+  if v_views <> '' then
+    v_findings := v_findings ||
+      format('census: section 47b did not hand back the membership(s) it borrowed: %s', v_views);
+  end if;
+
+  if cardinality(v_findings) > 0 then
+    raise exception 'ASSERT FAIL: % phase-d-containment finding(s): %',
+      cardinality(v_findings), array_to_string(v_findings, ' | ');
+  end if;
+
+  raise notice 'PASS ws11-phase-d-containment: a revoked credential is DEAD through every door — three credentials killed by the normal bound path, by a governed emergency a second human APPROVED, and by a governed emergency the WORKER swept to LAPSED (the sweep run as kitluy_worker_service, the role that could not reach the function at all until migration 0154), then the same matrix applied to all three: renewal refused at the reservation (KLUY-RENEWAL-REVOKED-REQUIRES-RECOVERY) and at prepare; restoration refused to the CREDENTIAL GOVERNOR itself, both as a state change and as a cleared revoked_at (KLUY-REVOCATION-IS-ONE-WAY); revocation evidence refuses UPDATE and DELETE (append-only); a settled verdict cannot be rewritten in either direction and a lapse never restores; the overlap window does not resurrect a generation revoked inside it and retiring it does not take the current generation; and "cannot become current" asserted in its only honest form — the head is monotonic and DOES point at the revoked generation, so NO view may read the heads table and every function that reads it must constrain credential state. Section leaves no standing authority, no ACTIVE evidence and no borrowed membership';
+end
+$section47b$;
+
+-- ============================================================================
 -- SECTION 48 — RC-022 spendability census (Phase C / migration 0153).
 -- After every prior section, neutralize leftover APPROVED approvals and pending
 -- emergency post-approvals, then prove zero reusable authority remains.

@@ -27,10 +27,7 @@ import {
   currentRole,
   withRole,
 } from "./support/renewal-fixtures.js";
-import {
-  revokeDeviceCredential,
-  type RevocationOutcome,
-} from "../src/credential-revocation.js";
+import { revokeDeviceCredential, type RevocationOutcome } from "../src/credential-revocation.js";
 import { createPgRevocationGateway } from "../src/pg-revocation-gateway.js";
 
 const SUITE = "@kitluy/device-identity pg RevocationGateway";

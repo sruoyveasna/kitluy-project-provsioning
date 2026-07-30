@@ -797,5 +797,6 @@ export * from "./credential-lifecycle.js";
 export * from "./credential-lifecycle-jobs.js";
 export * from "./credential-revocation.js";
 export * from "./pg-revocation-gateway.js";
+export * from "./pg-revocation-lookup.js";
 export * from "./key-destruction.js";
 export * from "./revocation-and-destruction-jobs.js";
