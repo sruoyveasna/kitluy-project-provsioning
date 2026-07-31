@@ -406,6 +406,25 @@ describe.skipIf(!live)("the online verifier denies a revoked credential", () => 
       );
       scope = rows[0]?.result ?? {};
       await keeperClient.query("reset role");
+      // HAND THE BORROW BACK before committing.
+      //
+      // `grant role` is catalog state and catalog state is TRANSACTIONAL, so a
+      // suite that rolls back un-grants for free. These transactions COMMIT, so
+      // the borrow would persist — leaving a login-capable role a standing member
+      // of the NOLOGIN owner of every governed door, which is the same escalation
+      // migration 0155 had to fix, and which trips both `assertions.sql` and the
+      // concurrency suite's own borrow guard during a parallel `pnpm verify`.
+      await keeperClient.query(
+        `do $handback$ begin
+           if pg_has_role(current_user, 'kitluy_credential_issuer', 'MEMBER') then
+             execute format('revoke kitluy_credential_issuer from %I', current_user);
+           end if;
+         exception when insufficient_privilege then
+           -- Another session in a parallel run already handed it back. Not our
+           -- borrow to return twice; the end-state assertion is what matters.
+           null;
+         end $handback$;`,
+      );
       await keeperClient.query("commit");
     } catch (error) {
       await keeperClient.query("rollback").catch(() => undefined);

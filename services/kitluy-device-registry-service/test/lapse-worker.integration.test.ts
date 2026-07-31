@@ -33,7 +33,42 @@ import { createEmergencyLapseWorker, EMERGENCY_LAPSE_JOB_KIND } from "../src/lap
 const LOCAL_DSN = "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
 const RUN = randomUUID().slice(0, 8);
 const ENV = { DEVICE_REGISTRY_DATABASE_URL: LOCAL_DSN, KITLUY_ENV: "local" } as const;
-const ENVIRONMENT = "development";
+/**
+ * A PER-RUN environment, not "development".
+ *
+ * The governed emergency lifecycle has an ENVIRONMENT-WIDE sweeper
+ * (`lapse_governed_emergency_post_approvals_v1`, group 0152), and
+ * `@kitluy/device-identity`'s concurrency suite exercises it against
+ * `development`. `turbo` runs package test tasks in PARALLEL against the same
+ * database, so a fixture of ours sitting overdue in `development` gets swept by
+ * that suite and changes the count it asserts — which is exactly how this suite
+ * broke `pnpm verify` while passing standalone.
+ *
+ * Scoping to a unique environment makes the two suites unable to see each other's
+ * obligations at all. Nothing in the lapse path validates the environment against
+ * policy (it is read from the stored row), so this narrows the fixture without
+ * weakening what is under test.
+ */
+const JOB_ENVIRONMENT = "development";
+
+/**
+ * The AUTHORIZATION's environment — per-run, and deliberately not "development".
+ *
+ * The governed emergency lifecycle has an ENVIRONMENT-WIDE sweeper
+ * (`lapse_governed_emergency_post_approvals_v1`, group 0152), and
+ * `@kitluy/device-identity`'s concurrency suite exercises it against
+ * `development`. `turbo` runs package test tasks in PARALLEL against one
+ * database, so an overdue fixture of ours in `development` gets swept by that
+ * suite and changes the count it asserts — which is exactly how this suite broke
+ * `pnpm verify` while passing standalone.
+ *
+ * The JOB stays in `development` because the durable-job runtime validates the
+ * environment against a known set and refuses an invented one. The authorization
+ * has no such constraint (the lapse reads it from the stored row), so scoping only
+ * the authorization is enough to make the two suites unable to see each other's
+ * obligations.
+ */
+const AUTH_ENVIRONMENT = `ws11-lapse-${RUN}`;
 
 async function reachable(): Promise<boolean> {
   const probe = new pg.Pool({ connectionString: LOCAL_DSN, max: 1, connectionTimeoutMillis: 2000 });
@@ -73,7 +108,7 @@ async function seedConsumedEvidence(
              now() - interval '6 hours', now() - interval '6 hours' + interval '300 seconds',
              'PASSWORD_TOTP', 'CONSUMED', now() - interval '6 hours', $3::uuid, $4::uuid)
      returning evidence_id`,
-    [actorUserId, ENVIRONMENT, authorizationHint, randomUUID()],
+    [actorUserId, AUTH_ENVIRONMENT, authorizationHint, randomUUID()],
   );
   return rows[0]?.evidence_id ?? "";
 }
@@ -115,13 +150,33 @@ describe.skipIf(!live)("an overdue emergency is lapsed by the production worker"
           SEEDED_ACTOR,
           `lapse worker suite ${RUN}`,
           `INC-LAPSE-${RUN}`,
-          ENVIRONMENT,
+          AUTH_ENVIRONMENT,
           randomUUID().replace(/-/g, "").padEnd(64, "0").slice(0, 64),
           `idem-lapse-${RUN}`,
           evidenceId,
         ],
       );
       authorizationId = rows[0]?.authorization_id ?? "";
+      await client.query("reset role");
+      // HAND THE BORROW BACK before committing.
+      //
+      // `grant role` is catalog state and catalog state is TRANSACTIONAL, so a
+      // suite that rolls back un-grants for free. These transactions COMMIT, so
+      // the borrow would persist — leaving a login-capable role a standing member
+      // of the NOLOGIN owner of every governed door, which is the same escalation
+      // migration 0155 had to fix, and which trips both `assertions.sql` and the
+      // concurrency suite's own borrow guard during a parallel `pnpm verify`.
+      await client.query(
+        `do $handback$ begin
+           if pg_has_role(current_user, 'kitluy_credential_issuer', 'MEMBER') then
+             execute format('revoke kitluy_credential_issuer from %I', current_user);
+           end if;
+         exception when insufficient_privilege then
+           -- Another session in a parallel run already handed it back. Not our
+           -- borrow to return twice; the end-state assertion is what matters.
+           null;
+         end $handback$;`,
+      );
       await client.query("reset role");
       await client.query("commit");
     } catch (error) {
@@ -141,7 +196,7 @@ describe.skipIf(!live)("an overdue emergency is lapsed by the production worker"
   it("SCHEDULES a lapse job carrying only the immutable authorization id", async () => {
     const scheduled = await runtime.lapseScheduler.scheduleLapse({
       authorizationId,
-      environment: ENVIRONMENT,
+      environment: JOB_ENVIRONMENT,
       postApprovalDueAt: null,
       actorRef: "lapse-suite",
     });
@@ -171,7 +226,7 @@ describe.skipIf(!live)("an overdue emergency is lapsed by the production worker"
   it("is IDEMPOTENT: a second schedule returns the same job, not a second obligation", async () => {
     const again = await runtime.lapseScheduler.scheduleLapse({
       authorizationId,
-      environment: ENVIRONMENT,
+      environment: JOB_ENVIRONMENT,
       postApprovalDueAt: null,
       actorRef: "lapse-suite",
     });
@@ -195,7 +250,7 @@ describe.skipIf(!live)("an overdue emergency is lapsed by the production worker"
         // REQUIRED, and the reason the first run claimed nothing:
         // `runDurableJobs` claims with `identity.environment`, so an absent value
         // matches no queued job.
-        environment: ENVIRONMENT,
+        environment: JOB_ENVIRONMENT,
         softwareVersion: "0.1.0",
       },
       lease: { leaseId: randomUUID(), leaseOwner: `lapse-suite-${RUN}`, leaseSeconds: 60 },
@@ -293,14 +348,32 @@ describe.skipIf(!live)("an overdue emergency is lapsed by the production worker"
           SEEDED_ACTOR,
           `not-due ${RUN}`,
           `INC-NOTDUE-${RUN}`,
-          ENVIRONMENT,
+          AUTH_ENVIRONMENT,
           randomUUID().replace(/-/g, "").padEnd(64, "1").slice(0, 64),
           `idem-notdue-${RUN}`,
           evidenceId,
         ],
       );
       futureAuthorization = rows[0]?.authorization_id ?? "";
-      await client.query("reset role");
+      // HAND THE BORROW BACK before committing.
+      //
+      // `grant role` is catalog state and catalog state is TRANSACTIONAL, so a
+      // suite that rolls back un-grants for free. These transactions COMMIT, so
+      // the borrow would persist — leaving a login-capable role a standing member
+      // of the NOLOGIN owner of every governed door, which is the same escalation
+      // migration 0155 had to fix, and which trips both `assertions.sql` and the
+      // concurrency suite's own borrow guard during a parallel `pnpm verify`.
+      await client.query(
+        `do $handback$ begin
+           if pg_has_role(current_user, 'kitluy_credential_issuer', 'MEMBER') then
+             execute format('revoke kitluy_credential_issuer from %I', current_user);
+           end if;
+         exception when insufficient_privilege then
+           -- Another session in a parallel run already handed it back. Not our
+           -- borrow to return twice; the end-state assertion is what matters.
+           null;
+         end $handback$;`,
+      );
       await client.query("commit");
     } finally {
       client.release();
