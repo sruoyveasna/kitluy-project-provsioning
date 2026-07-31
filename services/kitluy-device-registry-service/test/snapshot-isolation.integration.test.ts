@@ -218,35 +218,29 @@ describe.skipIf(!live)("a snapshot never carries another scope's revocations", (
   });
 
   /**
-   * BLOCKED BY A PRE-EXISTING DEFECT, not by this work. Skipped loudly rather
-   * than deleted, because the gap is real and must stay visible.
+   * PREVIOUSLY SKIPPED ON A MISDIAGNOSIS, now passing. Recorded because the wrong
+   * conclusion was published.
    *
-   * `hub_revocation_scope_v1` is owned by `kitluy_activation_governor`, following
-   * group 0152's `emergency_device_tenancy_v1` exactly. Called as
-   * `kitluy_issuance_service` it fails with
+   * This test was skipped with a claim that `emergency_device_tenancy_v1` and
+   * `hub_revocation_scope_v1` were broken because their SECURITY DEFINER owner
+   * lacked assignment access. Both halves of that were wrong:
    *
-   *     permission denied for table device_assignments
+   *   * the reproduction used `emergency_device_tenancy_v1((select device_id from
+   *     device_assignments limit 1))`. A function ARGUMENT is evaluated in the
+   *     CALLER's context, so the `42501` came from the subselect in the diagnostic
+   *     itself and never reached the definer body;
+   *   * `emergency_device_tenancy_v1` does fail for `kitluy_issuance_service`, but
+   *     with "permission denied for FUNCTION", and that is CORRECT. It is granted
+   *     to `kitluy_credential_issuer`, which is the owner of the governed emergency
+   *     RPC and therefore the effective role when the bridge is actually called.
+   *     Issuance is not supposed to reach it.
    *
-   * and SO DOES GROUP 0152's OWN FUNCTION, verified directly:
-   *
-   *     set role kitluy_issuance_service;
-   *     select kitluy_devices.emergency_device_tenancy_v1(<device>);
-   *     ERROR: permission denied for table device_assignments
-   *
-   * So the tenancy bridge the governed EMERGENCY path already depends on is
-   * unusable by the role that calls it — the same class as RC-028, where group
-   * 0154 shipped a real EXECUTE grant that was unusable for want of schema USAGE.
-   * The grant exists; the capability does not.
-   *
-   * Every other isolation property in this file passes, including the load-bearing
-   * one (a null scope returns nothing rather than the whole fleet). What is blocked
-   * is only end-to-end production THROUGH the scope bridge.
-   *
-   * This is recorded as a finding for the next session and is NOT worked around
-   * here: widening `kitluy_activation_governor`'s privileges to make my own test
-   * pass would paper over a defect that also affects the emergency path.
+   * `hub_revocation_scope_v1` was working the whole time. The only real defect was
+   * a missing EXECUTE for `kitluy_credential_issuer` on
+   * `retired_devices_in_scope_v1` — inside a definer the caller is the OWNER, not
+   * the session role — and that was fixed in the same commit that shipped it.
    */
-  it.skip("PRODUCES a signed snapshot whose scope is derived, not supplied", async () => {
+  it("PRODUCES a signed snapshot whose scope is derived, not supplied", async () => {
     const { rows } = await keeper.query<{ device_id: string }>(
       `select device_id::text as device_id from kitluy_devices.device_assignments
         where state in ('pending_trust','active') limit 1`,
