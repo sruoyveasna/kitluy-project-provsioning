@@ -19,3 +19,4 @@ export const PACKAGE_NAME = "@kitluy/job-contracts" as const;
 export * from "./durable-job.js";
 export * from "./retry-policy.js";
 export * from "./job-runtime.js";
+export * from "./pg-durable-job-gateway.js";

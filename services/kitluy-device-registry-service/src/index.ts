@@ -18,6 +18,13 @@
  */
 import type { HealthReport } from "@kitluy/observability";
 
+export {
+  handleKernelRequest,
+  handleRequest,
+  type KernelDeps,
+  type KernelResponse,
+} from "./http.js";
+
 export const SERVICE_NAME = "kitluy-device-registry-service" as const;
 export const SERVICE_VERSION = "0.1.0" as const;
 
@@ -48,7 +55,31 @@ export {
   FORBIDDEN_IMPLEMENTATION_OVERRIDES,
   resolveDeviceRevocationService,
   type DeviceRevocationRuntime,
+  type ResolveOptions,
 } from "./composition.js";
+
+export {
+  refuseAllRequests,
+  type AuthenticatedPrincipal,
+  type AuthenticationOutcome,
+  type RequestAuthenticator,
+  type RequestHeaders,
+} from "./authentication.js";
+
+export {
+  createRevocationRouter,
+  type RevocationRouter,
+  type RevocationRouterDeps,
+  type RouteRequest,
+  type RouteResponse,
+} from "./revocation-routes.js";
+
+export {
+  createEmergencyLapseScheduler,
+  type EmergencyLapseScheduler,
+  type ScheduleLapseRequest,
+  type ScheduleLapseResult,
+} from "./lapse-scheduling.js";
 
 export {
   EMERGENCY_REASON_CODES,
