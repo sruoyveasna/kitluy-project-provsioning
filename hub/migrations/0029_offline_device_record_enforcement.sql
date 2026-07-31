@@ -60,7 +60,7 @@ as $device$
   select exists (
     select 1
       from edge_config.revocation_snapshot s
-      join edge_config.revocation_snapshot_entry e on e.snapshot_id = s.snapshot_id
+      join edge_config.revocation_snapshot_entry e on e.snapshot_id = s.id
      where s.tenant_id = p_tenant_id
        and s.digital_store_id = p_digital_store_id
        and s.store_location_id = p_store_location_id

@@ -40,6 +40,31 @@
 -- Additive. Groups 0136-0158 are COMMITTED and are NOT edited.
 -- LOCAL execution only; never automatic in production (KL-INF-P1-037).
 
+-- Ownership borrow, same as groups 0125-0155: the applying role is not a member
+-- of the NOLOGIN definer owner (`kitluy_credential_issuer`, set by group 0155),
+-- so `create or replace function` would fail `42501 must be owner of function`
+-- on a from-zero replay. Membership is taken here and handed back at the end of
+-- this file; the applying role keeps no privilege the owner did not already
+-- have. (The first version of this group omitted the borrow; it had only ever
+-- been applied incrementally to a disposable local volume, where the defect was
+-- invisible. Canonical from-zero replay exposed it.)
+do $borrow$
+begin
+  execute format('grant kitluy_credential_issuer to %I', current_user);
+end
+$borrow$;
+
+-- The 0155 originals carry `default null` on the device argument, and
+-- `create or replace` cannot REMOVE a parameter default (`42P13 cannot remove
+-- parameter defaults from existing function`). Removing the default is the
+-- point of this group, so the functions are dropped and recreated instead.
+-- Nothing in the database depends on them (the only callers are application
+-- code), and the grants and comments are restated below, so nothing a caller
+-- can observe is lost. Ownership returns to `kitluy_credential_issuer` via the
+-- borrow above: the applying role is a member while it recreates them.
+drop function kitluy_devices.revoked_certificate_serials_v1(text, uuid);
+drop function kitluy_devices.revoked_device_records_v1(text, uuid);
+
 create or replace function kitluy_devices.revoked_certificate_serials_v1(
   p_environment text,
   p_device_record_id uuid
@@ -98,7 +123,15 @@ begin
 end
 $devices$;
 
--- Grants are preserved by `create or replace`, but restated so a reader can see
+-- The drop above discarded ownership along with the defaults; hand both
+-- functions back to the NOLOGIN definer owner group 0155 established (the
+-- borrow at the top of this file makes the applying role a member).
+alter function kitluy_devices.revoked_certificate_serials_v1(text, uuid)
+  owner to kitluy_credential_issuer;
+alter function kitluy_devices.revoked_device_records_v1(text, uuid)
+  owner to kitluy_credential_issuer;
+
+-- Grants were discarded by the drop, so they are restated so a reader can see
 -- the intended surface without consulting the catalogue. UNCHANGED from 0155 --
 -- this migration withdraws a MODE, not a caller.
 revoke all on function kitluy_devices.revoked_certificate_serials_v1(text, uuid) from public;
@@ -123,8 +156,13 @@ declare
   v_default_gone boolean;
 begin
   -- 1. The environment-wide read is refused, as the REAL caller.
+  -- The grant goes through `execute format(...)` like the borrows in groups
+  -- 0147-0155: the STATIC form `grant kitluy_issuance_service to current_user`
+  -- segfaults this PostgreSQL build (signal 11) when the session already holds
+  -- the `kitluy_credential_issuer` membership borrowed above. The dynamic form
+  -- is byte-identical in effect and does not crash.
   begin
-    grant kitluy_issuance_service to current_user;
+    execute format('grant kitluy_issuance_service to %I', current_user);
   exception when others then null;
   end;
 
@@ -187,3 +225,13 @@ exception when others then
   raise notice 'KLUY-MIGRATION-0159: could not hand back kitluy_issuance_service (%)', sqlerrm;
 end
 $hand_back$;
+
+-- Hand back the ownership borrow taken at the top of this file, unconditionally,
+-- the way groups 0147-0155 do: a login-capable role left holding
+-- `kitluy_credential_issuer` could `set role` to the NOLOGIN owner of every
+-- governed door and execute them directly (KLRISK-DEVICE-011 class).
+do $hand_back_owner$
+begin
+  execute format('revoke kitluy_credential_issuer from %I', current_user);
+end
+$hand_back_owner$;
