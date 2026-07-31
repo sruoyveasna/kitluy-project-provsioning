@@ -295,7 +295,18 @@ describe.skipIf(!live)("a real revocation through the route reaches the database
     let scope: Record<string, unknown>;
     try {
       await keeperClient.query(
-        `do $borrow$ begin execute format('grant kitluy_credential_issuer to %I', current_user); end $borrow$;`,
+        // MEMBERSHIP-CHECKED AND RACE-TOLERANT.
+        //
+        // Suites run in parallel against one server and several borrow this same
+        // authority. An unconditional GRANT makes two of them collide on
+        // `pg_auth_members_role_member_index`, which fails a suite for a reason
+        // that has nothing to do with what it is testing.
+        `do $borrow$ begin
+           if not pg_has_role(current_user, 'kitluy_credential_issuer', 'MEMBER') then
+             execute format('grant kitluy_credential_issuer to %I', current_user);
+           end if;
+         exception when unique_violation then null;
+         end $borrow$;`,
       );
       await keeperClient.query("set local role kitluy_credential_issuer");
       const { rows } = await keeperClient.query<{ result: Record<string, unknown> }>(

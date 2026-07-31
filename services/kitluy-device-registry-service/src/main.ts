@@ -21,6 +21,7 @@ import { createLogger } from "@kitluy/observability";
 import { requireEnvironment, requirePort } from "@kitluy/shared-config";
 import { resolveDeviceRevocationService } from "./composition.js";
 import { handleRequest } from "./http.js";
+import { createLapseWorkerLoop } from "./lapse-worker-runtime.js";
 import { SERVICE_NAME, SERVICE_VERSION } from "./index.js";
 
 const log = createLogger(SERVICE_NAME);
@@ -29,6 +30,28 @@ const port = requirePort(process.env, "PORT");
 
 // Startup-time refusal, before anything is listening.
 const revocation = resolveDeviceRevocationService(process.env);
+
+/**
+ * THE DEPLOYED LAPSE WORKER.
+ *
+ * Every emergency revocation enqueues an obligation to have a SECOND human
+ * review it. Lapsing is what happens when nobody does: the deadline passes, the
+ * worker closes the obligation and it escalates to manual security review.
+ *
+ * Until this line existed the route enqueued that job and no deployed process
+ * ever claimed it, so an unreviewed emergency stayed PENDING for ever and the
+ * four-eyes rule quietly became "reviewed, or forgotten". It runs IN THIS
+ * PROCESS rather than as a separate deployment because the obligation belongs to
+ * the same service that creates it; splitting them would let one be deployed
+ * without the other, which is exactly the failure being fixed.
+ */
+const lapseWorker = createLapseWorkerLoop({
+  gateway: revocation.jobGateway,
+  service: revocation.service,
+  environment,
+  softwareVersion: SERVICE_VERSION,
+  log,
+});
 
 let ready = true;
 
@@ -87,6 +110,9 @@ const server = createServer((req, res) => {
 });
 
 server.listen(port, () => {
+  // Started only once the socket is open, so a process that failed to bind never
+  // competes for jobs with the instance that did.
+  lapseWorker.start();
   log.info("listening", {
     port,
     environment,
@@ -95,6 +121,7 @@ server.listen(port, () => {
     // credential and no role name is logged.
     revocationWiring: "governed-database",
     governedRoutes: "/v1/device-credentials/*",
+    lapseWorker: lapseWorker.identity.workerInstanceId,
   });
 });
 
@@ -102,8 +129,12 @@ function shutdown(signal: string): void {
   ready = false;
   log.info("shutting down", { signal });
   server.close(() => {
-    void revocation
-      .shutdown()
+    // The worker stops FIRST and waits for an in-flight tick, so shutdown cannot
+    // abandon a claimed job and leave it stalled until its lease expires.
+    void lapseWorker
+      .stop()
+      .catch(() => undefined)
+      .then(() => revocation.shutdown())
       .catch((error: unknown) => {
         log.warn("revocation pool did not close cleanly", {
           error: error instanceof Error ? error.name : "unknown",
