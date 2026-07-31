@@ -6660,7 +6660,16 @@ declare
   v_other uuid := gen_random_uuid();
   v_res jsonb;
   v_n integer;
+  v_refusal text;
 begin
+  -- Borrow the sanctioned test authority for exactly this block (group 0160):
+  -- the due-now scaffold, the mutation-refusal probes and the two governed
+  -- operator acts below are EXECUTE-able by kitluy_test_harness and nobody
+  -- else. The membership is returned before the block ends and in the
+  -- exception path, so a failed run leaves no grant behind that a later census
+  -- could mistake for a standing leak. This replaces the direct
+  -- `durable_jobs` table access that used to run through the 0135 leak.
+  execute format('grant kitluy_test_harness to %I', current_user);
   -- Deduplication: the same work, discovered twice, is ONE job.
   v_res := kitluy_ops.enqueue_durable_job_v1(
     v_kind, 1, v_key, 'development', v_subject, '{}'::jsonb, 2, 'SECTION40B');
@@ -6685,7 +6694,7 @@ begin
   if v_n <> 0 then
     v_findings := v_findings || 'a second worker claimed a job under a live lease';
   end if;
-  if (select attempt_count from kitluy_ops.durable_jobs where job_id = v_job) <> 1 then
+  if kitluy_ops.inspect_job_attempt_count_v1(v_job) <> 1 then
     v_findings := v_findings || 'a claim did not increment the attempt count exactly once';
   end if;
 
@@ -6716,8 +6725,8 @@ begin
   if (v_res ->> 'outcome') <> 'DEFERRED' then
     v_findings := v_findings || 'a deferral was refused';
   end if;
-  if (select attempt_count from kitluy_ops.durable_jobs where job_id = v_job) <> 1
-     or (select deferral_count from kitluy_ops.durable_jobs where job_id = v_job) <> 1 then
+  if kitluy_ops.inspect_job_attempt_count_v1(v_job) <> 1
+     or kitluy_ops.inspect_job_deferral_count_v1(v_job) <> 1 then
     v_findings := v_findings || 'a deferral did not preserve history while discounting the budget';
   end if;
   -- A deferred job is genuinely out of the queue until its due time.
@@ -6727,43 +6736,38 @@ begin
     v_findings := v_findings || 'a deferred job was claimed before it was due';
   end if;
 
-  -- Attempt history is monotonic against a direct write by the table owner.
-  begin
-    update kitluy_ops.durable_jobs set attempt_count = 0 where job_id = v_job;
+  -- Attempt history is monotonic even against a direct write attempted with
+  -- owner-class table rights (the 0160 probe runs as the table owner).
+  v_refusal := kitluy_ops.test_probe_durable_job_mutation_refusal_v1(v_job, 'RESET_ATTEMPTS');
+  if v_refusal = 'MUTATION-ACCEPTED' then
     v_findings := v_findings || 'the attempt count was reset';
-  exception when others then
-    if sqlerrm not like 'KLUY-JOB-ATTEMPTS-NOT-MONOTONIC%' then
-      v_findings := v_findings || format('wrong refusal resetting attempts: %s', sqlerrm);
-    end if;
-  end;
+  elsif v_refusal not like 'KLUY-JOB-ATTEMPTS-NOT-MONOTONIC%' then
+    v_findings := v_findings || format('wrong refusal resetting attempts: %s', v_refusal);
+  end if;
 
   -- Identity and payload are fixed at creation. Retrying as a different kind,
   -- or against a different subject, is not a retry.
-  begin
-    update kitluy_ops.durable_jobs set subject_id = gen_random_uuid() where job_id = v_job;
+  v_refusal := kitluy_ops.test_probe_durable_job_mutation_refusal_v1(v_job, 'REAIM_SUBJECT');
+  if v_refusal = 'MUTATION-ACCEPTED' then
     v_findings := v_findings || 'a job was re-aimed at another subject';
-  exception when others then
-    if sqlerrm not like 'KLUY-JOB-IDENTITY-IMMUTABLE%' then
-      v_findings := v_findings || format('wrong refusal re-aiming a job: %s', sqlerrm);
-    end if;
-  end;
-  begin
-    update kitluy_ops.durable_jobs set payload = '{"injected":true}'::jsonb where job_id = v_job;
+  elsif v_refusal not like 'KLUY-JOB-IDENTITY-IMMUTABLE%' then
+    v_findings := v_findings || format('wrong refusal re-aiming a job: %s', v_refusal);
+  end if;
+  v_refusal := kitluy_ops.test_probe_durable_job_mutation_refusal_v1(v_job, 'REWRITE_PAYLOAD');
+  if v_refusal = 'MUTATION-ACCEPTED' then
     v_findings := v_findings || 'a job payload was rewritten';
-  exception when others then
-    if sqlerrm not like 'KLUY-JOB-PAYLOAD-IMMUTABLE%' then
-      v_findings := v_findings || format('wrong refusal rewriting a payload: %s', sqlerrm);
-    end if;
-  end;
+  elsif v_refusal not like 'KLUY-JOB-PAYLOAD-IMMUTABLE%' then
+    v_findings := v_findings || format('wrong refusal rewriting a payload: %s', v_refusal);
+  end if;
 
   -- Exhausting the budget dead-letters, and a dead letter does NOT return to
   -- the queue by itself. Two governed acts are required, and each is recorded.
-  update kitluy_ops.durable_jobs set next_attempt_at = now() where job_id = v_job;
+  perform kitluy_ops.test_make_durable_job_due_v1(v_job);
   perform kitluy_ops.claim_durable_jobs_v1(array[v_kind], 'development', 'w-a', v_lease, 60, 10);
   perform kitluy_ops.fail_durable_job_v1(
     v_job, v_lease, 'PROVIDER_UNAVAILABLE',
     'retryable'::kitluy_ops.job_outcome_classification, 0, 'SECTION40B');
-  update kitluy_ops.durable_jobs set next_attempt_at = now() where job_id = v_job;
+  perform kitluy_ops.test_make_durable_job_due_v1(v_job);
   v_lease := gen_random_uuid();
   perform kitluy_ops.claim_durable_jobs_v1(array[v_kind], 'development', 'w-a', v_lease, 60, 10);
   v_res := kitluy_ops.fail_durable_job_v1(
@@ -6773,16 +6777,14 @@ begin
     v_findings := v_findings ||
       format('an exhausted budget produced %s rather than a dead letter', v_res ->> 'outcome');
   end if;
-  begin
-    update kitluy_ops.durable_jobs set status = 'queued' where job_id = v_job;
+  v_refusal := kitluy_ops.test_probe_durable_job_mutation_refusal_v1(v_job, 'REQUEUE');
+  if v_refusal = 'MUTATION-ACCEPTED' then
     v_findings := v_findings || 'a dead letter returned itself to the queue';
-  exception when others then
-    if sqlerrm not like 'KLUY-JOB-ILLEGAL-TRANSITION%' then
-      v_findings := v_findings || format('wrong refusal requeueing a dead letter: %s', sqlerrm);
-    end if;
-  end;
+  elsif v_refusal not like 'KLUY-JOB-ILLEGAL-TRANSITION%' then
+    v_findings := v_findings || format('wrong refusal requeueing a dead letter: %s', v_refusal);
+  end if;
   -- The failure evidence survives the dead-lettering.
-  if (select last_failure_code from kitluy_ops.durable_jobs where job_id = v_job)
+  if kitluy_ops.inspect_job_last_failure_code_v1(v_job)
        is distinct from 'PROVIDER_UNAVAILABLE' then
     v_findings := v_findings || 'the dead letter discarded why it died';
   end if;
@@ -6793,7 +6795,7 @@ begin
   if (v_res ->> 'outcome') <> 'QUEUED' then
     v_findings := v_findings || 'a manual release did not requeue the job';
   end if;
-  if (select attempt_count from kitluy_ops.durable_jobs where job_id = v_job) < 2 then
+  if kitluy_ops.inspect_job_attempt_count_v1(v_job) < 2 then
     v_findings := v_findings || 'a manual release silently reset the attempt count';
   end if;
 
@@ -6826,7 +6828,17 @@ begin
       cardinality(v_findings), array_to_string(v_findings, ' | ');
   end if;
 
+  execute format('revoke kitluy_test_harness from %I', current_user);
   raise notice 'PASS ws11-durable-job-behaviour: the same work deduplicates to ONE job under a unique constraint, only one worker holds a live lease, a claim counts exactly one attempt, a stale lease token can neither complete nor fail a job, a deferral preserves the claim history while discounting the retry budget and stays out of the queue until due, attempt history is monotonic and job identity and payload are immutable against a direct write, an exhausted budget dead-letters while keeping its failure evidence, a dead letter cannot requeue itself, a manual release never resets the attempt count, the operational summary does not leak across environments, and no provider key was destroyed';
+exception when others then
+  -- Return the harness borrow even on failure, without masking the original
+  -- error if the membership is already gone.
+  begin
+    execute format('revoke kitluy_test_harness from %I', current_user);
+  exception when others then
+    null;
+  end;
+  raise;
 end
 $section40b$;
 
@@ -8782,8 +8794,15 @@ begin
       exception when others then
         get stacked diagnostics v_msg = message_text;
         execute 'reset role';
-        v_findings := v_findings ||
-          format('control 10: the execute probe for %s did not complete: %s', v_role, v_msg);
+        -- `permission denied to set role` is the fail-CLOSED answer, not a
+        -- probe malfunction: with the 0135 leak closed (group 0160) no
+        -- login-capable role holds the membership, so the role cannot even be
+        -- assumed -- which is strictly stronger than failing its execute
+        -- probe. Any OTHER error means the probe itself broke.
+        if v_msg not like 'permission denied to set role%' then
+          v_findings := v_findings ||
+            format('control 10: the execute probe for %s did not complete: %s', v_role, v_msg);
+        end if;
       end;
     end if;
   end loop;
@@ -9884,8 +9903,15 @@ begin
       exception when others then
         get stacked diagnostics v_msg = message_text;
         execute 'reset role';
-        v_findings := v_findings ||
-          format('control 10: the execute probe for %s did not complete: %s', v_role, v_msg);
+        -- `permission denied to set role` is the fail-CLOSED answer, not a
+        -- probe malfunction: with the 0135 leak closed (group 0160) no
+        -- login-capable role holds the membership, so the role cannot even be
+        -- assumed -- which is strictly stronger than failing its execute
+        -- probe. Any OTHER error means the probe itself broke.
+        if v_msg not like 'permission denied to set role%' then
+          v_findings := v_findings ||
+            format('control 10: the execute probe for %s did not complete: %s', v_role, v_msg);
+        end if;
       end;
     end if;
   end loop;
@@ -10485,8 +10511,15 @@ begin
       exception when others then
         get stacked diagnostics v_msg = message_text;
         execute 'reset role';
-        v_findings := v_findings ||
-          format('control 8: the execute probe for %s did not complete: %s', v_role, v_msg);
+        -- `permission denied to set role` is the fail-CLOSED answer, not a
+        -- probe malfunction: with the 0135 leak closed (group 0160) no
+        -- login-capable role holds the membership, so the role cannot even be
+        -- assumed -- which is strictly stronger than failing its execute
+        -- probe. Any OTHER error means the probe itself broke.
+        if v_msg not like 'permission denied to set role%' then
+          v_findings := v_findings ||
+            format('control 8: the execute probe for %s did not complete: %s', v_role, v_msg);
+        end if;
       end;
     end if;
   end loop;

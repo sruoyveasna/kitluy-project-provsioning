@@ -284,23 +284,44 @@ export async function readJobAttempts(client: pg.PoolClient, jobId: string) {
  * still taken against TRUSTED time by the credential services — which is the
  * separation being demonstrated: a deferred job stays out of the queue until
  * server time reaches its boundary, and reaching it grants no business verdict.
+ *
+ * Goes through group 0160's narrow scaffold as the borrowed test harness:
+ * with the 0135 governor-membership leak closed, no test touches the job table
+ * directly.
  */
 export async function makeDueNow(client: pg.PoolClient, jobId: string): Promise<void> {
-  await client.query(
-    `update kitluy_ops.durable_jobs set next_attempt_at = now() where job_id = $1`,
-    [jobId],
-  );
+  await withTestHarness(client, async () => {
+    await client.query(`select kitluy_ops.test_make_durable_job_due_v1($1::uuid)`, [jobId]);
+  });
 }
 
 /** Forces a lease to look expired without touching business state. */
 export async function expireLease(client: pg.PoolClient, jobId: string): Promise<void> {
+  await withTestHarness(client, async () => {
+    await client.query(`select kitluy_ops.test_expire_durable_job_lease_v1($1::uuid)`, [jobId]);
+  });
+}
+
+/**
+ * Borrows the sanctioned test authority for exactly one scaffold call and
+ * hands it back even when the call fails (group 0160; KLRISK-DEVICE-011).
+ */
+async function withTestHarness<T>(client: pg.PoolClient, fn: () => Promise<T>): Promise<T> {
   await client.query(
-    `update kitluy_ops.durable_jobs
-        set leased_at = now() - interval '2 hours',
-            lease_expires_at = now() - interval '1 hour'
-      where job_id = $1`,
-    [jobId],
+    `do $b$ begin execute format('grant kitluy_test_harness to %I', current_user); end $b$;`,
   );
+  try {
+    return await fn();
+  } finally {
+    await client.query(
+      `do $h$ begin
+         if pg_has_role(current_user, 'kitluy_test_harness', 'MEMBER') then
+           execute format('revoke kitluy_test_harness from %I', current_user);
+         end if;
+       exception when others then null;
+       end $h$;`,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -361,30 +382,28 @@ export async function purgeLeftoverTestJobs(client: pg.PoolClient): Promise<void
 /**
  * Removes committed job rows created by a test.
  *
- * Runs as the table owner rather than the worker, because the worker cannot
- * delete jobs and neither can anyone else through the governed path — jobs are
- * cancelled or dead-lettered, never deleted. This is a TEST-ONLY escape and it
- * is loud about being one.
+ * Group 0160 withdrew the standing `kitluy_job_governor` membership this used
+ * to assume (KLRISK-DEVICE-011). The purge now borrows the sanctioned test
+ * harness for the duration of one call and goes through the narrow
+ * governor-owned escape, which refuses anything outside the `kitluy.test.%`
+ * namespace — the harness is handed back even when the call fails.
  */
 export async function purgeTestJobs(client: pg.PoolClient, jobIds: readonly string[]) {
   if (jobIds.length === 0) return;
   await client.query("reset role");
-  await client.query(`set local role kitluy_job_governor`);
   await client.query(
-    `alter table kitluy_ops.durable_jobs disable trigger trg_durable_jobs_no_delete`,
+    `do $b$ begin execute format('grant kitluy_test_harness to %I', current_user); end $b$;`,
   );
   try {
-    await client.query(
-      `delete from kitluy_ops.durable_job_attempts where job_id = any($1::uuid[])`,
-      [jobIds],
-    );
-    await client.query(`delete from kitluy_ops.durable_jobs where job_id = any($1::uuid[])`, [
-      jobIds,
-    ]);
+    await client.query(`select kitluy_ops.test_purge_durable_jobs_v1($1::uuid[])`, [jobIds]);
   } finally {
     await client.query(
-      `alter table kitluy_ops.durable_jobs enable trigger trg_durable_jobs_no_delete`,
+      `do $h$ begin
+         if pg_has_role(current_user, 'kitluy_test_harness', 'MEMBER') then
+           execute format('revoke kitluy_test_harness from %I', current_user);
+         end if;
+       exception when others then null;
+       end $h$;`,
     );
-    await client.query("reset role");
   }
 }
