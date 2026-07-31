@@ -16,7 +16,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "turbo run typecheck",
-    "test": "turbo run test",
+    "test": "turbo run test --concurrency=1",
     "test:contract": "turbo run test:contract",
     "test:integration": "node scripts/testing/blocked.mjs integration",
     "test:e2e": "node scripts/testing/blocked.mjs e2e",
