@@ -36,6 +36,87 @@ const NAME_PATTERN = /^\d{14}_\d{4}_[a-z0-9_]+\.sql$/;
 const GROUP_MARKER = /^--\s*kitluy:group:(\d{4})\s*$/m;
 const DESTRUCTIVE = /\b(DROP\s+TABLE|TRUNCATE|DELETE\s+FROM)\b/i;
 
+/** A schema qualification: `kitluy_something.` before an object name. */
+const SCHEMA_REFERENCE = /\b(kitluy_[a-z0-9_]+)\s*\./g;
+
+/**
+ * The body of a `COMMENT ON ... IS '...'` statement.
+ *
+ * Stripped before the schema cross-check, because a schema QUALIFICATION cannot
+ * occur inside a string literal — but PROSE can, and prose routinely names a
+ * ROLE and then ends the sentence:
+ *
+ *     comment on function ... is
+ *       '... SECURITY DEFINER owned by kitluy_activation_governor. EXECUTE only ...';
+ *
+ * `kitluy_activation_governor.` then looks exactly like a schema qualification,
+ * and four migrations (0127, 0131, 0152, 0156) were reported as referencing
+ * undeclared schemas that are in fact ROLE names in documentation.
+ *
+ * Only COMMENT bodies are stripped. Ordinary string literals are left alone so a
+ * genuine reference inside dynamic SQL — `execute 'select from kitluy_bogus.t'` —
+ * is still detected, and `SELF_TEST` below proves it on every run.
+ *
+ * `(?:[^']|'')*` consumes doubled single quotes, so an escaped apostrophe inside
+ * a comment does not terminate the match early.
+ */
+const COMMENT_BODY = /comment\s+on\s+[\s\S]*?\s+is\s+'(?:[^']|'')*'/gi;
+
+const stripCommentBodies = (sql) => sql.replace(COMMENT_BODY, " ");
+
+/**
+ * Proves the detector still detects, on every run.
+ *
+ * A narrowing fix to a security lint is worth exactly as much as the evidence
+ * that it did not also switch the lint off. There is no script test harness in
+ * this repository, so the regression test lives here and runs as part of
+ * `pnpm db:validate` rather than in a suite nobody invokes.
+ */
+const SELF_TEST = [
+  {
+    name: "direct reference",
+    sql: "select * from kitluy_nonexistent.tbl;",
+    expect: ["kitluy_nonexistent"],
+  },
+  {
+    name: "reference inside dynamic SQL",
+    sql: "execute 'select from kitluy_bogus.t';",
+    expect: ["kitluy_bogus"],
+  },
+  {
+    name: "reference with whitespace around the dot",
+    sql: "select from kitluy_spaced . t;",
+    expect: ["kitluy_spaced"],
+  },
+  {
+    name: "role named in COMMENT prose is NOT a schema reference",
+    sql: "comment on table x is 'owned by kitluy_some_role. Next sentence.';",
+    expect: [],
+  },
+  {
+    name: "real code beside a COMMENT is still scanned",
+    sql: "comment on table x is 'see kitluy_role. Next'; select from kitluy_devices.t;",
+    expect: ["kitluy_devices"],
+  },
+];
+
+function runDetectorSelfTest() {
+  for (const testCase of SELF_TEST) {
+    const found = [
+      ...new Set([...stripCommentBodies(testCase.sql).matchAll(SCHEMA_REFERENCE)].map((m) => m[1])),
+    ].sort();
+    const expected = [...testCase.expect].sort();
+    if (JSON.stringify(found) !== JSON.stringify(expected)) {
+      fail(
+        "schema-reference-detector-self-test",
+        `${testCase.name}: expected [${expected.join(", ")}], got [${found.join(", ")}]`,
+      );
+      return;
+    }
+  }
+  pass("schema-reference-detector-self-test", `${SELF_TEST.length} cases`);
+}
+
 let failures = 0;
 const pass = (name, detail) => console.log(`PASS  ${name}${detail ? ` — ${detail}` : ""}`);
 const fail = (name, detail) => {
@@ -86,6 +167,9 @@ if (existsSync(DICTIONARY)) {
 } else {
   fail("dictionary:present", `${DICTIONARY} is missing; schema cross-check impossible`);
 }
+
+// Before trusting the detector on real migrations, prove it still detects.
+runDetectorSelfTest();
 
 let previousGroup = -1;
 for (const f of files) {
@@ -156,11 +240,14 @@ for (const f of files) {
   // 6. Schema cross-check.
   if (dictionarySchemas.size > 0) {
     const referenced = new Set();
-    for (const m of code.matchAll(
+    // COMMENT bodies are prose and cannot contain a schema qualification; see
+    // `COMMENT_BODY`. Everything else, including dynamic SQL, is still scanned.
+    const scannable = stripCommentBodies(code);
+    for (const m of scannable.matchAll(
       /create\s+schema\s+(?:if\s+not\s+exists\s+)?([a-z_][a-z0-9_]*)/gi,
     ))
       referenced.add(m[1].toLowerCase());
-    for (const m of code.matchAll(/\b(kitluy_[a-z0-9_]+)\s*\./g)) referenced.add(m[1]);
+    for (const m of scannable.matchAll(SCHEMA_REFERENCE)) referenced.add(m[1]);
     const unknown = [...referenced].filter(
       (s) => s.startsWith("kitluy_") && !dictionarySchemas.has(s) && !CONTROL_PLANE_SCHEMAS.has(s),
     );
