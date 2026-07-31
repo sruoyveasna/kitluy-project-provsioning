@@ -319,6 +319,7 @@ export const HUB_MIGRATION_ORDER = [
   // of signed revocation snapshots, so a Hub can enforce revocation offline
   // (KLD-2026-07-31-HUB-SNAPSHOT-SIGNING-001).
   "0027_revocation_trust_and_snapshot.sql",
+  "0028_revocation_reader_least_privilege.sql",
 ] as const;
 
 /**

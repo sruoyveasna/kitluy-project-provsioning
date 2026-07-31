@@ -1895,11 +1895,16 @@ begin
   select count(*) into v_triggers from pg_trigger t
   join pg_class c on c.oid = t.tgrelid join pg_namespace n on n.oid = c.relnamespace
   where not t.tgisinternal and n.nspname like 'edge\_%';
-  if v_tables <> 57 then
+  -- 57 -> 60: hub group 0027 adds `revocation_trust_key`, `revocation_snapshot`
+  -- and `revocation_snapshot_entry` (WS-11-T003 Step 4,
+  -- KLD-2026-07-31-HUB-SNAPSHOT-SIGNING-001). This tally is deliberately EXACT in
+  -- both directions -- it is how an unreviewed table gets noticed -- so it is
+  -- raised by exactly the three that were added and by nothing else.
+  if v_tables <> 60 then
     raise exception
-      'ASSERT FAIL: expected 57 relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11), found %',
+      'ASSERT FAIL: expected 60 relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11 + 3 G0027 revocation), found %',
       v_tables;
   end if;
-  raise notice 'PASS tally: % relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11 WS-10 extensions), % indexes, % triggers',
+  raise notice 'PASS tally: % relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11 WS-10 + 3 G0027 revocation), % indexes, % triggers',
     v_tables, v_indexes, v_triggers;
 end $$;
