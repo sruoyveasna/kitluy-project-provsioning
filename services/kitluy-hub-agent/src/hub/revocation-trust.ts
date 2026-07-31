@@ -385,6 +385,31 @@ async function readHeldStateOn(
  * Sharing the caller's client makes the revocation answer consistent with the
  * assignment, terminal and session reads the gate performs around it.
  */
+/**
+ * Is this DEVICE RECORD revoked by the snapshot this Hub holds?
+ *
+ * `revokedDeviceRecordIds` was signed, delivered and persisted with NO reader --
+ * a signed field with no enforcement effect, which is worse than not carrying it,
+ * because the signature implies the contents matter. Group 0029 adds the reader
+ * and this is its caller.
+ *
+ * Shares the caller's client for the same reason as the certificate reader: the
+ * gate must not answer from a different snapshot of the database than the one its
+ * other checks saw.
+ */
+export async function isDeviceRevokedOfflineWithin(
+  client: HubClient,
+  hub: HubScopeIdentity,
+  deviceRecordId: string,
+): Promise<boolean> {
+  const { rows } = await client.query<{ revoked: boolean }>(
+    `select edge_config.is_device_revoked_offline_v1(
+       $1::uuid, $2::uuid, $3::uuid, $4, $5::uuid) as revoked`,
+    [hub.tenantId, hub.digitalStoreId, hub.storeLocationId, hub.environment, deviceRecordId],
+  );
+  return rows[0]?.revoked === true;
+}
+
 export async function isCertificateRevokedOfflineWithin(
   client: HubClient,
   hub: HubScopeIdentity,

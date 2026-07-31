@@ -44,15 +44,10 @@
 import { createHash } from "node:crypto";
 
 import {
-  loadRevocationsViaGovernedBridge,
-  MAX_REVOCATION_SNAPSHOT_AGE_HOURS,
-  REVOCATION_SNAPSHOT_PURPOSE,
   type RevocationSnapshot,
   type TrustEnvironment,
 } from "@kitluy/device-identity";
 
-import { REGISTRY_ROLES, withServiceRole, type ClientSource } from "./database.js";
-import { throwRedacted } from "./revocation-failures.js";
 
 /**
  * The relational scope a snapshot is bound to.
@@ -83,7 +78,6 @@ export interface ScopedRevocationSnapshot {
   readonly scopedDigest: string;
 }
 
-const MS_PER_HOUR = 3_600_000;
 
 /**
  * Canonical payload bytes.
@@ -150,78 +144,24 @@ export function scopedDigest(scope: SnapshotScope, payloadSha256: string): strin
     .digest("hex");
 }
 
-export interface BuildSnapshotOptions {
-  readonly scope: SnapshotScope;
-  /**
-   * The highest version this Store has already been issued, or null for a first
-   * snapshot. The new snapshot is `previousVersion + 1`.
-   *
-   * Supplied rather than derived because the authoritative version ledger is the
-   * publication side's, not this function's. A builder that invented its own
-   * counter could hand out a version a Hub had already accepted, and the Hub's
-   * rollback guard would then reject the NEWER snapshot.
-   */
-  readonly previousVersion: number | null;
-  /** Operator clock. Passed in so nothing here reads a host clock implicitly. */
-  readonly issuedAt: Date;
-}
-
-/**
- * Reads the authoritative revocation set and returns a scoped snapshot payload.
+/*
+ * ===========================================================================
+ * REMOVED: `buildRevocationSnapshot` and `BuildSnapshotOptions` (group 0159)
+ * ===========================================================================
+ * It took a Tenant/Store/Location scope as an ARGUMENT, read the ENVIRONMENT-WIDE
+ * revocation set through `loadRevocationsViaGovernedBridge` with no device, and
+ * stamped the caller's scope onto the digest. Delivered to that Store's Hub the
+ * scope matched and the digest recomputed, so every integrity check passed --
+ * while the payload carried OTHER tenants' revoked certificate serials.
  *
- * Runs as `kitluy_issuance_service` through the group 0155 bridges, so building a
- * snapshot needs no table privilege and no BYPASSRLS.
+ * It is NOT retained as a compatibility path. Group 0156 added correctly scoped
+ * bridges and group 0159 makes the unscoped database read REFUSE outright, so
+ * there is no configuration in which the old shape is the right answer.
+ *
+ * The replacement is `signed-snapshot-producer.ts`: it takes ONE Hub device
+ * record id and DERIVES the scope from it, so a caller cannot name a scope it is
+ * not entitled to.
  */
-export async function buildRevocationSnapshot(
-  source: ClientSource,
-  options: BuildSnapshotOptions,
-): Promise<ScopedRevocationSnapshot> {
-  const { scope, issuedAt } = options;
-  try {
-    return await withServiceRole(source, REGISTRY_ROLES.issuance, async (client) => {
-      const loaded = await loadRevocationsViaGovernedBridge(client, {
-        environment: scope.environment,
-        // WHOLE ENVIRONMENT, not one device. A Hub must be able to refuse any
-        // credential presented to it, including one belonging to a device it has
-        // never seen before, so a per-device snapshot would be a snapshot with
-        // holes in it.
-      });
-
-      const serials = [...loaded.revokedCertificateSerials].sort();
-      const devices = [...loaded.revokedDeviceRecordIds].sort();
-      const digest = payloadDigest(serials, devices);
-      const maxAgeHours = MAX_REVOCATION_SNAPSHOT_AGE_HOURS[scope.environment];
-
-      const snapshot: RevocationSnapshot = {
-        snapshotVersion: (options.previousVersion ?? 0) + 1,
-        purpose: REVOCATION_SNAPSHOT_PURPOSE,
-        environment: scope.environment,
-        issuedAt,
-        // The window the environment's own staleness policy allows. A Hub past
-        // this point keeps ENFORCING what it knows and stops treating the
-        // snapshot as current (§6.1 / §6.7).
-        validUntil: new Date(issuedAt.getTime() + maxAgeHours * MS_PER_HOUR),
-        payloadSha256: digest,
-        // Computed from the SAME bytes in the same call. They agree here by
-        // construction; a transport that mangles the payload is what makes them
-        // disagree at the Hub, which is the point of carrying both.
-        computedPayloadSha256: digest,
-        signerKeyId: UNSIGNED_SIGNER_KEY_ID,
-        signerPurpose: REVOCATION_SNAPSHOT_PURPOSE,
-        revokedCertificateSerials: serials,
-        revokedDeviceRecordIds: devices,
-        // FALSE, and deliberately so. No signer exists until Step 6, and
-        // `evaluateRevocationSnapshot` refuses an unsigned snapshot. Emitting
-        // `true` here would be the fabrication condition C4 forbids.
-        signatureValid: false,
-      };
-
-      return { snapshot, scope, scopedDigest: scopedDigest(scope, digest) };
-    });
-  } catch (error) {
-    throwRedacted(error, "build_revocation_snapshot");
-  }
-}
 
 /**
  * The signer key id an UNSIGNED snapshot carries.

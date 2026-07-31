@@ -54,9 +54,6 @@ import {
 } from "../src/database.js";
 import { RedactedRevocationError } from "../src/revocation-failures.js";
 import {
-  buildRevocationSnapshot,
-  recomputePayloadDigest,
-  verifySnapshotScope,
 } from "../src/revocation-snapshot-builder.js";
 import type { DeviceRevocationRuntime } from "../src/composition.js";
 
@@ -79,7 +76,6 @@ const RUN = randomUUID().slice(0, 8);
  * SHA-256 is deterministic. Deriving the scope from `device_assignments` makes the
  * positive case mean something, and makes the negative case a real other-Store id.
  */
-let fixtureScope: SnapshotScope;
 const ENV = { DEVICE_REGISTRY_DATABASE_URL: LOCAL_DSN, KITLUY_ENV: "local" } as const;
 
 async function reachable(): Promise<boolean> {
@@ -319,29 +315,6 @@ describe.skipIf(!live)("the online verifier denies a revoked credential", () => 
       throw error;
     }
 
-    // THE AUTHORITATIVE SCOPE, from the assignment the claim created.
-    const { rows } = await keeperClient.query<{
-      tenant_id: string;
-      digital_store_id: string;
-      store_location_id: string;
-    }>(
-      `select tenant_id::text, digital_store_id::text, store_location_id::text
-         from kitluy_devices.device_assignments
-        where device_id = $1::uuid
-        order by assignment_generation desc
-        limit 1`,
-      [fixture.deviceRecordId],
-    );
-    const assignment = rows[0];
-    if (assignment === undefined) {
-      throw new Error("the fixture device has no assignment, so it has no authoritative scope");
-    }
-    fixtureScope = {
-      tenantId: assignment.tenant_id,
-      digitalStoreId: assignment.digital_store_id,
-      storeLocationId: assignment.store_location_id,
-      environment: DEVELOPMENT,
-    };
   }, 120_000);
 
   afterAll(async () => {
@@ -582,55 +555,49 @@ describe.skipIf(!live)("the online verifier denies a revoked credential", () => 
     expect(bridged.isCertificateRevoked(fixture.serialNumber)).toBe(true);
   });
 
-  it("builds an offline snapshot POPULATED from authoritative state", async () => {
-    // RV-GW-003 was that `revokedCertificateSerials` was caller-supplied and
-    // nothing ever filled it, so an offline Hub enforced nothing while the code
-    // read as though it did. This is the producing half, against the real
-    // database: the fixture's serial was revoked by the test above, so it must
-    // appear here without anyone passing it in.
-    // The scope came from `device_assignments` in `beforeAll`, so a passing scope
-    // check means the snapshot matches the Store the DATABASE says this device
-    // belongs to — not a value this file wrote down.
-    expect(fixtureScope.digitalStoreId).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+  it("REFUSES the environment-wide revocation read that the old builder used", async () => {
+    // WS-11-T003 Step 4 §4. This test replaces one that exercised
+    // `buildRevocationSnapshot`, which has been DELETED.
+    //
+    // That builder took a Tenant/Store/Location scope as an ARGUMENT, read the
+    // ENVIRONMENT-WIDE revocation set, and stamped the caller's scope onto the
+    // digest. Delivered to that Store's Hub the scope matched and the digest
+    // recomputed, so every integrity check passed while the payload carried
+    // OTHER tenants' revoked serials.
+    //
+    // Deleting the TypeScript was not enough -- the next caller would rebuild it.
+    // Group 0159 withdraws the CAPABILITY, and this asserts that, as the real
+    // caller, not as `postgres`.
+    await expect(
+      withServiceRole(runtime.pool, REGISTRY_ROLES.issuance, (client) =>
+        client.query(
+          `select 1 from kitluy_devices.revoked_certificate_serials_v1($1::text, null) limit 1`,
+          [DEVELOPMENT],
+        ),
+      ),
+    ).rejects.toThrow(/KLUY-REVOCATION-READ-UNSCOPED/);
+
+    await expect(
+      withServiceRole(runtime.pool, REGISTRY_ROLES.issuance, (client) =>
+        client.query(
+          `select 1 from kitluy_devices.revoked_device_records_v1($1::text, null) limit 1`,
+          [DEVELOPMENT],
+        ),
+      ),
+    ).rejects.toThrow(/KLUY-REVOCATION-READ-UNSCOPED/);
+  });
+
+  it("still answers the SCOPED question the online verifier asks", async () => {
+    // The narrow, per-device mode is what group 0159 preserves: refusing it too
+    // would have broken online verification, so this proves the fix removed a
+    // MODE and not a caller.
+    const bridged = await withServiceRole(runtime.pool, REGISTRY_ROLES.issuance, (client) =>
+      loadRevocationsViaGovernedBridge(client, {
+        environment: DEVELOPMENT,
+        deviceRecordId: fixture.deviceRecordId,
+      }),
     );
-    const built = await buildRevocationSnapshot(runtime.pool, {
-      scope: fixtureScope,
-      previousVersion: null,
-      issuedAt: new Date(),
-    });
-
-    expect(built.snapshot.revokedCertificateSerials).toContain(fixture.serialNumber);
-    expect(built.snapshot.snapshotVersion).toBe(1);
-    expect(built.snapshot.environment).toBe(DEVELOPMENT);
-    expect(built.snapshot.validUntil.getTime()).toBeGreaterThan(built.snapshot.issuedAt.getTime());
-    // The digest a Hub would recompute must match what the builder declared.
-    expect(recomputePayloadDigest(built.snapshot)).toBe(built.snapshot.payloadSha256);
-    expect(built.snapshot.payloadSha256).toBe(built.snapshot.computedPayloadSha256);
-
-    // Scope binding holds for this Store and fails for another.
-    expect(verifySnapshotScope(built, fixtureScope).accepted).toBe(true);
-
-    // A REAL other Store, read from the database rather than invented, so the
-    // negative case is a scope that genuinely exists and genuinely is not this one.
-    const others = await keeperClient.query<{ id: string }>(
-      `select id::text as id from kitluy_devices.device_assignments
-        where digital_store_id <> $1::uuid limit 1`,
-      [fixtureScope.digitalStoreId],
-    );
-    const otherStore = others.rows[0]?.id;
-    expect(
-      verifySnapshotScope(built, {
-        ...fixtureScope,
-        digitalStoreId: otherStore ?? "99999999-9999-4999-8999-999999999999",
-      }).rejectionCode,
-    ).toBe("SNAPSHOT_SCOPE_MISMATCH");
-
-    // UNSIGNED, and it says so. No signer exists until Step 6, and
-    // `evaluateRevocationSnapshot` refuses this — which is the correct
-    // fail-closed behaviour, not a gap being papered over.
-    expect(built.snapshot.signatureValid).toBe(false);
-    expect(built.snapshot.signerKeyId).toContain("[REQUIRED:");
+    expect(bridged.isCertificateRevoked(fixture.serialNumber)).toBe(true);
   });
 
   it("reads revocation without holding any table privilege", async () => {

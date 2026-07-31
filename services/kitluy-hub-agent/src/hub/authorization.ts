@@ -45,7 +45,10 @@ import type { HubClient } from "./db.js";
 import { HubCommandError, type HubCommandErrorCode } from "./errors.js";
 import type { HubCommandDefinition } from "./command-registry.js";
 import { configRepo, identityRepo } from "./repositories/index.js";
-import { isCertificateRevokedOfflineWithin } from "./revocation-trust.js";
+import {
+  isCertificateRevokedOfflineWithin,
+  isDeviceRevokedOfflineWithin,
+} from "./revocation-trust.js";
 import { isUuid } from "./uuid.js";
 
 export const PERMISSION_GAP_HUB_GRANT_PROJECTION =
@@ -245,6 +248,36 @@ export async function authorizeHubCommand(
     environment: device.environment,
     hubDeviceId: assignment.hub_device_id,
   };
+  // DEVICE RECORDS, not only certificate serials.
+  //
+  // `revokedDeviceRecordIds` rides inside the signed bytes and, until Hub group
+  // 0029, NOTHING read it back -- a signed field with no enforcement effect,
+  // which is worse than not carrying it, because the signature implies the
+  // contents matter.
+  //
+  // The Hub's OWN device record is checked first and is the sound half:
+  // `hub_assignment.hub_device_id` is a cloud device record id -- the scope check
+  // above compares it to the snapshot's `hubDeviceRecordId` -- so a Hub whose
+  // device record was retired stops operating.
+  //
+  // RECORDED, NOT ASSERTED: `terminal_device.id` is a plain uuid primary key with
+  // no column stating that it mirrors the cloud device record. It very likely
+  // does, but "likely" is not evidence, so the terminal is checked as well and
+  // the residual uncertainty is written down rather than presented as proof.
+  for (const deviceRecordId of [assignment.hub_device_id, terminal.id]) {
+    if (await isDeviceRevokedOfflineWithin(client, hubScope, deviceRecordId)) {
+      deny(
+        "EDGE_DEVICE_REVOKED",
+        `device record ${deviceRecordId} is revoked by the Hub's held revocation snapshot.`,
+        {
+          terminalDeviceId: terminal.id,
+          deviceRecordId,
+          source: "OFFLINE_REVOCATION_SNAPSHOT",
+        },
+      );
+    }
+  }
+
   for (const credential of credentials) {
     const offlineRevoked = await isCertificateRevokedOfflineWithin(
       client,

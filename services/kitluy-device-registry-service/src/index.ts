@@ -116,14 +116,12 @@ export {
 
 export {
   UNSIGNED_SIGNER_KEY_ID,
-  buildRevocationSnapshot,
   canonicalPayload,
   enforcedRevocationUnion,
   payloadDigest,
   recomputePayloadDigest,
   scopedDigest,
   verifySnapshotScope,
-  type BuildSnapshotOptions,
   type EnforcedRevocations,
   type ScopedRevocationSnapshot,
   type SnapshotScope,
