@@ -136,13 +136,25 @@ describe.skipIf(!live)("governed emergency revocation under real concurrency", (
       [`concurrency-suite-${RUN}`, DECISION],
     );
     await keeperClient.query(
-      `do $g$ begin execute format('grant kitluy_test_harness to %I', current_user); end $g$;`,
+      `do $g$ begin
+             if not pg_has_role(current_user, 'kitluy_test_harness', 'MEMBER') then
+               execute format('grant kitluy_test_harness to %I', current_user);
+             end if;
+           exception when unique_violation then
+             -- Another suite granted it concurrently. Membership is what we
+             -- needed and we now have it; the race is benign.
+             null;
+           end $g$;`,
     );
     try {
       return await fn();
     } finally {
+      // Only remove OUR row. The insert is tagged with this run, so a suite
+      // finishing cannot disable the clock underneath a concurrent one.
       await keeperClient
-        .query(`delete from kitluy_ops.test_clock_policy where environment = 'test'`)
+        .query(`delete from kitluy_ops.test_clock_policy where enabled_by = $1`, [
+          `concurrency-suite-${RUN}`,
+        ])
         .catch(() => undefined);
     }
   }
@@ -226,7 +238,15 @@ describe.skipIf(!live)("governed emergency revocation under real concurrency", (
         // under test is performed by the HUMAN through the governed door, never
         // by this session.
         await blocker.client.query(
-          `do $b$ begin execute format('grant kitluy_credential_issuer to %I', current_user); end $b$;`,
+          `do $b$ begin
+             if not pg_has_role(current_user, 'kitluy_credential_issuer', 'MEMBER') then
+               execute format('grant kitluy_credential_issuer to %I', current_user);
+             end if;
+           exception when unique_violation then
+             -- Another suite granted it concurrently. Membership is what we
+             -- needed and we now have it; the race is benign.
+             null;
+           end $b$;`,
         );
         await blocker.client.query("set local role kitluy_credential_issuer");
         await blocker.client.query(
@@ -321,7 +341,15 @@ describe.skipIf(!live)("governed emergency revocation under real concurrency", (
       // transaction as scaffolding that CREATES the race; the emergency under
       // test is still executed by the human through the governed door.
       await mutator.client.query(
-        `do $b$ begin execute format('grant kitluy_credential_issuer to %I', current_user); end $b$;`,
+        `do $b$ begin
+             if not pg_has_role(current_user, 'kitluy_credential_issuer', 'MEMBER') then
+               execute format('grant kitluy_credential_issuer to %I', current_user);
+             end if;
+           exception when unique_violation then
+             -- Another suite granted it concurrently. Membership is what we
+             -- needed and we now have it; the race is benign.
+             null;
+           end $b$;`,
       );
       await mutator.client.query("set local role kitluy_credential_issuer");
       await mutator.client.query(

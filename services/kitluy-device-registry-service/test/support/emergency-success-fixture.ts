@@ -183,5 +183,25 @@ export async function disposeEmergencyActor(
   await keeper.query(`delete from kitluy_auth.admin_user_profiles where user_id = $1::uuid`, [
     actor.userId,
   ]);
-  await keeper.query(`delete from auth.users where id = $1::uuid`, [actor.userId]);
+
+  // THE USER ROW IS DELETED ONLY IF NOTHING REFERENCES IT.
+  //
+  // Consumed re-authentication evidence has a foreign key to `auth.users`, and
+  // that evidence is append-only history of a real emergency. So an actor who
+  // actually revoked something CANNOT be deleted, and attempting it unconditionally
+  // just raised a foreign-key error that an earlier version of this function
+  // swallowed — which hid the fact that the row was still there.
+  //
+  // What matters for the residue census is that nothing SPENDABLE survives: the
+  // temporary grant is gone, the profile is gone, and any still-ACTIVE evidence has
+  // been retired above. A user row with no grant, no profile and no live evidence
+  // can authorise nothing.
+  const { rows } = await keeper.query<{ n: string }>(
+    `select count(*)::text as n from kitluy_auth.reauthentication_evidence
+      where actor_user_id = $1::uuid`,
+    [actor.userId],
+  );
+  if (rows[0]?.n === "0") {
+    await keeper.query(`delete from auth.users where id = $1::uuid`, [actor.userId]);
+  }
 }
