@@ -56,6 +56,14 @@ export type SnapshotRejectionReason =
   | "SIGNATURE_INVALID"
   | "SIGNING_KEY_UNKNOWN"
   | "SIGNING_KEY_REVOKED"
+  /** No signature envelope at all, rather than a bad one. */
+  | "SIGNATURE_MISSING"
+  /**
+   * A field or identifier carries a canonical separator, so these bytes are
+   * reachable from more than one body and a signature over them binds neither.
+   * Refused BEFORE any cryptography.
+   */
+  | "SNAPSHOT_SEPARATOR_INJECTION"
   | "SCOPE_TENANT_MISMATCH"
   | "SCOPE_STORE_MISMATCH"
   | "SCOPE_LOCATION_MISMATCH"
