@@ -321,6 +321,7 @@ export const HUB_MIGRATION_ORDER = [
   "0027_revocation_trust_and_snapshot.sql",
   "0028_revocation_reader_least_privilege.sql",
   "0029_offline_device_record_enforcement.sql",
+  "0030_governed_snapshot_staging.sql",
 ] as const;
 
 /**
