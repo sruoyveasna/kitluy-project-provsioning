@@ -2,7 +2,7 @@
   "name": "@kitluy-services/kitluy-hub-agent",
   "version": "0.1.0",
   "private": true,
-  "description": "Store Hub agent — HET-managed local edge appliance and operational authority for one Store Location (Store Hub spec v1.0.0). Linux ARM64 target, local PostgreSQL, LAN API, transactional outbox, async cloud sync.",
+  "description": "Store Hub agent \u2014 HET-managed local edge appliance and operational authority for one Store Location (Store Hub spec v1.0.0). Linux ARM64 target, local PostgreSQL, LAN API, transactional outbox, async cloud sync.",
   "type": "module",
   "main": "./dist/main.js",
   "scripts": {
@@ -13,9 +13,11 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@kitluy-verticals/phase1-laundry": "workspace:*",
     "@kitluy/api-errors": "workspace:*",
     "@kitluy/approvals": "workspace:*",
     "@kitluy/audit": "workspace:*",
+    "@kitluy/device-identity": "workspace:*",
     "@kitluy/edge-contracts": "workspace:*",
     "@kitluy/event-contracts": "workspace:*",
     "@kitluy/money": "workspace:*",
@@ -26,7 +28,6 @@
     "@kitluy/shared-config": "workspace:*",
     "@kitluy/shared-types": "workspace:*",
     "@kitluy/sync-protocol": "workspace:*",
-    "@kitluy-verticals/phase1-laundry": "workspace:*",
     "pg": "catalog:"
   },
   "devDependencies": {

@@ -1108,6 +1108,9 @@ importers:
       '@kitluy/audit':
         specifier: workspace:*
         version: link:../../packages/audit
+      '@kitluy/device-identity':
+        specifier: workspace:*
+        version: link:../../packages/device-identity
       '@kitluy/edge-contracts':
         specifier: workspace:*
         version: link:../../packages/edge-contracts

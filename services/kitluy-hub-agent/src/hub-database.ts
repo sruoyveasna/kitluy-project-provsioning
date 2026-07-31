@@ -315,6 +315,10 @@ export const HUB_MIGRATION_ORDER = [
   "0024_governed_marker_and_scope_hierarchy.sql",
   "0025_grant_scope_isolation.sql",
   "0026_amendment_projection_and_transitions.sql",
+  // WS-11-T003 Step 4: trusted snapshot signing keys and durable persistence
+  // of signed revocation snapshots, so a Hub can enforce revocation offline
+  // (KLD-2026-07-31-HUB-SNAPSHOT-SIGNING-001).
+  "0027_revocation_trust_and_snapshot.sql",
 ] as const;
 
 /**
