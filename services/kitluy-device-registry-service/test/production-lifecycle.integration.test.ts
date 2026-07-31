@@ -116,12 +116,19 @@ describe.skipIf(!live)(
     let emergencyEvidenceId = "";
     let postApprovalDueAt = "";
 
-    /** Stage numbers actually reached, printed at the end. */
-    const reached: number[] = [];
-    const stage = (n: number, label: string) => {
-      reached.push(n);
-      return `${String(n).padStart(2, "0")} ${label}`;
-    };
+    /**
+     * Stage numbers that actually EXECUTED.
+     *
+     * An earlier version pushed inside `stage()`, which is called as the ARGUMENT
+     * to `it()` -- so all 28 pushes happened during COLLECTION, before any test
+     * body ran. The count then read 28 even if every stage failed, and even with
+     * the database down and the whole describe skipped. It measured that the file
+     * parsed. Independent review caught it. `passed()` is now called at the END of
+     * each body, so a stage whose assertion throws never records itself.
+     */
+    const executed = new Set<number>();
+    const stage = (n: number, label: string) => `${String(n).padStart(2, "0")} ${label}`;
+    const passed = (n: number): void => void executed.add(n);
 
     const call = (request: Partial<RouteRequest>): Promise<RouteResponse> =>
       runtime.revocationRouter.handle({
@@ -151,10 +158,21 @@ describe.skipIf(!live)(
         bystanderCredentialId = bystander.credentialId;
         bystanderSerial = bystander.serialNumber;
 
-        // TWO DISTINCT HUMANS with DIFFERENT permissions. The first responder cannot
-        // post-approve and the approver cannot revoke; neither can do the other's job.
+        // TWO DISTINCT HUMANS.
+        //
+        // The responder holds BOTH grants ON PURPOSE. Giving them only
+        // `emergency_revoke` is what made stage 20 untestable: their
+        // self-post-approval was refused for lack of permission, so deleting the
+        // four-eyes rule entirely left the stage green. Holding both means the
+        // ONLY thing that can refuse them is the self-approval rule itself.
+        //
+        // The approver still holds post-approve alone, so they can never revoke.
         firstResponder = await createEmergencyActor(keeperClient, {
           environment: DEVELOPMENT,
+          actionClasses: [
+            "fleet.device_credential.emergency_revoke",
+            EMERGENCY_POST_APPROVE_ACTION,
+          ],
           label: `lifecycle-responder-${RUN}`,
         });
         approver = await createEmergencyActor(keeperClient, {
@@ -171,7 +189,8 @@ describe.skipIf(!live)(
 
     afterAll(async () => {
       console.warn(
-        `[lifecycle ${RUN}] correlation=${CORRELATION} stages=${reached.length} reached=[${reached.join(",")}]`,
+        `[lifecycle ${RUN}] correlation=${CORRELATION} executed=${String(executed.size)}/28 ` +
+          `stages=[${[...executed].sort((a, b) => a - b).join(",")}]`,
       );
       if (firstResponder !== undefined) {
         await disposeEmergencyActor(keeperClient, firstResponder).catch(() => undefined);
@@ -196,11 +215,13 @@ describe.skipIf(!live)(
       );
       expect(rows[0]?.state, "the incumbent must be live before the incident").not.toBe("revoked");
       expect(rows[0]?.revoked_at, "a freshly issued credential must not be revoked").toBeNull();
+      passed(1);
     });
 
     it(stage(2, "an offline snapshot taken NOW does not list it"), async () => {
-      const revoked = await revokedSerialsInScope(keeperClient);
+      const revoked = await revokedSerialsFleetWide(keeperClient);
       expect(revoked).not.toContain(serialNumber);
+      passed(2);
     });
 
     it(
@@ -218,8 +239,15 @@ describe.skipIf(!live)(
         expect(await held(firstResponder.userId, "fleet.device_credential.emergency_revoke")).toBe(
           true,
         );
-        expect(await held(approver.userId, "fleet.device_credential.emergency_revoke")).toBe(false);
+        // Deliberately granted: see `beforeAll`. Four eyes must refuse the
+        // responder for WHO THEY ARE, not for what they lack.
+        expect(await held(firstResponder.userId, EMERGENCY_POST_APPROVE_ACTION)).toBe(true);
+        expect(
+          await held(approver.userId, "fleet.device_credential.emergency_revoke"),
+          "the approver must never be able to revoke",
+        ).toBe(false);
         expect(await held(approver.userId, EMERGENCY_POST_APPROVE_ACTION)).toBe(true);
+        passed(3);
       },
     );
 
@@ -246,6 +274,7 @@ describe.skipIf(!live)(
         [credentialId],
       );
       expect(rows[0]?.revoked_at, "a refused emergency must not revoke anything").toBeNull();
+      passed(4);
     });
 
     it(stage(5, "the human records REAL single-use evidence in their own session"), async () => {
@@ -259,6 +288,7 @@ describe.skipIf(!live)(
       const seconds =
         ((evidence?.expiresAt.getTime() ?? 0) - (evidence?.verifiedAt.getTime() ?? 0)) / 1000;
       expect(seconds).toBe(300);
+      passed(5);
     });
 
     it(stage(6, "the route REFUSES a body that tries to supply its own authority"), async () => {
@@ -278,6 +308,7 @@ describe.skipIf(!live)(
       expect(response.status).toBe(400);
       const evidence = await readEvidence(keeperClient, emergencyEvidenceId);
       expect(evidence?.lifecycleState, "a rejected body must not spend evidence").toBe("ACTIVE");
+      passed(6);
     });
 
     it(stage(7, "the EMERGENCY REVOCATION succeeds through the shipped route"), async () => {
@@ -297,6 +328,7 @@ describe.skipIf(!live)(
       postApprovalDueAt = String(response.body.postApprovalDueAt ?? "");
       expect(authorizationId).not.toBe("");
       expect(response.body.revokedCredentialCount).toBe(1);
+      passed(7);
     });
 
     it(stage(8, "the credential is REVOKED in the authoritative database"), async () => {
@@ -307,6 +339,7 @@ describe.skipIf(!live)(
       );
       expect(rows[0]?.revoked_at).not.toBeNull();
       expect(rows[0]?.state).toBe("revoked");
+      passed(8);
     });
 
     it(stage(9, "the evidence went ACTIVE -> CONSUMED exactly once"), async () => {
@@ -319,6 +352,7 @@ describe.skipIf(!live)(
         [emergencyEvidenceId, authorizationId],
       );
       expect(rows[0]?.n).toBe("1");
+      passed(9);
     });
 
     it(stage(10, "the BYSTANDER credential is untouched"), async () => {
@@ -327,6 +361,7 @@ describe.skipIf(!live)(
         [bystanderCredentialId],
       );
       expect(rows[0]?.revoked_at, "an emergency must not widen beyond its scope").toBeNull();
+      passed(10);
     });
 
     it(
@@ -352,6 +387,7 @@ describe.skipIf(!live)(
         expect(rows[0]?.reason).toBe("KEY_COMPROMISE");
         expect(rows[0]?.incident).toBe(`INC-${RUN}`);
         expect(Number(rows[0]?.count)).toBe(1);
+        passed(11);
       },
     );
 
@@ -363,6 +399,7 @@ describe.skipIf(!live)(
         [authorizationId],
       );
       expect(rows.map((r) => r.credential)).toEqual([credentialId]);
+      passed(12);
     });
 
     it(stage(13, "an obligation exists, PENDING, with a future deadline"), async () => {
@@ -371,6 +408,7 @@ describe.skipIf(!live)(
       expect(status?.decidedAt).toBeNull();
       expect(status?.postApprovalDueAt.getTime()).toBeGreaterThan(Date.now());
       expect(new Date(postApprovalDueAt).getTime()).toBe(status?.postApprovalDueAt.getTime());
+      passed(13);
     });
 
     it(stage(14, "the STATUS route reports the same obligation to an operator"), async () => {
@@ -381,6 +419,7 @@ describe.skipIf(!live)(
       expect(response.status).toBe(200);
       expect(response.body.postApprovalDecision).toBe("PENDING");
       expect(response.body.authorizationId).toBe(authorizationId);
+      passed(14);
     });
 
     // -------------------------------------------------------------------------
@@ -411,6 +450,7 @@ describe.skipIf(!live)(
           [`lifecycle-${RUN}`],
         );
         expect(rows[0]?.n, "a retry must not create a second authorization").toBe("1");
+        passed(15);
       },
     );
 
@@ -426,6 +466,7 @@ describe.skipIf(!live)(
       expect(rows, `roles able to UPDATE credentials directly: ${JSON.stringify(rows)}`).toEqual(
         [],
       );
+      passed(16);
     });
 
     it(
@@ -440,6 +481,7 @@ describe.skipIf(!live)(
                 r.rolname, 'kitluy_devices.device_emergency_revocation_authorizations', p.priv)`,
         );
         expect(rows, `authorization rows are mutable by: ${JSON.stringify(rows)}`).toEqual([]);
+        passed(17);
       },
     );
 
@@ -448,12 +490,27 @@ describe.skipIf(!live)(
     // -------------------------------------------------------------------------
 
     it(stage(18, "a signed snapshot produced NOW lists the revoked serial"), async () => {
+      // THE TARGET'S OWN HUB, not `limit 1` over every assignment.
+      //
+      // An earlier version took an arbitrary assigned Hub with no ORDER BY and no
+      // relationship to the revoked credential. If that Hub belonged to another
+      // scope the snapshot was simply EMPTY and every assertion still passed.
       const { rows } = await keeperClient.query<{ device_id: string }>(
-        `select device_id::text as device_id from kitluy_devices.device_assignments
-        where state in ('pending_trust','active') limit 1`,
+        `select a.device_id::text as device_id
+           from kitluy_devices.device_assignments a
+           join kitluy_devices.device_credentials c on c.device_record_id = a.device_id
+          where c.credential_id = $1::uuid and a.state in ('pending_trust','active')
+          order by a.device_id limit 1`,
+        [credentialId],
       );
       const hub = rows[0]?.device_id;
-      expect(hub, "the seed must provide at least one assigned Hub").toBeDefined();
+      // FAILS rather than skips: a stage that cannot prove its property must not
+      // report success.
+      expect(
+        hub,
+        "KLUY-LIFECYCLE-18-UNPROVABLE: the revoked credential's device has no live Hub " +
+          "assignment, so no scoped snapshot can contain it and this stage cannot pass honestly",
+      ).toBeDefined();
       if (hub === undefined) return;
 
       const pair = generateKeyPairSync("ed25519");
@@ -490,16 +547,34 @@ describe.skipIf(!live)(
       // The snapshot's scope is DERIVED from the Hub, never supplied.
       expect(snapshot.hubDeviceRecordId).toBe(hub);
       expect(snapshot.scope.environment).toBe(DEVELOPMENT);
-      // And it is not the union of every Store's revocations: the bystander was
-      // never revoked, so no scope may list it.
+      // THE POINT OF THE STAGE: the revocation reached the offline artifact.
+      //
+      // Without this, the stage asserted only that a signature verified and two
+      // echoed fields matched -- and would still pass if the producer read the
+      // ENVIRONMENT-WIDE revocation set instead of the scoped one, i.e. if the
+      // cross-tenant leak this design exists to prevent were reintroduced.
+      expect(
+        snapshot.revokedCertificateSerials,
+        "the credential revoked at stage 7 never reached the offline snapshot",
+      ).toContain(serialNumber);
+
+      // Weak on its own -- the bystander was never revoked, so no scope could
+      // list it. Kept only as a floor.
       expect(snapshot.revokedCertificateSerials).not.toContain(bystanderSerial);
+      passed(18);
     });
 
-    it(stage(19, "the authoritative scoped reader now includes the serial"), async () => {
-      const revoked = await revokedSerialsInScope(keeperClient);
-      expect(revoked).toContain(serialNumber);
-      expect(revoked).not.toContain(bystanderSerial);
-    });
+    it(
+      stage(19, "the FLEET-WIDE revocation set includes it, and still excludes the bystander"),
+      async () => {
+        // Named for what it executes. The SCOPED reader is exercised at stage 18,
+        // through the production producer; this is the environment-wide truth.
+        const revoked = await revokedSerialsFleetWide(keeperClient);
+        expect(revoked).toContain(serialNumber);
+        expect(revoked).not.toContain(bystanderSerial);
+        passed(19);
+      },
+    );
 
     // -------------------------------------------------------------------------
     // FOUR EYES
@@ -519,11 +594,21 @@ describe.skipIf(!live)(
           note: "self approval attempt",
         },
       });
-      // Refused whether the block lands on the missing permission or on four eyes;
-      // either way the SAME human cannot close their own obligation.
+      // THE REFUSAL CODE, not merely a 4xx.
+      //
+      // The responder was granted `emergency_post_approve` in `beforeAll`
+      // specifically so this stage cannot be satisfied by a missing permission.
+      // Without that, removing the self-approval check entirely left this green:
+      // the permission check refused first and the four-eyes rule -- repository
+      // hard rule 7, which cannot be relaxed -- had no test behind it.
       expect(response.status).toBeGreaterThanOrEqual(400);
+      expect(
+        JSON.stringify(response.body),
+        "the refusal must be the SELF-post-approval rule, not a missing permission",
+      ).toContain("SELF");
       const status = await runtime.service.readEmergencyStatus(authorizationId);
       expect(status?.postApprovalDecision, "self-approval must leave it PENDING").toBe("PENDING");
+      passed(20);
     });
 
     it(stage(21, "a SECOND, DISTINCT human post-approves it"), async () => {
@@ -539,6 +624,7 @@ describe.skipIf(!live)(
       expect(response.status, JSON.stringify(response.body)).toBeLessThan(400);
       expect(response.body.outcome).toBe("POST_APPROVED");
       expect(response.body.authorizationId).toBe(authorizationId);
+      passed(21);
     });
 
     it(stage(22, "the verdict is recorded against the SECOND human"), async () => {
@@ -554,6 +640,7 @@ describe.skipIf(!live)(
       expect(rows[0]?.decider).toBe(approver.userId);
       expect(rows[0]?.decider).not.toBe(firstResponder.userId);
       expect(rows[0]?.verdict).toBe("APPROVED");
+      passed(22);
     });
 
     it(stage(23, "the obligation is CLOSED and the decision is terminal"), async () => {
@@ -578,6 +665,7 @@ describe.skipIf(!live)(
         [authorizationId],
       );
       expect(rows[0]?.n, "a decided obligation must not gain a second verdict").toBe("1");
+      passed(23);
     });
 
     it(stage(24, "the LAPSE path refuses to decide an already-decided authorization"), async () => {
@@ -587,6 +675,7 @@ describe.skipIf(!live)(
       expect(result.outcome).toBe("ALREADY_DECIDED");
       const status = await runtime.service.readEmergencyStatus(authorizationId);
       expect(status?.postApprovalDecision, "the human verdict must survive").toBe("APPROVED");
+      passed(24);
     });
 
     // -------------------------------------------------------------------------
@@ -602,6 +691,7 @@ describe.skipIf(!live)(
       );
       expect(rows[0]?.revoked_at).not.toBeNull();
       expect(rows[0]?.state).toBe("revoked");
+      passed(25);
     });
 
     it(stage(26, "a REFUSED verdict could not have resurrected it either"), async () => {
@@ -614,6 +704,7 @@ describe.skipIf(!live)(
           and column_name in ('revoked_at','reinstated_at','restores_credential')`,
       );
       expect(rows[0]?.n, "a verdict must have no way to reinstate a credential").toBe("0");
+      passed(26);
     });
 
     it(stage(27, "the run left NOTHING spendable behind"), async () => {
@@ -625,9 +716,27 @@ describe.skipIf(!live)(
           and expires_at > kitluy_ops.authoritative_now_v1()`,
         [[firstResponder.userId, approver.userId]],
       );
-      // Any evidence this run recorded and did not spend is bounded by the governed
-      // 300-second window; `disposeEmergencyActor` retires whatever is still live.
-      expect(Number(rows[0]?.n)).toBeGreaterThanOrEqual(0);
+      // A REAL bound, not `>= 0`.
+      //
+      // The earlier assertion here was `toBeGreaterThanOrEqual(0)` on a `count(*)`
+      // -- true for every possible database state, under the title "the run left
+      // NOTHING spendable behind". Independent review caught it.
+      //
+      // The honest bound is the evidence this run recorded and DELIBERATELY did
+      // not spend, enumerated rather than guessed:
+      //
+      //   stage 15  responder, emergency_revoke      -- retry answered
+      //             ALREADY_AUTHORIZED, so it was never consumed
+      //   stage 20  responder, emergency_post_approve -- refused by four eyes
+      //   stage 23  approver,  emergency_post_approve -- refused ALREADY_DECIDED
+      //
+      // Three, each single-use, each bounded by the governed 300-second window,
+      // and each retired by `disposeEmergencyActor` in `afterAll`. A fourth would
+      // be residue this run cannot explain.
+      expect(
+        Number(rows[0]?.n),
+        "more live evidence survives than this run can account for",
+      ).toBeLessThanOrEqual(3);
       const audit = await keeperClient.query<{ n: string }>(
         `select count(*)::text as n from kitluy_devices.device_emergency_revocation_authorizations
         where authorization_id = $1::uuid`,
@@ -635,10 +744,15 @@ describe.skipIf(!live)(
       );
       // The HISTORY, by contrast, must still be there. Append-only means it stays.
       expect(audit.rows[0]?.n).toBe("1");
+      passed(27);
     });
 
     it(stage(28, "the whole run is traceable under ONE correlation id"), async () => {
-      expect(reached.length, "every stage above must have run").toBeGreaterThanOrEqual(27);
+      // Counts stages that EXECUTED TO COMPLETION, not stages that were declared.
+      expect(
+        [...executed].sort((a, b) => a - b),
+        "every stage before this one must have run to completion",
+      ).toEqual(Array.from({ length: 27 }, (_, i) => i + 1));
       expect(CORRELATION).toMatch(/^[0-9a-f-]{36}$/);
       expect(authorizationId).not.toBe("");
       expect(emergencyEvidenceId).not.toBe("");
@@ -646,8 +760,15 @@ describe.skipIf(!live)(
   },
 );
 
-/** The scoped reader the snapshot builder uses, asked directly. */
-async function revokedSerialsInScope(client: pg.PoolClient): Promise<string[]> {
+/**
+ * The ENVIRONMENT-WIDE revocation set. NOT a scoped read -- and named so.
+ *
+ * An earlier version of this helper was documented as "the scoped reader the
+ * snapshot builder uses, asked directly" while executing exactly this raw query,
+ * which touches no group-0156 bridge at all: dropping every scoped bridge left it
+ * passing. Stage 18 exercises the scoped path through the real producer.
+ */
+async function revokedSerialsFleetWide(client: pg.PoolClient): Promise<string[]> {
   const { rows } = await client.query<{ serial: string }>(
     `select c.serial_number as serial
        from kitluy_devices.device_credentials c
