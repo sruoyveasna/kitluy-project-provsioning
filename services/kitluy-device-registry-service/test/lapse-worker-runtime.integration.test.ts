@@ -224,12 +224,28 @@ describe.skipIf(!live)("the DEPLOYED worker lapses an unreviewed emergency", () 
     // The job's own retry clock is brought forward too. Step 4 legitimately
     // deferred it by 60 seconds, and this stands in for waiting that out -- it is
     // queue scheduling, not a business fact, and the governed door still decides
-    // the outcome entirely from `post_approval_due_at`.
-    await keeperClient.query(
-      `update kitluy_ops.durable_jobs set next_attempt_at = now() - interval '1 second'
+    // the outcome entirely from `post_approval_due_at`. The write goes through
+    // group 0160's narrow due-now scaffold as the borrowed test harness: with
+    // the 0135 governor-membership leak closed, no test may touch the job table
+    // directly.
+    const { rows: jobRows } = await keeperClient.query<{ id: string }>(
+      `select job_id::text as id from kitluy_ops.durable_jobs
         where dedupe_key like '%' || $1 || '%' and status = 'retry_scheduled'`,
       [authorizationId],
     );
+    expect(jobRows.length, "exactly one scheduled lapse job").toBe(1);
+    await keeperClient.query(
+      `do $b$ begin execute format('grant kitluy_test_harness to %I', current_user); end $b$;`,
+    );
+    try {
+      await keeperClient.query("select kitluy_ops.test_make_durable_job_due_v1($1::uuid)", [
+        jobRows[0]?.id ?? "",
+      ]);
+    } finally {
+      await keeperClient.query(
+        `do $b$ begin execute format('revoke kitluy_test_harness from %I', current_user); end $b$;`,
+      );
+    }
 
     // Group 0152's trigger refuses the opposite direction. Proved here so the
     // step above cannot be mistaken for "the test can rewrite deadlines".
