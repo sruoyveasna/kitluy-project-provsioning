@@ -32,10 +32,14 @@
  * ===========================================================================
  * Every identifier is per-fixture unique, and the emergency actor is a brand-new
  * user rather than a seeded one, so two suites running in parallel cannot spend
- * each other's grant or evidence. `dispose()` removes the grant, the profile and
- * the user; consumed evidence and the append-only authorization are left in place
- * because they are permanently non-spendable, which is what the residue census
- * requires rather than deletion.
+ * each other's grant or evidence.
+ *
+ * `disposeEmergencyActor` removes everything SPENDABLE — the temporary grant, the
+ * profile, and any still-ACTIVE evidence — and deletes the user only when nothing
+ * references it. Consumed evidence and the emergency authorization are left in
+ * place: both are append-only history of something that really happened and are
+ * permanently non-spendable. The census asks for zero SPENDABLE residue, not zero
+ * history.
  */
 import { randomUUID } from "node:crypto";
 import type pg from "pg";
