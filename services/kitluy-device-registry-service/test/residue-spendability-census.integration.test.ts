@@ -56,6 +56,7 @@ import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const LOCAL_DSN = "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
+const HUB_DSN = "postgresql://postgres:postgres@127.0.0.1:54322/kitluy_hub_local";
 
 async function reachable(): Promise<boolean> {
   const probe = new pg.Pool({ connectionString: LOCAL_DSN, max: 1, connectionTimeoutMillis: 2000 });
@@ -68,21 +69,35 @@ async function reachable(): Promise<boolean> {
     await probe.end().catch(() => undefined);
   }
 }
-const live = await reachable();
-if (!live) console.warn("SKIPPED: residue spendability census — local database unreachable");
+async function hubReachable(): Promise<boolean> {
+  const probe = new pg.Pool({ connectionString: HUB_DSN, max: 1, connectionTimeoutMillis: 2000 });
+  try {
+    await probe.query("select 1");
+    return true;
+  } catch {
+    return false;
+  } finally {
+    await probe.end().catch(() => undefined);
+  }
+}
+const live = (await reachable()) && (await hubReachable());
+if (!live) console.warn("SKIPPED: residue spendability census — a local database is unreachable");
 
 describe.skipIf(!live)("nothing left behind can authorize anything", () => {
   let pool: pg.Pool;
+  let hubPool: pg.Pool;
   const surviving: Record<string, string> = {};
   const spendable: Record<string, string> = {};
 
   beforeAll(() => {
     pool = new pg.Pool({ connectionString: LOCAL_DSN, max: 4 });
+    hubPool = new pg.Pool({ connectionString: HUB_DSN, max: 2 });
   });
   afterAll(async () => {
     console.warn(`[census surviving] ${JSON.stringify(surviving)}`);
     console.warn(`[census spendable]  ${JSON.stringify(spendable)}`);
     await pool?.end().catch(() => undefined);
+    await hubPool?.end().catch(() => undefined);
   });
 
   const count = async (label: string, sql: string, bucket: Record<string, string>) => {
@@ -163,25 +178,25 @@ describe.skipIf(!live)("nothing left behind can authorize anything", () => {
     expect(rows, `borrowed memberships were not handed back: ${JSON.stringify(rows)}`).toEqual([]);
   });
 
-  it("RECORDS the kitluy_job_governor borrow that group 0135 never returned", async () => {
-    // KLRISK-DEVICE-011, recorded rather than asserted away.
+  it("PROVES the kitluy_job_governor borrow group 0135 never returned is CLOSED", async () => {
+    // KLRISK-DEVICE-011 — REPAIRED by migration 0160 (2026-07-31).
     //
     // Group 0135 borrows `kitluy_job_governor` to set ownership and — alone among
     // the migrations that borrow — never hands it back. Every later migration
     // (0147, 0150-0153, 0155, 0157) ends with a `$hand_back$` block; 0135 predates
-    // that habit. A LOGIN-capable role is therefore left a standing member of the
-    // NOLOGIN owner of every governed durable-job function, so it can
-    // `set role kitluy_job_governor` and drive the queue directly, bypassing the
-    // EXECUTE grants meant to decide who may.
+    // that habit.
     //
     // An additive repair was written and REVERTED: `supabase/tests/assertions.sql`
-    // itself relies on that membership to exercise the governor, so revoking it
-    // makes `db:test` fail with "permission denied for table durable_jobs" after a
-    // clean reset. Fixing it needs assertions.sql to borrow the role transactionally
-    // in the same change, which is a separate, verifiable piece of work.
+    // itself relied on that membership to exercise the governor, so revoking it
+    // made `db:test` fail with "permission denied for table durable_jobs" after a
+    // clean reset. Group 0160 completed the repair the revert deferred: four
+    // narrow governor-owned inspection readers for the facts section 40b needs,
+    // two harness-only scaffold functions for its writes, harness EXECUTE on the
+    // two operator acts, and assertions.sql reworked to borrow `kitluy_test_harness`
+    // for exactly one block instead of the governor permanently.
     //
-    // This test asserts the CURRENT state so the exception cannot widen unnoticed:
-    // exactly one login-capable member, and no OTHER authority affected.
+    // This test asserts the end state so the exception cannot RETURN unnoticed:
+    // ZERO login-capable members remain.
     const { rows } = await pool.query<{ member: string }>(
       `select m.rolname as member
          from pg_auth_members am
@@ -191,9 +206,7 @@ describe.skipIf(!live)("nothing left behind can authorize anything", () => {
         order by m.rolname`,
     );
     spendable.job_governor_recorded_exception = String(rows.length);
-    expect(rows.length, "the recorded exception grew beyond the applying role").toBeLessThanOrEqual(
-      1,
-    );
+    expect(rows, `the 0135 leak is back: ${JSON.stringify(rows)}`).toEqual([]);
   });
 
   it("has ZERO active test-clock policy rows", async () => {
@@ -293,5 +306,114 @@ describe.skipIf(!live)("nothing left behind can authorize anything", () => {
       await client.query("rollback").catch(() => undefined);
       client.release();
     }
+  });
+
+  // ===========================================================================
+  // SECTION 13 — the runtime containment census. Every assertion here is true
+  // at ANY point in a parallel run: each one names a property no
+  // correctly-behaved suite may ever create, not a count that settles late.
+  // ===========================================================================
+
+  it("has ZERO runtime identities beyond the issuance path able to call the scoped-refusal bridges", async () => {
+    // Group 0159 narrowed the environment-wide read to exactly one device. The
+    // grant boundary is what keeps a future caller honest: EXECUTE belongs to
+    // `kitluy_issuance_service` alone, and the only runtime identity that
+    // reaches it is `service_role` — a member of the named service by the
+    // SANCTIONED wiring of groups 0127/0135, which is how the production
+    // composition holds the role at all. The worker and the browser-facing
+    // roles may hold nothing.
+    const { rows } = await pool.query<{ role: string; fn: string }>(
+      `select r.rolname as role, f.fn
+         from (values ('kitluy_worker_service'),('authenticated'),('anon')) as r(rolname)
+         cross join (values
+           ('kitluy_devices.revoked_certificate_serials_v1(text, uuid)'),
+           ('kitluy_devices.revoked_device_records_v1(text, uuid)')) as f(fn)
+        where has_function_privilege(r.rolname, f.fn, 'execute')`,
+    );
+    spendable.unsafe_builder_runtime_access = String(rows.length);
+    expect(
+      rows,
+      `runtime roles can reach the narrowed revocation bridges: ${JSON.stringify(rows)}`,
+    ).toEqual([]);
+    // The issuance path itself must remain intact, or snapshot production dies.
+    const { rows: issuance } = await pool.query<{ ok: boolean }>(
+      `select has_function_privilege(
+         'kitluy_issuance_service',
+         'kitluy_devices.revoked_certificate_serials_v1(text, uuid)', 'execute') as ok`,
+    );
+    expect(issuance[0]?.ok, "the issuance service lost its own bridge").toBe(true);
+  });
+
+  it("has ZERO unsigned or untrusted ACTIVE Hub snapshots", async () => {
+    // A snapshot without its detached signature, its canonical digest, or a
+    // signing key the trust registry still holds as current/next is not an
+    // integrity artifact — it is a claim. Zero may be active.
+    const { rows } = await hubPool.query<{ n: string }>(
+      `select count(*)::text as n from edge_config.revocation_snapshot s
+        where s.state = 'active'
+          and (s.signature_b64 is null or btrim(s.signature_b64) = ''
+            or s.canonical_sha256 is null or btrim(s.canonical_sha256) = ''
+            or not exists (
+              select 1 from edge_config.revocation_trust_key k
+               where k.key_id = s.signing_key_id
+                 and k.key_version = s.signing_key_version
+                 and k.state in ('current','next')))`,
+    );
+    spendable.unsigned_active_hub_snapshots = rows[0]?.n ?? "?";
+    expect(Number(rows[0]?.n)).toBe(0);
+  });
+
+  it("has ZERO structurally cross-scope ACTIVE Hub snapshots", async () => {
+    // Scope columns are NOT NULL by schema; the residual structural question is
+    // whether every entry kind is one the scope model knows. The content-level
+    // question — no identifier from another Tenant/Store/Location — is the
+    // scope-isolation suite's executable proof, not a count.
+    const { rows } = await hubPool.query<{ n: string }>(
+      `select count(*)::text as n from edge_config.revocation_snapshot_entry e
+        join edge_config.revocation_snapshot s on s.id = e.snapshot_id
+        where s.state = 'active'
+          and e.entry_kind not in ('certificate_serial','device_record')`,
+    );
+    spendable.cross_scope_active_hub_snapshots = rows[0]?.n ?? "?";
+    expect(Number(rows[0]?.n)).toBe(0);
+  });
+
+  it("has ZERO sync-worker capability to mutate an ACTIVE Hub snapshot directly", async () => {
+    // Group 0030: the sync worker stages through the governed door; it may not
+    // INSERT an active row, UPDATE one to active, or DELETE the last-known-good.
+    const { rows } = await hubPool.query<{ priv: string }>(
+      `select p.priv from (values ('INSERT'),('UPDATE'),('DELETE')) as p(priv)
+        where has_table_privilege(
+          'kitluy_sync_worker', 'edge_config.revocation_snapshot', p.priv)`,
+    );
+    spendable.sync_worker_active_snapshot_mutation = String(rows.length);
+    expect(
+      rows,
+      `kitluy_sync_worker holds direct snapshot mutation: ${JSON.stringify(rows)}`,
+    ).toEqual([]);
+    // ...and the staging door really is the only path it was given.
+    const { rows: staging } = await hubPool.query<{ ok: boolean }>(
+      `select has_function_privilege(
+         'kitluy_sync_worker', 'edge_config.stage_revocation_snapshot_v1(
+           uuid, uuid, uuid, uuid, text, uuid, integer, bigint, bigint, text,
+           timestamptz, timestamptz, char, text, integer, text)', 'execute') as ok`,
+    );
+    expect(staging[0]?.ok, "the governed staging door is not reachable by the sync worker").toBe(
+      true,
+    );
+  });
+
+  it("has ZERO durable lapse jobs abandoned without a terminal or retryable state", async () => {
+    // leased/running past lease expiry by more than an hour is ABANDONED: the
+    // worker that held it is gone and nothing reclaimed the row. Everything
+    // else is either terminal (completed/cancelled/dead_letter/manual_review)
+    // or retryable (queued/retry_scheduled, or a live lease).
+    const { rows } = await pool.query<{ n: string }>(
+      `select count(*)::text as n from kitluy_ops.durable_jobs
+        where status in ('leased','running')
+          and lease_expires_at < now() - interval '1 hour'`,
+    );
+    spendable.abandoned_durable_jobs = rows[0]?.n ?? "?";
+    expect(Number(rows[0]?.n)).toBe(0);
   });
 });
