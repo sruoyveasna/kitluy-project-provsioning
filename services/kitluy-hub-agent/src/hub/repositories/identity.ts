@@ -65,6 +65,15 @@ export async function findTerminalDevice(
 export interface DeviceCredentialRow {
   id: string;
   device_id: string;
+  /**
+   * The identifier a signed revocation snapshot names.
+   *
+   * Selected because the live device gate consults the persisted offline
+   * snapshot by serial: the replicated `status` column is only as fresh as the
+   * last successful sync, and the whole point of the snapshot is to answer
+   * "is this revoked" when that sync has not happened.
+   */
+  certificate_serial: string;
   status: string;
   expires_at: Date;
   revoked_at: Date | null;
@@ -80,7 +89,7 @@ export async function findDeviceCredentials(
   deviceId: string,
 ): Promise<readonly DeviceCredentialRow[]> {
   const result = await client.query<DeviceCredentialRow>(
-    `select id, device_id, status, expires_at, revoked_at, revocation_reason
+    `select id, device_id, certificate_serial, status, expires_at, revoked_at, revocation_reason
        from edge_identity.device_credential where device_id = $1`,
     [deviceId],
   );

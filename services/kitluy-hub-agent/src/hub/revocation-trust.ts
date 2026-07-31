@@ -370,6 +370,34 @@ async function readHeldStateOn(
  * This is what the credential verification path consults when the Hub cannot
  * reach the cloud. It reads only this Hub's own active snapshot.
  */
+/**
+ * The offline revocation answer, INSIDE a caller's transaction.
+ *
+ * ===========================================================================
+ * WHY THE LIVE GATE NEEDS THIS FORM
+ * ===========================================================================
+ * `authorizeHubCommand` already runs inside one transaction and holds a client,
+ * not a pool. Opening a SECOND connection from inside it to ask whether a
+ * credential is revoked would read a different snapshot of the database than
+ * every other check the gate makes, so a snapshot committed mid-authorization
+ * could be seen by one check and not another.
+ *
+ * Sharing the caller's client makes the revocation answer consistent with the
+ * assignment, terminal and session reads the gate performs around it.
+ */
+export async function isCertificateRevokedOfflineWithin(
+  client: HubClient,
+  hub: HubScopeIdentity,
+  serialNumber: string,
+): Promise<boolean> {
+  const { rows } = await client.query<{ revoked: boolean }>(
+    `select edge_config.is_certificate_revoked_offline_v1(
+       $1::uuid, $2::uuid, $3::uuid, $4, $5) as revoked`,
+    [hub.tenantId, hub.digitalStoreId, hub.storeLocationId, hub.environment, serialNumber],
+  );
+  return rows[0]?.revoked === true;
+}
+
 export async function isCertificateRevokedOffline(
   pool: HubPool,
   hub: HubScopeIdentity,

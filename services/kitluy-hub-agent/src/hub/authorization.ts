@@ -45,6 +45,7 @@ import type { HubClient } from "./db.js";
 import { HubCommandError, type HubCommandErrorCode } from "./errors.js";
 import type { HubCommandDefinition } from "./command-registry.js";
 import { configRepo, identityRepo } from "./repositories/index.js";
+import { isCertificateRevokedOfflineWithin } from "./revocation-trust.js";
 import { isUuid } from "./uuid.js";
 
 export const PERMISSION_GAP_HUB_GRANT_PROJECTION =
@@ -213,6 +214,56 @@ export async function authorizeHubCommand(
       terminalDeviceId: terminal.id,
       revocationReason: revoked.revocation_reason,
     });
+  }
+
+  // 2b ------------------------------------------- OFFLINE REVOCATION ENFORCEMENT
+  //
+  // THE REPLICATED `status` COLUMN IS NOT AN ANSWER WHEN THE CLOUD IS UNREACHABLE.
+  //
+  // The check above reads `edge_identity.device_credential.status`, which is only
+  // as fresh as the last successful sync. A credential revoked in the cloud while
+  // this Hub is offline still reads 'active' here, so on its own that check lets a
+  // compromised terminal keep operating for exactly as long as the outage lasts --
+  // which is the window an attacker chooses.
+  //
+  // The signed snapshot exists to answer the question without the cloud, and until
+  // this call it had no runtime consumer at all: it could be delivered, verified
+  // and persisted, and nothing ever asked it anything (WS-11-T003 Step 4 §2).
+  //
+  // NOT OPTIONAL AND NOT FALLBACK-ON-ERROR. There is no `catch` here: if the
+  // offline store cannot be read, the gate fails rather than admitting a device it
+  // could not clear. `is_certificate_revoked_offline_v1` spans
+  // `state in ('active','superseded')`, so the answer only ever GROWS -- a newer
+  // snapshot that omits a serial cannot un-revoke it, and neither can a reconnect.
+  //
+  // The serial comes from the Hub's own credential row, never from the presenter:
+  // a caller who could name the serial to check would simply name a different one.
+  const hubScope = {
+    tenantId: assignment.tenant_id,
+    digitalStoreId: assignment.digital_store_id,
+    storeLocationId: assignment.location_id,
+    environment: device.environment,
+    hubDeviceId: assignment.hub_device_id,
+  };
+  for (const credential of credentials) {
+    const offlineRevoked = await isCertificateRevokedOfflineWithin(
+      client,
+      hubScope,
+      credential.certificate_serial,
+    );
+    if (offlineRevoked) {
+      deny(
+        "EDGE_DEVICE_REVOKED",
+        `certificate ${credential.certificate_serial} is revoked by the Hub's held revocation snapshot.`,
+        {
+          terminalDeviceId: terminal.id,
+          certificateSerial: credential.certificate_serial,
+          // Named so an operator can tell this apart from the replicated-status
+          // denial above: this one fired with no cloud involved.
+          source: "OFFLINE_REVOCATION_SNAPSHOT",
+        },
+      );
+    }
   }
   if (
     terminal.assignment_generation !== assignment.assignment_generation ||

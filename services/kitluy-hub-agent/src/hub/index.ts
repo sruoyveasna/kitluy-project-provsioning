@@ -16,6 +16,10 @@ export * from "./errors.js";
 export * from "./uuid.js";
 export * from "./idempotency.js";
 export * from "./authorization.js";
+// The offline revocation evaluator. Exported because `authorization.ts` now CALLS
+// it on every device request (WS-11-T003 Step 4 §2) -- it is runtime surface, not
+// a test helper.
+export * from "./revocation-trust.js";
 export * from "./command-registry.js";
 export * from "./command-pipeline.js";
 export * from "./booking-status.js";
