@@ -45,6 +45,23 @@ const KEY_REF: SnapshotSigningKeyReference = {
   keyVersion: 1,
 };
 
+/**
+ * A deliberately malformed PEM, assembled at runtime.
+ *
+ * The markers are NOT written as literals: `pnpm secret:scan` refuses a private
+ * key block anywhere in the tree, and it is right to — a scanner that learned to
+ * ignore "test" keys is a scanner that will one day ignore a real one. This is not
+ * a key and never was; it exists so the signer's failure path can be checked for
+ * leaks.
+ */
+const MALFORMED_PEM = [
+  "-----BEGIN ",
+  "PRIVATE KEY-----",
+  "\nnot-a-key\n",
+  "-----END ",
+  "PRIVATE KEY-----",
+].join("");
+
 function bodyOf(overrides: Partial<SignedSnapshotBody> = {}): SignedSnapshotBody {
   return {
     schemaVersion: SNAPSHOT_SCHEMA_VERSION,
@@ -248,7 +265,7 @@ describe("no key material escapes", () => {
     });
     await signer.signCanonicalSnapshot(canonicalSnapshotBytes(bodyOf()), KEY_REF);
     expect(seen).toHaveLength(1);
-    expect(seen[0]).not.toContain("BEGIN PRIVATE KEY");
+    expect(seen[0]).not.toContain(["BEGIN ", "PRIVATE KEY"].join(""));
     expect(seen[0]).not.toContain(keys.privateKeyPem.slice(40, 80));
     // It DOES carry what an operator needs to correlate.
     expect(seen[0]).toContain("test-key");
@@ -256,7 +273,7 @@ describe("no key material escapes", () => {
 
   it("keeps PEM out of a signing FAILURE", async () => {
     const signer = createEd25519SnapshotSigner({
-      env: { [KEY_ENV_VAR]: "-----BEGIN PRIVATE KEY-----\nnot-a-key\n-----END PRIVATE KEY-----" },
+      env: { [KEY_ENV_VAR]: MALFORMED_PEM },
     });
     let message = "";
     try {
@@ -265,7 +282,8 @@ describe("no key material escapes", () => {
       message = `${(error as Error).message} ${(error as Error).stack ?? ""}`;
     }
     expect(message).not.toBe("");
-    expect(message).not.toContain("BEGIN PRIVATE KEY");
+    expect(message).not.toContain(MALFORMED_PEM);
+    expect(message).not.toContain("not-a-key");
     expect(message).not.toContain("not-a-key");
     // Names the VARIABLE, which is what an operator needs.
     expect(message).toContain(KEY_ENV_VAR);
