@@ -93,10 +93,85 @@ export interface SignedRevocationSnapshot extends SignedSnapshotBody {
  * `join(US)` as `join("")` and reported a collision that did not exist.
  *
  * Neither byte can occur in a uuid, a certificate serial, an ISO instant or an
- * environment name, so no field can absorb its neighbour.
+ * environment name — but that is a fact about well-formed PRODUCERS, and the
+ * wire is not a producer. See `SeparatorInjectionError`.
  */
 const US = "";
 const RS = "";
+
+/**
+ * A value that would make the canonical encoding AMBIGUOUS.
+ *
+ * ===========================================================================
+ * THE COLLISION THIS EXISTS TO PREVENT
+ * ===========================================================================
+ * Separator-delimited encoding with no escaping is injective only if no VALUE can
+ * contain a separator. An earlier version asserted that in a comment and enforced
+ * it nowhere, which was a real, exploitable defect found by review:
+ *
+ *   ["SER-A", "SER-B", "SER-C"]   and   ["SER-A<US>SER-B<US>SER-C"]
+ *
+ * encode to IDENTICAL bytes, so ONE Ed25519 signature is valid for both. No
+ * private key is needed to exploit it: anyone on the delivery path rewrites the
+ * JSON array into a single joined string, the detached signature still verifies,
+ * and the Hub stores one entry that matches no serial. Every credential that
+ * snapshot was the first to revoke is silently UN-REVOKED offline — the exact
+ * failure the signature exists to prevent.
+ *
+ * The same shape applies across FIELDS with U+001E: a watermark ending in a
+ * record separator can absorb the field after it.
+ *
+ * So the invariant is now ENFORCED rather than asserted. Signing raises, because
+ * a producer emitting a separator is a bug in this codebase and must be loud.
+ * Verification REFUSES instead of raising: the wire is hostile, and a thrown
+ * exception on a hostile input is an outage, not a rejection.
+ */
+export class SeparatorInjectionError extends Error {
+  constructor(readonly field: string) {
+    // Deliberately does not echo the offending value.
+    super(`KLUY-SNAPSHOT-SEPARATOR-INJECTION: ${field} contains a canonical separator`);
+    this.name = "SeparatorInjectionError";
+  }
+}
+
+function containsSeparator(value: string): boolean {
+  return value.includes(US) || value.includes(RS);
+}
+
+/**
+ * Every string that goes into the canonical bytes, with its field name.
+ *
+ * One list, used by BOTH the encoder and the verifier, so the two can never
+ * disagree about what is checked.
+ */
+function canonicalStrings(body: SignedSnapshotBody): readonly (readonly [string, string])[] {
+  const listed = (name: string, values: readonly string[]) =>
+    values.map((value, index) => [`${name}[${String(index)}]`, value] as const);
+  return [
+    ["scope.tenantId", body.scope.tenantId],
+    ["scope.digitalStoreId", body.scope.digitalStoreId],
+    ["scope.storeLocationId", body.scope.storeLocationId],
+    ["scope.environment", body.scope.environment],
+    ["hubDeviceRecordId", body.hubDeviceRecordId],
+    ["revocationWatermark", body.revocationWatermark],
+    ["generatedAt", body.generatedAt],
+    ["effectiveAt", body.effectiveAt],
+    ...listed("revokedCertificateSerials", body.revokedCertificateSerials),
+    ...listed("revokedDeviceRecordIds", body.revokedDeviceRecordIds),
+  ];
+}
+
+/**
+ * The first field carrying a separator, or null.
+ *
+ * Total: never throws, so the verifier can use it to REFUSE rather than raise.
+ */
+export function findSeparatorInjection(body: SignedSnapshotBody): string | null {
+  for (const [field, value] of canonicalStrings(body)) {
+    if (typeof value === "string" && containsSeparator(value)) return field;
+  }
+  return null;
+}
 
 /** Terminated, not joined: what distinguishes `[]` from `[""]`. */
 function encodeList(values: readonly string[]): string {
@@ -111,6 +186,11 @@ function encodeList(values: readonly string[]): string {
  * what makes a signature reproducible and a replay detectable.
  */
 export function canonicalSnapshotBytes(body: SignedSnapshotBody): Uint8Array {
+  // ENFORCED, not assumed. Without this the encoding is not injective and a
+  // signature does not bind the list it appears to sign.
+  const injected = findSeparatorInjection(body);
+  if (injected !== null) throw new SeparatorInjectionError(injected);
+
   const fields: readonly string[] = [
     `kitluy.revocation-snapshot.v${body.schemaVersion}`,
     body.scope.tenantId,
@@ -160,7 +240,15 @@ export type SnapshotVerificationFailure =
   | "SIGNATURE_MALFORMED"
   | "SIGNATURE_INVALID"
   | "SIGNING_KEY_UNKNOWN"
-  | "SIGNING_KEY_REVOKED";
+  | "SIGNING_KEY_REVOKED"
+  /** No signature envelope at all. A rejection, never a thrown TypeError. */
+  | "SIGNATURE_MISSING"
+  /**
+   * A field or identifier carries a canonical separator, so these bytes are
+   * reachable from more than one body and a valid signature would not bind the
+   * list it appears to sign. See `SeparatorInjectionError`.
+   */
+  | "SNAPSHOT_SEPARATOR_INJECTION";
 
 export type SnapshotVerificationResult =
   | { readonly verified: true; readonly keyId: string; readonly keyVersion: number }
@@ -192,8 +280,21 @@ export function verifySnapshotSignature(
   envelope: SnapshotSignatureEnvelope,
   trustedKeys: readonly TrustedSnapshotKey[],
 ): SnapshotVerificationResult {
+  // The wire is hostile, so every check below REFUSES rather than raises. A
+  // thrown exception on a malformed delivery is an outage, not a rejection.
+  if (envelope === null || envelope === undefined || typeof envelope !== "object") {
+    return { verified: false, failure: "SIGNATURE_MISSING" };
+  }
   if (envelope.algorithm !== SNAPSHOT_SIGNATURE_ALGORITHM) {
     return { verified: false, failure: "SIGNATURE_ALGORITHM_UNSUPPORTED" };
+  }
+
+  // BEFORE any cryptography. A body whose values contain a separator encodes to
+  // bytes that a DIFFERENT body also encodes to, so a signature over them binds
+  // neither. Refused as malformed input, not treated as a signature failure.
+  const injected = findSeparatorInjection(body);
+  if (injected !== null) {
+    return { verified: false, failure: "SNAPSHOT_SEPARATOR_INJECTION" };
   }
 
   // Matched on key id AND version: a rotation that reused an id with new material

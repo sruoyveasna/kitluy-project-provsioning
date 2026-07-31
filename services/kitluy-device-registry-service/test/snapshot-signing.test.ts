@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   canonicalSnapshotBytes,
+  SeparatorInjectionError,
   SNAPSHOT_SCHEMA_VERSION,
   SNAPSHOT_SIGNATURE_ALGORITHM,
   verifySnapshotSignature,
@@ -294,5 +295,97 @@ describe("no key material escapes", () => {
     // and nothing else — asserted structurally so a future field cannot quietly
     // become a place to pass a key.
     expect(Object.keys(KEY_REF).sort()).toEqual(["keyId", "keyVersion", "secretEnvVar"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SEPARATOR INJECTION -- the collision that made the signature non-binding
+// ---------------------------------------------------------------------------
+describe("the canonical encoding is INJECTIVE, not merely deterministic", () => {
+  // Assembled at runtime. As raw bytes these separators are INVISIBLE in a diff,
+  // which is exactly how the defect below survived review the first time.
+  const US = String.fromCharCode(0x1f);
+  const RS = String.fromCharCode(0x1e);
+
+  const scope = {
+    tenantId: "11111111-1111-1111-1111-111111111111",
+    digitalStoreId: "22222222-2222-2222-2222-222222222222",
+    storeLocationId: "33333333-3333-3333-3333-333333333333",
+    environment: "development",
+  };
+  const body = (over: Partial<SignedSnapshotBody>): SignedSnapshotBody => ({
+    schemaVersion: SNAPSHOT_SCHEMA_VERSION,
+    scope,
+    hubDeviceRecordId: "44444444-4444-4444-4444-444444444444",
+    snapshotVersion: 1,
+    sequence: 1,
+    revocationWatermark: "w",
+    generatedAt: "2026-07-31T00:00:00.000Z",
+    effectiveAt: "2026-07-31T00:00:00.000Z",
+    revokedCertificateSerials: [],
+    revokedDeviceRecordIds: [],
+    ...over,
+  });
+
+  it("REFUSES to encode a list element containing a unit separator", () => {
+    // THE ORIGINAL DEFECT, kept as an executable record.
+    //
+    // ["SER-A","SER-B","SER-C"] and the same three joined by a unit separator used
+    // to encode to IDENTICAL bytes, so ONE Ed25519 signature was valid for both.
+    // Anyone on the delivery path could join the array into a single string, keep
+    // the genuine signature, and the Hub would store one entry matching no serial
+    // at all -- silently UN-REVOKING every credential that snapshot was first to
+    // revoke. No private key required.
+    const honest = body({ revokedCertificateSerials: ["SER-A", "SER-B", "SER-C"] });
+    const merged = body({ revokedCertificateSerials: [["SER-A", "SER-B", "SER-C"].join(US)] });
+
+    expect(canonicalSnapshotBytes(honest).length).toBeGreaterThan(0);
+    expect(() => canonicalSnapshotBytes(merged)).toThrow(SeparatorInjectionError);
+  });
+
+  it("REFUSES a field containing a separator, in every position", () => {
+    expect(() => canonicalSnapshotBytes(body({ revocationWatermark: `w${RS}x` }))).toThrow(
+      SeparatorInjectionError,
+    );
+    expect(() => canonicalSnapshotBytes(body({ hubDeviceRecordId: `h${US}x` }))).toThrow(
+      SeparatorInjectionError,
+    );
+    expect(() =>
+      canonicalSnapshotBytes(body({ scope: { ...scope, environment: `dev${RS}` } })),
+    ).toThrow(SeparatorInjectionError);
+  });
+
+  it("names the offending field WITHOUT echoing its value", () => {
+    try {
+      canonicalSnapshotBytes(body({ revokedDeviceRecordIds: [`dd${US}ee`] }));
+      expect.unreachable("the encoder must refuse an ambiguous body");
+    } catch (error) {
+      expect(error).toBeInstanceOf(SeparatorInjectionError);
+      expect((error as SeparatorInjectionError).field).toBe("revokedDeviceRecordIds[0]");
+      expect((error as Error).message).not.toContain("dd");
+    }
+  });
+
+  it("VERIFICATION refuses such a body instead of throwing", () => {
+    // The producer RAISING is right -- emitting one is a bug in this codebase and
+    // must be loud. The VERIFIER must not raise: a thrown exception on a hostile
+    // delivery is an outage, not a rejection.
+    const result = verifySnapshotSignature(
+      body({ revokedCertificateSerials: [["A", "B"].join(US)] }),
+      { algorithm: SNAPSHOT_SIGNATURE_ALGORITHM, keyId: "k", keyVersion: 1, signatureB64: "AA==" },
+      [],
+    );
+    expect(result.verified).toBe(false);
+    expect(result.verified === false && result.failure).toBe("SNAPSHOT_SEPARATOR_INJECTION");
+  });
+
+  it("VERIFICATION refuses a MISSING signature envelope instead of throwing", () => {
+    const result = verifySnapshotSignature(
+      body({}),
+      undefined as unknown as Parameters<typeof verifySnapshotSignature>[1],
+      [],
+    );
+    expect(result.verified).toBe(false);
+    expect(result.verified === false && result.failure).toBe("SIGNATURE_MISSING");
   });
 });
