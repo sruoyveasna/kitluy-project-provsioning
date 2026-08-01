@@ -177,3 +177,101 @@ Re-verified after the changes: registry suite **219/219**, lifecycle
 **30/30 (executed=30/30)**, census **14/14** (including
 `abandoned_durable_jobs 0`), aggregate `pnpm verify` **12/13** (the
 pre-existing CRLF format condition only).
+
+---
+
+# FORMAL CLOSURE — WS-11-T003 (2026-08-01)
+
+This section is the formal record reconciliation and closure package for
+WS-11-T003. Historical SHAs above are preserved unchanged; this section carries
+the current authoritative closure SHA.
+
+## Closure SHAs
+
+```text
+Implementation evidence end SHA:  ff15a80
+Reviewer-note closure SHA:        b3989bf
+Formal WS-11-T003 closure SHA:    <this document's commit — see git log>
+```
+
+## Reviewer finding dispositions (every item, accounted)
+
+### R1 — Hub runtime & snapshot security: APPROVED
+
+| Finding | Disposition |
+| ------- | ----------- |
+| RV-001 (LOW) census "all zeros" wording vs bounded temporary-grants check | FIXED in `6ba2d52` — title retitled to the bounded predicate, leftover row recorded with its expiry |
+| RV-002 (NOTE) no automated cloud→hub delivery transport | RECORDED non-blocking — enforcement of held snapshots is live; transport is sync-domain future work (WS-10), not Step 4 |
+| RV-003 (NOTE) hub:db:test runs tests, not a reset | RECORDED non-blocking — accurate observation; reset evidence came from explicit `hub:db:reset` runs |
+| RV-004 (NOTE) pre-application migration corrections | RECORDED non-blocking — checksums prove corrections preceded first application; no applied history rewritten |
+
+### R2 — jobs, permissions & post-approval: APPROVED-WITH-CONDITIONS, every condition fixed and re-verified
+
+| Finding | Disposition |
+| ------- | ----------- |
+| RV-001 (LOW) temporary-grants count 1 vs "ZERO" wording | FIXED in `6ba2d52`; the specific leftover row (run d7df9017, expired 2026-08-01 00:16:52Z) is recorded in the test comment; census re-run 14/14 |
+| RV-002 (LOW) swallowed teardown (`disposeEmergencyActor` catch) | FIXED in `ff15a80` — teardown failures now log the actor label loudly; lifecycle re-run 30/30 |
+| RV-003 (LOW) db:test count 197 vs static 196 | CORRECTED in all records — canonical count is **196** (92 assertions + 104 RLS); the 197 was a grep artifact |
+| RV-004 (NOTE) `authenticated` holds EXECUTE on readers without schema USAGE | RECORDED non-blocking — unreachable in practice; a dedicated assertion role is a future hygiene candidate |
+| RV-005 (NOTE) census header stale about parallelism | FIXED in `6ba2d52` — header records the landed `fileParallelism: false` serialization |
+| RV-006 (NOTE) lapse-vs-verdict races live in the package suite | RECORDED — R2 reproduced them there (14/14); mapping noted |
+
+### R3 — lifecycle & evidence integrity: APPROVED
+
+| Finding | Disposition |
+| ------- | ----------- |
+| RV-301 (NOTE) stage 30 reason string | FIXED in `b3989bf` — asserts `SEQUENCE_NOT_NEWER` explicitly |
+| RV-302 (NOTE) stage 13 disjunctive assertion | FIXED in `b3989bf` — deterministic `SEQUENCE_NOT_NEWER` + last-known-good |
+| RV-303 (NOTE) stage 26 enumeration vs bound | FIXED in `b3989bf` — residue is exactly the two enumerated rows |
+| RV-304 (NOTE) tautological history assertion | FIXED in `b3989bf` — partition reconciliation (consumed + revoked + other = total) |
+
+No review blocker remains. All three verdicts stand: R1 APPROVED, R2
+APPROVED-WITH-CONDITIONS with every condition fixed and re-verified, R3
+APPROVED with every note closed and re-verified (registry suite 219/219 after
+the fixes).
+
+## KLRISK-DEVICE-012 — registered here and in the canonical register
+
+The migration-0137 abandoned-key destruction defect found while building
+lifecycle stage 29 is registered as **KLRISK-DEVICE-012** in
+`docs/authority/kitluy-decision-and-reconciliation-register-v1.0.0.md` (full
+record there). It is outside WS-11-T003 Step 4, does not reopen
+KLRISK-DEVICE-007, and requires a future additive migration.
+
+## Formal status
+
+```text
+WS-11-T003 Step 4:   IMPLEMENTED-IN-DEV WITH RECORDED ENVIRONMENT CONDITION
+WS-11-T003 overall:  COMPLETED-IN-DEV
+WS-11:               IN PROGRESS
+Cycle 10:            IN PROGRESS
+WS-11-T004..T008:    NOT STARTED
+Pilot readiness:     NOT PROMOTED
+Production readiness: NOT PROMOTED
+```
+
+Environment conditions (explicit; none is missing Step-4 implementation):
+
+- repository-wide CRLF format condition (808 files, `format:check` fails);
+- classified-document verification condition (`docs:verify` classification section);
+- Hub destructive restore tooling condition (pg_restore as `postgres` cannot
+  restore NOLOGIN-governor ownership; opt-in suite gated);
+- sanctioned test clock (0157) inert in production by design;
+- KLRISK-DEVICE-003 remains OPEN.
+
+Baseline skips unrelated to required WS-11-T003 behavior (explicit): the
+device-identity package's 2 skipped tests and the Hub destructive backup/restore
+opt-in's 2 skipped tests are pre-existing baseline conditions, not database-,
+worker-, offline- or lifecycle-unavailable skips. Required WS-11-T003 tests ran
+with zero skips.
+
+## Next permitted task
+
+```text
+Next permitted task identifier: WS-11-T004
+Exact title: NOT RESOLVED FROM CURRENT REGISTER — the repository's task
+registers (00_AI_HANDOFF/tasks/, docs/evidence/phase1/ws-11/) carry titles for
+T001/T002 only; T003's title lived in the swarm execution prompt. A separate
+discovery package is required before T004 is titled or started.
+T004 implementation was NOT started in this package.
+```

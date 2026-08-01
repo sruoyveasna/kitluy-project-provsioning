@@ -2321,11 +2321,22 @@ executable), the production lapse worker, offline enforcement in the live Hub
 gate, and the 30-stage production lifecycle (30/30). CLOSED by that evidence;
 the handoff of 2026-08-01 carries the full record.
 
-## New finding (recorded, out of WS-11-T003 scope)
+## KLRISK-DEVICE-012 — abandoned-key destruction can never reach `destroyed` (2026-08-01)
 
-0137's destruction eligibility admits an `abandoned` retention basis, but
-`device_generation_keys_abandon_chk` requires `abandon_reason` to be NULL for
-any state other than `abandoned` — and `confirm_key_destruction_v1` does not
-clear it. An abandoned key therefore can never reach `destroyed`; only the
-`superseded` basis completes today. Recorded 2026-08-01 while building
-lifecycle stage 29; needs an additive fix, not part of Step 4.
+KLRISK-DEVICE-012 — **OPEN** (contained; requires a future additive migration).
+
+| Field | Value |
+| ----- | ----- |
+| Title | Migration-0137 abandoned-key destruction basis is unreachable at confirm |
+| Source migration | `20260729170137_0137_device_key_destruction_workflow.sql` (eligibility + confirm) and `20260728200128_0128_renewal_key_lifecycle.sql` (`device_generation_keys_abandon_chk`) |
+| Defect | `evaluate_key_destruction_eligibility_v1` admits an `abandoned` retention basis (with `abandoned_minimum_retention_days`), but `confirm_key_destruction_v1` sets `state='destroyed'` without clearing `abandon_reason`, and `device_generation_keys_abandon_chk` requires `abandon_reason IS NULL` for every non-`abandoned` state. Since `abandon_generation_key_v1` always sets a reason, **every abandoned key fails the confirm with a check-constraint violation** — the abandoned retention basis is dead code in practice. |
+| Affected branch | abandoned-key destruction (unreachable end-to-end) |
+| Proven working branch | **superseded-key destruction** — proven end-to-end by the WS-11-T003 Step-4 production lifecycle stage 29 (four-eyes DESTROYED, reconciliation recorded, key row destroyed) and by the key-destruction suites |
+| Impact | A documented policy basis cannot execute; an operator abandoning a key for destruction will hit a constraint violation at confirm, after provider-side erasure may already have happened (ambiguous-outcome reconciliation path engaged) |
+| Current containment | None needed for integrity: the constraint fails CLOSED (the database refuses the inconsistent state); the superseded path covers every destruction the lifecycle currently needs |
+| Required future correction | One additive migration: either clear `abandon_reason` inside `confirm_key_destruction_v1` on the destroyed transition, or amend the constraint to admit `destroyed` with a non-null reason. Out of WS-11-T003 Step-4 scope; no task file exists yet — title to come from the next WS-11/fleet work package |
+| Status | OPEN |
+| Evidence | `00_AI_HANDOFF/shared/2026-08-01__SHARED__WS-11-T003-STEP4__RUNTIME-ENFORCEMENT-AND-REVIEW-REMEDIATION__AI-HANDOFF.md` (risk section + stage-29 build notes); reproduction: `confirm_key_destruction_v1` on an abandoned key raises `new row for relation "device_generation_keys" violates check constraint "device_generation_keys_abandon_chk"` |
+
+Does not reopen KLRISK-DEVICE-007 (closed 2026-08-01): the governed destruction
+operation exists and is exercised through the superseded basis.
