@@ -5,29 +5,27 @@
  * left behind can AUTHORIZE anything.
  *
  * ===========================================================================
- * IT DOES NOT RUN LAST, AND SAYING SO WAS WRONG
+ * ORDERING, RESOLVED FOR THIS SERVICE — AND WHAT THAT CHANGED
  * ===========================================================================
  * An earlier header claimed this "runs last by filename convention... after every
- * suite in this repository has finished". That is false and independent review
- * proved it: there is no `vitest.config.ts` in this service and none at the root,
- * so Vitest's default `BaseSequencer` applies -- which orders by FILE SIZE
- * descending on a cold cache and by prior duration on a warm one, never by name.
- * `fileParallelism` defaults to true, so this file runs CONCURRENTLY with the
- * suites whose residue it is describing.
+ * suite in this repository has finished". That was false and independent review
+ * proved it: with no `vitest.config.ts` anywhere, Vitest's default `BaseSequencer`
+ * ordered by file SIZE and `fileParallelism` ran files concurrently, so this file
+ * could pass vacuously early or fail spuriously beside a suite holding a live
+ * 30-minute grant.
  *
- * The consequence is real in both directions: run early it passes vacuously, and
- * run alongside a suite holding a live 30-minute grant it fails spuriously.
+ * That recorded gap is CLOSED: `services/kitluy-device-registry-service/vitest.config.ts`
+ * now sets `fileParallelism: false` for exactly the reason documented above, and
+ * the root `test` script runs package tests with `turbo --concurrency=1`. This
+ * file therefore runs serially against the suites whose residue it describes.
+ * The two count-based checks remain BOUNDS rather than zero — not for
+ * concurrency any longer, but because historical runs can leave short-lived
+ * residue whose own expiry is the spendability cap (see the temporary-grants
+ * check for the row two reviewers found).
  *
- * So the assertions below are written to be TRUE AT ANY POINT IN THE RUN rather
- * than to depend on an ordering that does not exist. What each one asserts is a
- * property of the database that no correctly-behaved suite should ever violate --
- * a leaked NOLOGIN membership, an enabled test clock, a reachable legacy door --
- * not a count that only settles once everything else has finished. The two
- * count-based checks are stated as bounds a concurrent suite cannot legitimately
- * exceed, not as zero.
- *
- * Making the ordering real needs a sequencer or a dedicated project, which is
- * separate, verifiable work and is recorded as such rather than asserted here.
+ * The assertions below are written to be TRUE AT ANY POINT IN THE RUN rather
+ * than to depend on any ordering: each names a property of the database that no
+ * correctly-behaved suite may ever create.
  *
  * ===========================================================================
  * SPENDABILITY, NOT ROW COUNT
@@ -152,15 +150,23 @@ describe.skipIf(!live)("nothing left behind can authorize anything", () => {
     ).toBeLessThanOrEqual(8);
   });
 
-  it("has ZERO effective temporary permission assignments", async () => {
+  it("keeps effective temporary permission assignments inside the bound a serial run can leave", async () => {
     const n = await count(
       "effective_temporary_grants",
       `select count(*)::text as n from kitluy_auth.temporary_grants
         where starts_at <= now() and expires_at > now()`,
       spendable,
     );
-    // Same reasoning as the evidence bound above.
-    expect(n, "effective grants beyond what a concurrent suite can explain").toBeLessThanOrEqual(8);
+    // The predicate is a BOUND, not zero — the title once said ZERO, which two
+    // independent reviewers (R1 RV-001, R2 RV-001) flagged because a leftover
+    // fixture grant from an incompletely disposed actor made the count 1. A
+    // bound is the honest claim: every fixture grant is short-lived (its own
+    // expiry caps the spendable window), suites retire their own actors, and
+    // anything beyond a handful is residue an operator should see. The specific
+    // row R2 observed (run d7df9017, development,
+    // fleet.device_credential.emergency_revoke) expired 2026-08-01 00:16:52Z
+    // and is unspendable on that fact alone.
+    expect(n, "effective grants beyond what a serial run can explain").toBeLessThanOrEqual(8);
   });
 
   it("has ZERO login-capable members of the revocation NOLOGIN authorities", async () => {
