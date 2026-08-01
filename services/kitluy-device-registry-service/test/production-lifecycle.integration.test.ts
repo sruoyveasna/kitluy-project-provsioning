@@ -868,9 +868,15 @@ describe.skipIf(!live)(
       if (!refused.applied) {
         expect(refused.reason).toBe("SCOPE_TENANT_MISMATCH");
       }
-      // The hub's own snapshot applies.
+      // The hub's own snapshot is refused ONLY because its sequence is already
+      // active (stage 11 applied it) — deterministically SEQUENCE_NOT_NEWER, not
+      // a disjunction that could hide a scope failure (R3-RV-302).
       const own = await applySignedSnapshot(hubPool, hubScope, snapshot, [trusted]);
-      expect(own.applied || (!own.applied && own.reason === "SEQUENCE_NOT_NEWER")).toBe(true);
+      expect(own.applied).toBe(false);
+      if (!own.applied) {
+        expect(own.reason).toBe("SEQUENCE_NOT_NEWER");
+      }
+      expect(own.lastKnownGoodPreserved).toBe(true);
       passed(13);
     });
 
@@ -1413,9 +1419,11 @@ describe.skipIf(!live)(
         expect((await credentialState(thread.credentialId)).state).toBe("revoked");
       }
 
-      // Residue census: the run's unspent ACTIVE evidence is bounded and
-      // enumerated (the deliberately unspent rows: B self-approval attempt, B's
-      // conflicting post-decision REFUSE evidence). Everything else was consumed.
+      // Residue census: the run's unspent ACTIVE evidence is EXACTLY the two
+      // deliberately unspent rows (R3-RV-303): B's self-approval attempt evidence
+      // (refused by the four-eyes rule, never consumed) and B's conflicting
+      // post-decision REFUSE evidence (refused ALREADY_DECIDED, never consumed).
+      // Everything else this run recorded was consumed exactly once.
       const actors = [responderB, approverB, responderC, refuserC, responderD].map((a) => a.userId);
       const { rows: liveEvidence } = await keeperClient.query<{ n: string }>(
         `select count(*)::text as n from kitluy_auth.reauthentication_evidence
@@ -1427,8 +1435,8 @@ describe.skipIf(!live)(
       );
       expect(
         Number(liveEvidence[0]?.n),
-        "more live evidence survives than this run can account for",
-      ).toBeLessThanOrEqual(3);
+        "unspent live evidence beyond the two enumerated rows",
+      ).toBe(2);
 
       // Drain THIS run's three lapse jobs to terminal. Each emergency enqueued a
       // due-now job; decided obligations claim as NO_ACTION_REQUIRED (terminal),
@@ -1754,11 +1762,16 @@ describe.skipIf(!live)(
         await restarted.end();
       }
 
-      // RECONNECTION cannot resurrect: replaying an OLDER sequence is refused,
-      // last-known-good is preserved, and the serial stays denied.
+      // RECONNECTION cannot resurrect: replaying an OLDER sequence is refused as
+      // SEQUENCE_NOT_NEWER, last-known-good is preserved, and the serial stays denied.
       const older = await produceSnapshot(1);
       const replay = await applySignedSnapshot(hubPool, hubScope, older, [trusted]);
       expect(replay.applied).toBe(false);
+      if (!replay.applied) {
+        // R3-RV-301: the REASON is the assertion — a generic non-apply could hide
+        // a scope or signature failure masquerading as sequence protection.
+        expect(replay.reason).toBe("SEQUENCE_NOT_NEWER");
+      }
       expect(replay.lastKnownGoodPreserved).toBe(true);
       const stillDenied = await decideOffline(hubPool, hubScope, revokedSpineSerial, {
         now: new Date(),

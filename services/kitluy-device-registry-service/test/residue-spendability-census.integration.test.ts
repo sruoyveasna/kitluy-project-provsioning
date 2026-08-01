@@ -125,8 +125,20 @@ describe.skipIf(!live)("nothing left behind can authorize anything", () => {
       `select count(*)::text as n from kitluy_devices.device_emergency_revocation_authorizations`,
       surviving,
     );
+    const other = await count(
+      "evidence_other_states",
+      `select count(*)::text as n from kitluy_auth.reauthentication_evidence
+        where lifecycle_state not in ('CONSUMED','REVOKED')`,
+      surviving,
+    );
     // History is expected to be non-empty; that is the point of append-only.
-    expect(Number(surviving.evidence_total)).toBeGreaterThanOrEqual(0);
+    // A tautology is not evidence (R3-RV-304): the recording must RECONCILE —
+    // every surviving row is in exactly one lifecycle state, so the partition
+    // sums to the total.
+    expect(
+      Number(surviving.evidence_consumed) + Number(surviving.evidence_revoked) + other,
+      "the evidence partition does not reconcile with the total",
+    ).toBe(Number(surviving.evidence_total));
   });
 
   it("has ZERO SPENDABLE re-authentication evidence", async () => {
@@ -414,6 +426,14 @@ describe.skipIf(!live)("nothing left behind can authorize anything", () => {
     // worker that held it is gone and nothing reclaimed the row. Everything
     // else is either terminal (completed/cancelled/dead_letter/manual_review)
     // or retryable (queued/retry_scheduled, or a live lease).
+    //
+    // One such orphan WAS found and handled (2026-08-01): job
+    // e2df9796-5f0e-4516-bc1b-5d6a5fd78c43 of the superseded kind
+    // `device.credential-emergency-lapse.v1`, claimed through the governed
+    // queue, whose governed lapse returned KLUY-EMERGENCY-NOT-FOUND — its
+    // authorization does not exist. It now sits in `manual_review` with eight
+    // attempts of evidence, which is a terminal-for-queue state a human can
+    // act on, not an abandonment.
     const { rows } = await pool.query<{ n: string }>(
       `select count(*)::text as n from kitluy_ops.durable_jobs
         where status in ('leased','running')
