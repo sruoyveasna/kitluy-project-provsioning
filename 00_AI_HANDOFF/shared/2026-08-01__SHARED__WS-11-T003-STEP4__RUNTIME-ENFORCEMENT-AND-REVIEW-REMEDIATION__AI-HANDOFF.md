@@ -151,3 +151,29 @@ Push disabled throughout; nothing pushed. No production migration applied. Commi
 ## Rollback
 
 All changes are test files, two vitest configs, one package.json concurrency flag, and three migration-file corrections to never-applied migrations. Rollback is `git revert` of the eleven commits (`2a54e1c..ff15a80`); the database has no destructive residue (a full `db:reset`/`hub:db:reset` restores any earlier chain state).
+
+---
+
+## Follow-up closure (2026-08-01, commits `b3989bf`)
+
+Every remaining reviewer note is closed:
+
+- **R3 RV-301/302** — lifecycle stages 30 and 13 now assert the refusal REASON
+  (`SEQUENCE_NOT_NEWER`) instead of a non-specific non-apply / disjunction.
+- **R3 RV-303** — stage 26's live-evidence residue is exactly the two
+  enumerated unspent rows, matching its enumeration.
+- **R3 RV-304** — the census's surviving-history check reconciles the
+  lifecycle-state partition (consumed + revoked + other = total) instead of a
+  `count >= 0` tautology.
+- **Orphan residue** — one abandoned lapse job of the superseded kind
+  `device.credential-emergency-lapse.v1` (lease expired hours earlier, 7
+  attempts, authorization nonexistent) was claimed through the governed queue
+  as `kitluy_worker_service`, evaluated by the governed lapse
+  (`KLUY-EMERGENCY-NOT-FOUND`, permanent) and moved to `manual_review` with
+  its full attempt evidence. No raw writes; every step went through the
+  governed doors.
+
+Re-verified after the changes: registry suite **219/219**, lifecycle
+**30/30 (executed=30/30)**, census **14/14** (including
+`abandoned_durable_jobs 0`), aggregate `pnpm verify` **12/13** (the
+pre-existing CRLF format condition only).
