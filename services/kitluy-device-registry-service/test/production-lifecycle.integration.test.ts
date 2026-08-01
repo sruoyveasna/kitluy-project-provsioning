@@ -639,7 +639,16 @@ describe.skipIf(!live)(
       );
       for (const actor of [responderB, approverB, responderC, refuserC, responderD]) {
         if (actor !== undefined) {
-          await disposeEmergencyActor(keeperClient, actor).catch(() => undefined);
+          // R2-RV-002: a swallowed dispose is how short-lived grants leak into
+          // the census. Failures are LOUD now — logged with the actor's label —
+          // while remaining non-fatal so teardown never masks the run's result.
+          await disposeEmergencyActor(keeperClient, actor).catch((error: unknown) => {
+            console.warn(
+              `[lifecycle ${RUN}] TEARDOWN FAILED for ${actor.label}: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+          });
         }
       }
       keeperClient?.release();
