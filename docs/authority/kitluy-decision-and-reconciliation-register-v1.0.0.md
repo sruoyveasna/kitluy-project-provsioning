@@ -2286,3 +2286,46 @@ and independent hostile review all remain absent.
 
 5. **No independent review of Phase A–D exists yet.** Phase E is the gate; nothing
    in the evidence register was promoted by this phase, deliberately.
+
+## KLRISK-DEVICE-011 — canonical closure record (2026-08-01)
+
+KLRISK-DEVICE-011 — **CLOSED**.
+
+Group 0135 borrowed `kitluy_job_governor` (NOLOGIN) and never returned it,
+leaving a login-capable role able to `set role` into the owner of every
+governed durable-job function. An earlier additive repair was REVERTED because
+`supabase/tests/assertions.sql` itself relied on the membership.
+
+Group **0160** completed the repair: four narrow governor-owned inspection
+readers (attempt/deferral counts, status, last failure code; fixed
+`search_path`, explicit return columns, no dynamic SQL, read-only), four
+harness-only test-scaffold functions (due-now, mutation-refusal probes,
+test-namespace purge, lease expiry), harness EXECUTE on the two governed
+operator acts, and the membership itself revoked. `assertions.sql` section 40b
+and `packages/device-identity/test/support/job-fixtures.ts` now borrow
+`kitluy_test_harness` for exactly one block instead of the governor
+permanently; three set-role probe loops treat `permission denied to set role`
+as the fail-closed answer it is.
+
+Executable evidence: `db:test` 196 PASS from a from-zero reset (0000→0160);
+residue census asserts `job_governor_recorded_exception 0` and
+`leaked_memberships 0`; reviewer R2 reproduced zero members (login or not) of
+the governor and governor-ownership of all eight 0160 functions.
+
+## KLRISK-DEVICE-007 — closure candidate recorded (2026-08-01)
+
+"There is no governed credential-revocation operation" is superseded by the
+WS-11-T003 Step-4 evidence: the governed bound normal path, the governed
+emergency path with four-eyes post-approval (APPROVE, REFUSE and LAPSE all
+executable), the production lapse worker, offline enforcement in the live Hub
+gate, and the 30-stage production lifecycle (30/30). CLOSED by that evidence;
+the handoff of 2026-08-01 carries the full record.
+
+## New finding (recorded, out of WS-11-T003 scope)
+
+0137's destruction eligibility admits an `abandoned` retention basis, but
+`device_generation_keys_abandon_chk` requires `abandon_reason` to be NULL for
+any state other than `abandoned` — and `confirm_key_destruction_v1` does not
+clear it. An abandoned key therefore can never reach `destroyed`; only the
+`superseded` basis completes today. Recorded 2026-08-01 while building
+lifecycle stage 29; needs an additive fix, not part of Step 4.
