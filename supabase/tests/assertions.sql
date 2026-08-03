@@ -13715,4 +13715,321 @@ begin
 end
 $section48$;
 
+-- ============================================================================
+-- SECTION 49 — terminal provisioning-code schema foundation (migration 0162).
+--
+-- WS-11-T004-P02A. The schema foundation exists with its integrity machine,
+-- its TTL and attempt caps, its one-outstanding index, its append-only events
+-- and its default-deny posture — and NO runtime role can touch any of it yet.
+-- The borrow below is the ONLY way fixtures exist, and it is returned in the
+-- same block (exception-safe), exactly like section 40b.
+-- ============================================================================
+do $section49$
+declare
+  v_tenant uuid := '00000000-0000-4000-8000-000000000011';
+  v_store uuid := '00000000-0000-4000-8000-000000000015';
+  v_location uuid := '00000000-0000-4000-8000-000000000018';
+  v_profile uuid;
+  v_hub uuid;
+  v_terminal uuid;
+  v_terminal2 uuid;
+  v_orphan uuid;
+  v_token text;
+  v_payload text;
+  v_claim uuid;
+  v_hub_assignment uuid;
+  v_terminal_assignment_id uuid;
+  v_terminal2_assignment_id uuid;
+  v_code uuid := gen_random_uuid();
+  v_digest text := repeat('e7', 32);
+  v_payload2 text := repeat('f8', 32);
+  v_owner text;
+  v_cnt integer;
+begin
+  -- Borrow the NOLOGIN owner for fixtures; returned before the block ends and
+  -- in the exception path, so a failure leaves no grant behind.
+  execute format('grant kitluy_activation_governor to %I', current_user);
+
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+
+  -- A Hub with an assignment to the fixture scope...
+  v_hub := kitluy_devices.enroll_device_v1(
+    'WS11-T004-HUB-' || gen_random_uuid(), v_profile, now() - interval '30 days',
+    repeat('c3', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'aa:cc:' || substr(md5(random()::text),1,6) || ':01'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-t4hub-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-t4hub-' || gen_random_uuid())));
+  v_token := repeat('d4', 32);
+  v_payload := repeat('e5', 32);
+  v_claim := kitluy_devices.create_device_claim_v1(
+    v_hub, v_tenant, v_store, v_location, v_token, v_payload, 900, 'OP-PROBE');
+  v_hub_assignment := kitluy_devices.redeem_device_claim_v1(v_token, v_payload, v_hub, 'HUB-AGENT');
+
+  -- ...and a terminal with its own assignment and a bound profile.
+  v_terminal := kitluy_devices.enroll_device_v1(
+    'WS11-T004-TERM-' || gen_random_uuid(), v_profile, now() - interval '30 days',
+    repeat('a9', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'bb:02:' || substr(md5(random()::text),1,6) || ':02'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-t4term-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-t4term-' || gen_random_uuid())));
+  v_token := repeat('b1', 32);
+  v_payload := repeat('c2', 32);
+  v_claim := kitluy_devices.create_device_claim_v1(
+    v_terminal, v_tenant, v_store, v_location, v_token, v_payload, 900, 'OP-PROBE');
+  perform kitluy_devices.redeem_device_claim_v1(v_token, v_payload, v_terminal, 'TERM-AGENT');
+  v_terminal_assignment_id := kitluy_devices.assign_terminal_profile_v1(
+    v_terminal, 1, 'laundry.t1.cashier', v_location, 'OP-PROBE');
+
+  -- A second terminal (for the profile-mismatch case, so the one-outstanding
+  -- index cannot fire before the trigger under test) and an orphan device
+  -- with NO assignment (for the unassigned-Hub case).
+  v_terminal2 := kitluy_devices.enroll_device_v1(
+    'WS11-T004-TERM2-' || gen_random_uuid(), v_profile, now() - interval '30 days',
+    repeat('f6', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'cc:03:' || substr(md5(random()::text),1,6) || ':03'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-t4term2-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-t4term2-' || gen_random_uuid())));
+  v_token := repeat('9d', 32);
+  v_payload := repeat('8c', 32);
+  v_claim := kitluy_devices.create_device_claim_v1(
+    v_terminal2, v_tenant, v_store, v_location, v_token, v_payload, 900, 'OP-PROBE');
+  perform kitluy_devices.redeem_device_claim_v1(v_token, v_payload, v_terminal2, 'TERM2-AGENT');
+  v_terminal2_assignment_id := kitluy_devices.assign_terminal_profile_v1(
+    v_terminal2, 1, 'laundry.t1.cashier', v_location, 'OP-PROBE');
+
+  v_orphan := kitluy_devices.enroll_device_v1(
+    'WS11-T004-ORPH-' || gen_random_uuid(), v_profile, now() - interval '30 days',
+    repeat('5e', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'dd:04:' || substr(md5(random()::text),1,6) || ':04'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-t4orph-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-t4orph-' || gen_random_uuid())));
+
+  -- -------------------------------------------------------------------------
+  -- CATALOG CONTRACT
+  -- -------------------------------------------------------------------------
+  select pg_get_userbyid(c.relowner) into v_owner
+    from pg_class c join pg_namespace n on n.oid = c.relnamespace
+   where n.nspname = 'kitluy_devices' and c.relname = 'device_provisioning_codes';
+  if v_owner is distinct from 'kitluy_activation_governor' then
+    raise exception 'ASSERT FAIL: device_provisioning_codes is owned by %, not the NOLOGIN governor', v_owner;
+  end if;
+  if exists (
+    select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = 'kitluy_devices'
+       and c.relname in ('device_provisioning_codes', 'device_provisioning_code_events')
+       and (not c.relrowsecurity or not c.relforcerowsecurity)) then
+    raise exception 'ASSERT FAIL: RLS is not ENABLE+FORCE on the provisioning-code tables';
+  end if;
+  if has_table_privilege('public', 'kitluy_devices.device_provisioning_codes', 'SELECT')
+     or has_table_privilege('anon', 'kitluy_devices.device_provisioning_codes', 'SELECT')
+     or has_table_privilege('authenticated', 'kitluy_devices.device_provisioning_codes', 'SELECT')
+     or has_table_privilege('kitluy_issuance_service', 'kitluy_devices.device_provisioning_codes', 'INSERT,UPDATE,DELETE')
+     or has_table_privilege('kitluy_worker_service', 'kitluy_devices.device_provisioning_codes', 'INSERT,UPDATE,DELETE')
+     or has_table_privilege('service_role', 'kitluy_devices.device_provisioning_codes', 'INSERT,UPDATE,DELETE')
+     or has_table_privilege('authenticated', 'kitluy_devices.device_provisioning_code_events', 'INSERT,UPDATE,DELETE') then
+    raise exception 'ASSERT FAIL: a runtime identity holds privileges on the provisioning-code tables';
+  end if;
+  -- No column can hold a raw code.
+  if exists (
+    select 1 from information_schema.columns
+     where table_schema = 'kitluy_devices' and table_name = 'device_provisioning_codes'
+       and (column_name ~ '(^|_)(code|raw|plain|secret)(_|$)' and column_name not in ('code_digest'))) then
+    raise exception 'ASSERT FAIL: a raw-code-capable column exists on device_provisioning_codes';
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- A VALID SCOPED ROW EXISTS, WITH ITS EVENT
+  -- -------------------------------------------------------------------------
+  insert into kitluy_devices.device_provisioning_codes
+    (id, tenant_id, digital_store_id, store_location_id, store_hub_device_id,
+     terminal_device_id, terminal_assignment_id, terminal_profile_key, environment,
+     code_digest, payload_sha256, expires_at, issued_by_operator_ref, correlation_id)
+  values
+    (v_code, v_tenant, v_store, v_location, v_hub, v_terminal, v_terminal_assignment_id,
+     'laundry.t1.cashier', 'development', v_digest, v_payload2,
+     now() + interval '15 minutes', 'OP-PROBE', gen_random_uuid());
+  insert into kitluy_devices.device_provisioning_code_events
+    (provisioning_code_id, tenant_id, digital_store_id, store_location_id, environment,
+     event_type, actor_type, actor_ref, correlation_id)
+  values
+    (v_code, v_tenant, v_store, v_location, 'development',
+     'CREATED', 'OPERATOR', 'OP-PROBE', gen_random_uuid());
+
+  -- -------------------------------------------------------------------------
+  -- THE REFUSAL MATRIX (every one must raise; savepoints keep the block alive)
+  -- -------------------------------------------------------------------------
+  -- TTL beyond 15 minutes.
+  begin
+    insert into kitluy_devices.device_provisioning_codes
+      (tenant_id, digital_store_id, store_location_id, store_hub_device_id,
+       terminal_device_id, terminal_assignment_id, terminal_profile_key, environment,
+       code_digest, payload_sha256, expires_at, issued_by_operator_ref, correlation_id)
+    values
+      (v_tenant, v_store, v_location, v_hub, v_terminal, v_terminal_assignment_id,
+       'laundry.t1.cashier', 'development', repeat('11', 32), repeat('22', 32),
+       now() + interval '16 minutes', 'OP-PROBE', gen_random_uuid());
+    raise exception 'ASSERT FAIL: a TTL above 15 minutes was accepted';
+  exception when check_violation then null;
+  end;
+  -- Expiry not after creation.
+  begin
+    insert into kitluy_devices.device_provisioning_codes
+      (tenant_id, digital_store_id, store_location_id, store_hub_device_id,
+       terminal_device_id, terminal_assignment_id, terminal_profile_key, environment,
+       code_digest, payload_sha256, created_at, expires_at, issued_by_operator_ref, correlation_id)
+    values
+      (v_tenant, v_store, v_location, v_hub, v_terminal, v_terminal_assignment_id,
+       'laundry.t1.cashier', 'development', repeat('33', 32), repeat('44', 32),
+       now(), now(), 'OP-PROBE', gen_random_uuid());
+    raise exception 'ASSERT FAIL: an expiry not after creation was accepted';
+  exception when check_violation then null;
+  end;
+  -- Attempt counts outside 0..5.
+  begin
+    insert into kitluy_devices.device_provisioning_codes
+      (tenant_id, digital_store_id, store_location_id, store_hub_device_id,
+       terminal_device_id, terminal_assignment_id, terminal_profile_key, environment,
+       code_digest, payload_sha256, failed_attempt_count, expires_at, issued_by_operator_ref, correlation_id)
+    values
+      (v_tenant, v_store, v_location, v_hub, v_terminal, v_terminal_assignment_id,
+       'laundry.t1.cashier', 'development', repeat('55', 32), repeat('66', 32),
+       6, now() + interval '5 minutes', 'OP-PROBE', gen_random_uuid());
+    raise exception 'ASSERT FAIL: a sixth failed attempt was accepted by the cap';
+  exception when check_violation then null;
+  end;
+  -- Inconsistent LOCKED / REDEEMED / REVOKED states.
+  begin
+    insert into kitluy_devices.device_provisioning_codes
+      (tenant_id, digital_store_id, store_location_id, store_hub_device_id,
+       terminal_device_id, terminal_assignment_id, terminal_profile_key, environment,
+       code_digest, payload_sha256, state, expires_at, issued_by_operator_ref, correlation_id)
+    values
+      (v_tenant, v_store, v_location, v_hub, v_terminal, v_terminal_assignment_id,
+       'laundry.t1.cashier', 'development', repeat('77', 32), repeat('88', 32),
+       'locked', now() + interval '5 minutes', 'OP-PROBE', gen_random_uuid());
+    raise exception 'ASSERT FAIL: a locked state without evidence was accepted';
+  exception when check_violation then null;
+  end;
+  -- Duplicate digest.
+  begin
+    insert into kitluy_devices.device_provisioning_codes
+      (tenant_id, digital_store_id, store_location_id, store_hub_device_id,
+       terminal_device_id, terminal_assignment_id, terminal_profile_key, environment,
+       code_digest, payload_sha256, expires_at, issued_by_operator_ref, correlation_id)
+    values
+      (v_tenant, v_store, v_location, v_hub, v_terminal, v_terminal_assignment_id,
+       'laundry.t1.cashier', 'development', v_digest, repeat('99', 32),
+       now() + interval '5 minutes', 'OP-PROBE', gen_random_uuid());
+    raise exception 'ASSERT FAIL: a duplicate digest was accepted';
+  exception when unique_violation then null;
+  end;
+  -- Second OUTSTANDING code for the same assignment.
+  begin
+    insert into kitluy_devices.device_provisioning_codes
+      (tenant_id, digital_store_id, store_location_id, store_hub_device_id,
+       terminal_device_id, terminal_assignment_id, terminal_profile_key, environment,
+       code_digest, payload_sha256, expires_at, issued_by_operator_ref, correlation_id)
+    values
+      (v_tenant, v_store, v_location, v_hub, v_terminal, v_terminal_assignment_id,
+       'laundry.t1.cashier', 'development', repeat('aa', 32), repeat('bb', 32),
+       now() + interval '5 minutes', 'OP-PROBE', gen_random_uuid());
+    raise exception 'ASSERT FAIL: a second outstanding code for one assignment was accepted';
+  exception when unique_violation then null;
+  end;
+  -- Scope inconsistency: the profile does not match ITS assignment's profile.
+  -- Tested against the SECOND terminal's assignment, so the one-outstanding
+  -- index cannot fire first and the refusal can only be the trigger.
+  begin
+    insert into kitluy_devices.device_provisioning_codes
+      (tenant_id, digital_store_id, store_location_id, store_hub_device_id,
+       terminal_device_id, terminal_assignment_id, terminal_profile_key, environment,
+       code_digest, payload_sha256, expires_at, issued_by_operator_ref, correlation_id)
+    values
+      (v_tenant, v_store, v_location, v_hub, v_terminal2, v_terminal2_assignment_id,
+       'laundry.t3.ready_scan', 'development', repeat('cc', 32), repeat('dd', 32),
+       now() + interval '5 minutes', 'OP-PROBE', gen_random_uuid());
+    raise exception 'ASSERT FAIL: a code naming a profile its assignment does not was accepted';
+  exception when others then
+    if sqlerrm not like 'KLUY-PROVCODE-SCOPE-INCONSISTENT%' then raise; end if;
+  end;
+  -- Scope inconsistency: a Hub with NO assignment to the code's scope.
+  begin
+    insert into kitluy_devices.device_provisioning_codes
+      (tenant_id, digital_store_id, store_location_id, store_hub_device_id,
+       terminal_device_id, terminal_assignment_id, terminal_profile_key, environment,
+       code_digest, payload_sha256, expires_at, issued_by_operator_ref, correlation_id)
+    values
+      (v_tenant, v_store, v_location, v_orphan, v_terminal2, v_terminal2_assignment_id,
+       'laundry.t1.cashier', 'development', repeat('ee', 32), repeat('ff', 32),
+       now() + interval '5 minutes', 'OP-PROBE', gen_random_uuid());
+    raise exception 'ASSERT FAIL: a code naming an unassigned Hub was accepted';
+  exception when others then
+    if sqlerrm not like 'KLUY-PROVCODE-SCOPE-INCONSISTENT%' then raise; end if;
+  end;
+  -- Scope, digest, payload and expiry are immutable.
+  begin
+    update kitluy_devices.device_provisioning_codes set tenant_id = gen_random_uuid()
+     where id = v_code;
+    raise exception 'ASSERT FAIL: a provisioning code''s scope was rewritten';
+  exception when others then
+    if sqlerrm not like 'KLUY-PROVCODE-IMMUTABLE%' then raise; end if;
+  end;
+  -- issued -> revoked closes; revoked -> issued reopens nothing.
+  update kitluy_devices.device_provisioning_codes
+     set state = 'revoked', revoked_at = now(), revocation_reason = 'operator cancelled'
+   where id = v_code;
+  begin
+    update kitluy_devices.device_provisioning_codes set state = 'issued' where id = v_code;
+    raise exception 'ASSERT FAIL: a closed provisioning code was reopened';
+  exception when others then
+    if sqlerrm not like 'KLUY-PROVCODE-CLOSED%' then raise; end if;
+  end;
+  -- Attempts are monotonic.
+  begin
+    update kitluy_devices.device_provisioning_codes set failed_attempt_count = 2 where id = v_code;
+    update kitluy_devices.device_provisioning_codes set failed_attempt_count = 1 where id = v_code;
+    raise exception 'ASSERT FAIL: the failed-attempt count moved backwards';
+  exception when others then
+    if sqlerrm not like 'KLUY-PROVCODE-ATTEMPTS-NOT-MONOTONIC%' then raise; end if;
+  end;
+  -- Events are append-only.
+  begin
+    update kitluy_devices.device_provisioning_code_events set event_type = 'REDEEMED'
+     where provisioning_code_id = v_code;
+    raise exception 'ASSERT FAIL: a provisioning-code event was updated';
+  exception when others then
+    if sqlerrm not like 'KLUY-PROVCODE-EVENT-IMMUTABLE%' then raise; end if;
+  end;
+  begin
+    delete from kitluy_devices.device_provisioning_code_events
+     where provisioning_code_id = v_code;
+    raise exception 'ASSERT FAIL: a provisioning-code event was deleted';
+  exception when others then
+    if sqlerrm not like 'KLUY-PROVCODE-EVENT-IMMUTABLE%' then raise; end if;
+  end;
+  -- The code row itself is never deletable.
+  begin
+    delete from kitluy_devices.device_provisioning_codes where id = v_code;
+    raise exception 'ASSERT FAIL: a provisioning code was deleted';
+  exception when others then
+    if sqlerrm not like 'KLUY-PROVCODE-IMMUTABLE%' then raise; end if;
+  end;
+
+  execute format('revoke kitluy_activation_governor from %I', current_user);
+  raise notice 'PASS ws11-t004-provisioning-code-schema: device_provisioning_codes exists with relational scope, hash-only storage, a 15-minute TTL cap, a 0..5 attempt cap, terminal-state consistency, one outstanding code per assignment, scope/digest/payload/expiry immutability, a one-way state machine with monotonic attempts, append-only events, RLS ENABLE+FORCE and default-deny for every runtime identity (0162; doors arrive with P02B)';
+exception when others then
+  begin
+    execute format('revoke kitluy_activation_governor from %I', current_user);
+  exception when others then
+    null;
+  end;
+  raise;
+end
+$section49$;
+
 select 'assertions complete: groups 0010-0153 structural contract holds (incl. WS-11-T003 Step 4 Phase C — RC-022 spendability census CLOSED; governed emergency 0150–0153; RevocationGateway ships in @kitluy/device-identity)' as result;

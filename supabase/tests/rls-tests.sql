@@ -2798,4 +2798,100 @@ begin
 end $$;
 rollback;
 
-select 'rls-tests complete: 14+9 baseline cases; cycle-5 WS5 7 negative + 7 positive and WS6 10 negative + 9 positive; cycle-6 WS7 13 negative + 6 positive and WS8 13 negative + 6 positive; cycle-10 WS11 T001 4 negative + 1 positive and T002 3 negative + 1 positive kitluy_devices cases executed' as result;
+-- WS11-N8: anonymous access to provisioning codes and their events is denied
+-- with no leakage (0162).
+begin;
+select set_config('request.jwt.claims', '{"role":"anon"}', true);
+set local role anon;
+do $$
+declare
+  v_denied int := 0;
+  v_probe int;
+begin
+  begin
+    select count(*) into v_probe from kitluy_devices.device_provisioning_codes;
+    if v_probe > 0 then
+      raise exception 'FAIL WS11-N8: anon read % provisioning-code rows', v_probe;
+    end if;
+    v_denied := v_denied + 1; -- zero rows is also fail-closed
+  exception when insufficient_privilege then
+    v_denied := v_denied + 1;
+  end;
+  begin
+    select count(*) into v_probe from kitluy_devices.device_provisioning_code_events;
+    if v_probe > 0 then
+      raise exception 'FAIL WS11-N8: anon read % provisioning-code event rows', v_probe;
+    end if;
+    v_denied := v_denied + 1;
+  exception when insufficient_privilege then
+    v_denied := v_denied + 1;
+  end;
+  if v_denied <> 2 then
+    raise exception 'FAIL WS11-N8: expected 2 denied anon probes, got %', v_denied;
+  end if;
+  raise notice 'PASS WS11-N8: anonymous reads of provisioning codes and events are denied';
+end $$;
+rollback;
+
+-- WS11-N9: an authenticated tenant user cannot read or mutate provisioning
+-- codes or their events (0162).
+begin;
+select set_config('request.jwt.claims', '{"role":"authenticated"}', true);
+set local role authenticated;
+do $$
+declare
+  v_denied int := 0;
+  v_probe int;
+begin
+  begin
+    select count(*) into v_probe from kitluy_devices.device_provisioning_codes;
+    if v_probe > 0 then
+      raise exception 'FAIL WS11-N9: authenticated read % provisioning-code rows', v_probe;
+    end if;
+    v_denied := v_denied + 1;
+  exception when insufficient_privilege then
+    v_denied := v_denied + 1;
+  end;
+  begin
+    insert into kitluy_devices.device_provisioning_codes
+      (tenant_id, digital_store_id, store_location_id, store_hub_device_id,
+       terminal_device_id, terminal_assignment_id, terminal_profile_key, environment,
+       code_digest, payload_sha256, expires_at, issued_by_operator_ref, correlation_id)
+    values
+      (gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), gen_random_uuid(),
+       gen_random_uuid(), gen_random_uuid(), 'laundry.t1.cashier', 'development',
+       repeat('01', 32), repeat('02', 32), now() + interval '5 minutes',
+       'OP-PROBE', gen_random_uuid());
+    raise exception 'FAIL WS11-N9: authenticated inserted a provisioning code';
+  exception
+    when insufficient_privilege then v_denied := v_denied + 1;
+    when foreign_key_violation then
+      raise exception 'FAIL WS11-N9: an FK, not the privilege boundary, stopped the insert';
+  end;
+  if v_denied <> 2 then
+    raise exception 'FAIL WS11-N9: expected 2 denied authenticated probes, got %', v_denied;
+  end if;
+  raise notice 'PASS WS11-N9: authenticated users cannot read or mutate provisioning codes';
+end $$;
+rollback;
+
+-- WS11-N10: runtime service identities cannot mutate provisioning codes
+-- directly (0162). The governed doors P02B adds will be the only path.
+begin;
+do $$
+begin
+  if has_table_privilege('kitluy_issuance_service',
+       'kitluy_devices.device_provisioning_codes', 'INSERT,UPDATE,DELETE')
+     or has_table_privilege('kitluy_worker_service',
+       'kitluy_devices.device_provisioning_codes', 'INSERT,UPDATE,DELETE')
+     or has_table_privilege('service_role',
+       'kitluy_devices.device_provisioning_codes', 'INSERT,UPDATE,DELETE')
+     or has_table_privilege('kitluy_worker_service',
+       'kitluy_devices.device_provisioning_code_events', 'INSERT,UPDATE,DELETE') then
+    raise exception 'FAIL WS11-N10: a runtime identity can mutate provisioning-code tables';
+  end if;
+  raise notice 'PASS WS11-N10: no runtime service identity holds direct mutation on provisioning-code tables';
+end $$;
+rollback;
+
+select 'rls-tests complete: 14+9 baseline cases; cycle-5 WS5 7 negative + 7 positive and WS6 10 negative + 9 positive; cycle-6 WS7 13 negative + 6 positive and WS8 13 negative + 6 positive; cycle-10 WS11 T001 4 negative + 1 positive and T002 3 negative + 1 positive kitluy_devices cases executed; WS-11-T004-P02A 3 negative provisioning-code cases executed' as result;
