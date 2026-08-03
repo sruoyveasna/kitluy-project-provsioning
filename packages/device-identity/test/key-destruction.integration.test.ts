@@ -749,6 +749,175 @@ describe.skipIf(!reachable)("live governed provider-key destruction", () => {
     });
   }, 180_000);
 
+  it("destroys an ABANDONED key end-to-end, preserving the abandonment reason (KLRISK-DEVICE-012)", async () => {
+    await withDatabaseTransaction(async (client) => {
+      // A replacement key in `generated` state — the ONLY legal abandoned
+      // source (0128 transition table: generated -> abandoned): minted for a
+      // renewal, never activated, exactly the losing-renewal cleanup the
+      // abandoned basis exists for.
+      const fixture = await createIncumbentFixture(client, {
+        issuedAtTrustedTime: new Date(Date.now() - 21 * MS_PER_DAY),
+        label: "KDABD",
+      });
+      await enableDevelopmentRotation(client);
+      const log: CallLog = [];
+      const gateway = pgKeyDestructionGateway(client, log);
+
+      const reservation = await pgReservationGateway(client).reserveRenewal({
+        deviceRecordId: fixture.deviceRecordId,
+        environment: DEVELOPMENT,
+        purpose: DEVICE_IDENTITY,
+        idempotencyKey: `kd-abd-res-${randomUUID()}`,
+        trustedTime: new Date(),
+        trustedTimeStatus: "trusted",
+        renewalMode: "rotate_key",
+        actorRef: "KEY-DESTRUCTION-TEST",
+      });
+      expect(reservation.outcome).toBe("RESERVED");
+
+      const provider = new DevelopmentReplacementKeyProvider();
+      const descriptor = await provider.generateReplacementKey({
+        deviceRecordId: fixture.deviceRecordId,
+        environment: DEVELOPMENT,
+        purpose: DEVICE_IDENTITY,
+        renewalAttemptId: reservation.renewalAttemptId,
+        keyGeneration: 2,
+      });
+      await pgRotationGateway(client).registerReplacementKey({
+        renewalAttemptId: reservation.renewalAttemptId,
+        providerKeyReference: descriptor.providerKeyReference,
+        publicKeyPem: descriptor.publicKeyPem,
+        publicKeyFingerprint: descriptor.publicKeyFingerprint,
+        keyGeneration: 2,
+      });
+      const abandonedWorld: DestroyableKey = {
+        deviceRecordId: fixture.deviceRecordId,
+        providerKeyReference: descriptor.providerKeyReference,
+        publicKeyFingerprint: descriptor.publicKeyFingerprint,
+        keyGeneration: 2,
+        provider,
+        // Past every floor: 7 days abandoned + 14 days recovery.
+        trustedNow: new Date(Date.now() + 365 * MS_PER_DAY).toISOString(),
+      };
+
+      const { rows: minted } = await client.query<{ state: string; generation: number }>(
+        `select state::text as state, generation from kitluy_devices.device_generation_keys
+          where device_record_id = $1 and key_handle = $2`,
+        [fixture.deviceRecordId, descriptor.providerKeyReference],
+      );
+      expect(minted[0]?.state).toBe("generated");
+
+      // Abandon through the governed function — legal from `generated`.
+      await withRole(client, TEST_ROLES.issuanceService, async () => {
+        const { rows } = await client.query<{ result: Record<string, unknown> }>(
+          `select kitluy_devices.abandon_generation_key_v1(
+             $1::uuid, $2, $3, $4::integer, $5) as result`,
+          [
+            fixture.deviceRecordId,
+            DEVELOPMENT,
+            DEVICE_IDENTITY,
+            Number(minted[0]?.generation ?? 2),
+            "the renewal this key was minted for is not proceeding; destroy it after the floor",
+          ],
+        );
+        expect(String(rows[0]?.result["outcome"] ?? ""), JSON.stringify(rows[0]?.result)).toBe(
+          "ABANDONED",
+        );
+      });
+      const { rows: preCheck } = await client.query<{
+        state: string;
+        reason: string | null;
+        abandonedAt: Date | null;
+      }>(
+        `select state::text as state, abandon_reason as reason, abandoned_at as "abandonedAt"
+           from kitluy_devices.device_generation_keys
+          where device_record_id = $1 and key_handle = $2`,
+        [fixture.deviceRecordId, descriptor.providerKeyReference],
+      );
+      expect(preCheck[0]?.state).toBe("abandoned");
+      expect(preCheck[0]?.reason).not.toBeNull();
+      expect(preCheck[0]?.abandonedAt).not.toBeNull();
+
+      // 0161's second half: the dead attempt closed atomically with the key.
+      const { rows: resAfter } = await client.query<{ status: string }>(
+        `select status::text as status from kitluy_devices.device_renewal_reservations
+          where renewal_attempt_id = $1`,
+        [reservation.renewalAttemptId],
+      );
+      expect(
+        resAfter[0]?.status,
+        "the losing reservation must close with its key, or eligibility stays blocked on UNFINISHED_RENEWAL",
+      ).toBe("abandoned");
+
+      // The recovery floor needs a verified terminal recovery for the device:
+      // one real reconciliation record through the governed function.
+      await withRole(client, TEST_ROLES.issuanceService, async () => {
+        await client.query(
+          `select kitluy_devices.record_renewal_reconciliation_v1(
+             $1::uuid,'CONSISTENT','CONSISTENT','CONSISTENT','NONE','NONE','NONE',null,
+             'KEY-DESTRUCTION-TEST')`,
+          [reservation.renewalAttemptId],
+        );
+      });
+
+      // Eligibility on the abandoned basis: 7 days past abandoned_at plus the
+      // 14-day recovery floor, both cleared by the +365d trusted instant.
+      const { rows: eligibility } = await client.query<{
+        result: { eligible: boolean; blockers: string[]; retention_basis: string };
+      }>(
+        `select kitluy_devices.evaluate_key_destruction_eligibility_v1(
+           $1::uuid, $2, $3, $4::timestamptz, $5) as result`,
+        [
+          fixture.deviceRecordId,
+          DEVELOPMENT,
+          descriptor.providerKeyReference,
+          new Date(Date.now() + 365 * MS_PER_DAY),
+          "trusted",
+        ],
+      );
+      expect(
+        eligibility[0]?.result.retention_basis,
+        JSON.stringify(eligibility[0]?.result),
+      ).toBe("abandoned");
+      expect(eligibility[0]?.result.eligible, JSON.stringify(eligibility[0]?.result)).toBe(true);
+
+      const requestId = await requestAndApprove(gateway, abandonedWorld, {
+        requestKey: `kd-abd-${randomUUID()}`,
+        requestedBy: "operator:alice",
+        approvedBy: "operator:bob",
+      });
+      const outcome = await executeProviderKeyDestruction(
+        gateway,
+        recordingProvider(provider, log),
+        executionInput(abandonedWorld, requestId),
+      );
+
+      // THE POINT OF 0161: the confirm completes instead of violating the
+      // abandon check — and the reason SURVIVES the destroyed transition.
+      expect(outcome.outcome, JSON.stringify(outcome)).toBe("DESTROYED");
+      const { rows: keyAfter } = await client.query<{
+        state: string;
+        reason: string | null;
+        destroyedAt: Date | null;
+      }>(
+        `select state::text as state, abandon_reason as reason, destroyed_at as "destroyedAt"
+           from kitluy_devices.device_generation_keys
+          where device_record_id = $1 and key_handle = $2`,
+        [fixture.deviceRecordId, descriptor.providerKeyReference],
+      );
+      expect(keyAfter[0]?.state).toBe("destroyed");
+      expect(keyAfter[0]?.destroyedAt).not.toBeNull();
+      expect(
+        keyAfter[0]?.reason,
+        "the abandonment audit must survive destruction (0161 option b: amend the constraint, never erase the reason)",
+      ).not.toBeNull();
+
+      const row = await readRequest(client, requestId);
+      expect(row.status).toBe("executed");
+      expect(provider.destructionCount).toBe(1);
+    });
+  }, 180_000);
+
   // =========================================================================
   // B. Refusals — every one leaves the database NON-DESTROYED
   // =========================================================================
