@@ -2323,20 +2323,14 @@ the handoff of 2026-08-01 carries the full record.
 
 ## KLRISK-DEVICE-012 — abandoned-key destruction can never reach `destroyed` (2026-08-01)
 
-KLRISK-DEVICE-012 — **OPEN** (contained; requires a future additive migration).
+KLRISK-DEVICE-012 — **CLOSED** (repaired by migration 0161, 2026-08-03).
 
 | Field | Value |
 | ----- | ----- |
 | Title | Migration-0137 abandoned-key destruction basis is unreachable at confirm |
-| Source migration | `20260729170137_0137_device_key_destruction_workflow.sql` (eligibility + confirm) and `20260728200128_0128_renewal_key_lifecycle.sql` (`device_generation_keys_abandon_chk`) |
-| Defect | `evaluate_key_destruction_eligibility_v1` admits an `abandoned` retention basis (with `abandoned_minimum_retention_days`), but `confirm_key_destruction_v1` sets `state='destroyed'` without clearing `abandon_reason`, and `device_generation_keys_abandon_chk` requires `abandon_reason IS NULL` for every non-`abandoned` state. Since `abandon_generation_key_v1` always sets a reason, **every abandoned key fails the confirm with a check-constraint violation** — the abandoned retention basis is dead code in practice. |
-| Affected branch | abandoned-key destruction (unreachable end-to-end) |
-| Proven working branch | **superseded-key destruction** — proven end-to-end by the WS-11-T003 Step-4 production lifecycle stage 29 (four-eyes DESTROYED, reconciliation recorded, key row destroyed) and by the key-destruction suites |
-| Impact | A documented policy basis cannot execute; an operator abandoning a key for destruction will hit a constraint violation at confirm, after provider-side erasure may already have happened (ambiguous-outcome reconciliation path engaged) |
-| Current containment | None needed for integrity: the constraint fails CLOSED (the database refuses the inconsistent state); the superseded path covers every destruction the lifecycle currently needs |
-| Required future correction | One additive migration: either clear `abandon_reason` inside `confirm_key_destruction_v1` on the destroyed transition, or amend the constraint to admit `destroyed` with a non-null reason. Out of WS-11-T003 Step-4 scope; no task file exists yet — title to come from the next WS-11/fleet work package |
-| Status | OPEN |
-| Evidence | `00_AI_HANDOFF/shared/2026-08-01__SHARED__WS-11-T003-STEP4__RUNTIME-ENFORCEMENT-AND-REVIEW-REMEDIATION__AI-HANDOFF.md` (risk section + stage-29 build notes); reproduction: `confirm_key_destruction_v1` on an abandoned key raises `new row for relation "device_generation_keys" violates check constraint "device_generation_keys_abandon_chk"` |
-
-Does not reopen KLRISK-DEVICE-007 (closed 2026-08-01): the governed destruction
-operation exists and is exercised through the superseded basis.
+| Source migration | `20260729170137_0137_device_key_destruction_workflow.sql` (eligibility + confirm) and `20260728200128_0128_renewal_key_lifecycle.sql` (`device_generation_keys_abandon_chk`, `abandon_generation_key_v1`) |
+| Defect | TWO compounding gaps: (1) `device_generation_keys_abandon_chk` required `abandon_reason IS NULL` for every non-`abandoned` state, while `confirm_key_destruction_v1` transitions to `destroyed` without clearing the reason — every abandoned key failed confirm with a check-constraint violation, after the provider may already have erased the private half. (2) A losing renewal's reservation stayed `pop_pending` for ever (the conflict raises and rolls back), so the eligibility's device-wide UNFINISHED_RENEWAL check blocked the abandoned basis even had the constraint allowed it. |
+| Repair (0161, additive) | (1) Constraint amended to `state = 'destroyed' or (state = 'abandoned') = (abandon_reason is not null)` — the abandoned basis becomes reachable and the abandonment REASON is preserved through destruction (option b; the alternative, clearing the reason at confirm, would have erased the audit). (2) `abandon_generation_key_v1` now closes the dead attempt's reservation (`status = 'abandoned'`) atomically with the key abandonment; an already-terminal reservation is left alone. |
+| Proof | From-zero chain 0000→0161 with `db:test` 196 PASS and `test:rls` 104; `key-destruction.integration.test.ts` 13/13 including the new test "destroys an ABANDONED key end-to-end, preserving the abandonment reason" (generated → abandoned → four-eyes destruction DESTROYED, reservation closed, reason preserved); full package 779 passed / 2 skipped; registry 219/219 with lifecycle 30/30 and census all zeros. |
+| Recorded, not changed | The comment/code mismatch on `abandon_generation_key_v1` ("refuses to abandon an `active` key") — the function body has no such check; the trigger's transition table is what actually refuses active→abandoned and superseded→abandoned. Correcting the comment or the behavior belongs to its own named package. |
+| Status | CLOSED (0161) |
