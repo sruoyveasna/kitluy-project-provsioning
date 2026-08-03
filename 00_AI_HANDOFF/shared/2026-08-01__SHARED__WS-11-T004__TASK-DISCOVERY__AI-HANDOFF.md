@@ -73,9 +73,11 @@ title, scope and acceptance criteria. Nothing in this note starts WS-11-T004.
 
 ## Also awaiting named work packages (not started)
 
-- **KLRISK-DEVICE-012** — migration-0137 abandoned-key destruction cannot
-  complete at confirm (`abandon_chk`); superseded-key destruction proven.
-  Needs one additive migration and a named owner package.
+- ~~**KLRISK-DEVICE-012**~~ — **CLOSED 2026-08-03** by additive migration 0161
+  (constraint admits `destroyed` with the reason preserved, and
+  `abandon_generation_key_v1` closes the dead reservation atomically);
+  end-to-end proof in the destruction suite (13/13). See
+  `2026-08-03__SHARED__KLRISK-DEVICE-012__ABANDONED-KEY-DESTRUCTION-REPAIR__AI-HANDOFF.md`.
 - **R2-RV-004 hygiene candidate** — a dedicated assertion role for the 0160
   inspection readers (today `authenticated` holds EXECUTE without schema
   USAGE, i.e. unreachable). Low priority, no behavior change.
