@@ -3017,4 +3017,85 @@ begin
 end $$;
 rollback;
 
-select 'rls-tests complete: 14+9 baseline cases; cycle-5 WS5 7 negative + 7 positive and WS6 10 negative + 9 positive; cycle-6 WS7 13 negative + 6 positive and WS8 13 negative + 6 positive; cycle-10 WS11 T001 4 negative + 1 positive and T002 3 negative + 1 positive kitluy_devices cases executed; WS-11-T004-P02A 3 negative provisioning-code cases executed; WS-11-T004-P02B1 issuance-door boundary case executed; WS-11-T004-P02B2A presentation-evaluator boundary case executed' as result;
+-- WS11-N13: the revocation door (0165) is a PUBLIC governed door for
+-- `authenticated` only; its permission bridges are governor-only internals;
+-- and no runtime identity gained anything on the code or event tables.
+-- Catalog checks run FIRST, as the migration role.
+begin;
+do $$
+begin
+  if has_function_privilege('public',
+       'kitluy_devices.revoke_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or has_function_privilege('anon',
+       'kitluy_devices.revoke_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or has_function_privilege('service_role',
+       'kitluy_devices.revoke_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or has_function_privilege('kitluy_worker_service',
+       'kitluy_devices.revoke_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or has_function_privilege('kitluy_issuance_service',
+       'kitluy_devices.revoke_terminal_provisioning_code_v1(uuid, text, text)', 'execute') then
+    raise exception 'FAIL WS11-N13: the revocation door is executable outside its boundary';
+  end if;
+  if not has_function_privilege('authenticated',
+       'kitluy_devices.revoke_terminal_provisioning_code_v1(uuid, text, text)', 'execute') then
+    raise exception 'FAIL WS11-N13: authenticated lost the revocation door';
+  end if;
+  if has_function_privilege('public',
+       'kitluy_devices.provisioning_code_revoke_held_v1()', 'execute')
+     or has_function_privilege('anon',
+       'kitluy_devices.provisioning_code_revoke_held_v1()', 'execute')
+     or has_function_privilege('authenticated',
+       'kitluy_devices.provisioning_code_revoke_held_v1()', 'execute')
+     or has_function_privilege('service_role',
+       'kitluy_devices.provisioning_code_revoke_held_v1()', 'execute')
+     or has_function_privilege('authenticated',
+       'kitluy_devices.provisioning_code_revoke_permitted_v1(uuid, text)', 'execute')
+     or has_function_privilege('service_role',
+       'kitluy_devices.provisioning_code_revoke_permitted_v1(uuid, text)', 'execute') then
+    raise exception 'FAIL WS11-N13: a revocation bridge escaped the governor boundary';
+  end if;
+  -- The 0163/0164 boundaries must be untouched by 0165.
+  if not has_function_privilege('authenticated',
+       'kitluy_devices.issue_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or has_function_privilege('service_role',
+       'kitluy_devices.issue_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or has_function_privilege('authenticated',
+       'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
+     or not has_function_privilege('kitluy_test_harness',
+       'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute') then
+    raise exception 'FAIL WS11-N13: the issuance or presentation boundary drifted under 0165';
+  end if;
+  if has_table_privilege('authenticated',
+       'kitluy_devices.device_provisioning_codes', 'INSERT,UPDATE,DELETE')
+     or has_table_privilege('authenticated',
+       'kitluy_devices.device_provisioning_code_events', 'INSERT,UPDATE,DELETE')
+     or has_table_privilege('service_role',
+       'kitluy_devices.device_provisioning_codes', 'INSERT,UPDATE,DELETE') then
+    raise exception 'FAIL WS11-N13: a runtime identity holds direct mutation on provisioning-code tables';
+  end if;
+  raise notice 'PASS WS11-N13a: the revocation door is authenticated-only; the bridges are governor-only; no runtime identity holds direct mutation; 0163/0164 boundaries unchanged';
+end $$;
+select set_config('request.jwt.claims', '{"role":"anon"}', true);
+set local role anon;
+do $$
+declare
+  v_result jsonb;
+  v_refused boolean := false;
+begin
+  begin
+    v_result := kitluy_devices.revoke_terminal_provisioning_code_v1(
+      gen_random_uuid(), 'n13-anon-probe', 'a reason');
+    -- Any answer at all proves EXECUTE reached the door; the privilege
+    -- boundary must fire before the body.
+    raise exception 'FAIL WS11-N13: anon reached the revocation door: %', v_result;
+  exception when insufficient_privilege then
+    v_refused := true;
+  end;
+  if not v_refused then
+    raise exception 'FAIL WS11-N13: the anon probe did not run';
+  end if;
+  raise notice 'PASS WS11-N13b: anon cannot execute the revocation door';
+end $$;
+rollback;
+
+select 'rls-tests complete: 14+9 baseline cases; cycle-5 WS5 7 negative + 7 positive and WS6 10 negative + 9 positive; cycle-6 WS7 13 negative + 6 positive and WS8 13 negative + 6 positive; cycle-10 WS11 T001 4 negative + 1 positive and T002 3 negative + 1 positive kitluy_devices cases executed; WS-11-T004-P02A 3 negative provisioning-code cases executed; WS-11-T004-P02B1 issuance-door boundary case executed; WS-11-T004-P02B2A presentation-evaluator boundary case executed; WS-11-T004-P02B2B1 revocation-door boundary case executed' as result;

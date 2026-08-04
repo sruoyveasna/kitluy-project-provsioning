@@ -14636,4 +14636,724 @@ $section51$;
 -- ============================================================================
 
 
+-- ============================================================================
+-- SECTION 52 — governed terminal provisioning-code revocation (migration 0165).
+--
+-- WS-11-T004-P02B2B1. The door derives actor and all scope from the session
+-- and the stored rows; only an ISSUED code transitions to REVOKED, with a
+-- mandatory bounded reason, authoritative time, exactly one REVOKED event and
+-- race-safe idempotency. Terminal states are never overwritten. Proved here:
+-- the full refusal battery, success, replay semantics, terminal-state
+-- stability, presentation interaction, immutability and the privilege census.
+-- ============================================================================
+do $section52$
+declare
+  v_tenant uuid := '00000000-0000-4000-8000-000000000011';
+  v_store uuid := '00000000-0000-4000-8000-000000000015';
+  v_location uuid := '00000000-0000-4000-8000-000000000018';
+  v_profile uuid;
+  v_hub uuid;
+  v_terminal uuid;
+  v_token text;
+  v_payload text;
+  v_claim uuid;
+  v_operator uuid := gen_random_uuid();
+  v_operator2 uuid := gen_random_uuid();
+  v_noGrant uuid := gen_random_uuid();
+  v_pilotGrant uuid := gen_random_uuid();
+  v_tassignments uuid[] := array[]::uuid[];
+  v_tassignment uuid;
+  v_terminals uuid[] := array[]::uuid[];
+  v_result jsonb;
+  v_code_ids uuid[] := array[]::uuid[];
+  v_code_id uuid;
+  v_raw text;
+  v_bound_hub uuid;
+  v_state record;
+  v_cnt integer;
+  v_before timestamptz;
+  v_revoked_at timestamptz;
+  v_correlation uuid;
+  v_i integer;
+  v_refused boolean;
+begin
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+
+  -- Operator identities (fixture humans with real auth.users rows).
+  insert into auth.users (id, instance_id, aud, role, email, encrypted_password,
+                          email_confirmed_at, created_at, updated_at)
+  values (v_operator, '00000000-0000-0000-0000-000000000000', 'authenticated',
+          'authenticated', 's52-operator@fixture.invalid', '', now(), now(), now()),
+         (v_operator2, '00000000-0000-0000-0000-000000000000', 'authenticated',
+          'authenticated', 's52-operator2@fixture.invalid', '', now(), now(), now()),
+         (v_noGrant, '00000000-0000-0000-0000-000000000000', 'authenticated',
+          'authenticated', 's52-nogrant@fixture.invalid', '', now(), now(), now()),
+         (v_pilotGrant, '00000000-0000-0000-0000-000000000000', 'authenticated',
+          'authenticated', 's52-pilot@fixture.invalid', '', now(), now(), now());
+  set local role service_role;
+  insert into kitluy_auth.temporary_grants (subject_id, permission_key, environment, starts_at, expires_at, reason)
+  values
+    (v_operator, 'fleet.device_provisioning_code.issue', 'development',
+     now() - interval '1 minute', now() + interval '30 minutes', 'section-52 fixture: issuance for fixtures'),
+    (v_operator, 'fleet.device_provisioning_code.revoke', 'development',
+     now() - interval '1 minute', now() + interval '30 minutes', 'section-52 fixture: the authorized revoker'),
+    (v_operator2, 'fleet.device_provisioning_code.revoke', 'development',
+     now() - interval '1 minute', now() + interval '30 minutes', 'section-52 fixture: second authorized revoker'),
+    (v_pilotGrant, 'fleet.device_provisioning_code.revoke', 'pilot',
+     now() - interval '1 minute', now() + interval '30 minutes', 'section-52 fixture: wrong-environment grant');
+  reset role;
+
+  -- A Hub, claimed, trusted, certified and activated through the governed path.
+  v_hub := kitluy_devices.enroll_device_v1(
+    'WS11-S52-HUB-' || gen_random_uuid(), v_profile, now() - interval '30 days',
+    repeat('0a', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', '1f:11:' || substr(md5(random()::text),1,6) || ':11'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-s52hub-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-s52hub-' || gen_random_uuid())));
+  v_token := repeat('7b', 32);
+  v_payload := repeat('8c', 32);
+  v_claim := kitluy_devices.create_device_claim_v1(
+    v_hub, v_tenant, v_store, v_location, v_token, v_payload, 900, 'OP-PROBE');
+  perform kitluy_devices.redeem_device_claim_v1(v_token, v_payload, v_hub, 'HUB-AGENT');
+  perform kitluy_devices.evaluate_trusted_time_v1(
+    v_hub, 'development', null, now(), null, gen_random_uuid());
+  perform kitluy_devices.issue_device_certificate_v1(
+    v_hub, 'development', 'SERIAL-S52-HUB-' || gen_random_uuid(), repeat('0a', 32), 'OP-PROBE');
+  perform kitluy_devices.attempt_activate_device_v1(v_hub, 'development', 'OP-ACTIVATE');
+
+  -- Eight terminals, eight assignments, eight issued codes — one per case.
+  for v_i in 1..8 loop
+    v_terminal := kitluy_devices.enroll_device_v1(
+      'WS11-S52-TERM' || v_i || '-' || gen_random_uuid(), v_profile, now() - interval '30 days',
+      repeat(lpad(to_hex(v_i + 10), 2, '0'), 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+      jsonb_build_array(
+        jsonb_build_object('signal_type', 'mac_address',   'signal_value', '2e:2' || v_i || ':' || substr(md5(random()::text),1,6) || ':2' || v_i),
+        jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-s52term' || v_i || '-' || gen_random_uuid()),
+        jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-s52term' || v_i || '-' || gen_random_uuid())));
+    v_token := repeat(lpad(to_hex(v_i + 40), 2, '0'), 32);
+    v_payload := repeat(lpad(to_hex(v_i + 60), 2, '0'), 32);
+    v_claim := kitluy_devices.create_device_claim_v1(
+      v_terminal, v_tenant, v_store, v_location, v_token, v_payload, 900, 'OP-PROBE');
+    perform kitluy_devices.redeem_device_claim_v1(v_token, v_payload, v_terminal, 'TERM-AGENT');
+    v_tassignment := kitluy_devices.assign_terminal_profile_v1(
+      v_terminal, 1, 'laundry.t1.cashier', v_location, 'OP-PROBE');
+    v_tassignments := v_tassignments || v_tassignment;
+    v_terminals := v_terminals || v_terminal;
+  end loop;
+
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_operator, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  for v_i in 1..8 loop
+    v_result := kitluy_devices.issue_terminal_provisioning_code_v1(
+      v_tassignments[v_i], 's52-issue-' || v_i, null);
+    if v_result ->> 'outcome' <> 'ISSUED' then
+      raise exception 'ASSERT FAIL: fixture issuance % failed: %', v_i, v_result;
+    end if;
+    v_code_ids := v_code_ids || (v_result ->> 'provisioning_code_id')::uuid;
+    if v_i = 1 then
+      v_raw := v_result ->> 'code';
+      -- The issuance door binds the EARLIEST-ACTIVATED Hub at the scope,
+      -- which may be an earlier section's fixture Hub; what revocation must
+      -- preserve is the binding the code was issued with.
+      v_bound_hub := (v_result ->> 'store_hub_device_id')::uuid;
+    end if;
+  end loop;
+  reset role;
+
+  -- -------------------------------------------------------------------------
+  -- CONTRACT VIOLATIONS: malformed calls refuse with no residue.
+  -- -------------------------------------------------------------------------
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_operator, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+
+  v_result := kitluy_devices.revoke_terminal_provisioning_code_v1(null, 's52-x1', 'a reason');
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-NO-CODE' then
+    raise exception 'ASSERT FAIL: a null code id was not refused: %', v_result;
+  end if;
+  v_result := kitluy_devices.revoke_terminal_provisioning_code_v1(v_code_ids[1], null, 'a reason');
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-NO-IDEMPOTENCY-KEY' then
+    raise exception 'ASSERT FAIL: a null idempotency key was not refused: %', v_result;
+  end if;
+  v_result := kitluy_devices.revoke_terminal_provisioning_code_v1(v_code_ids[1], '   ', 'a reason');
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-NO-IDEMPOTENCY-KEY' then
+    raise exception 'ASSERT FAIL: a blank idempotency key was not refused: %', v_result;
+  end if;
+  v_result := kitluy_devices.revoke_terminal_provisioning_code_v1(v_code_ids[1], 's52-x2', null);
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-NO-REASON' then
+    raise exception 'ASSERT FAIL: a missing reason was not refused: %', v_result;
+  end if;
+  v_result := kitluy_devices.revoke_terminal_provisioning_code_v1(v_code_ids[1], 's52-x2', '   ');
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-NO-REASON' then
+    raise exception 'ASSERT FAIL: a blank reason was not refused: %', v_result;
+  end if;
+  v_result := kitluy_devices.revoke_terminal_provisioning_code_v1(v_code_ids[1], 's52-x2', repeat('x', 501));
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-REASON-TOO-LONG' then
+    raise exception 'ASSERT FAIL: an overlong reason was not refused: %', v_result;
+  end if;
+  v_result := kitluy_devices.revoke_terminal_provisioning_code_v1(v_code_ids[1], 's52-x2', 'bad' || chr(10) || 'reason');
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-REASON-INVALID' then
+    raise exception 'ASSERT FAIL: a control-character reason was not refused: %', v_result;
+  end if;
+  v_result := kitluy_devices.revoke_terminal_provisioning_code_v1(v_code_ids[1], 's52-x2', 'see BEGIN PRIVATE KEY material');
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-REASON-INVALID' then
+    raise exception 'ASSERT FAIL: a key-material reason was not refused: %', v_result;
+  end if;
+  v_result := kitluy_devices.revoke_terminal_provisioning_code_v1(v_code_ids[1], 's52-x2', 'the code ABCD1234 was leaked');
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-REASON-INVALID' then
+    raise exception 'ASSERT FAIL: a code-shaped reason was not refused: %', v_result;
+  end if;
+  reset role;
+
+  -- Unauthenticated caller (no claims at all).
+  perform set_config('request.jwt.claims', '', true);
+  set local role authenticated;
+  v_result := kitluy_devices.revoke_terminal_provisioning_code_v1(v_code_ids[1], 's52-x3', 'a reason');
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-UNAUTHENTICATED' then
+    raise exception 'ASSERT FAIL: an unauthenticated caller was not refused: %', v_result;
+  end if;
+  reset role;
+
+  -- Authenticated human WITHOUT the permission: the SAME refusal whether the
+  -- code exists or not (no cross-scope existence leak).
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_noGrant, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  v_result := kitluy_devices.revoke_terminal_provisioning_code_v1(v_code_ids[1], 's52-x4', 'a reason');
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-PERMISSION-DENIED' then
+    raise exception 'ASSERT FAIL: a human without the permission was not refused: %', v_result;
+  end if;
+  v_result := kitluy_devices.revoke_terminal_provisioning_code_v1(gen_random_uuid(), 's52-x5', 'a reason');
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-PERMISSION-DENIED' then
+    raise exception 'ASSERT FAIL: the no-permission refusal leaks code existence: %', v_result;
+  end if;
+  reset role;
+
+  -- Permission granted for the WRONG environment.
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_pilotGrant, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  v_result := kitluy_devices.revoke_terminal_provisioning_code_v1(v_code_ids[1], 's52-x6', 'a reason');
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-PERMISSION-DENIED' then
+    raise exception 'ASSERT FAIL: a pilot-scoped grant was honored in development: %', v_result;
+  end if;
+  reset role;
+
+  -- The AUTHORIZED caller on a nonexistent code: a stable NOT-FOUND.
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_operator, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  v_result := kitluy_devices.revoke_terminal_provisioning_code_v1(gen_random_uuid(), 's52-x7', 'a reason');
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-NOT-FOUND' then
+    raise exception 'ASSERT FAIL: a nonexistent code was not refused NOT-FOUND: %', v_result;
+  end if;
+  reset role;
+
+  -- No residue from any refusal: code 1 is still issued, event count is one.
+  select * into v_state from kitluy_devices.device_provisioning_codes where id = v_code_ids[1];
+  if v_state.state::text <> 'issued' or v_state.revoked_at is not null then
+    raise exception 'ASSERT FAIL: a refusal mutated the code: %', row_to_json(v_state);
+  end if;
+  select count(*) into v_cnt from kitluy_devices.device_provisioning_code_events
+   where provisioning_code_id = v_code_ids[1];
+  if v_cnt <> 1 then
+    raise exception 'ASSERT FAIL: a refusal appended an event, found %', v_cnt;
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- SUCCESS: the exact scoped authorized human revokes; everything is derived.
+  -- -------------------------------------------------------------------------
+  v_before := clock_timestamp();
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_operator, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  v_result := kitluy_devices.revoke_terminal_provisioning_code_v1(
+    v_code_ids[1], 's52-revoke-1', 'installer reported the terminal stolen');
+  reset role;
+
+  if v_result ->> 'outcome' <> 'REVOKED' then
+    raise exception 'ASSERT FAIL: authorized revocation did not succeed: %', v_result;
+  end if;
+  v_revoked_at := (v_result ->> 'revoked_at')::timestamptz;
+  v_correlation := (v_result ->> 'correlation_id')::uuid;
+
+  select * into v_state from kitluy_devices.device_provisioning_codes where id = v_code_ids[1];
+  if v_state.state::text <> 'revoked' or v_state.revoked_at is null then
+    raise exception 'ASSERT FAIL: the code is not terminally revoked: %', row_to_json(v_state);
+  end if;
+  if v_state.revocation_reason <> 'installer reported the terminal stolen' then
+    raise exception 'ASSERT FAIL: the canonical reason was not stored: %', v_state.revocation_reason;
+  end if;
+  if v_state.revocation_idempotency_key <> 's52-revoke-1' then
+    raise exception 'ASSERT FAIL: the idempotency key was not stored';
+  end if;
+  -- Authoritative time: not caller-supplied, not in the future, not before
+  -- the call (the authoritative clock is clock_timestamp(), wall time).
+  if v_state.revoked_at > clock_timestamp() or v_state.revoked_at < v_before - interval '5 seconds' then
+    raise exception 'ASSERT FAIL: revoked_at is not authoritative time: %', v_state.revoked_at;
+  end if;
+  -- Attempts, expiry, profile, Hub and assignment bindings are unchanged.
+  if v_state.failed_attempt_count <> 0
+     or v_state.expires_at - v_state.created_at <> interval '15 minutes'
+     or v_state.terminal_profile_key <> 'laundry.t1.cashier'
+     or v_state.store_hub_device_id <> v_bound_hub
+     or v_state.terminal_assignment_id <> v_tassignments[1]
+     or v_state.tenant_id <> v_tenant or v_state.digital_store_id <> v_store
+     or v_state.store_location_id <> v_location or v_state.environment <> 'development' then
+    raise exception 'ASSERT FAIL: revocation mutated an immutable binding: %', row_to_json(v_state);
+  end if;
+  -- Exactly one REVOKED event, attributed, carrying a safe reason reference.
+  select count(*) into v_cnt from kitluy_devices.device_provisioning_code_events
+   where provisioning_code_id = v_code_ids[1] and event_type = 'REVOKED';
+  if v_cnt <> 1 then
+    raise exception 'ASSERT FAIL: expected exactly one REVOKED event, found %', v_cnt;
+  end if;
+  if not exists (
+    select 1 from kitluy_devices.device_provisioning_code_events
+     where provisioning_code_id = v_code_ids[1] and event_type = 'REVOKED'
+       and actor_type = 'OPERATOR' and actor_ref = v_operator::text
+       and reason_code = 'OPERATOR_REVOCATION' and correlation_id = v_correlation
+       and tenant_id = v_tenant and digital_store_id = v_store
+       and store_location_id = v_location and environment = 'development') then
+    raise exception 'ASSERT FAIL: the REVOKED event is misattributed or mis-scoped';
+  end if;
+  -- The event contains no raw code and no digest.
+  if exists (
+    select 1 from kitluy_devices.device_provisioning_code_events
+     where provisioning_code_id = v_code_ids[1] and event_type = 'REVOKED'
+       and (detail::text like '%' || v_raw || '%'
+            or detail::text like '%' || v_state.code_digest || '%')) then
+    raise exception 'ASSERT FAIL: the REVOKED event carries raw-code or digest material';
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- IDEMPOTENCY: identical replay, new key, and the three conflict shapes.
+  -- -------------------------------------------------------------------------
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_operator, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+
+  -- Identical replay: original identity and timestamp, no mutation, no event.
+  v_result := kitluy_devices.revoke_terminal_provisioning_code_v1(
+    v_code_ids[1], 's52-revoke-1', 'installer reported the terminal stolen');
+  if v_result ->> 'outcome' <> 'ALREADY_REVOKED'
+     or (v_result ->> 'revoked_at')::timestamptz <> v_revoked_at
+     or (v_result ->> 'correlation_id')::uuid <> v_correlation then
+    raise exception 'ASSERT FAIL: the identical replay did not return the canonical revocation: %', v_result;
+  end if;
+
+  -- Same key, same code, DIFFERENT reason: conflicting replay, closed.
+  v_result := kitluy_devices.revoke_terminal_provisioning_code_v1(
+    v_code_ids[1], 's52-revoke-1', 'a different reason entirely');
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-CONFLICTING-REPLAY' then
+    raise exception 'ASSERT FAIL: a reason-conflicting replay was not refused: %', v_result;
+  end if;
+
+  -- Same key, DIFFERENT code: conflicting replay, closed, loser no residue.
+  v_result := kitluy_devices.revoke_terminal_provisioning_code_v1(
+    v_code_ids[7], 's52-revoke-1', 'installer reported the terminal stolen');
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-CONFLICTING-REPLAY' then
+    raise exception 'ASSERT FAIL: a code-conflicting replay was not refused: %', v_result;
+  end if;
+
+  -- A DIFFERENT key against the already-revoked code: the stable terminal
+  -- classification, no timestamp change, no reason overwrite, no new event.
+  v_result := kitluy_devices.revoke_terminal_provisioning_code_v1(
+    v_code_ids[1], 's52-revoke-1b', 'another operator reason');
+  if v_result ->> 'outcome' <> 'ALREADY_REVOKED'
+     or (v_result ->> 'revoked_at')::timestamptz <> v_revoked_at then
+    raise exception 'ASSERT FAIL: a new key on a revoked code did not return the stable terminal result: %', v_result;
+  end if;
+  reset role;
+
+  -- Same key, same code, same reason, DIFFERENT actor: conflicting replay.
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_operator2, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  v_result := kitluy_devices.revoke_terminal_provisioning_code_v1(
+    v_code_ids[1], 's52-revoke-1', 'installer reported the terminal stolen');
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-CONFLICTING-REPLAY' then
+    raise exception 'ASSERT FAIL: an actor-conflicting replay was not refused: %', v_result;
+  end if;
+  reset role;
+
+  -- No replay mutated anything: still exactly one REVOKED event, original
+  -- timestamp and reason stand.
+  select * into v_state from kitluy_devices.device_provisioning_codes where id = v_code_ids[1];
+  if v_state.revoked_at <> v_revoked_at
+     or v_state.revocation_reason <> 'installer reported the terminal stolen'
+     or v_state.revocation_idempotency_key <> 's52-revoke-1' then
+    raise exception 'ASSERT FAIL: a replay overwrote the original revocation';
+  end if;
+  select count(*) into v_cnt from kitluy_devices.device_provisioning_code_events
+   where provisioning_code_id = v_code_ids[1] and event_type = 'REVOKED';
+  if v_cnt <> 1 then
+    raise exception 'ASSERT FAIL: a replay appended a second REVOKED event';
+  end if;
+  -- The conflicting-replay loser left no residue on code 7.
+  select * into v_state from kitluy_devices.device_provisioning_codes where id = v_code_ids[7];
+  if v_state.state::text <> 'issued' then
+    raise exception 'ASSERT FAIL: the conflicting-replay loser mutated code 7';
+  end if;
+
+  -- A revoked code can never produce MATCH_READY again (0164 evaluator).
+  execute format('grant kitluy_test_harness to %I', current_user);
+  v_result := kitluy_devices.evaluate_terminal_provisioning_code_v1(
+    v_tassignments[1], v_raw, gen_random_uuid(), 'TERMINAL', v_terminals[1]::text);
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-ALREADY-REVOKED' then
+    raise exception 'ASSERT FAIL: a revoked code did not refuse presentation as ALREADY-REVOKED: %', v_result;
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- LOCKED: five failures on code 2, then revocation must not overwrite it.
+  -- -------------------------------------------------------------------------
+  for v_i in 1..5 loop
+    v_result := kitluy_devices.evaluate_terminal_provisioning_code_v1(
+      v_tassignments[2], 'ZZZZZZZZ', gen_random_uuid(), 'TERMINAL', v_terminals[2]::text);
+  end loop;
+  select * into v_state from kitluy_devices.device_provisioning_codes where id = v_code_ids[2];
+  if v_state.state::text <> 'locked' then
+    raise exception 'ASSERT FAIL: the lockout fixture did not lock: %', row_to_json(v_state);
+  end if;
+  v_before := v_state.locked_at;
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_operator, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  v_result := kitluy_devices.revoke_terminal_provisioning_code_v1(
+    v_code_ids[2], 's52-revoke-2', 'trying to revoke a locked code');
+  reset role;
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-ALREADY-LOCKED' then
+    raise exception 'ASSERT FAIL: revoking a locked code was not refused: %', v_result;
+  end if;
+  select * into v_state from kitluy_devices.device_provisioning_codes where id = v_code_ids[2];
+  if v_state.state::text <> 'locked' or v_state.locked_at <> v_before
+     or v_state.revoked_at is not null then
+    raise exception 'ASSERT FAIL: revocation overwrote the locked state';
+  end if;
+  if exists (select 1 from kitluy_devices.device_provisioning_code_events
+              where provisioning_code_id = v_code_ids[2] and event_type = 'REVOKED') then
+    raise exception 'ASSERT FAIL: a locked code gained a REVOKED event';
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- EXPIRED: code 3 expires on the sanctioned clock; revocation must not
+  -- overwrite the terminal expired state.
+  -- -------------------------------------------------------------------------
+  insert into kitluy_ops.test_clock_policy (environment, enabled_by, decision_ref)
+  values ('test', 'section-52', 'KLD-2026-07-31-SECURITY-TEST-CLOCK-001')
+  on conflict (environment) do nothing;
+  perform kitluy_ops.test_clock_set_v1(now() + interval '20 minutes');
+  v_result := kitluy_devices.evaluate_terminal_provisioning_code_v1(
+    v_tassignments[3], 'ZZZZZZZZ', gen_random_uuid(), 'TERMINAL', v_terminals[3]::text);
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-EXPIRED' then
+    raise exception 'ASSERT FAIL: the expiry fixture did not expire: %', v_result;
+  end if;
+  delete from kitluy_ops.test_clock_policy where environment = 'test';
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_operator, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  v_result := kitluy_devices.revoke_terminal_provisioning_code_v1(
+    v_code_ids[3], 's52-revoke-3', 'trying to revoke an expired code');
+  reset role;
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-ALREADY-EXPIRED' then
+    raise exception 'ASSERT FAIL: revoking an expired code was not refused: %', v_result;
+  end if;
+  select * into v_state from kitluy_devices.device_provisioning_codes where id = v_code_ids[3];
+  if v_state.state::text <> 'expired' or v_state.revoked_at is not null then
+    raise exception 'ASSERT FAIL: revocation overwrote the expired state';
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- REDEEMED: code 4 is closed as redeemed (the P02B3 door does not exist
+  -- yet; the schema transition issued -> redeemed is the modeled one);
+  -- revocation must not overwrite it. The 0162-era tables are governor-owned,
+  -- so the fixture borrows the NOLOGIN authority exactly the way the
+  -- migrations do; it is returned after the tamper and event tests below.
+  -- -------------------------------------------------------------------------
+  execute format('grant kitluy_activation_governor to %I', current_user);
+  set local role kitluy_activation_governor;
+  update kitluy_devices.device_provisioning_codes
+     set state = 'redeemed', redeemed_at = now()
+   where id = v_code_ids[4] and state = 'issued';
+  if not found then
+    raise exception 'ASSERT FAIL: the redeemed fixture did not transition';
+  end if;
+  reset role;
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_operator, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  v_result := kitluy_devices.revoke_terminal_provisioning_code_v1(
+    v_code_ids[4], 's52-revoke-4', 'trying to revoke a redeemed code');
+  reset role;
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-ALREADY-REDEEMED' then
+    raise exception 'ASSERT FAIL: revoking a redeemed code was not refused: %', v_result;
+  end if;
+  select * into v_state from kitluy_devices.device_provisioning_codes where id = v_code_ids[4];
+  if v_state.state::text <> 'redeemed' or v_state.revoked_at is not null then
+    raise exception 'ASSERT FAIL: revocation overwrote the redeemed state';
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- INACTIVE ASSIGNMENT: code 5's assignment closes with its device
+  -- assignment; the door refuses the stable classification.
+  -- -------------------------------------------------------------------------
+  perform kitluy_devices.revoke_device_assignment_v1(v_terminals[5], 'S52-INACTIVE-FIXTURE', 'OP-S52');
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_operator, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  v_result := kitluy_devices.revoke_terminal_provisioning_code_v1(
+    v_code_ids[5], 's52-revoke-5', 'trying to revoke against a closed assignment');
+  reset role;
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-ASSIGNMENT-INACTIVE' then
+    raise exception 'ASSERT FAIL: revocation against an inactive assignment was not refused: %', v_result;
+  end if;
+  select * into v_state from kitluy_devices.device_provisioning_codes where id = v_code_ids[5];
+  if v_state.state::text <> 'issued' then
+    raise exception 'ASSERT FAIL: the inactive-assignment refusal mutated the code';
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- RELATIONAL SCOPE INCONSISTENCY: the terminal-assignment trigger makes an
+  -- inconsistent scope unmanufacturable through SQL (proved by the tamper
+  -- refusal below — as the postgres-owned table's owner, so the probe reaches
+  -- the trigger); with the trigger momentarily disabled under the same
+  -- authority, the door's own under-lock revalidation is what must refuse.
+  -- -------------------------------------------------------------------------
+  v_refused := false;
+  begin
+    update kitluy_devices.device_terminal_assignments
+       set terminal_profile_key = 'laundry.t2.display'
+     where id = v_tassignments[6];
+  exception when raise_exception then
+    v_refused := true; -- expected: KLUY-DEVICE-TERMINAL-IMMUTABLE
+  end;
+  if not v_refused then
+    raise exception 'ASSERT FAIL: the terminal-assignment immutability trigger did not fire';
+  end if;
+  alter table kitluy_devices.device_terminal_assignments
+    disable trigger trg_device_terminal_assignments_location;
+  update kitluy_devices.device_terminal_assignments
+     set terminal_profile_key = 'laundry.t2.display'
+   where id = v_tassignments[6];
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_operator, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  v_result := kitluy_devices.revoke_terminal_provisioning_code_v1(
+    v_code_ids[6], 's52-revoke-6', 'trying to revoke against a tampered assignment');
+  reset role;
+  update kitluy_devices.device_terminal_assignments
+     set terminal_profile_key = 'laundry.t1.cashier'
+   where id = v_tassignments[6];
+  alter table kitluy_devices.device_terminal_assignments
+    enable trigger trg_device_terminal_assignments_location;
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-SCOPE-INCONSISTENT' then
+    raise exception 'ASSERT FAIL: a scope-inconsistent code was not refused: %', v_result;
+  end if;
+  select * into v_state from kitluy_devices.device_provisioning_codes where id = v_code_ids[6];
+  if v_state.state::text <> 'issued' then
+    raise exception 'ASSERT FAIL: the scope-inconsistency refusal mutated the code';
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- ATTEMPT PRESERVATION: two genuine failures on code 7, then revocation —
+  -- the count, expiry and bindings are preserved exactly.
+  -- -------------------------------------------------------------------------
+  for v_i in 1..2 loop
+    v_result := kitluy_devices.evaluate_terminal_provisioning_code_v1(
+      v_tassignments[7], 'ZZZZZZZZ', gen_random_uuid(), 'TERMINAL', v_terminals[7]::text);
+  end loop;
+  execute format('revoke kitluy_test_harness from %I', current_user);
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_operator, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  v_result := kitluy_devices.revoke_terminal_provisioning_code_v1(
+    v_code_ids[7], 's52-revoke-7', 'terminal decommissioned mid-provisioning');
+  reset role;
+  if v_result ->> 'outcome' <> 'REVOKED' then
+    raise exception 'ASSERT FAIL: revocation with prior attempts did not succeed: %', v_result;
+  end if;
+  select * into v_state from kitluy_devices.device_provisioning_codes where id = v_code_ids[7];
+  if v_state.failed_attempt_count <> 2 then
+    raise exception 'ASSERT FAIL: revocation changed the attempt count: %', v_state.failed_attempt_count;
+  end if;
+  select count(*) into v_cnt from kitluy_devices.device_provisioning_code_events
+   where provisioning_code_id = v_code_ids[7] and event_type = 'FAILED_ATTEMPT';
+  if v_cnt <> 2 then
+    raise exception 'ASSERT FAIL: attempt events changed, found %', v_cnt;
+  end if;
+  select count(*) into v_cnt from kitluy_devices.device_provisioning_code_events
+   where provisioning_code_id = v_code_ids[7] and event_type = 'REVOKED';
+  if v_cnt <> 1 then
+    raise exception 'ASSERT FAIL: expected exactly one REVOKED event on code 7, found %', v_cnt;
+  end if;
+
+  -- UNRELATED: code 8 was never touched — still issued, no REVOKED event.
+  select * into v_state from kitluy_devices.device_provisioning_codes where id = v_code_ids[8];
+  if v_state.state::text <> 'issued' then
+    raise exception 'ASSERT FAIL: an unrelated code changed state';
+  end if;
+  if exists (select 1 from kitluy_devices.device_provisioning_code_events
+              where provisioning_code_id = v_code_ids[8] and event_type = 'REVOKED') then
+    raise exception 'ASSERT FAIL: an unrelated code gained a REVOKED event';
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- APPEND-ONLY EVENTS: direct event mutation is refused even for the table
+  -- OWNER (the borrowed governor reaches the trigger; 42501 would mask it).
+  -- -------------------------------------------------------------------------
+  v_refused := false;
+  set local role kitluy_activation_governor;
+  begin
+    update kitluy_devices.device_provisioning_code_events
+       set detail = '{}'::jsonb
+     where provisioning_code_id = v_code_ids[1] and event_type = 'REVOKED';
+  exception when raise_exception then
+    v_refused := true; -- expected: KLUY-PROVCODE-EVENT-IMMUTABLE
+  end;
+  reset role;
+  if not v_refused then
+    raise exception 'ASSERT FAIL: a REVOKED event was mutated directly';
+  end if;
+
+  -- The borrowed NOLOGIN authority is returned BEFORE the census below:
+  -- the fixture must leave no login-capable membership residue.
+  execute format('revoke kitluy_activation_governor from %I', current_user);
+
+  -- -------------------------------------------------------------------------
+  -- CALLER-SUPPLIED AUTHORITY: the signature carries no actor, scope, Hub,
+  -- profile, environment or timestamp parameter — the caller CANNOT supply
+  -- them. The actor-substitution proof is behavioral: operator2 holds the
+  -- same permission yet cannot replay operator's key (proved above).
+  -- -------------------------------------------------------------------------
+  if not exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'kitluy_devices' and p.proname = 'revoke_terminal_provisioning_code_v1'
+       and pg_get_function_arguments(p.oid) = 'p_provisioning_code_id uuid, p_idempotency_key text, p_reason text') then
+    raise exception 'ASSERT FAIL: the door''s signature drifted — caller-supplied authority may have appeared';
+  end if;
+
+  -- Direct internal-helper execution is refused for authenticated.
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_operator, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  v_refused := false;
+  begin
+    perform kitluy_devices.provisioning_code_revoke_held_v1();
+  exception when insufficient_privilege then
+    v_refused := true;
+  end;
+  if not v_refused then
+    raise exception 'ASSERT FAIL: authenticated executed the held bridge';
+  end if;
+  v_refused := false;
+  begin
+    perform kitluy_devices.provisioning_code_revoke_permitted_v1(v_terminals[1], 'development');
+  exception when insufficient_privilege then
+    v_refused := true;
+  end;
+  if not v_refused then
+    raise exception 'ASSERT FAIL: authenticated executed the scoped bridge';
+  end if;
+
+  -- Direct table mutation is refused for authenticated.
+  v_refused := false;
+  begin
+    update kitluy_devices.device_provisioning_codes set state = 'revoked'
+     where id = v_code_ids[8];
+  exception when insufficient_privilege then
+    v_refused := true;
+  end;
+  if not v_refused then
+    raise exception 'ASSERT FAIL: authenticated mutated the codes table directly';
+  end if;
+  v_refused := false;
+  begin
+    insert into kitluy_devices.device_provisioning_code_events
+      (provisioning_code_id, tenant_id, digital_store_id, store_location_id, environment,
+       event_type, actor_type)
+    values (v_code_ids[8], v_tenant, v_store, v_location, 'development', 'REVOKED', 'OPERATOR');
+  exception when insufficient_privilege then
+    v_refused := true;
+  end;
+  if not v_refused then
+    raise exception 'ASSERT FAIL: authenticated inserted an event directly';
+  end if;
+  reset role;
+
+  -- -------------------------------------------------------------------------
+  -- PRIVILEGE CENSUS: the door's boundary, the bridges, the tables, FORCE
+  -- RLS, the membership census, and the 0163/0164 boundaries unchanged.
+  -- -------------------------------------------------------------------------
+  if has_function_privilege('public', 'kitluy_devices.revoke_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or has_function_privilege('anon', 'kitluy_devices.revoke_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or has_function_privilege('service_role', 'kitluy_devices.revoke_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or has_function_privilege('kitluy_worker_service', 'kitluy_devices.revoke_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or not has_function_privilege('authenticated', 'kitluy_devices.revoke_terminal_provisioning_code_v1(uuid, text, text)', 'execute') then
+    raise exception 'ASSERT FAIL: the revocation door''s grant boundary is wrong';
+  end if;
+  if has_function_privilege('public', 'kitluy_devices.provisioning_code_revoke_held_v1()', 'execute')
+     or has_function_privilege('anon', 'kitluy_devices.provisioning_code_revoke_held_v1()', 'execute')
+     or has_function_privilege('authenticated', 'kitluy_devices.provisioning_code_revoke_held_v1()', 'execute')
+     or has_function_privilege('service_role', 'kitluy_devices.provisioning_code_revoke_held_v1()', 'execute')
+     or has_function_privilege('authenticated', 'kitluy_devices.provisioning_code_revoke_permitted_v1(uuid, text)', 'execute')
+     or not has_function_privilege('kitluy_activation_governor', 'kitluy_devices.provisioning_code_revoke_held_v1()', 'execute')
+     or not has_function_privilege('kitluy_activation_governor', 'kitluy_devices.provisioning_code_revoke_permitted_v1(uuid, text)', 'execute') then
+    raise exception 'ASSERT FAIL: the revocation bridges escaped the governor boundary';
+  end if;
+  if has_table_privilege('authenticated', 'kitluy_devices.device_provisioning_codes', 'INSERT,UPDATE,DELETE')
+     or has_table_privilege('authenticated', 'kitluy_devices.device_provisioning_code_events', 'INSERT,UPDATE,DELETE')
+     or has_table_privilege('service_role', 'kitluy_devices.device_provisioning_codes', 'INSERT,UPDATE,DELETE') then
+    raise exception 'ASSERT FAIL: a runtime identity holds direct mutation on provisioning-code tables';
+  end if;
+  if exists (
+    select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = 'kitluy_devices'
+       and c.relname in ('device_provisioning_codes', 'device_provisioning_code_events')
+       and (not c.relrowsecurity or not c.relforcerowsecurity)) then
+    raise exception 'ASSERT FAIL: FORCE RLS no longer holds on the provisioning-code tables';
+  end if;
+  if exists (
+    select 1 from pg_auth_members m join pg_roles r on r.oid = m.member
+     where m.roleid in ((select oid from pg_roles where rolname = 'kitluy_activation_governor'),
+                        (select oid from pg_roles where rolname = 'kitluy_credential_approval_reader'))
+       and r.rolcanlogin) then
+    raise exception 'ASSERT FAIL: a login-capable role is a member of a NOLOGIN authority';
+  end if;
+  if not has_function_privilege('authenticated', 'kitluy_devices.issue_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or has_function_privilege('service_role', 'kitluy_devices.issue_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or has_function_privilege('authenticated', 'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
+     or not has_function_privilege('kitluy_test_harness', 'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute') then
+    raise exception 'ASSERT FAIL: the issuance or presentation boundary drifted under 0165';
+  end if;
+
+  -- The sanctioned temporary grants are removed; the fixture leaves no grant
+  -- or membership residue.
+  delete from kitluy_auth.temporary_grants
+   where subject_id in (v_operator, v_operator2, v_noGrant, v_pilotGrant);
+
+  raise notice 'PASS ws11-t004-provisioning-code-revocation: actor/scope derived; coarse gate leaks no existence; contract violations, unauthenticated, no-permission, wrong-environment, not-found, conflicting-replay (code/reason/actor), locked, expired, redeemed, inactive-assignment and scope-inconsistent all refuse with zero residue; authorized revocation transitions ISSUED->REVOKED with mandatory bounded reason, authoritative time, preserved attempts/expiry/bindings and exactly one attributed REVOKED event with no raw code or digest; identical replay returns the canonical revocation with no mutation; revoked code never MATCHes again; append-only events, helper/table direct execution refused; grants removed; 0163/0164 boundaries unchanged (0165)';
+exception when others then
+  begin
+    execute format('revoke kitluy_test_harness from %I', current_user);
+  exception when others then
+    null;
+  end;
+  begin
+    execute format('revoke kitluy_activation_governor from %I', current_user);
+  exception when others then
+    null;
+  end;
+  begin
+    alter table kitluy_devices.device_terminal_assignments
+      enable trigger trg_device_terminal_assignments_location;
+  exception when others then
+    null;
+  end;
+  raise;
+end
+$section52$;
+
 select 'assertions complete: groups 0010-0153 structural contract holds (incl. WS-11-T003 Step 4 Phase C — RC-022 spendability census CLOSED; governed emergency 0150–0153; RevocationGateway ships in @kitluy/device-identity)' as result;
