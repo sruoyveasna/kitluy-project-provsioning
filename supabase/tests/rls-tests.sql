@@ -2599,27 +2599,38 @@ begin
 end $$;
 rollback;
 
--- WS11-P1 (control): the service path reads the fleet view, and while BLK-005
--- is open no device is ACTIVE and no device holds a certificate.
+-- WS11-P1 (control): the service path reads the fleet view. Post KLD-2026-07-28-002
+-- the gate RESOLVES for development and fails closed for pilot and production,
+-- so the invariant is environment-exact: nothing pilot/production may be ACTIVE
+-- or hold a certificate, and every ACTIVE device must stand on a development
+-- certificate issued through the governed gate.
 begin;
 set local role service_role;
 do $$
 declare
   v_total int;
   v_active int;
-  v_certs int;
+  v_foreign_certs int;
+  v_active_without_dev_cert int;
 begin
   select count(*) into v_total from kitluy_devices.device_fleet_status;
   select count(*) into v_active from kitluy_devices.device_fleet_status where fleet_status = 'ACTIVE';
-  select count(*) into v_certs from kitluy_devices.device_certificates;
+  select count(*) into v_foreign_certs from kitluy_devices.device_certificates
+   where environment in ('pilot', 'production');
+  select count(*) into v_active_without_dev_cert
+    from kitluy_devices.device_fleet_status s
+   where s.fleet_status = 'ACTIVE'
+     and not exists (
+       select 1 from kitluy_devices.device_certificates c
+        where c.device_id = s.device_record_id and c.environment = 'development' and c.status = 'active');
 
-  if v_active <> 0 then
-    raise exception 'FAIL WS11-P1: % device(s) are ACTIVE while BLK-005 is open', v_active;
+  if v_foreign_certs <> 0 then
+    raise exception 'FAIL WS11-P1: % certificate row(s) exist for pilot/production while BLK-005 keeps those environments fail-closed', v_foreign_certs;
   end if;
-  if v_certs <> 0 then
-    raise exception 'FAIL WS11-P1: % certificate row(s) exist with no approved issuing CA', v_certs;
+  if v_active_without_dev_cert <> 0 then
+    raise exception 'FAIL WS11-P1: % ACTIVE device(s) lack the development-gated certificate the ballot requires', v_active_without_dev_cert;
   end if;
-  raise notice 'PASS WS11-P1: the service path reads the fleet view (% device rows); zero devices are ACTIVE and zero certificates exist while BLK-005 is open', v_total;
+  raise notice 'PASS WS11-P1: the service path reads the fleet view (% device rows, % ACTIVE); zero pilot/production certificates exist while BLK-005 is open, and every ACTIVE device holds a development certificate through the governed gate (KLD-2026-07-28-002)', v_total, v_active;
 end $$;
 rollback;
 
@@ -2760,30 +2771,40 @@ begin
 end $$;
 rollback;
 
--- WS11-P2 (control): the service path reads the fleet view, and while BLK-005
--- is open no assignment is active and no offline projection exists.
+-- WS11-P2 (control): the service path reads the fleet view. Post KLD-2026-07-28-002
+-- the fail-closed half is environment-exact: zero pilot/production projections,
+-- zero active assignments without a development projection, no certified SKU and
+-- no production-eligible device. Development-gated activations are legal.
 begin;
 set local role service_role;
 do $$
 declare
   v_awaiting int;
-  v_active_assignments int;
-  v_projections int;
+  v_active_without_dev_projection int;
+  v_foreign_projections int;
 begin
   -- Post KLD-2026-07-28-002 the most specific TRUE blocker is production
   -- ineligibility: section 4 blocks hardware certification until a
   -- TPM/secure-element SKU is certified, and certified_hardware_skus is empty.
   select count(*) into v_awaiting from kitluy_devices.device_fleet_status
    where fleet_status = 'BLOCKED_PRODUCTION_INELIGIBLE';
-  select count(*) into v_active_assignments
-   from kitluy_devices.device_assignments where state = 'active';
-  select count(*) into v_projections from kitluy_devices.device_assignment_projections;
+  select count(*) into v_active_without_dev_projection
+    from kitluy_devices.device_assignments a
+   where a.state = 'active'
+     and not exists (
+       select 1 from kitluy_devices.device_assignment_projections p
+        where p.assignment_id = a.id and p.environment = 'development');
+  select count(*) into v_foreign_projections from kitluy_devices.device_assignment_projections
+   where environment in ('pilot', 'production');
 
   if v_awaiting = 0 then
     raise exception 'FAIL WS11-P2: no claimed device reports BLOCKED_PRODUCTION_INELIGIBLE';
   end if;
-  if v_active_assignments <> 0 then
-    raise exception 'FAIL WS11-P2: % assignment(s) are active though no device is production-eligible', v_active_assignments;
+  if v_active_without_dev_projection <> 0 then
+    raise exception 'FAIL WS11-P2: % active assignment(s) lack the development activation projection the ballot requires', v_active_without_dev_projection;
+  end if;
+  if v_foreign_projections <> 0 then
+    raise exception 'FAIL WS11-P2: % offline projection(s) exist for pilot/production while those environments fail closed', v_foreign_projections;
   end if;
   if exists (select 1 from kitluy_devices.certified_hardware_skus) then
     raise exception 'FAIL WS11-P2: a certified hardware SKU exists; KLD-2026-07-28-002 section 4 leaves SKU certification to the owner and procurement';
@@ -2791,10 +2812,7 @@ begin
   if exists (select 1 from kitluy_devices.devices where production_eligible) then
     raise exception 'FAIL WS11-P2: a device is production-eligible with no certified SKU';
   end if;
-  if v_projections <> 0 then
-    raise exception 'FAIL WS11-P2: % offline projection(s) exist though no activation has ever succeeded', v_projections;
-  end if;
-  raise notice 'PASS WS11-P2: the service path reads the fleet view; % device(s) report BLOCKED_PRODUCTION_INELIGIBLE, zero assignments are active, zero offline projections exist, the certified-SKU table is empty and no device is production-eligible', v_awaiting;
+  raise notice 'PASS WS11-P2: the service path reads the fleet view; % device(s) report BLOCKED_PRODUCTION_INELIGIBLE, every active assignment stands on a development projection, zero pilot/production projections exist, the certified-SKU table is empty and no device is production-eligible (KLD-2026-07-28-002)', v_awaiting;
 end $$;
 rollback;
 
@@ -2894,4 +2912,52 @@ begin
 end $$;
 rollback;
 
-select 'rls-tests complete: 14+9 baseline cases; cycle-5 WS5 7 negative + 7 positive and WS6 10 negative + 9 positive; cycle-6 WS7 13 negative + 6 positive and WS8 13 negative + 6 positive; cycle-10 WS11 T001 4 negative + 1 positive and T002 3 negative + 1 positive kitluy_devices cases executed; WS-11-T004-P02A 3 negative provisioning-code cases executed' as result;
+-- WS11-N11: anon cannot execute the issuance door; PUBLIC cannot; and the
+-- door's only granted surface is `authenticated` (0163).
+-- The catalog checks run FIRST, as the migration role, because evaluating the
+-- function identity under a schema-denied role is itself refused.
+begin;
+do $$
+begin
+  if has_function_privilege('public',
+       'kitluy_devices.issue_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or has_function_privilege('anon',
+       'kitluy_devices.issue_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or has_function_privilege('service_role',
+       'kitluy_devices.issue_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or not has_function_privilege('authenticated',
+       'kitluy_devices.issue_terminal_provisioning_code_v1(uuid, text, text)', 'execute') then
+    raise exception 'FAIL WS11-N11: the door''s grant boundary is wrong';
+  end if;
+  raise notice 'PASS WS11-N11a: PUBLIC, anon and service_role hold nothing on the issuance door; only authenticated may call it';
+end $$;
+select set_config('request.jwt.claims', '{"role":"anon"}', true);
+set local role anon;
+do $$
+declare
+  v_result jsonb;
+  v_refused boolean := false;
+begin
+  begin
+    v_result := kitluy_devices.issue_terminal_provisioning_code_v1(
+      gen_random_uuid(), 'n11-probe', null);
+    if (v_result ->> 'outcome') = 'ISSUED' then
+      raise exception 'FAIL WS11-N11: anon issued a provisioning code: %', v_result;
+    end if;
+    -- A governed refusal would still prove EXECUTE reached the door; the
+    -- privilege boundary must fire first.
+    if (v_result ->> 'refusal_code') <> 'KLUY-PROVCODE-UNAUTHENTICATED' then
+      raise exception 'FAIL WS11-N11: anon reached the door body: %', v_result;
+    end if;
+    v_refused := true;
+  exception when insufficient_privilege then
+    v_refused := true;
+  end;
+  if not v_refused then
+    raise exception 'FAIL WS11-N11: the anon probe did not run';
+  end if;
+  raise notice 'PASS WS11-N11b: anon cannot execute the issuance door';
+end $$;
+rollback;
+
+select 'rls-tests complete: 14+9 baseline cases; cycle-5 WS5 7 negative + 7 positive and WS6 10 negative + 9 positive; cycle-6 WS7 13 negative + 6 positive and WS8 13 negative + 6 positive; cycle-10 WS11 T001 4 negative + 1 positive and T002 3 negative + 1 positive kitluy_devices cases executed; WS-11-T004-P02A 3 negative provisioning-code cases executed; WS-11-T004-P02B1 issuance-door boundary case executed' as result;

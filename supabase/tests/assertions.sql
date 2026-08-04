@@ -14032,4 +14032,286 @@ exception when others then
 end
 $section49$;
 
+-- ============================================================================
+-- SECTION 50 — governed terminal provisioning-code issuance (migration 0163).
+--
+-- WS-11-T004-P02B1. The door derives everything: actor, scope, Hub, profile,
+-- environment, expiry. Proved here: success, exact time and digest contracts,
+-- the active-Hub gate, the permission gate, one-outstanding, idempotency and
+-- every refusal — through the door as `authenticated`, the only granted role.
+-- ============================================================================
+do $section50$
+declare
+  v_tenant uuid := '00000000-0000-4000-8000-000000000011';
+  v_store uuid := '00000000-0000-4000-8000-000000000015';
+  v_location uuid := '00000000-0000-4000-8000-000000000018';
+  v_profile uuid;
+  v_hub uuid;
+  v_terminal uuid;
+  v_terminal2 uuid;
+  v_token text;
+  v_payload text;
+  v_claim uuid;
+  v_req text := 'req-s50-' || gen_random_uuid();
+  v_idem text := repeat('2b', 32);
+  v_prep jsonb;
+  v_activation kitluy_devices.activation_outcome;
+  v_operator uuid := gen_random_uuid();
+  v_noGrant uuid := gen_random_uuid();
+  v_pilotGrant uuid := gen_random_uuid();
+  v_tassignment uuid;
+  v_tassignment2 uuid;
+  v_result jsonb;
+  v_code_id uuid;
+  v_raw text;
+  v_state record;
+  v_cnt integer;
+begin
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+
+  -- Operator identities (fixture humans with real auth.users rows; auth.users
+  -- inserts run as postgres. The kitluy_auth grant rows go through
+  -- service_role, then it's dropped.
+  insert into auth.users (id, instance_id, aud, role, email, encrypted_password,
+                          email_confirmed_at, created_at, updated_at)
+  values (v_operator, '00000000-0000-0000-0000-000000000000', 'authenticated',
+          'authenticated', 's50-operator@fixture.invalid', '', now(), now(), now()),
+         (v_noGrant, '00000000-0000-0000-0000-000000000000', 'authenticated',
+          'authenticated', 's50-nogrant@fixture.invalid', '', now(), now(), now()),
+         (v_pilotGrant, '00000000-0000-0000-0000-000000000000', 'authenticated',
+          'authenticated', 's50-pilot@fixture.invalid', '', now(), now(), now());
+  set local role service_role;
+  insert into kitluy_auth.temporary_grants (subject_id, permission_key, environment, starts_at, expires_at, reason)
+  values
+    (v_operator, 'fleet.device_provisioning_code.issue', 'development',
+     now() - interval '1 minute', now() + interval '10 minutes', 'section-50 fixture: the authorized installer'),
+    (v_pilotGrant, 'fleet.device_provisioning_code.issue', 'pilot',
+     now() - interval '1 minute', now() + interval '10 minutes', 'section-50 fixture: wrong-environment grant');
+  reset role;
+
+  -- A Hub, claimed and redeemed.
+  v_hub := kitluy_devices.enroll_device_v1(
+    'WS11-S50-HUB-' || gen_random_uuid(), v_profile, now() - interval '30 days',
+    repeat('4d', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', '5a:05:' || substr(md5(random()::text),1,6) || ':05'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-s50hub-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-s50hub-' || gen_random_uuid())));
+  v_token := repeat('6e', 32);
+  v_payload := repeat('7f', 32);
+  v_claim := kitluy_devices.create_device_claim_v1(
+    v_hub, v_tenant, v_store, v_location, v_token, v_payload, 900, 'OP-PROBE');
+  perform kitluy_devices.redeem_device_claim_v1(v_token, v_payload, v_hub, 'HUB-AGENT');
+
+  -- Trusted time first: certificate issuance and activation both refuse
+  -- KLUY-DEVICE-TIME-UNTRUSTED without it.
+  perform kitluy_devices.evaluate_trusted_time_v1(
+    v_hub, 'development', null, now(), null, gen_random_uuid());
+  -- Its operational certificate (the BLK-005-era table activation reads; the
+  -- gate resolves for development and fails closed for pilot/production).
+  perform kitluy_devices.issue_device_certificate_v1(
+    v_hub, 'development', 'SERIAL-S50-HUB-' || gen_random_uuid(), repeat('4d', 32), 'OP-PROBE');
+
+  -- A terminal with its own assignment and profile, and a second one for the
+  -- conflicting-replay case.
+  v_terminal := kitluy_devices.enroll_device_v1(
+    'WS11-S50-TERM-' || gen_random_uuid(), v_profile, now() - interval '30 days',
+    repeat('1c', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', '6b:06:' || substr(md5(random()::text),1,6) || ':06'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-s50term-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-s50term-' || gen_random_uuid())));
+  v_token := repeat('8a', 32);
+  v_payload := repeat('9b', 32);
+  v_claim := kitluy_devices.create_device_claim_v1(
+    v_terminal, v_tenant, v_store, v_location, v_token, v_payload, 900, 'OP-PROBE');
+  perform kitluy_devices.redeem_device_claim_v1(v_token, v_payload, v_terminal, 'TERM-AGENT');
+  v_tassignment := kitluy_devices.assign_terminal_profile_v1(
+    v_terminal, 1, 'laundry.t1.cashier', v_location, 'OP-PROBE');
+
+  v_terminal2 := kitluy_devices.enroll_device_v1(
+    'WS11-S50-TERM2-' || gen_random_uuid(), v_profile, now() - interval '30 days',
+    repeat('3e', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', '7c:07:' || substr(md5(random()::text),1,6) || ':07'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-s50term2-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-s50term2-' || gen_random_uuid())));
+  v_token := repeat('0f', 32);
+  v_payload := repeat('2a', 32);
+  v_claim := kitluy_devices.create_device_claim_v1(
+    v_terminal2, v_tenant, v_store, v_location, v_token, v_payload, 900, 'OP-PROBE');
+  perform kitluy_devices.redeem_device_claim_v1(v_token, v_payload, v_terminal2, 'TERM2-AGENT');
+  v_tassignment2 := kitluy_devices.assign_terminal_profile_v1(
+    v_terminal2, 1, 'laundry.t3.ready_scan', v_location, 'OP-PROBE');
+
+  -- -------------------------------------------------------------------------
+  -- REFUSALS FIRST, while the Hub is NOT yet active (ordering gate).
+  -- -------------------------------------------------------------------------
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_operator, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  v_result := kitluy_devices.issue_terminal_provisioning_code_v1(v_tassignment, 's50-pre-activation', null);
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-HUB-INACTIVE' then
+    raise exception 'ASSERT FAIL: issuance with an inactive Hub did not fail KLUY-PROVCODE-HUB-INACTIVE: %', v_result;
+  end if;
+  reset role;
+
+  -- Unauthenticated caller (no claims at all).
+  perform set_config('request.jwt.claims', '', true);
+  set local role authenticated;
+  v_result := kitluy_devices.issue_terminal_provisioning_code_v1(v_tassignment, 's50-anon-call', null);
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-UNAUTHENTICATED' then
+    raise exception 'ASSERT FAIL: an unauthenticated caller was not refused: %', v_result;
+  end if;
+  reset role;
+
+  -- -------------------------------------------------------------------------
+  -- ACTIVATE THE HUB (governed path; the projection is the active marker).
+  -- -------------------------------------------------------------------------
+  v_activation := kitluy_devices.attempt_activate_device_v1(v_hub, 'development', 'OP-ACTIVATE');
+  if (select state from kitluy_devices.device_assignments where device_id = v_hub) <> 'active' then
+    raise exception 'ASSERT FAIL: the hub assignment did not activate: %', v_activation;
+  end if;
+
+  -- An authenticated human WITHOUT the permission.
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_noGrant, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  v_result := kitluy_devices.issue_terminal_provisioning_code_v1(v_tassignment, 's50-nogrant-call', null);
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-PERMISSION-DENIED' then
+    raise exception 'ASSERT FAIL: a human without the permission was not refused: %', v_result;
+  end if;
+  reset role;
+
+  -- Permission granted for the WRONG environment.
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_pilotGrant, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  v_result := kitluy_devices.issue_terminal_provisioning_code_v1(v_tassignment, 's50-pilot-call', null);
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-PERMISSION-DENIED' then
+    raise exception 'ASSERT FAIL: a pilot-scoped grant was honored in development: %', v_result;
+  end if;
+  reset role;
+
+  -- -------------------------------------------------------------------------
+  -- SUCCESS: the authorized human issues, and everything is derived.
+  -- -------------------------------------------------------------------------
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_operator, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  v_result := kitluy_devices.issue_terminal_provisioning_code_v1(v_tassignment, 's50-issue-1', 'first issue');
+  reset role;
+
+  if v_result ->> 'outcome' <> 'ISSUED' then
+    raise exception 'ASSERT FAIL: authorized issuance did not succeed: %', v_result;
+  end if;
+  v_code_id := (v_result ->> 'provisioning_code_id')::uuid;
+  v_raw := v_result ->> 'code';
+
+  -- The raw code: exactly 8 Crockford characters, no I/L/O/U.
+  if v_raw is null or length(v_raw) <> 8 or v_raw !~ '^[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{8}$' then
+    raise exception 'ASSERT FAIL: the returned code is not 8 valid Crockford characters';
+  end if;
+
+  select * into v_state from kitluy_devices.device_provisioning_codes where id = v_code_id;
+  if v_state.state::text <> 'issued' then
+    raise exception 'ASSERT FAIL: the issued code is not in state issued';
+  end if;
+  if v_state.failed_attempt_count <> 0 then
+    raise exception 'ASSERT FAIL: failed_attempt_count does not start at zero';
+  end if;
+  if v_state.terminal_profile_key <> 'laundry.t1.cashier'
+     or v_state.store_hub_device_id <> v_hub
+     or v_state.terminal_device_id <> v_terminal
+     or v_state.tenant_id <> v_tenant or v_state.digital_store_id <> v_store
+     or v_state.store_location_id <> v_location or v_state.environment <> 'development' then
+    raise exception 'ASSERT FAIL: the derived scope is wrong: %', row_to_json(v_state);
+  end if;
+  -- Expiry is EXACTLY 15 minutes after creation, from the authoritative clock.
+  if v_state.expires_at - v_state.created_at <> interval '15 minutes' then
+    raise exception 'ASSERT FAIL: expiry is not exactly 15 minutes after creation: %', v_state.expires_at - v_state.created_at;
+  end if;
+  -- The digest is sha-256 of the raw code; the payload binding is sha-256 of
+  -- the canonical scope string the door documented.
+  if v_state.code_digest <> encode(extensions.digest(v_raw, 'sha256'), 'hex') then
+    raise exception 'ASSERT FAIL: the stored digest is not sha-256 of the returned code';
+  end if;
+  -- The raw code is stored NOWHERE: not in the code row's other columns, not
+  -- in any event, not in the events table at all.
+  if exists (
+    select 1 from kitluy_devices.device_provisioning_code_events
+     where provisioning_code_id = v_code_id and detail::text like '%' || v_raw || '%') then
+    raise exception 'ASSERT FAIL: the raw code appears in an event';
+  end if;
+  if v_state.payload_sha256 = v_raw or v_state.idempotency_key = v_raw then
+    raise exception 'ASSERT FAIL: the raw code is persisted in a column';
+  end if;
+  -- Exactly ONE created event, with the operator attribution.
+  select count(*) into v_cnt from kitluy_devices.device_provisioning_code_events
+   where provisioning_code_id = v_code_id and event_type = 'CREATED';
+  if v_cnt <> 1 then
+    raise exception 'ASSERT FAIL: expected exactly one CREATED event, found %', v_cnt;
+  end if;
+  if not exists (
+    select 1 from kitluy_devices.device_provisioning_code_events
+     where provisioning_code_id = v_code_id and event_type = 'CREATED'
+       and actor_type = 'OPERATOR' and actor_ref = v_operator::text) then
+    raise exception 'ASSERT FAIL: the CREATED event is not attributed to the operator';
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- IDEMPOTENCY: identical replay, then a different key, then a conflict.
+  -- -------------------------------------------------------------------------
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_operator, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  v_result := kitluy_devices.issue_terminal_provisioning_code_v1(v_tassignment, 's50-issue-1', 'first issue');
+  if v_result ->> 'outcome' <> 'ALREADY_ISSUED' then
+    raise exception 'ASSERT FAIL: an identical replay was not ALREADY_ISSUED: %', v_result;
+  end if;
+  if (v_result ->> 'provisioning_code_id')::uuid <> v_code_id then
+    raise exception 'ASSERT FAIL: the replay did not return the canonical issuance id';
+  end if;
+  if v_result ? 'code' then
+    raise exception 'ASSERT FAIL: the replay returned a raw code — it must never reconstruct one';
+  end if;
+
+  -- A DIFFERENT idempotency key for the same assignment: governed OUTSTANDING.
+  v_result := kitluy_devices.issue_terminal_provisioning_code_v1(v_tassignment, 's50-issue-2', null);
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-OUTSTANDING' then
+    raise exception 'ASSERT FAIL: a second key for one assignment was not OUTSTANDING: %', v_result;
+  end if;
+
+  -- The SAME key for a DIFFERENT assignment: conflicting replay, closed.
+  v_result := kitluy_devices.issue_terminal_provisioning_code_v1(v_tassignment2, 's50-issue-1', null);
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-CONFLICTING-REPLAY' then
+    raise exception 'ASSERT FAIL: a conflicting replay was not refused: %', v_result;
+  end if;
+  reset role;
+
+  -- No residue from any refusal: one code row, one event, nothing else.
+  select count(*) into v_cnt from kitluy_devices.device_provisioning_codes
+   where terminal_assignment_id in (v_tassignment, v_tassignment2);
+  if v_cnt <> 1 then
+    raise exception 'ASSERT FAIL: expected exactly one code row after the refusals, found %', v_cnt;
+  end if;
+  select count(*) into v_cnt from kitluy_devices.device_provisioning_code_events
+   where provisioning_code_id = v_code_id;
+  if v_cnt <> 1 then
+    raise exception 'ASSERT FAIL: expected exactly one event after the refusals, found %', v_cnt;
+  end if;
+
+  raise notice 'PASS ws11-t004-provisioning-code-issuance: the door derives actor/scope/Hub/profile/environment/expiry; the active-Hub gate (ADMIN-QA-014), permission gate, unauthenticated and wrong-environment refusals all hold; the 8-char Crockford code is returned once and stored nowhere; digest = sha256(raw), expiry is exactly 15 minutes; one outstanding; identical replay ALREADY_ISSUED with no code and no second event; different key OUTSTANDING; conflicting key CONFLICTING_REPLAY; zero residue (0163)';
+end
+$section50$;
+--
+-- WS-11-T004-P02A. The schema foundation exists with its integrity machine,
+-- its TTL and attempt caps, its one-outstanding index, its append-only events
+-- and its default-deny posture — and NO runtime role can touch any of it yet.
+-- The borrow below is the ONLY way fixtures exist, and it is returned in the
+-- same block (exception-safe), exactly like section 40b.
+-- ============================================================================
+
+
 select 'assertions complete: groups 0010-0153 structural contract holds (incl. WS-11-T003 Step 4 Phase C — RC-022 spendability census CLOSED; governed emergency 0150–0153; RevocationGateway ships in @kitluy/device-identity)' as result;
