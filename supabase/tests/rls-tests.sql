@@ -2960,4 +2960,61 @@ begin
 end $$;
 rollback;
 
-select 'rls-tests complete: 14+9 baseline cases; cycle-5 WS5 7 negative + 7 positive and WS6 10 negative + 9 positive; cycle-6 WS7 13 negative + 6 positive and WS8 13 negative + 6 positive; cycle-10 WS11 T001 4 negative + 1 positive and T002 3 negative + 1 positive kitluy_devices cases executed; WS-11-T004-P02A 3 negative provisioning-code cases executed; WS-11-T004-P02B1 issuance-door boundary case executed' as result;
+-- WS11-N12: the presentation evaluator (0164) is an INTERNAL function: nothing
+-- but the test harness may execute it, and no runtime identity reaches it.
+-- The catalog checks run FIRST, as the migration role, because evaluating the
+-- function identity under a schema-denied role is itself refused.
+begin;
+do $$
+begin
+  if has_function_privilege('public',
+       'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
+     or has_function_privilege('anon',
+       'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
+     or has_function_privilege('authenticated',
+       'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
+     or has_function_privilege('service_role',
+       'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
+     or has_function_privilege('kitluy_worker_service',
+       'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
+     or has_function_privilege('kitluy_issuance_service',
+       'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute') then
+    raise exception 'FAIL WS11-N12: the evaluator is executable outside its boundary';
+  end if;
+  if not has_function_privilege('kitluy_test_harness',
+       'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute') then
+    raise exception 'FAIL WS11-N12: the test harness lost the evaluator';
+  end if;
+  -- The 0163 door's boundary must be untouched by 0164.
+  if not has_function_privilege('authenticated',
+       'kitluy_devices.issue_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or has_function_privilege('service_role',
+       'kitluy_devices.issue_terminal_provisioning_code_v1(uuid, text, text)', 'execute') then
+    raise exception 'FAIL WS11-N12: the issuance door drifted under 0164';
+  end if;
+  raise notice 'PASS WS11-N12a: the evaluator is harness-only; PUBLIC, anon, authenticated, service_role and the runtime services hold nothing; the issuance door is unchanged';
+end $$;
+select set_config('request.jwt.claims', '{"role":"anon"}', true);
+set local role anon;
+do $$
+declare
+  v_result jsonb;
+  v_refused boolean := false;
+begin
+  begin
+    v_result := kitluy_devices.evaluate_terminal_provisioning_code_v1(
+      gen_random_uuid(), 'ABCDEF12', gen_random_uuid(), 'TERMINAL', null);
+    -- Any answer at all proves EXECUTE reached the evaluator; the privilege
+    -- boundary must fire before the body.
+    raise exception 'FAIL WS11-N12: anon reached the evaluator: %', v_result;
+  exception when insufficient_privilege then
+    v_refused := true;
+  end;
+  if not v_refused then
+    raise exception 'FAIL WS11-N12: the anon probe did not run';
+  end if;
+  raise notice 'PASS WS11-N12b: anon cannot execute the presentation evaluator';
+end $$;
+rollback;
+
+select 'rls-tests complete: 14+9 baseline cases; cycle-5 WS5 7 negative + 7 positive and WS6 10 negative + 9 positive; cycle-6 WS7 13 negative + 6 positive and WS8 13 negative + 6 positive; cycle-10 WS11 T001 4 negative + 1 positive and T002 3 negative + 1 positive kitluy_devices cases executed; WS-11-T004-P02A 3 negative provisioning-code cases executed; WS-11-T004-P02B1 issuance-door boundary case executed; WS-11-T004-P02B2A presentation-evaluator boundary case executed' as result;

@@ -14305,6 +14305,328 @@ begin
   raise notice 'PASS ws11-t004-provisioning-code-issuance: the door derives actor/scope/Hub/profile/environment/expiry; the active-Hub gate (ADMIN-QA-014), permission gate, unauthenticated and wrong-environment refusals all hold; the 8-char Crockford code is returned once and stored nowhere; digest = sha256(raw), expiry is exactly 15 minutes; one outstanding; identical replay ALREADY_ISSUED with no code and no second event; different key OUTSTANDING; conflicting key CONFLICTING_REPLAY; zero residue (0163)';
 end
 $section50$;
+
+-- ============================================================================
+-- SECTION 51 — presentation, attempts and lockout (migration 0164).
+--
+-- WS-11-T004-P02B2A. The internal evaluator: MATCH_READY without consumption,
+-- every genuine failure counted atomically, the fifth locking terminally with
+-- its canonical reason, expiry as bookkeeping (never an attempt), and nothing
+-- brute-forceable persisted. All evaluator calls run as the borrowed test
+-- harness, returned exception-safely.
+-- ============================================================================
+do $section51$
+declare
+  v_tenant uuid := '00000000-0000-4000-8000-000000000011';
+  v_store uuid := '00000000-0000-4000-8000-000000000015';
+  v_location uuid := '00000000-0000-4000-8000-000000000018';
+  v_profile uuid;
+  v_hub uuid;
+  v_terminal uuid;
+  v_terminal2 uuid;
+  v_token text;
+  v_payload text;
+  v_claim uuid;
+  v_operator uuid := gen_random_uuid();
+  v_tassignment uuid;
+  v_tassignment2 uuid;
+  v_result jsonb;
+  v_code_id uuid;
+  v_raw text;
+  v_state record;
+  v_cnt integer;
+begin
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+
+  -- Operator with the issuance grant.
+  insert into auth.users (id, instance_id, aud, role, email, encrypted_password,
+                          email_confirmed_at, created_at, updated_at)
+  values (v_operator, '00000000-0000-0000-0000-000000000000', 'authenticated',
+          'authenticated', 's51-operator@fixture.invalid', '', now(), now(), now());
+  set local role service_role;
+  insert into kitluy_auth.temporary_grants (subject_id, permission_key, environment, starts_at, expires_at, reason)
+  values
+    (v_operator, 'fleet.device_provisioning_code.issue', 'development',
+     now() - interval '1 minute', now() + interval '30 minutes', 'section-51 fixture');
+  reset role;
+
+  -- A Hub, activated through the governed path.
+  v_hub := kitluy_devices.enroll_device_v1(
+    'WS11-S51-HUB-' || gen_random_uuid(), v_profile, now() - interval '30 days',
+    repeat('6d', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', '8d:08:' || substr(md5(random()::text),1,6) || ':08'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-s51hub-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-s51hub-' || gen_random_uuid())));
+  v_token := repeat('1e', 32);
+  v_payload := repeat('2f', 32);
+  v_claim := kitluy_devices.create_device_claim_v1(
+    v_hub, v_tenant, v_store, v_location, v_token, v_payload, 900, 'OP-PROBE');
+  perform kitluy_devices.redeem_device_claim_v1(v_token, v_payload, v_hub, 'HUB-AGENT');
+  perform kitluy_devices.evaluate_trusted_time_v1(
+    v_hub, 'development', null, now(), null, gen_random_uuid());
+  perform kitluy_devices.issue_device_certificate_v1(
+    v_hub, 'development', 'SERIAL-S51-HUB-' || gen_random_uuid(), repeat('6d', 32), 'OP-PROBE');
+  perform kitluy_devices.attempt_activate_device_v1(v_hub, 'development', 'OP-ACTIVATE');
+
+  -- Two terminals, each with its own assignment and profile.
+  v_terminal := kitluy_devices.enroll_device_v1(
+    'WS11-S51-TERM-' || gen_random_uuid(), v_profile, now() - interval '30 days',
+    repeat('7e', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', '9e:09:' || substr(md5(random()::text),1,6) || ':09'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-s51term-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-s51term-' || gen_random_uuid())));
+  v_token := repeat('3a', 32);
+  v_payload := repeat('4b', 32);
+  v_claim := kitluy_devices.create_device_claim_v1(
+    v_terminal, v_tenant, v_store, v_location, v_token, v_payload, 900, 'OP-PROBE');
+  perform kitluy_devices.redeem_device_claim_v1(v_token, v_payload, v_terminal, 'TERM-AGENT');
+  v_tassignment := kitluy_devices.assign_terminal_profile_v1(
+    v_terminal, 1, 'laundry.t1.cashier', v_location, 'OP-PROBE');
+
+  v_terminal2 := kitluy_devices.enroll_device_v1(
+    'WS11-S51-TERM2-' || gen_random_uuid(), v_profile, now() - interval '30 days',
+    repeat('8f', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', '0a:10:' || substr(md5(random()::text),1,6) || ':10'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-s51term2-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-s51term2-' || gen_random_uuid())));
+  v_token := repeat('5c', 32);
+  v_payload := repeat('6d', 32);
+  v_claim := kitluy_devices.create_device_claim_v1(
+    v_terminal2, v_tenant, v_store, v_location, v_token, v_payload, 900, 'OP-PROBE');
+  perform kitluy_devices.redeem_device_claim_v1(v_token, v_payload, v_terminal2, 'TERM2-AGENT');
+  v_tassignment2 := kitluy_devices.assign_terminal_profile_v1(
+    v_terminal2, 1, 'laundry.t1.cashier', v_location, 'OP-PROBE');
+
+  -- Issue ONE code for each of the two assignments through the governed door.
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_operator, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  v_result := kitluy_devices.issue_terminal_provisioning_code_v1(v_tassignment, 's51-issue-1', null);
+  if v_result ->> 'outcome' <> 'ISSUED' then
+    raise exception 'ASSERT FAIL: fixture issuance failed: %', v_result;
+  end if;
+  v_code_id := (v_result ->> 'provisioning_code_id')::uuid;
+  v_raw := v_result ->> 'code';
+  v_result := kitluy_devices.issue_terminal_provisioning_code_v1(v_tassignment2, 's51-issue-2', null);
+  if v_result ->> 'outcome' <> 'ISSUED' then
+    raise exception 'ASSERT FAIL: second fixture issuance failed: %', v_result;
+  end if;
+  reset role;
+
+  -- Borrow the harness for evaluator calls; returned before the block ends and
+  -- in the exception path.
+  execute format('grant kitluy_test_harness to %I', current_user);
+
+  -- -------------------------------------------------------------------------
+  -- MATCH_READY: exact code, then lowercase (normalization), neither consumes.
+  -- -------------------------------------------------------------------------
+  v_result := kitluy_devices.evaluate_terminal_provisioning_code_v1(
+    v_tassignment, v_raw, gen_random_uuid(), 'TERMINAL', v_terminal::text);
+  if v_result ->> 'outcome' <> 'MATCH_READY' then
+    raise exception 'ASSERT FAIL: the correct code did not produce MATCH_READY: %', v_result;
+  end if;
+  if v_result ? 'code' then
+    raise exception 'ASSERT FAIL: MATCH_READY returned a raw code';
+  end if;
+  v_result := kitluy_devices.evaluate_terminal_provisioning_code_v1(
+    v_tassignment, lower(v_raw), gen_random_uuid(), 'TERMINAL', v_terminal::text);
+  if v_result ->> 'outcome' <> 'MATCH_READY' then
+    raise exception 'ASSERT FAIL: the lowercase-normalized code did not produce MATCH_READY: %', v_result;
+  end if;
+  select * into v_state from kitluy_devices.device_provisioning_codes where id = v_code_id;
+  if v_state.state::text <> 'issued' or v_state.failed_attempt_count <> 0 then
+    raise exception 'ASSERT FAIL: a correct presentation consumed, redeemed or counted: %', row_to_json(v_state);
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- FAILURES, one at a time: wrong (1), too-short (2), forbidden-I (3),
+  -- punctuation (4). The FIFTH locks, terminally and exactly once.
+  -- -------------------------------------------------------------------------
+  v_result := kitluy_devices.evaluate_terminal_provisioning_code_v1(
+    v_tassignment, 'ZZZZZZZZ', gen_random_uuid(), 'TERMINAL', v_terminal::text);
+  if v_result ->> 'outcome' <> 'FAILED_PRESENTATION'
+     or (v_result ->> 'failed_attempt_count')::integer <> 1 then
+    raise exception 'ASSERT FAIL: the first failure did not count exactly one: %', v_result;
+  end if;
+  v_result := kitluy_devices.evaluate_terminal_provisioning_code_v1(
+    v_tassignment, 'ABCDEFG', gen_random_uuid(), 'TERMINAL', v_terminal::text);
+  if (v_result ->> 'failed_attempt_count')::integer <> 2 then
+    raise exception 'ASSERT FAIL: a too-short code did not count: %', v_result;
+  end if;
+  v_result := kitluy_devices.evaluate_terminal_provisioning_code_v1(
+    v_tassignment, 'ABCDEFGI', gen_random_uuid(), 'TERMINAL', v_terminal::text);
+  if (v_result ->> 'failed_attempt_count')::integer <> 3 then
+    raise exception 'ASSERT FAIL: a forbidden-I code did not count: %', v_result;
+  end if;
+  v_result := kitluy_devices.evaluate_terminal_provisioning_code_v1(
+    v_tassignment, 'ABCDE-1Z', gen_random_uuid(), 'TERMINAL', v_terminal::text);
+  if (v_result ->> 'failed_attempt_count')::integer <> 4 then
+    raise exception 'ASSERT FAIL: punctuation did not count: %', v_result;
+  end if;
+  v_result := kitluy_devices.evaluate_terminal_provisioning_code_v1(
+    v_tassignment, '00000000', gen_random_uuid(), 'TERMINAL', v_terminal::text);
+  if v_result ->> 'outcome' <> 'PRESENTATION_REFUSED'
+     or v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-LOCKED' then
+    raise exception 'ASSERT FAIL: the fifth failure did not lock: %', v_result;
+  end if;
+
+  -- The lock is terminal, exact and once.
+  select * into v_state from kitluy_devices.device_provisioning_codes where id = v_code_id;
+  if v_state.state::text <> 'locked' or v_state.failed_attempt_count <> 5
+     or v_state.locked_at is null or v_state.locked_reason <> 'MAX_ATTEMPTS_EXCEEDED' then
+    raise exception 'ASSERT FAIL: the lock is not terminal and exact: %', row_to_json(v_state);
+  end if;
+  select count(*) into v_cnt from kitluy_devices.device_provisioning_code_events
+   where provisioning_code_id = v_code_id and event_type = 'FAILED_ATTEMPT';
+  if v_cnt <> 5 then
+    raise exception 'ASSERT FAIL: expected exactly five FAILED_ATTEMPT events, found %', v_cnt;
+  end if;
+  select count(*) into v_cnt from kitluy_devices.device_provisioning_code_events
+   where provisioning_code_id = v_code_id and event_type = 'LOCKED';
+  if v_cnt <> 1 then
+    raise exception 'ASSERT FAIL: expected exactly one LOCKED event, found %', v_cnt;
+  end if;
+  select count(*) into v_cnt from kitluy_devices.device_provisioning_code_events
+   where provisioning_code_id = v_code_id and event_type = 'PRESENTED';
+  if v_cnt <> 2 then
+    raise exception 'ASSERT FAIL: expected exactly two PRESENTED events, found %', v_cnt;
+  end if;
+  -- A further presentation is the terminal answer with no new residue.
+  v_result := kitluy_devices.evaluate_terminal_provisioning_code_v1(
+    v_tassignment, v_raw, gen_random_uuid(), 'TERMINAL', v_terminal::text);
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-ALREADY-LOCKED' then
+    raise exception 'ASSERT FAIL: a presentation after lock was not ALREADY-LOCKED: %', v_result;
+  end if;
+  select count(*) into v_cnt from kitluy_devices.device_provisioning_code_events
+   where provisioning_code_id = v_code_id and event_type = 'FAILED_ATTEMPT';
+  if v_cnt <> 5 then
+    raise exception 'ASSERT FAIL: a presentation after lock added residue';
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- MALFORMED INPUT against the SECOND outstanding code: forbidden O, forbidden
+  -- L, forbidden U, unicode lookalike, whitespace — each counts, capped at five.
+  -- -------------------------------------------------------------------------
+  v_result := kitluy_devices.evaluate_terminal_provisioning_code_v1(
+    v_tassignment2, 'ABCDEFGO', gen_random_uuid(), 'TERMINAL', v_terminal2::text);
+  if (v_result ->> 'failed_attempt_count')::integer <> 1 then
+    raise exception 'ASSERT FAIL: a forbidden-O code did not count: %', v_result;
+  end if;
+  v_result := kitluy_devices.evaluate_terminal_provisioning_code_v1(
+    v_tassignment2, 'ABCDEFGL', gen_random_uuid(), 'TERMINAL', v_terminal2::text);
+  if (v_result ->> 'failed_attempt_count')::integer <> 2 then
+    raise exception 'ASSERT FAIL: a forbidden-L code did not count: %', v_result;
+  end if;
+  v_result := kitluy_devices.evaluate_terminal_provisioning_code_v1(
+    v_tassignment2, 'ABCDEFGU', gen_random_uuid(), 'TERMINAL', v_terminal2::text);
+  if (v_result ->> 'failed_attempt_count')::integer <> 3 then
+    raise exception 'ASSERT FAIL: a forbidden-U code did not count: %', v_result;
+  end if;
+  -- A Unicode lookalike (fullwidth zero) is not in the alphabet and counts.
+  v_result := kitluy_devices.evaluate_terminal_provisioning_code_v1(
+    v_tassignment2, '００００００００', gen_random_uuid(), 'TERMINAL', v_terminal2::text);
+  if (v_result ->> 'failed_attempt_count')::integer <> 4 then
+    raise exception 'ASSERT FAIL: a Unicode lookalike did not count: %', v_result;
+  end if;
+  -- Whitespace is not trimmed: '  ABC12345' is malformed and counts as the
+  -- terminal fifth.
+  v_result := kitluy_devices.evaluate_terminal_provisioning_code_v1(
+    v_tassignment2, '  ABC12345', gen_random_uuid(), 'TERMINAL', v_terminal2::text);
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-LOCKED' then
+    raise exception 'ASSERT FAIL: whitespace input did not lock as the fifth failure: %', v_result;
+  end if;
+
+  -- No residue from malformed presentation where NO code is outstanding:
+  -- a third assignment never issued one, and nothing was counted for it.
+  v_result := kitluy_devices.evaluate_terminal_provisioning_code_v1(
+    gen_random_uuid(), 'ABCDEF12', gen_random_uuid(), 'TERMINAL', v_terminal::text);
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-ASSIGNMENT-MISSING' then
+    raise exception 'ASSERT FAIL: a missing assignment was not refused: %', v_result;
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- EXPIRY through the sanctioned clock: one EXPIRED transition, one event,
+  -- no attempt counted, and a second presentation adds nothing.
+  -- -------------------------------------------------------------------------
+  -- Issue a third code (after the previous two locked; the assignments each
+  -- hold one outstanding... the second is now locked, the first is locked too,
+  -- so re-issuing the FIRST assignment is legitimate).
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_operator, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  v_result := kitluy_devices.issue_terminal_provisioning_code_v1(v_tassignment, 's51-issue-3', null);
+  if v_result ->> 'outcome' <> 'ISSUED' then
+    raise exception 'ASSERT FAIL: re-issuance after lock failed: %', v_result;
+  end if;
+  reset role;
+  v_code_id := (v_result ->> 'provisioning_code_id')::uuid;
+  v_raw := v_result ->> 'code';
+
+  insert into kitluy_ops.test_clock_policy (environment, enabled_by, decision_ref)
+  values ('test', 'section-51', 'KLD-2026-07-31-SECURITY-TEST-CLOCK-001')
+  on conflict (environment) do nothing;
+  perform kitluy_ops.test_clock_set_v1(now() + interval '20 minutes');
+
+  v_result := kitluy_devices.evaluate_terminal_provisioning_code_v1(
+    v_tassignment, v_raw, gen_random_uuid(), 'TERMINAL', v_terminal::text);
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-EXPIRED'
+     or v_result ->> 'state' is distinct from 'expired' then
+    raise exception 'ASSERT FAIL: the expired code did not fail closed as EXPIRED: %', v_result;
+  end if;
+  select count(*) into v_cnt from kitluy_devices.device_provisioning_code_events
+   where provisioning_code_id = v_code_id and event_type = 'EXPIRED';
+  if v_cnt <> 1 then
+    raise exception 'ASSERT FAIL: expected exactly one EXPIRED event, found %', v_cnt;
+  end if;
+  select failed_attempt_count into v_cnt from kitluy_devices.device_provisioning_codes
+   where id = v_code_id;
+  if v_cnt <> 0 then
+    raise exception 'ASSERT FAIL: expiry counted as a failed attempt';
+  end if;
+  -- A second presentation: terminal answer, no second event.
+  v_result := kitluy_devices.evaluate_terminal_provisioning_code_v1(
+    v_tassignment, v_raw, gen_random_uuid(), 'TERMINAL', v_terminal::text);
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-ALREADY-EXPIRED'
+     or v_result ->> 'state' is distinct from 'expired' then
+    raise exception 'ASSERT FAIL: the second expired presentation was not refused: %', v_result;
+  end if;
+  select count(*) into v_cnt from kitluy_devices.device_provisioning_code_events
+   where provisioning_code_id = v_code_id and event_type = 'EXPIRED';
+  if v_cnt <> 1 then
+    raise exception 'ASSERT FAIL: a duplicate EXPIRED event was appended';
+  end if;
+  delete from kitluy_ops.test_clock_policy where environment = 'test';
+
+  -- -------------------------------------------------------------------------
+  -- PRIVILEGE CENSUS: the evaluator is internal; P02B1's door is unchanged.
+  -- -------------------------------------------------------------------------
+  if has_function_privilege('public', 'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
+     or has_function_privilege('anon', 'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
+     or has_function_privilege('authenticated', 'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
+     or has_function_privilege('service_role', 'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
+     or has_function_privilege('kitluy_worker_service', 'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute') then
+    raise exception 'ASSERT FAIL: the evaluator is executable outside the governor/harness boundary';
+  end if;
+  if not has_function_privilege('authenticated', 'kitluy_devices.issue_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or has_function_privilege('service_role', 'kitluy_devices.issue_terminal_provisioning_code_v1(uuid, text, text)', 'execute') then
+    raise exception 'ASSERT FAIL: the issuance door''s boundary drifted';
+  end if;
+
+  execute format('revoke kitluy_test_harness from %I', current_user);
+  raise notice 'PASS ws11-t004-presentation-attempts-lockout: MATCH_READY without consumption or raw-code return; lowercase normalizes to uppercase; wrong/short/forbidden-I,O,L,U/unicode/whitespace each count once as FAILED_ATTEMPT; the fifth failure locks terminally with MAX_ATTEMPTS_EXCEEDED and exactly one LOCKED event; locked takes no further presentations; expiry via the sanctioned clock transitions once with one EXPIRED event and zero attempts; no-outstanding and missing-assignment leave no residue; the evaluator stays internal and the issuance door is unchanged (0164)';
+exception when others then
+  begin
+    execute format('revoke kitluy_test_harness from %I', current_user);
+  exception when others then
+    null;
+  end;
+  raise;
+end
+$section51$;
 --
 -- WS-11-T004-P02A. The schema foundation exists with its integrity machine,
 -- its TTL and attempt caps, its one-outstanding index, its append-only events
