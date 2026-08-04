@@ -3098,4 +3098,76 @@ begin
 end $$;
 rollback;
 
-select 'rls-tests complete: 14+9 baseline cases; cycle-5 WS5 7 negative + 7 positive and WS6 10 negative + 9 positive; cycle-6 WS7 13 negative + 6 positive and WS8 13 negative + 6 positive; cycle-10 WS11 T001 4 negative + 1 positive and T002 3 negative + 1 positive kitluy_devices cases executed; WS-11-T004-P02A 3 negative provisioning-code cases executed; WS-11-T004-P02B1 issuance-door boundary case executed; WS-11-T004-P02B2A presentation-evaluator boundary case executed; WS-11-T004-P02B2B1 revocation-door boundary case executed' as result;
+-- WS11-N14: the canonical expiration helper (0166) is an INTERNAL function:
+-- nothing but the test harness may execute it, and the 0163/0164/0165
+-- boundaries are untouched. Catalog checks run FIRST, as the migration role.
+begin;
+do $$
+begin
+  if has_function_privilege('public',
+       'kitluy_devices.expire_terminal_provisioning_code_v1(uuid, uuid, text, text, text)', 'execute')
+     or has_function_privilege('anon',
+       'kitluy_devices.expire_terminal_provisioning_code_v1(uuid, uuid, text, text, text)', 'execute')
+     or has_function_privilege('authenticated',
+       'kitluy_devices.expire_terminal_provisioning_code_v1(uuid, uuid, text, text, text)', 'execute')
+     or has_function_privilege('service_role',
+       'kitluy_devices.expire_terminal_provisioning_code_v1(uuid, uuid, text, text, text)', 'execute')
+     or has_function_privilege('kitluy_worker_service',
+       'kitluy_devices.expire_terminal_provisioning_code_v1(uuid, uuid, text, text, text)', 'execute')
+     or has_function_privilege('kitluy_issuance_service',
+       'kitluy_devices.expire_terminal_provisioning_code_v1(uuid, uuid, text, text, text)', 'execute') then
+    raise exception 'FAIL WS11-N14: the expiration helper is executable outside its boundary';
+  end if;
+  if not has_function_privilege('kitluy_test_harness',
+       'kitluy_devices.expire_terminal_provisioning_code_v1(uuid, uuid, text, text, text)', 'execute') then
+    raise exception 'FAIL WS11-N14: the test harness lost the expiration helper';
+  end if;
+  -- The 0163/0164/0165 boundaries must be untouched by 0166.
+  if not has_function_privilege('authenticated',
+       'kitluy_devices.issue_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or has_function_privilege('service_role',
+       'kitluy_devices.issue_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or not has_function_privilege('authenticated',
+       'kitluy_devices.revoke_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or has_function_privilege('service_role',
+       'kitluy_devices.revoke_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or has_function_privilege('authenticated',
+       'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
+     or not has_function_privilege('kitluy_test_harness',
+       'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute') then
+    raise exception 'FAIL WS11-N14: an issuance, revocation or evaluator boundary drifted under 0166';
+  end if;
+  if has_table_privilege('authenticated',
+       'kitluy_devices.device_provisioning_codes', 'INSERT,UPDATE,DELETE')
+     or has_table_privilege('authenticated',
+       'kitluy_devices.device_provisioning_code_events', 'INSERT,UPDATE,DELETE')
+     or has_table_privilege('service_role',
+       'kitluy_devices.device_provisioning_codes', 'INSERT,UPDATE,DELETE') then
+    raise exception 'FAIL WS11-N14: a runtime identity holds direct mutation on provisioning-code tables';
+  end if;
+  raise notice 'PASS WS11-N14a: the expiration helper is harness-only; PUBLIC, anon, authenticated, service_role and the runtime services hold nothing; issuance, revocation and evaluator boundaries unchanged';
+end $$;
+select set_config('request.jwt.claims', '{"role":"anon"}', true);
+set local role anon;
+do $$
+declare
+  v_result jsonb;
+  v_refused boolean := false;
+begin
+  begin
+    v_result := kitluy_devices.expire_terminal_provisioning_code_v1(
+      gen_random_uuid(), gen_random_uuid(), 'TEST_HARNESS');
+    -- Any answer at all proves EXECUTE reached the helper; the privilege
+    -- boundary must fire before the body.
+    raise exception 'FAIL WS11-N14: anon reached the expiration helper: %', v_result;
+  exception when insufficient_privilege then
+    v_refused := true;
+  end;
+  if not v_refused then
+    raise exception 'FAIL WS11-N14: the anon probe did not run';
+  end if;
+  raise notice 'PASS WS11-N14b: anon cannot execute the expiration helper';
+end $$;
+rollback;
+
+select 'rls-tests complete: 14+9 baseline cases; cycle-5 WS5 7 negative + 7 positive and WS6 10 negative + 9 positive; cycle-6 WS7 13 negative + 6 positive and WS8 13 negative + 6 positive; cycle-10 WS11 T001 4 negative + 1 positive and T002 3 negative + 1 positive kitluy_devices cases executed; WS-11-T004-P02A 3 negative provisioning-code cases executed; WS-11-T004-P02B1 issuance-door boundary case executed; WS-11-T004-P02B2A presentation-evaluator boundary case executed; WS-11-T004-P02B2B1 revocation-door boundary case executed; WS-11-T004-P02B2B2A expiration-helper boundary case executed' as result;

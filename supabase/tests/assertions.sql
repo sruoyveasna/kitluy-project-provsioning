@@ -15356,4 +15356,512 @@ exception when others then
 end
 $section52$;
 
+-- ============================================================================
+-- SECTION 53 — canonical terminal-code expiration (migration 0166).
+--
+-- WS-11-T004-P02B2B2A. ONE expiration authority: the helper owns the
+-- due-time rule, the ISSUED->EXPIRED transition and the one EXPIRED event;
+-- the 0164 evaluator delegates. Proved here: contract violations, NOT-FOUND,
+-- NOT_DUE one second before, the exact equality boundary, delegated expiry
+-- with replay idempotency, terminal states never overwritten, attempts and
+-- bindings preserved, evaluator regression (MATCH/count/lockout/expiry
+-- vocabulary), revocation unchanged, and the full privilege census.
+-- ============================================================================
+do $section53$
+declare
+  v_tenant uuid := '00000000-0000-4000-8000-000000000011';
+  v_store uuid := '00000000-0000-4000-8000-000000000015';
+  v_location uuid := '00000000-0000-4000-8000-000000000018';
+  v_profile uuid;
+  v_hub uuid;
+  v_terminal uuid;
+  v_token text;
+  v_payload text;
+  v_claim uuid;
+  v_operator uuid := gen_random_uuid();
+  v_tassignments uuid[] := array[]::uuid[];
+  v_tassignment uuid;
+  v_terminals uuid[] := array[]::uuid[];
+  v_result jsonb;
+  v_code_ids uuid[] := array[]::uuid[];
+  v_raws text[] := array[]::text[];
+  v_expires timestamptz[] := array[]::timestamptz[];
+  v_state record;
+  v_cnt integer;
+  v_i integer;
+  v_refused boolean;
+  v_corr uuid;
+  v_locked_at timestamptz;
+  v_revoked_at timestamptz;
+begin
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+
+  insert into auth.users (id, instance_id, aud, role, email, encrypted_password,
+                          email_confirmed_at, created_at, updated_at)
+  values (v_operator, '00000000-0000-0000-0000-000000000000', 'authenticated',
+          'authenticated', 's53-operator@fixture.invalid', '', now(), now(), now());
+  set local role service_role;
+  insert into kitluy_auth.temporary_grants (subject_id, permission_key, environment, starts_at, expires_at, reason)
+  values
+    (v_operator, 'fleet.device_provisioning_code.issue', 'development',
+     now() - interval '1 minute', now() + interval '30 minutes', 'section-53 fixture: issuance'),
+    (v_operator, 'fleet.device_provisioning_code.revoke', 'development',
+     now() - interval '1 minute', now() + interval '30 minutes', 'section-53 fixture: revocation regression');
+  reset role;
+
+  -- A Hub, activated through the governed path.
+  v_hub := kitluy_devices.enroll_device_v1(
+    'WS11-S53-HUB-' || gen_random_uuid(), v_profile, now() - interval '30 days',
+    repeat('13', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', '3f:13:' || substr(md5(random()::text),1,6) || ':13'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-s53hub-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-s53hub-' || gen_random_uuid())));
+  v_token := repeat('9e', 32);
+  v_payload := repeat('af', 32);
+  v_claim := kitluy_devices.create_device_claim_v1(
+    v_hub, v_tenant, v_store, v_location, v_token, v_payload, 900, 'OP-PROBE');
+  perform kitluy_devices.redeem_device_claim_v1(v_token, v_payload, v_hub, 'HUB-AGENT');
+  perform kitluy_devices.evaluate_trusted_time_v1(
+    v_hub, 'development', null, now(), null, gen_random_uuid());
+  perform kitluy_devices.issue_device_certificate_v1(
+    v_hub, 'development', 'SERIAL-S53-HUB-' || gen_random_uuid(), repeat('13', 32), 'OP-PROBE');
+  perform kitluy_devices.attempt_activate_device_v1(v_hub, 'development', 'OP-ACTIVATE');
+
+  -- Eight terminals, eight assignments, eight codes (real-time issuance).
+  for v_i in 1..8 loop
+    v_terminal := kitluy_devices.enroll_device_v1(
+      'WS11-S53-TERM' || v_i || '-' || gen_random_uuid(), v_profile, now() - interval '30 days',
+      repeat(lpad(to_hex(v_i + 30), 2, '0'), 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+      jsonb_build_array(
+        jsonb_build_object('signal_type', 'mac_address',   'signal_value', '4e:4' || v_i || ':' || substr(md5(random()::text),1,6) || ':4' || v_i),
+        jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-s53term' || v_i || '-' || gen_random_uuid()),
+        jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-s53term' || v_i || '-' || gen_random_uuid())));
+    v_token := repeat(lpad(to_hex(v_i + 80), 2, '0'), 32);
+    v_payload := repeat(lpad(to_hex(v_i + 100), 2, '0'), 32);
+    v_claim := kitluy_devices.create_device_claim_v1(
+      v_terminal, v_tenant, v_store, v_location, v_token, v_payload, 900, 'OP-PROBE');
+    perform kitluy_devices.redeem_device_claim_v1(v_token, v_payload, v_terminal, 'TERM-AGENT');
+    v_tassignment := kitluy_devices.assign_terminal_profile_v1(
+      v_terminal, 1, 'laundry.t1.cashier', v_location, 'OP-PROBE');
+    v_tassignments := v_tassignments || v_tassignment;
+    v_terminals := v_terminals || v_terminal;
+  end loop;
+
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_operator, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  for v_i in 1..8 loop
+    v_result := kitluy_devices.issue_terminal_provisioning_code_v1(
+      v_tassignments[v_i], 's53-issue-' || v_i, null);
+    if v_result ->> 'outcome' <> 'ISSUED' then
+      raise exception 'ASSERT FAIL: fixture issuance % failed: %', v_i, v_result;
+    end if;
+    v_code_ids := v_code_ids || (v_result ->> 'provisioning_code_id')::uuid;
+    v_raws := v_raws || (v_result ->> 'code');
+    v_expires := v_expires || (v_result ->> 'expires_at')::timestamptz;
+  end loop;
+  reset role;
+
+  -- Helper and evaluator calls run under the borrowed harness (0164 pattern).
+  execute format('grant kitluy_test_harness to %I', current_user);
+
+  -- -------------------------------------------------------------------------
+  -- CONTRACT VIOLATIONS: no code, no correlation, bad trigger, bad actor,
+  -- NOT-FOUND — all refuse with no residue.
+  -- -------------------------------------------------------------------------
+  v_result := kitluy_devices.expire_terminal_provisioning_code_v1(null, gen_random_uuid(), 'TEST_HARNESS');
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-NO-CODE' then
+    raise exception 'ASSERT FAIL: a null code id was not refused: %', v_result;
+  end if;
+  v_result := kitluy_devices.expire_terminal_provisioning_code_v1(v_code_ids[1], null, 'TEST_HARNESS');
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-NO-CORRELATION' then
+    raise exception 'ASSERT FAIL: a null correlation id was not refused: %', v_result;
+  end if;
+  v_result := kitluy_devices.expire_terminal_provisioning_code_v1(v_code_ids[1], gen_random_uuid(), 'worker runtime');
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-BAD-TRIGGER-SOURCE' then
+    raise exception 'ASSERT FAIL: a malformed trigger source was not refused: %', v_result;
+  end if;
+  v_result := kitluy_devices.expire_terminal_provisioning_code_v1(v_code_ids[1], gen_random_uuid(), 'TEST_HARNESS', 'GHOST', null);
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-BAD-ACTOR-TYPE' then
+    raise exception 'ASSERT FAIL: a bad actor type was not refused: %', v_result;
+  end if;
+  v_result := kitluy_devices.expire_terminal_provisioning_code_v1(gen_random_uuid(), gen_random_uuid(), 'TEST_HARNESS');
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-NOT-FOUND' then
+    raise exception 'ASSERT FAIL: a nonexistent code was not refused NOT-FOUND: %', v_result;
+  end if;
+
+  -- The helper takes no time parameter and no scope parameter: the caller
+  -- CANNOT supply caller time, Tenant, Store, Location, Hub, profile or
+  -- environment.
+  if not exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'kitluy_devices' and p.proname = 'expire_terminal_provisioning_code_v1'
+       and regexp_replace(pg_get_function_arguments(p.oid), ' DEFAULT [^,]+', '', 'g')
+           = 'p_provisioning_code_id uuid, p_correlation_id uuid, p_trigger_source text, p_actor_type text, p_actor_ref text') then
+    raise exception 'ASSERT FAIL: the helper''s signature drifted — caller-supplied time or scope may have appeared';
+  end if;
+
+  -- The sanctioned test clock drives every due/not-due case below.
+  insert into kitluy_ops.test_clock_policy (environment, enabled_by, decision_ref)
+  values ('test', 'section-53', 'KLD-2026-07-31-SECURITY-TEST-CLOCK-001')
+  on conflict (environment) do nothing;
+
+  -- -------------------------------------------------------------------------
+  -- NOT DUE: one second BEFORE expires_at the code is valid; no mutation, no
+  -- event, no residue.
+  -- -------------------------------------------------------------------------
+  perform kitluy_ops.test_clock_set_v1(v_expires[3] - interval '1 second');
+  v_result := kitluy_devices.expire_terminal_provisioning_code_v1(
+    v_code_ids[3], gen_random_uuid(), 'TEST_HARNESS');
+  if v_result ->> 'outcome' <> 'NOT_DUE' or v_result ->> 'state' is distinct from 'issued' then
+    raise exception 'ASSERT FAIL: a code one second before expiry was not NOT_DUE: %', v_result;
+  end if;
+  select * into v_state from kitluy_devices.device_provisioning_codes where id = v_code_ids[3];
+  if v_state.state::text <> 'issued' then
+    raise exception 'ASSERT FAIL: NOT_DUE mutated the code';
+  end if;
+  if exists (select 1 from kitluy_devices.device_provisioning_code_events
+              where provisioning_code_id = v_code_ids[3] and event_type = 'EXPIRED') then
+    raise exception 'ASSERT FAIL: NOT_DUE appended an EXPIRED event';
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- THE EXACT EQUALITY BOUNDARY: authoritative_now = expires_at EXPIRES.
+  -- -------------------------------------------------------------------------
+  perform kitluy_ops.test_clock_set_v1(v_expires[2]);
+  v_corr := gen_random_uuid();
+  v_result := kitluy_devices.expire_terminal_provisioning_code_v1(
+    v_code_ids[2], v_corr, 'TEST_HARNESS');
+  if v_result ->> 'outcome' <> 'EXPIRED' or v_result ->> 'state' is distinct from 'expired' then
+    raise exception 'ASSERT FAIL: the equality boundary did not expire: %', v_result;
+  end if;
+  select * into v_state from kitluy_devices.device_provisioning_codes where id = v_code_ids[2];
+  if v_state.state::text <> 'expired' then
+    raise exception 'ASSERT FAIL: the equality boundary did not transition the row';
+  end if;
+  -- The transition used the authoritative (override) clock exactly.
+  if (v_result ->> 'expired_at')::timestamptz <> v_expires[2] then
+    raise exception 'ASSERT FAIL: expired_at is not the authoritative clock instant: %', v_result;
+  end if;
+  -- Exactly one EXPIRED event, attributed and safe.
+  select count(*) into v_cnt from kitluy_devices.device_provisioning_code_events
+   where provisioning_code_id = v_code_ids[2] and event_type = 'EXPIRED';
+  if v_cnt <> 1 then
+    raise exception 'ASSERT FAIL: expected exactly one EXPIRED event, found %', v_cnt;
+  end if;
+  if not exists (
+    select 1 from kitluy_devices.device_provisioning_code_events
+     where provisioning_code_id = v_code_ids[2] and event_type = 'EXPIRED'
+       and actor_type = 'SYSTEM' and reason_code = 'TTL_ELAPSED'
+       and correlation_id = v_corr
+       and detail ->> 'trigger_source' = 'TEST_HARNESS'
+       and tenant_id = v_tenant and digital_store_id = v_store
+       and store_location_id = v_location and environment = 'development') then
+    raise exception 'ASSERT FAIL: the EXPIRED event is misattributed or mis-scoped';
+  end if;
+  -- No raw code and no digest anywhere in the event.
+  if exists (
+    select 1 from kitluy_devices.device_provisioning_code_events
+     where provisioning_code_id = v_code_ids[2] and event_type = 'EXPIRED'
+       and (detail::text like '%' || v_raws[2] || '%'
+            or detail::text like '%' || v_state.code_digest || '%')) then
+    raise exception 'ASSERT FAIL: the EXPIRED event carries raw-code or digest material';
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- DUE EXPIRY + REPLAY IDEMPOTENCY: one second past expires_at expires;
+  -- the repeated call is ALREADY_EXPIRED with no second event; the
+  -- evaluator's second presentation is the stable terminal classification.
+  -- -------------------------------------------------------------------------
+  perform kitluy_ops.test_clock_set_v1(v_expires[1] + interval '1 second');
+  v_result := kitluy_devices.expire_terminal_provisioning_code_v1(
+    v_code_ids[1], gen_random_uuid(), 'TEST_HARNESS');
+  if v_result ->> 'outcome' <> 'EXPIRED' then
+    raise exception 'ASSERT FAIL: the due code did not expire: %', v_result;
+  end if;
+  v_result := kitluy_devices.expire_terminal_provisioning_code_v1(
+    v_code_ids[1], gen_random_uuid(), 'TEST_HARNESS');
+  if v_result ->> 'outcome' <> 'ALREADY_EXPIRED' then
+    raise exception 'ASSERT FAIL: the repeated call was not ALREADY_EXPIRED: %', v_result;
+  end if;
+  select count(*) into v_cnt from kitluy_devices.device_provisioning_code_events
+   where provisioning_code_id = v_code_ids[1] and event_type = 'EXPIRED';
+  if v_cnt <> 1 then
+    raise exception 'ASSERT FAIL: a duplicate EXPIRED event was appended';
+  end if;
+  v_result := kitluy_devices.evaluate_terminal_provisioning_code_v1(
+    v_tassignments[1], v_raws[1], gen_random_uuid(), 'TERMINAL', v_terminals[1]::text);
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-ALREADY-EXPIRED' then
+    raise exception 'ASSERT FAIL: a presentation after expiry was not ALREADY-EXPIRED: %', v_result;
+  end if;
+  select count(*) into v_cnt from kitluy_devices.device_provisioning_code_events
+   where provisioning_code_id = v_code_ids[1] and event_type = 'EXPIRED';
+  if v_cnt <> 1 then
+    raise exception 'ASSERT FAIL: the expired presentation appended an event';
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- ATTEMPTS AND BINDINGS PRESERVED: two genuine failures first (clock held
+  -- before expiry), then due expiry — count stays two, bindings untouched.
+  -- -------------------------------------------------------------------------
+  perform kitluy_ops.test_clock_set_v1(v_expires[7] - interval '60 seconds');
+  for v_i in 1..2 loop
+    v_result := kitluy_devices.evaluate_terminal_provisioning_code_v1(
+      v_tassignments[7], 'ZZZZZZZZ', gen_random_uuid(), 'TERMINAL', v_terminals[7]::text);
+  end loop;
+  perform kitluy_ops.test_clock_set_v1(v_expires[7] + interval '1 second');
+  v_result := kitluy_devices.expire_terminal_provisioning_code_v1(
+    v_code_ids[7], gen_random_uuid(), 'TEST_HARNESS');
+  if v_result ->> 'outcome' <> 'EXPIRED' then
+    raise exception 'ASSERT FAIL: the attempted code did not expire when due: %', v_result;
+  end if;
+  select * into v_state from kitluy_devices.device_provisioning_codes where id = v_code_ids[7];
+  if v_state.failed_attempt_count <> 2 then
+    raise exception 'ASSERT FAIL: expiry changed the attempt count: %', v_state.failed_attempt_count;
+  end if;
+  if v_state.expires_at - v_state.created_at <> interval '15 minutes'
+     or v_state.terminal_profile_key <> 'laundry.t1.cashier'
+     or v_state.terminal_assignment_id <> v_tassignments[7]
+     or v_state.tenant_id <> v_tenant or v_state.digital_store_id <> v_store
+     or v_state.store_location_id <> v_location or v_state.environment <> 'development'
+     or v_state.locked_at is not null or v_state.revoked_at is not null then
+    raise exception 'ASSERT FAIL: expiry mutated a preserved binding: %', row_to_json(v_state);
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- REVOKED IS NOT OVERWRITTEN: revoke code 4 through the 0165 door (itself
+  -- unchanged under 0166), then the helper answers ALREADY_REVOKED with no
+  -- mutation and no event.
+  -- -------------------------------------------------------------------------
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_operator, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  v_result := kitluy_devices.revoke_terminal_provisioning_code_v1(
+    v_code_ids[4], 's53-revoke-4', 'revoking before the expiry probe');
+  reset role;
+  if v_result ->> 'outcome' <> 'REVOKED' then
+    raise exception 'ASSERT FAIL: the revocation regression fixture failed: %', v_result;
+  end if;
+  select revoked_at into v_revoked_at from kitluy_devices.device_provisioning_codes
+   where id = v_code_ids[4];
+  v_result := kitluy_devices.expire_terminal_provisioning_code_v1(
+    v_code_ids[4], gen_random_uuid(), 'TEST_HARNESS');
+  if v_result ->> 'outcome' <> 'ALREADY_REVOKED' then
+    raise exception 'ASSERT FAIL: expiring a revoked code was not ALREADY_REVOKED: %', v_result;
+  end if;
+  select * into v_state from kitluy_devices.device_provisioning_codes where id = v_code_ids[4];
+  if v_state.state::text <> 'revoked' or v_state.revoked_at <> v_revoked_at then
+    raise exception 'ASSERT FAIL: expiry overwrote the revoked state';
+  end if;
+  if exists (select 1 from kitluy_devices.device_provisioning_code_events
+              where provisioning_code_id = v_code_ids[4] and event_type = 'EXPIRED') then
+    raise exception 'ASSERT FAIL: a revoked code gained an EXPIRED event';
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- LOCKED IS NOT OVERWRITTEN: five failures lock code 5 (clock held before
+  -- expiry); even when due, the helper answers ALREADY_LOCKED.
+  -- -------------------------------------------------------------------------
+  perform kitluy_ops.test_clock_set_v1(v_expires[5] - interval '60 seconds');
+  for v_i in 1..5 loop
+    v_result := kitluy_devices.evaluate_terminal_provisioning_code_v1(
+      v_tassignments[5], 'ZZZZZZZZ', gen_random_uuid(), 'TERMINAL', v_terminals[5]::text);
+  end loop;
+  select locked_at into v_locked_at from kitluy_devices.device_provisioning_codes
+   where id = v_code_ids[5];
+  if v_locked_at is null then
+    raise exception 'ASSERT FAIL: the lockout fixture did not lock';
+  end if;
+  perform kitluy_ops.test_clock_set_v1(v_expires[5] + interval '1 second');
+  v_result := kitluy_devices.expire_terminal_provisioning_code_v1(
+    v_code_ids[5], gen_random_uuid(), 'TEST_HARNESS');
+  if v_result ->> 'outcome' <> 'ALREADY_LOCKED' then
+    raise exception 'ASSERT FAIL: expiring a locked code was not ALREADY_LOCKED: %', v_result;
+  end if;
+  select * into v_state from kitluy_devices.device_provisioning_codes where id = v_code_ids[5];
+  if v_state.state::text <> 'locked' or v_state.locked_at <> v_locked_at then
+    raise exception 'ASSERT FAIL: expiry overwrote the locked state';
+  end if;
+  if exists (select 1 from kitluy_devices.device_provisioning_code_events
+              where provisioning_code_id = v_code_ids[5] and event_type = 'EXPIRED') then
+    raise exception 'ASSERT FAIL: a locked code gained an EXPIRED event';
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- REDEEMED IS NOT OVERWRITTEN: the borrowed governor closes code 6 as
+  -- redeemed (P02B3 ships the real door); the helper answers ALREADY_REDEEMED.
+  -- -------------------------------------------------------------------------
+  execute format('grant kitluy_activation_governor to %I', current_user);
+  set local role kitluy_activation_governor;
+  update kitluy_devices.device_provisioning_codes
+     set state = 'redeemed', redeemed_at = now()
+   where id = v_code_ids[6] and state = 'issued';
+  if not found then
+    raise exception 'ASSERT FAIL: the redeemed fixture did not transition';
+  end if;
+  reset role;
+  execute format('revoke kitluy_activation_governor from %I', current_user);
+  v_result := kitluy_devices.expire_terminal_provisioning_code_v1(
+    v_code_ids[6], gen_random_uuid(), 'TEST_HARNESS');
+  if v_result ->> 'outcome' <> 'ALREADY_REDEEMED' then
+    raise exception 'ASSERT FAIL: expiring a redeemed code was not ALREADY_REDEEMED: %', v_result;
+  end if;
+  select * into v_state from kitluy_devices.device_provisioning_codes where id = v_code_ids[6];
+  if v_state.state::text <> 'redeemed' then
+    raise exception 'ASSERT FAIL: expiry overwrote the redeemed state';
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- EVALUATOR REGRESSION on code 8: MATCH_READY (exact + lowercase), one
+  -- genuine failure, then the DELEGATED expiry under the due clock with the
+  -- established refusal vocabulary, then the stable terminal classification.
+  -- -------------------------------------------------------------------------
+  perform kitluy_ops.test_clock_set_v1(v_expires[8] - interval '60 seconds');
+  v_result := kitluy_devices.evaluate_terminal_provisioning_code_v1(
+    v_tassignments[8], v_raws[8], gen_random_uuid(), 'TERMINAL', v_terminals[8]::text);
+  if v_result ->> 'outcome' <> 'MATCH_READY' then
+    raise exception 'ASSERT FAIL: the unexpired correct code did not MATCH: %', v_result;
+  end if;
+  v_result := kitluy_devices.evaluate_terminal_provisioning_code_v1(
+    v_tassignments[8], lower(v_raws[8]), gen_random_uuid(), 'TERMINAL', v_terminals[8]::text);
+  if v_result ->> 'outcome' <> 'MATCH_READY' then
+    raise exception 'ASSERT FAIL: lowercase normalization regressed: %', v_result;
+  end if;
+  v_result := kitluy_devices.evaluate_terminal_provisioning_code_v1(
+    v_tassignments[8], 'ZZZZZZZZ', gen_random_uuid(), 'TERMINAL', v_terminals[8]::text);
+  if v_result ->> 'outcome' <> 'FAILED_PRESENTATION'
+     or (v_result ->> 'failed_attempt_count')::integer <> 1 then
+    raise exception 'ASSERT FAIL: the unexpired wrong code did not count exactly one: %', v_result;
+  end if;
+  perform kitluy_ops.test_clock_set_v1(v_expires[8] + interval '1 second');
+  v_corr := gen_random_uuid();
+  v_result := kitluy_devices.evaluate_terminal_provisioning_code_v1(
+    v_tassignments[8], v_raws[8], v_corr, 'TERMINAL', v_terminals[8]::text);
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-EXPIRED'
+     or v_result ->> 'state' is distinct from 'expired' then
+    raise exception 'ASSERT FAIL: the delegated expiry did not return the established classification: %', v_result;
+  end if;
+  select * into v_state from kitluy_devices.device_provisioning_codes where id = v_code_ids[8];
+  if v_state.state::text <> 'expired' or v_state.failed_attempt_count <> 1 then
+    raise exception 'ASSERT FAIL: the delegated expiry miscounted or mutated: %', row_to_json(v_state);
+  end if;
+  -- Exactly one EXPIRED event, from the canonical helper, naming the
+  -- presenter and the evaluator as the trigger source.
+  select count(*) into v_cnt from kitluy_devices.device_provisioning_code_events
+   where provisioning_code_id = v_code_ids[8] and event_type = 'EXPIRED';
+  if v_cnt <> 1 then
+    raise exception 'ASSERT FAIL: expected exactly one delegated EXPIRED event, found %', v_cnt;
+  end if;
+  if not exists (
+    select 1 from kitluy_devices.device_provisioning_code_events
+     where provisioning_code_id = v_code_ids[8] and event_type = 'EXPIRED'
+       and actor_type = 'TERMINAL' and actor_ref = v_terminals[8]::text
+       and correlation_id = v_corr
+       and detail ->> 'trigger_source' = 'PRESENTATION_EVALUATOR') then
+    raise exception 'ASSERT FAIL: the delegated EXPIRED event is misattributed';
+  end if;
+  -- No PRESENTED event from the expired presentation; the two earlier
+  -- MATCH_READY events stand.
+  select count(*) into v_cnt from kitluy_devices.device_provisioning_code_events
+   where provisioning_code_id = v_code_ids[8] and event_type = 'PRESENTED';
+  if v_cnt <> 2 then
+    raise exception 'ASSERT FAIL: PRESENTED residue regressed, found %', v_cnt;
+  end if;
+  v_result := kitluy_devices.evaluate_terminal_provisioning_code_v1(
+    v_tassignments[8], v_raws[8], gen_random_uuid(), 'TERMINAL', v_terminals[8]::text);
+  if v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-ALREADY-EXPIRED' then
+    raise exception 'ASSERT FAIL: the second expired presentation was not ALREADY-EXPIRED: %', v_result;
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- ISSUANCE + REVOCATION UNCHANGED UNDER 0166: code 3 (left issued after
+  -- its NOT_DUE probe) revokes cleanly through the 0165 door.
+  -- -------------------------------------------------------------------------
+  delete from kitluy_ops.test_clock_policy where environment = 'test';
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_operator, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  v_result := kitluy_devices.revoke_terminal_provisioning_code_v1(
+    v_code_ids[3], 's53-revoke-3', 'revocation regression after expiry refactor');
+  reset role;
+  if v_result ->> 'outcome' <> 'REVOKED' then
+    raise exception 'ASSERT FAIL: revocation regressed under 0166: %', v_result;
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- PRIVILEGE CENSUS: the helper is harness-only; nothing else drifted.
+  -- -------------------------------------------------------------------------
+  if has_function_privilege('public', 'kitluy_devices.expire_terminal_provisioning_code_v1(uuid, uuid, text, text, text)', 'execute')
+     or has_function_privilege('anon', 'kitluy_devices.expire_terminal_provisioning_code_v1(uuid, uuid, text, text, text)', 'execute')
+     or has_function_privilege('authenticated', 'kitluy_devices.expire_terminal_provisioning_code_v1(uuid, uuid, text, text, text)', 'execute')
+     or has_function_privilege('service_role', 'kitluy_devices.expire_terminal_provisioning_code_v1(uuid, uuid, text, text, text)', 'execute')
+     or has_function_privilege('kitluy_worker_service', 'kitluy_devices.expire_terminal_provisioning_code_v1(uuid, uuid, text, text, text)', 'execute')
+     or has_function_privilege('kitluy_issuance_service', 'kitluy_devices.expire_terminal_provisioning_code_v1(uuid, uuid, text, text, text)', 'execute')
+     or not has_function_privilege('kitluy_test_harness', 'kitluy_devices.expire_terminal_provisioning_code_v1(uuid, uuid, text, text, text)', 'execute') then
+    raise exception 'ASSERT FAIL: the expiration helper escaped its internal boundary';
+  end if;
+  if not has_function_privilege('authenticated', 'kitluy_devices.issue_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or has_function_privilege('service_role', 'kitluy_devices.issue_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or not has_function_privilege('authenticated', 'kitluy_devices.revoke_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or has_function_privilege('service_role', 'kitluy_devices.revoke_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or has_function_privilege('authenticated', 'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
+     or not has_function_privilege('kitluy_test_harness', 'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute') then
+    raise exception 'ASSERT FAIL: the issuance, revocation or evaluator boundary drifted under 0166';
+  end if;
+  if has_table_privilege('authenticated', 'kitluy_devices.device_provisioning_codes', 'INSERT,UPDATE,DELETE')
+     or has_table_privilege('authenticated', 'kitluy_devices.device_provisioning_code_events', 'INSERT,UPDATE,DELETE')
+     or has_table_privilege('service_role', 'kitluy_devices.device_provisioning_codes', 'INSERT,UPDATE,DELETE') then
+    raise exception 'ASSERT FAIL: a runtime identity holds direct mutation on provisioning-code tables';
+  end if;
+  if exists (
+    select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = 'kitluy_devices'
+       and c.relname in ('device_provisioning_codes', 'device_provisioning_code_events')
+       and (not c.relrowsecurity or not c.relforcerowsecurity)) then
+    raise exception 'ASSERT FAIL: FORCE RLS no longer holds on the provisioning-code tables';
+  end if;
+  if exists (
+    select 1 from pg_auth_members m join pg_roles r on r.oid = m.member
+     where m.roleid in ((select oid from pg_roles where rolname = 'kitluy_activation_governor'),
+                        (select oid from pg_roles where rolname = 'kitluy_credential_approval_reader'))
+       and r.rolcanlogin) then
+    raise exception 'ASSERT FAIL: a login-capable role is a member of a NOLOGIN authority';
+  end if;
+
+  -- The evaluator's signature is pinned to the 0164 shape.
+  if not exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'kitluy_devices' and p.proname = 'evaluate_terminal_provisioning_code_v1'
+       and regexp_replace(pg_get_function_arguments(p.oid), ' DEFAULT [^,]+', '', 'g')
+           = 'p_terminal_assignment_id uuid, p_presented_code text, p_correlation_id uuid, p_actor_type text, p_actor_ref text') then
+    raise exception 'ASSERT FAIL: the evaluator''s signature drifted under 0166';
+  end if;
+
+  -- Harness returned; sanctioned temporary grants removed; no residue.
+  execute format('revoke kitluy_test_harness from %I', current_user);
+  delete from kitluy_auth.temporary_grants where subject_id = v_operator;
+
+  raise notice 'PASS ws11-t004-canonical-expiration: one helper owns due-time evaluation (equality boundary expires, one second before is NOT_DUE), the ISSUED->EXPIRED transition and the one EXPIRED event; replay is ALREADY_EXPIRED with no duplicate; revoked/locked/redeemed are never overwritten; attempts and scope/Hub/profile bindings are preserved; the evaluator DELEGATES (established KLUY-PROVCODE-EXPIRED then ALREADY-EXPIRED vocabulary, no attempt on expiry, MATCH/count/lockout and lowercase normalization unchanged); issuance and revocation behave identically; the helper is harness-only and the 0163/0164/0165 boundaries stand (0166)';
+exception when others then
+  begin
+    execute format('revoke kitluy_test_harness from %I', current_user);
+  exception when others then
+    null;
+  end;
+  begin
+    execute format('revoke kitluy_activation_governor from %I', current_user);
+  exception when others then
+    null;
+  end;
+  begin
+    delete from kitluy_ops.test_clock_policy where environment = 'test';
+  exception when others then
+    null;
+  end;
+  raise;
+end
+$section53$;
+
 select 'assertions complete: groups 0010-0153 structural contract holds (incl. WS-11-T003 Step 4 Phase C — RC-022 spendability census CLOSED; governed emergency 0150–0153; RevocationGateway ships in @kitluy/device-identity)' as result;
