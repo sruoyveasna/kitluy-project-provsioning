@@ -34,6 +34,8 @@
     "typescript": "catalog:",
     "@types/node": "catalog:",
     "@types/pg": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "node-forge": "catalog:",
+    "@types/node-forge": "catalog:"
   }
 }

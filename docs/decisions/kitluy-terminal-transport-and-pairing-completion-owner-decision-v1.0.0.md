@@ -119,3 +119,23 @@ surface and does not rewrite the shipped revocation surface.
   remains `[REQUIRED]`;
 - T004 capability census — row 22 movement;
 - P03C handoff dependency section — dated cross-reference.
+
+---
+
+## 6. Implementation status
+
+| Decision area                                                                               | Status                                                                                                                                    |
+| ------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| §1 cloud bootstrap identity                                                                 | **IMPLEMENTED-IN-DEV** (WS-11-T004-P04A, `399817b`); made usable by a real terminal in P04A1 (`70056cb`)                                  |
+| §2 cloud route contract, headers, 16 KiB, rate limit                                        | **IMPLEMENTED-IN-DEV** (P04A)                                                                                                             |
+| §3 environment posture                                                                      | **HELD** — development composes; pilot and production fail closed inside `assert_pki_configuration_approved` (re-proven each package)     |
+| LAN transport (HTTPS/1.1, TLS 1.3, mTLS, 7443, `/edge/v1`, base64url, no WAN ingress)       | **IMPLEMENTED-IN-DEV** (WS-11-T004-P04B) — proven over real TLS 1.3 sockets                                                               |
+| Signed discovery (`_kitluy-edge._tcp.local`, 30 s refresh, 90 s validity, well-known route) | **IMPLEMENTED-IN-DEV** (P04B)                                                                                                             |
+| Lifecycle authorization matrix                                                              | **IMPLEMENTED-IN-DEV** (P04B) — per-request revalidation against the projected terminal and credential                                    |
+| LAN activation routes                                                                       | **PARTIAL** (P04B) — routes and the P04A1 signable-payload contract exist; the authenticated Hub→cloud bridge is BLK-006 and fails closed |
+| LAN pairing routes + 300 s challenge lifetime                                               | **IMPLEMENTED-IN-DEV** (P04B; Hub migration 0032 clamps to Hub-authoritative 300 s) — closes `[REQUIRED: pairing_challenge_lifetime]`     |
+| Terminal receipt persistence, receipt replication                                           | **NOT STARTED** — WS-11-T004-P04C                                                                                                         |
+
+Production TLS material, the Hub's cloud service identity and pilot/production
+PKI remain **BLK-005/BLK-006**; every certificate exercised so far is
+development-only and minted per test run.

@@ -767,4 +767,87 @@ describe.skipIf(!live)("terminal activation and provisioning completion (0174)",
       expect(Object.keys(line).sort().join(",")).toBe("correlationId,operation,result");
     }
   }, 90_000);
+
+  it("P04B: the activation challenge is terminal-signable — black-box signing, byte identity, byte-stable replay", async () => {
+    const s = await newStation("ACT-P04B");
+    const p = await provision(s, "P04B", "p04b");
+
+    const prepared = await activation.prepareActivation({
+      terminalAssignmentId: s.assignmentId,
+      redemptionIdempotencyKey: p.redemptionKey,
+    });
+    expect(prepared.result).toBe("ACTIVATION_PREPARED");
+    const material = prepared.data;
+    expect(material?.signatureAlgorithm).toBe("ed25519");
+    expect(material?.signingPayloadEncoding).toBe("base64url");
+    expect(String(material?.signingPayload)).toMatch(/^[A-Za-z0-9_-]+$/);
+    const payload = Buffer.from(String(material?.signingPayload), "base64url");
+    expect(payload.toString("utf8").startsWith("kitluy.activation-ack.v1\n")).toBe(true);
+
+    // BYTE IDENTITY: the server crypto authority reconstructs the same bytes
+    // independently from the authoritative context.
+    const { rows } = await keeper.query<{ r: Record<string, unknown> }>(
+      `select kitluy_devices.read_terminal_activation_challenge_context_v1($1::uuid) as r`,
+      [String(material?.activationChallengeId)],
+    );
+    const ctx = rows[0]?.r ?? {};
+    const serverBytes = Buffer.from(
+      activationAckBytes({
+        activationChallengeId: String(ctx.activation_challenge_id),
+        purpose: String(ctx.purpose),
+        activationId: String(ctx.activation_id),
+        tenantId: String(ctx.tenant_id),
+        digitalStoreId: String(ctx.digital_store_id),
+        storeLocationId: String(ctx.store_location_id),
+        environment: String(ctx.environment) as ActivationAckChallenge["environment"],
+        storeHubDeviceId: String(ctx.store_hub_device_id),
+        terminalDeviceId: String(ctx.terminal_device_id),
+        terminalAssignmentId: String(ctx.terminal_assignment_id),
+        terminalProfileKey: String(ctx.terminal_profile_key),
+        provisioningCodeId: String(ctx.provisioning_code_id),
+        popChallengeId: String(ctx.pop_challenge_id),
+        terminalKeyFingerprint: String(ctx.terminal_key_fingerprint),
+        certificateId: String(ctx.certificate_id),
+        certificateSerial: String(ctx.certificate_serial),
+        certificateFingerprint: String(ctx.certificate_fingerprint),
+        nonce: String(ctx.nonce),
+        issuedAt: new Date(String(ctx.created_at)),
+        expiresAt: new Date(String(ctx.expires_at)),
+      }),
+    );
+    expect(payload.equals(serverBytes), "byte-identical canonical acknowledgment").toBe(true);
+
+    // BYTE-STABLE REPLAY: preparation reuses the outstanding challenge, so a
+    // lost response is recovered with the IDENTICAL payload.
+    const replay = await activation.prepareActivation({
+      terminalAssignmentId: s.assignmentId,
+      redemptionIdempotencyKey: p.redemptionKey,
+    });
+    expect(replay.data?.activationChallengeId).toBe(material?.activationChallengeId);
+    expect(
+      Buffer.from(String(replay.data?.signingPayload), "base64url").equals(payload),
+      "replayed payload is byte-identical",
+    ).toBe(true);
+
+    // THE BLACK-BOX TERMINAL: signs the decoded payload bytes and nothing
+    // else — no database read, no canonicalizer, no timestamp handling.
+    const signature = Buffer.from(
+      keys.provePossession(s.keyRef, Uint8Array.from(payload)),
+    ).toString("base64");
+    const completed = await activation.verifyAcknowledgmentAndActivate({
+      activationChallengeId: String(material?.activationChallengeId),
+      signatureBase64: signature,
+      terminalPublicKeyPem: s.pem,
+      idempotencyKey: `act-p04b-complete-${RUN}`,
+    });
+    expect(completed.result).toBe("ACTIVATED");
+
+    // After activation the prepare replay answers from the authoritative row
+    // and carries no further signable payload.
+    const afterwards = await activation.prepareActivation({
+      terminalAssignmentId: s.assignmentId,
+      redemptionIdempotencyKey: p.redemptionKey,
+    });
+    expect(afterwards.result).toBe("ALREADY_ACTIVATED");
+  }, 90_000);
 });

@@ -41,6 +41,7 @@ import {
   provisioningChallengeBytes,
   provisioningChallengeHash,
   verifyProvisioningPop,
+  activationAckBytes,
   activationAckHash,
   verifyActivationAck,
   type ProvisioningPopChallenge,
@@ -602,6 +603,19 @@ export interface ActivationChallengeMaterial {
   readonly certificateFingerprint: string;
   readonly terminalProfileKey: string;
   readonly correlationId: string;
+  /**
+   * WS-11-T004-P04B — the P04A1 discipline applied to activation:
+   * `signingPayload` is the EXACT canonical `kitluy.activation-ack.v1` bytes
+   * (reconstructed HERE from the authoritative context reader in the SAME
+   * transaction that prepared the challenge), encoded as unpadded base64url.
+   * The terminal signs these bytes verbatim; it never rebuilds them. A
+   * prepare replay reuses the outstanding challenge (0174), so the payload
+   * is byte-stable across retries. Challenge material, not a secret; never
+   * logged.
+   */
+  readonly signatureAlgorithm: string;
+  readonly signingPayloadEncoding: string;
+  readonly signingPayload: string;
 }
 
 export interface ActivationState {
@@ -665,6 +679,41 @@ export class TerminalActivationComposition {
           if (prepared.outcome !== "ACTIVATION_PREPARED") {
             return { result: mapRefusal(String(prepared.refusal_code ?? "")) } as const;
           }
+          // The canonical acknowledgment bytes, from the AUTHORITATIVE
+          // context reader in the SAME transaction — exactly the
+          // reconstruction the completion path performs independently
+          // (WS-11-T004-P04B; the P04A1 discipline). A prepare replay reuses
+          // the outstanding challenge, so retries are byte-stable.
+          const ctx = await callDoor(
+            client,
+            `kitluy_devices.read_terminal_activation_challenge_context_v1($1::uuid)`,
+            [String(prepared.activation_challenge_id)],
+          );
+          if (ctx.outcome !== "CONTEXT") {
+            return { result: mapRefusal(String(ctx.refusal_code ?? "")) } as const;
+          }
+          const canonical: ActivationAckChallenge = {
+            activationChallengeId: String(ctx.activation_challenge_id),
+            purpose: String(ctx.purpose),
+            activationId: String(ctx.activation_id),
+            tenantId: String(ctx.tenant_id),
+            digitalStoreId: String(ctx.digital_store_id),
+            storeLocationId: String(ctx.store_location_id),
+            environment: String(ctx.environment) as ActivationAckChallenge["environment"],
+            storeHubDeviceId: String(ctx.store_hub_device_id),
+            terminalDeviceId: String(ctx.terminal_device_id),
+            terminalAssignmentId: String(ctx.terminal_assignment_id),
+            terminalProfileKey: String(ctx.terminal_profile_key),
+            provisioningCodeId: String(ctx.provisioning_code_id),
+            popChallengeId: String(ctx.pop_challenge_id),
+            terminalKeyFingerprint: String(ctx.terminal_key_fingerprint),
+            certificateId: String(ctx.certificate_id),
+            certificateSerial: String(ctx.certificate_serial),
+            certificateFingerprint: String(ctx.certificate_fingerprint),
+            nonce: String(ctx.nonce),
+            issuedAt: new Date(String(ctx.created_at)),
+            expiresAt: new Date(String(ctx.expires_at)),
+          };
           const data: ActivationChallengeMaterial = {
             activationId: String(prepared.activation_id),
             activationChallengeId: String(prepared.activation_challenge_id),
@@ -678,6 +727,9 @@ export class TerminalActivationComposition {
             certificateFingerprint: String(prepared.certificate_fingerprint ?? ""),
             terminalProfileKey: String(prepared.terminal_profile_key ?? ""),
             correlationId: String(prepared.correlation_id),
+            signatureAlgorithm: SIGNATURE_ALGORITHM,
+            signingPayloadEncoding: SIGNING_PAYLOAD_ENCODING,
+            signingPayload: Buffer.from(activationAckBytes(canonical)).toString("base64url"),
           };
           return { result: "ACTIVATION_PREPARED", data } as const;
         },
