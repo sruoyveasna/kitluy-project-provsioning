@@ -194,7 +194,24 @@ export interface ChallengeMaterial {
   readonly terminalAssignmentId: string;
   readonly terminalProfileKey: string;
   readonly correlationId: string;
+  /**
+   * WS-11-T004-P04A1 — the terminal-signable contract. `signingPayload` is
+   * the EXACT canonical `kitluy.provisioning-pop.v1` bytes (built HERE from
+   * the door's authoritative material, never by the terminal), encoded as
+   * unpadded base64url. A terminal decodes it and signs those bytes verbatim
+   * with its manufacturing-enrollment private key — it never rebuilds them
+   * from timestamps, JSON fields or its own formatting, so parser drift
+   * cannot enter the signature. Challenge material, not a secret; still
+   * never logged.
+   */
+  readonly signatureAlgorithm: string;
+  readonly signingPayloadEncoding: string;
+  readonly signingPayload: string;
 }
+
+/** Locked by KLD-2026-08-05-TERMINAL-TRANSPORT-001 / the P04A1 package. */
+const SIGNATURE_ALGORITHM = "ed25519";
+const SIGNING_PAYLOAD_ENCODING = "base64url";
 
 export interface CompositionResult<T = undefined> {
   readonly result: ProvisioningResultCode;
@@ -289,6 +306,31 @@ export class TerminalProvisioningComposition {
           if (issued.outcome !== "POP_CHALLENGE_ISSUED") {
             return { result: mapRefusal(String(issued.refusal_code ?? "")) } as const;
           }
+          // The canonical signing bytes, built from the door's AUTHORITATIVE
+          // material through the one crypto canonicalizer — the SAME
+          // reconstruction the verification path performs independently from
+          // the context reader (both parse the same jsonb text of the same
+          // immutable row, so the bytes are identical whatever precision the
+          // database timestamps carry). The terminal signs these bytes
+          // verbatim; it never receives the scope identifiers as separate
+          // fields and never re-serializes anything.
+          const canonical: ProvisioningPopChallenge = {
+            challengeId: String(issued.challenge_id),
+            purpose: String(issued.purpose),
+            tenantId: String(issued.tenant_id),
+            digitalStoreId: String(issued.digital_store_id),
+            storeLocationId: String(issued.store_location_id),
+            environment: String(issued.environment) as ProvisioningPopChallenge["environment"],
+            storeHubDeviceId: String(issued.store_hub_device_id),
+            terminalDeviceId: String(issued.terminal_device_id),
+            terminalAssignmentId: String(issued.terminal_assignment_id),
+            terminalProfileKey: String(issued.terminal_profile_key),
+            provisioningCodeId: String(issued.provisioning_code_id),
+            terminalKeyFingerprint: String(issued.terminal_key_fingerprint),
+            nonce: String(issued.nonce),
+            issuedAt: new Date(String(issued.created_at)),
+            expiresAt: new Date(String(issued.expires_at)),
+          };
           const material: ChallengeMaterial = {
             challengeId: String(issued.challenge_id),
             challengeVersion: String(issued.challenge_version),
@@ -299,6 +341,11 @@ export class TerminalProvisioningComposition {
             terminalAssignmentId: String(issued.terminal_assignment_id),
             terminalProfileKey: String(issued.terminal_profile_key),
             correlationId: String(issued.correlation_id),
+            signatureAlgorithm: SIGNATURE_ALGORITHM,
+            signingPayloadEncoding: SIGNING_PAYLOAD_ENCODING,
+            signingPayload: Buffer.from(provisioningChallengeBytes(canonical)).toString(
+              "base64url",
+            ),
           };
           return { result: "CHALLENGE_ISSUED", material } as const;
         },

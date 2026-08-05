@@ -2387,3 +2387,15 @@ since P02C; no earlier suite probed a ghost challenge id on the verify path.
 Repaired by an EXACT-code mapping (no family widening) to
 `CHALLENGE_NOT_FOUND`; proven by route scenario E and the unchanged 56/56
 neighbor suites.
+
+## KLREC-2026-08-05-P04A1 — 0170 challenge issuance never reconciled; repaired forward by 0175 (WS-11-T004-P04A1)
+
+| Field | Value |
+| ----- | ----- |
+| Title | PoP challenge issuance duplicated ISSUED challenges on retry instead of reconciling |
+| Documented intent | The WS-11-T004-P04A owner package §5.2 step 5 ("issue or RECONCILE the existing PoP challenge") and the P02C handoff §3 both describe reconciliation |
+| Implemented behavior (defect) | `issue_terminal_provisioning_pop_challenge_v1` (0170) always inserted a fresh challenge with a fresh nonce; `uq_..._one_proof_per_code` constrains only verified/consumed, so duplicate ISSUED rows accumulated. Executable evidence at `399817b`: two calls on one outstanding code → two issued challenges, distinct nonces (P04A1 handoff §5) |
+| Why it became blocking | P04A1 hands real terminals the exact canonical signing bytes; a lost-response retry must be byte-stable (same challenge id, nonce, expiry). No composition- or route-level substitute exists: the composer has no discover-outstanding-challenge capability and a cache would be a second source of truth |
+| Repair (0175, forward; 0170 file untouched) | `create or replace` of the door with ONE added branch: after every inherited validation, an outstanding ISSUED challenge bound to the CURRENT sealed enrollment is returned exactly as first issued; the code-row FOR UPDATE lock serializes concurrent issuance; superseded-enrollment rows are not reused; ownership borrow per the 0125–0166 pattern (first apply attempt failed `42501 must be owner of function` — the applying role is not superuser); guard re-asserts governor ownership, the reconcile branch, the surviving insert path and the 0173 effective-privilege boundary |
+| Proof | From-zero reset 0000→0175 (74 files, guard NOTICE); db:test 229 = baseline; test:rls 131 = baseline; terminal-contract suite 7/7 (test D: same id/nonce/expiry, byte-identical payload, ONE row, retry payload verifies); regression 59/59 |
+| Status | CLOSED (0175, 2026-08-05) |

@@ -75,6 +75,38 @@ export interface BootstrapRouteResponse {
   readonly headers?: Readonly<Record<string, string>>;
 }
 
+/**
+ * The PUBLIC challenge contract a terminal consumes (WS-11-T004-P04A1) —
+ * the `challenge` object of a 201 response from
+ * `POST /v1/terminal-provisioning/challenges`.
+ *
+ * A terminal's whole signing procedure is: base64url-decode
+ * `signingPayload`, sign those exact bytes with its manufacturing-enrollment
+ * private key (`signatureAlgorithm`), and POST the unpadded-base64url
+ * signature with `challengeVersion` as `protocolVersion` to
+ * `/v1/terminal-provisioning/challenges/{challengeId}/verify` along with its
+ * own public key PEM. No database access, no scope inputs, no timestamp
+ * handling, no server canonicalization code.
+ */
+export interface TerminalSignableChallenge {
+  readonly challengeId: string;
+  /** Doubles as the verify route's `protocolVersion` value. */
+  readonly challengeVersion: string;
+  readonly purpose: string;
+  readonly nonce: string;
+  readonly issuedAt: string;
+  /** Authoritative expiry; an expired challenge stays unusable regardless of a retained payload. */
+  readonly expiresAt: string;
+  readonly terminalAssignmentId: string;
+  readonly terminalProfileKey: string;
+  /** Locked: "ed25519" (KLD-2026-08-05-TERMINAL-TRANSPORT-001). */
+  readonly signatureAlgorithm: string;
+  /** Locked: "base64url" (unpadded). */
+  readonly signingPayloadEncoding: string;
+  /** The EXACT canonical kitluy.provisioning-pop.v1 bytes, base64url. Sign verbatim. */
+  readonly signingPayload: string;
+}
+
 export interface TerminalProvisioningRouter {
   handle(request: BootstrapRouteRequest): Promise<BootstrapRouteResponse>;
 }
@@ -603,22 +635,31 @@ async function handleChallenges(
     return refusal(outcome.result, correlationId);
   }
   // The composition's approved terminal-facing material ONLY: no digest, no
-  // scope identifiers, no enrollment data (P02C contract; owner decision §1).
+  // scope identifiers as separate fields, no enrollment data (P02C contract;
+  // owner decision §1). `signingPayload` (P04A1) is the ONE opaque value a
+  // terminal signs — the exact canonical kitluy.provisioning-pop.v1 bytes as
+  // unpadded base64url — so a real terminal needs no database access, no
+  // server canonicalization code and no timestamp reformatting. Challenge
+  // material, not a secret; still never logged.
+  const challenge: TerminalSignableChallenge = {
+    challengeId: outcome.data.challengeId,
+    challengeVersion: outcome.data.challengeVersion,
+    purpose: outcome.data.purpose,
+    nonce: outcome.data.nonce,
+    issuedAt: outcome.data.issuedAt,
+    expiresAt: outcome.data.expiresAt,
+    terminalAssignmentId: outcome.data.terminalAssignmentId,
+    terminalProfileKey: outcome.data.terminalProfileKey,
+    signatureAlgorithm: outcome.data.signatureAlgorithm,
+    signingPayloadEncoding: outcome.data.signingPayloadEncoding,
+    signingPayload: outcome.data.signingPayload,
+  };
   return {
     status: 201,
     body: {
       result: "CHALLENGE_ISSUED",
       correlationId,
-      challenge: {
-        challengeId: outcome.data.challengeId,
-        challengeVersion: outcome.data.challengeVersion,
-        purpose: outcome.data.purpose,
-        nonce: outcome.data.nonce,
-        issuedAt: outcome.data.issuedAt,
-        expiresAt: outcome.data.expiresAt,
-        terminalAssignmentId: outcome.data.terminalAssignmentId,
-        terminalProfileKey: outcome.data.terminalProfileKey,
-      },
+      challenge: { ...challenge },
     },
   };
 }

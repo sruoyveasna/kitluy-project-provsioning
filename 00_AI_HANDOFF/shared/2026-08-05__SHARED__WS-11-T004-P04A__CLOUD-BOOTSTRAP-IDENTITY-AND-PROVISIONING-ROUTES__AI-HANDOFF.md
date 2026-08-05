@@ -180,13 +180,14 @@ the gate itself plus post-proof-failure residue-freeness are what F proves.
 
 ## 10. Remaining gaps → P04B / P04C
 
-- **Terminal-side canonical-payload acquisition:** the challenge response
-  carries the composition's approved material only (no tenant/store/location/
-  hub/code-row identifiers), so a REAL terminal cannot yet reconstruct the
-  `kitluy.provisioning-pop.v1` signing bytes from the response alone — the
-  suites sign from authoritative rows exactly as every prior suite did. The
-  terminal-client contract for obtaining/holding those facts is P04B scope;
-  widening the response here would have violated §5.2.
+- **Terminal-side canonical-payload acquisition:** ~~the challenge response
+  carries the composition's approved material only, so a REAL terminal cannot
+  yet reconstruct the signing bytes from the response alone~~ — **CLOSED
+  2026-08-05 by WS-11-T004-P04A1**: the challenge response now carries the
+  exact canonical bytes as one opaque `signingPayload` (unpadded base64url,
+  Ed25519), with migration 0175 making challenge retry byte-stable. See the
+  P04A1 handoff. The 0175 slot recorded as free below is therefore now
+  OCCUPIED — by that package, on executable evidence, not by this one.
 - Store Hub credential delivery (#28), activation transport, LAN mTLS +
   signed discovery, pairing routes, terminal receipt persistence (34/35
   terminal side) — P04B/P04C per the owner decision.
