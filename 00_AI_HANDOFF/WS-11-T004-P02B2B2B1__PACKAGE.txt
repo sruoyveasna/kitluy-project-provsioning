@@ -1,0 +1,1076 @@
+# KIMI SWARM PACKAGE
+# WS-11-T004-P02B2B2B1 — CORE EXPIRED-CODE REPLACEMENT ISSUANCE
+
+Repository:
+
+/c/Users/Hello-Evo-PC/Desktop/HET-KITLUY-PROJECT
+
+## Task identity
+
+Task:
+
+WS-11-T004 — Terminal (T1–T4) assignment and provisioning
+
+Working-title authority:
+
+DERIVED FROM AUTHORITATIVE SOURCES
+
+## Package identity
+
+Package ID:
+
+WS-11-T004-P02B2B2B1
+
+Single objective:
+
+Extend the governed terminal provisioning-code issuance door so that an
+overdue ISSUED code is expired through the canonical 0166 expiration authority
+and replaced by exactly one new provisioning-code row under a new idempotency
+key.
+
+The predecessor must remain immutable historical evidence.
+
+This package owns:
+
+- overdue-code detection inside the issuance transaction;
+- delegation to the canonical expiration helper;
+- replacement eligibility;
+- one new replacement row;
+- relational predecessor linkage when the current schema lacks it;
+- fresh code generation;
+- fresh 15-minute expiry;
+- exact idempotency behavior;
+- exact replacement event evidence;
+- focused serial and core concurrency tests.
+
+This package does not own:
+
+- broad race/recovery hardening beyond the required core races;
+- expiration workers;
+- expiration sweeps;
+- changes to explicit revocation;
+- changes to presentation or lockout;
+- successful code redemption;
+- proof-of-possession;
+- terminal certificate issuance;
+- terminal activation;
+- pairing;
+- provisioning-service HTTP routes;
+- final production service grants;
+- Store Hub changes.
+
+Do not start P02B2B2B2, P02B2B2C, P02B3 or P02C.
+
+---
+
+## 1. Hard execution limits
+
+Finish before either limit:
+
+- 59 minutes;
+- 100 platform steps.
+
+Target:
+
+- 45–50 minutes;
+- 65–75 steps;
+- 80 planned steps maximum.
+
+Reserve at least 15 steps for:
+
+- from-zero replay;
+- focused tests;
+- two core concurrency cases;
+- defect correction;
+- diff inspection;
+- atomic commit;
+- handoff;
+- clean exit.
+
+Checkpoints:
+
+- minute 0–5 / steps 1–10:
+  verify repository and Node 22;
+- minute 5–15 / steps 11–25:
+  confirm current issuance and replacement contract;
+- minute 15–37 / steps 26–55:
+  implement migration and focused tests;
+- minute 37–48 / steps 56–72:
+  replay and verify;
+- minute 48–55 / steps 73–88:
+  correct package defects, inspect and commit;
+- minute 55–59 / steps 89–95:
+  complete the handoff and exit cleanly.
+
+At minute 40 or step 65:
+
+- stop expanding scope.
+
+At minute 50 or step 80:
+
+- do not start a new substantive change.
+
+At minute 55 or step 90:
+
+- commit only verified work;
+- finish the handoff;
+- exit cleanly.
+
+When the package cannot safely finish:
+
+1. finish or roll back the current atomic change;
+2. run the available focused tests;
+3. commit only verified work;
+4. document the exact continuation point;
+5. assign the remainder to P02B2B2B2;
+6. leave the tree clean.
+
+Do not reach maxSteps=100 without a handoff.
+
+---
+
+## 2. Verify repository and toolchain
+
+Run:
+
+cd /c/Users/Hello-Evo-PC/Desktop/HET-KITLUY-PROJECT
+
+pwd
+git status --short
+git branch --show-current
+git rev-parse HEAD
+git log --oneline --decorate -20
+git rev-list --count @{u}..HEAD 2>/dev/null || true
+git remote get-url --push origin
+git diff --check
+where node
+node --version
+pnpm --version
+pnpm config get engine-strict
+
+Reported checkpoint:
+
+- expected HEAD: 2336b08;
+- branch: main;
+- tree: clean;
+- approximately 97 commits ahead;
+- push URL: disabled://push-requires-owner-approval;
+- Node: v22.23.0;
+- pnpm: 9.15.9;
+- engine-strict: true;
+- cloud migrations through 0166;
+- expected next migration: 0167;
+- Hub migrations through 0030;
+- db:test baseline: 212 PASS;
+- test:rls baseline: 115 PASS;
+- Hub db:test baseline: 35 PASS;
+- registry baseline: 233/233;
+- lifecycle baseline: 30/30;
+- census baseline: 14/14;
+- P02B2B2A: IMPLEMENTED-IN-DEV;
+- replacement issuance and later packages: NOT STARTED.
+
+Expected Node binary:
+
+C:\Users\Hello-Evo-PC\AppData\Local\kitluy-toolchain\
+node-v22.23.0-win-x64\node.exe
+
+Use the repository and live environment as authority.
+
+Stop and report BLOCKED when:
+
+- the tree contains unexplained changes;
+- Node 22 is not active;
+- engine enforcement is disabled;
+- migration 0167 already has another purpose;
+- migrations 0162–0166 differ from recorded evidence;
+- push is no longer disabled;
+- another package has already modified replacement issuance.
+
+Do not use Node 24 or `engine-strict=false`.
+
+---
+
+## 3. Read required authority
+
+Read in repository-required order:
+
+AGENTS.md
+CLAUDE.md
+KIMI.md
+PROJECT_HOME.md
+CONTRIBUTING.md
+SECURITY.md
+
+Then read:
+
+00_AI_HANDOFF/000_INDEX.md
+00_AI_HANDOFF/000_CURRENT_STATE.md
+00_AI_HANDOFF/000_ACTIVE_PHASE.md
+00_AI_HANDOFF/000_BLOCKERS.md
+
+Read all WS-11-T004 handoffs through P02B2B2A.
+
+Inspect:
+
+- migration 0162 — schema, constraints, event model;
+- migration 0163 — issuance door;
+- migration 0164 — presentation and lockout;
+- migration 0165 — explicit revocation;
+- migration 0166 — canonical expiration;
+- `issue_terminal_provisioning_code_v1`;
+- `expire_terminal_provisioning_code_v1`;
+- authoritative clock;
+- assignment and code lock order;
+- active-Hub projection and ordering gate;
+- idempotency conventions;
+- code-generation and digest-binding contract;
+- event vocabulary;
+- current grants and capability census.
+
+Do not modify migrations 0000–0166.
+
+---
+
+## 4. Core replacement rule
+
+After this package, issuance must follow this authoritative decision tree under
+one transaction and one assignment lock.
+
+### No current outstanding code
+
+Use the existing 0163 issuance behavior unchanged.
+
+### Current ISSUED code is not due
+
+Return the existing stable result:
+
+OUTSTANDING
+
+Do not:
+
+- expire it;
+- issue another code;
+- change its expiry;
+- append a replacement event.
+
+### Current ISSUED code is due
+
+1. delegate to `expire_terminal_provisioning_code_v1`;
+2. require a successful or already-expired canonical result;
+3. preserve the predecessor row as EXPIRED;
+4. reassess issuance eligibility;
+5. issue one new code row under the new idempotency key;
+6. return the raw replacement code only from the call that created it.
+
+### Existing terminal historical rows
+
+Do not mutate:
+
+- EXPIRED;
+- REVOKED;
+- LOCKED;
+- REDEEMED
+
+back to ISSUED.
+
+A replacement is always a separate row.
+
+### New idempotency key
+
+Replacement issuance requires a new idempotency key.
+
+Replaying the predecessor’s original issuance key must never create or identify
+a replacement.
+
+---
+
+## 5. Relational replacement lineage
+
+Inspect migration 0162 first.
+
+When no authoritative relational replacement link exists, add the minimum
+nullable self-reference, conceptually:
+
+replaces_provisioning_code_id uuid
+  references device_provisioning_codes(id)
+
+Use the exact repository naming convention.
+
+Requirements:
+
+- replacement row points to its immediate predecessor;
+- predecessor does not point forward;
+- no self-reference;
+- predecessor and replacement must belong to the same:
+  - Tenant;
+  - Digital Store;
+  - Location;
+  - Store Hub;
+  - assignment;
+  - terminal profile;
+  - environment;
+- one replacement row may directly replace one predecessor at most;
+- lineage cannot be modified after insertion;
+- authoritative lineage must not exist only in JSON metadata.
+
+Add a narrow unique constraint when required to guarantee one direct successor
+per predecessor.
+
+Do not add a speculative full generation tree, sequence system or JSON lineage.
+
+When the existing schema already provides an equivalent relational field,
+reuse it and do not add another.
+
+---
+
+## 6. Issuance-door integration
+
+Create additive migration 0167.
+
+Use `CREATE OR REPLACE` for
+`issue_terminal_provisioning_code_v1` only when necessary.
+
+Preserve its:
+
+- public signature;
+- owner;
+- permission;
+- authenticated execution boundary;
+- fixed search_path;
+- actor-resolution behavior;
+- scope derivation;
+- active-Hub gate;
+- T1–T4 profile derivation;
+- Crockford generation;
+- digest binding;
+- raw-code return rules;
+- initial issuance behavior;
+- grant posture.
+
+Do not create a competing replacement RPC.
+
+Replacement behavior belongs inside the governed issuance door because it owns:
+
+- issuance permission;
+- assignment scope;
+- active-Hub validation;
+- code generation;
+- digest creation;
+- idempotency;
+- created-event production.
+
+Do not weaken the active-Hub gate.
+
+---
+
+## 7. Transaction and lock order
+
+Use the established order:
+
+1. resolve authenticated actor;
+2. perform the safe coarse authorization gate;
+3. lock the terminal assignment;
+4. derive Tenant, Store, Location, Hub, profile and environment;
+5. perform exact scoped permission validation;
+6. evaluate idempotency under the lock;
+7. locate and lock any outstanding ISSUED code;
+8. evaluate authoritative time;
+9. call the canonical expiration helper when due;
+10. issue the replacement only after expiration eligibility is confirmed.
+
+The canonical helper uses the same assignment-first, code-second order and must
+remain safely re-entrant.
+
+Do not introduce:
+
+- code-first then assignment locking;
+- unlocked read-then-write replacement;
+- client-selected predecessor;
+- client-selected Hub or profile.
+
+---
+
+## 8. Active-Hub revalidation
+
+A replacement code must not be issued unless the assigned Store Hub satisfies
+the current 0163 activation gate at replacement time.
+
+Revalidate:
+
+- Tenant;
+- Digital Store;
+- Location;
+- environment;
+- current assignment;
+- current activation state;
+- revoked/replaced/inactive Hub state.
+
+The predecessor’s historical Hub binding is not proof that the Hub is still
+active.
+
+Do not:
+
+- copy an old active decision from the predecessor;
+- accept a caller-provided Hub;
+- bypass BLK-005;
+- invent pilot or production signing custody.
+
+Development activation remains governed by the recorded decision.
+
+Pilot and production remain fail-closed where BLK-005 requires it.
+
+---
+
+## 9. Canonical expiration interaction
+
+Do not reproduce expiration logic in the issuance function.
+
+The issuance function must call the 0166 canonical helper.
+
+Required behavior:
+
+### Due predecessor
+
+The predecessor must end as:
+
+- state = EXPIRED;
+- exactly one EXPIRED event;
+- unchanged attempts;
+- unchanged scope and assignment;
+- immutable historical row.
+
+### Helper returns ALREADY_EXPIRED
+
+Replacement may proceed only when:
+
+- the row is the expected predecessor;
+- no newer outstanding code exists;
+- all replacement eligibility checks still pass.
+
+### Helper returns NOT_DUE
+
+Return OUTSTANDING.
+
+No new code.
+
+### Helper returns REVOKED, LOCKED or REDEEMED classification
+
+Do not describe that row as an expired predecessor.
+
+Preserve existing issuance semantics for those terminal states.
+
+Do not overwrite them.
+
+---
+
+## 10. Replacement code
+
+The replacement must be a completely new row with:
+
+- a new UUID;
+- a new eight-character Crockford code;
+- a new digest;
+- a new canonical payload binding;
+- a new idempotency key;
+- a new created_at;
+- a new expires_at exactly 15 minutes after created_at;
+- state ISSUED;
+- failed-attempt count zero;
+- no terminal timestamps;
+- authoritative scope derived from the current assignment;
+- authoritative T1–T4 profile;
+- authoritative assigned Hub;
+- relational predecessor linkage when required.
+
+Do not copy:
+
+- digest;
+- raw code;
+- expiry;
+- failed-attempt count;
+- terminal-state timestamp;
+- revocation reason;
+- lock reason;
+- prior correlation ID.
+
+Raw code is returned exactly once from the successful replacement-creation
+call.
+
+It must not be persisted.
+
+---
+
+## 11. Idempotency behavior
+
+Preserve the existing 0163 idempotency contract.
+
+### New replacement key, initial success
+
+- expire the due predecessor canonically;
+- create one replacement row;
+- append one CREATED event for the replacement;
+- return the raw replacement code once.
+
+### Identical replay of the replacement key
+
+- return ALREADY_ISSUED or the established canonical replay result;
+- return the replacement row identity;
+- do not return or reconstruct the raw code;
+- do not append another CREATED event;
+- do not append another EXPIRED event.
+
+### Different key while replacement remains outstanding
+
+Return:
+
+OUTSTANDING
+
+No third row.
+
+### Replay of the predecessor’s old issuance key
+
+Return the canonical historical result for that predecessor.
+
+Do not:
+
+- create a replacement;
+- return the replacement identity as though it belonged to the old key;
+- return a new raw code.
+
+### Same replacement key with conflicting assignment or immutable input
+
+Return:
+
+CONFLICTING_REPLAY
+
+No loser residue.
+
+---
+
+## 12. Event evidence
+
+A successful replacement transaction must leave:
+
+### Predecessor
+
+Exactly one EXPIRED event, produced only by the canonical helper.
+
+### Replacement
+
+Exactly one CREATED event using the existing issuance event contract.
+
+The replacement event must safely indicate replacement provenance without
+putting authoritative lineage only in JSON.
+
+When a relational predecessor column is added, the event may include the
+predecessor ID as non-secret supplemental detail.
+
+Do not add duplicate events such as both:
+
+- CREATED; and
+- REPLACEMENT_CREATED
+
+unless the authoritative event registry explicitly requires both.
+
+Do not invent a new event type merely for wording convenience.
+
+No event may contain:
+
+- raw code;
+- digest;
+- candidate digest;
+- key material;
+- session token;
+- private key.
+
+---
+
+## 13. Eligibility and refusal cases
+
+Add focused executable coverage for:
+
+- unexpired outstanding code → OUTSTANDING;
+- due outstanding code → canonical expiration then replacement;
+- predecessor already expired with no outstanding successor;
+- predecessor revoked;
+- predecessor locked;
+- predecessor redeemed;
+- replacement already outstanding;
+- inactive Hub;
+- revoked Hub;
+- replaced Hub;
+- wrong Tenant;
+- wrong Store;
+- wrong Location;
+- wrong environment;
+- inactive or invalid assignment;
+- missing permission;
+- wrong-scope permission;
+- old idempotency-key replay;
+- conflicting replacement-key replay;
+- malformed idempotency key;
+- caller attempt to choose predecessor;
+- caller attempt to choose Hub;
+- caller attempt to choose T1–T4 profile;
+- caller-supplied time;
+- direct table mutation;
+- direct helper execution.
+
+Every refusal must leave:
+
+- no unauthorized replacement row;
+- no duplicate expiration event;
+- no duplicate created event;
+- no direct-grant residue;
+- no membership residue.
+
+---
+
+## 14. Required success tests
+
+Prove:
+
+- existing no-predecessor issuance still works;
+- unexpired issued code remains OUTSTANDING;
+- due issued code becomes EXPIRED;
+- replacement row is separate;
+- predecessor remains immutable;
+- replacement links relationally to the predecessor when required;
+- predecessor and replacement scope match exactly;
+- replacement uses the current assignment and Hub;
+- replacement profile is assignment-derived;
+- replacement code is eight valid Crockford characters;
+- replacement raw code is returned only once;
+- replacement raw code is not persisted;
+- replacement digest uses the existing binding contract;
+- replacement expires exactly 15 minutes after creation;
+- replacement attempts start at zero;
+- exactly one predecessor EXPIRED event exists;
+- exactly one replacement CREATED event exists;
+- identical replay creates no additional row or event;
+- old-key replay does not create replacement work;
+- unrelated assignments and scopes remain unchanged.
+
+Required package tests must have zero skips.
+
+---
+
+## 15. Core concurrency requirements
+
+Use genuinely separate PostgreSQL sessions and record backend PIDs.
+
+Each case must use its own assignment.
+
+### Race A — two different new replacement keys
+
+Start with one overdue ISSUED code.
+
+Run two replacement issuance calls concurrently with different new
+idempotency keys.
+
+Required:
+
+- predecessor EXPIRED;
+- one replacement ISSUED;
+- one caller receives success;
+- the other receives OUTSTANDING or the established stable result;
+- exactly one EXPIRED event;
+- exactly one replacement CREATED event;
+- one direct successor link;
+- no uncontrolled unique-constraint error.
+
+### Race B — same new replacement key
+
+Start with one overdue ISSUED code.
+
+Run two identical replacement calls concurrently.
+
+Required:
+
+- one predecessor expiration;
+- one replacement row;
+- one raw code returned by the creating call only;
+- one canonical replay;
+- one EXPIRED event;
+- one CREATED event.
+
+Do not add the broader revocation, Hub-state or recovery races in this package.
+
+Those belong to P02B2B2B2.
+
+---
+
+## 16. Security and grants
+
+Migration 0167 must preserve:
+
+- issuance permission;
+- authenticated governed door;
+- NOLOGIN owner;
+- fixed search_path;
+- PUBLIC refusal;
+- anon refusal;
+- no direct table grants;
+- no service_role table mutation;
+- no worker grant;
+- no owner-membership leak;
+- FORCE RLS on code and event tables;
+- internal expiration helper grant posture;
+- presentation and revocation boundaries.
+
+When a lineage column is added:
+
+- runtime identities cannot update it directly;
+- it is immutable after insertion;
+- RLS and trigger protections cover it.
+
+P02C still owns final production composition grants.
+
+---
+
+## 17. Migration assertions
+
+Migration 0167 must non-vacuously assert:
+
+- issuance function signature remains expected;
+- issuance owner remains the correct NOLOGIN authority;
+- issuance grants remain expected;
+- expiration helper owner/grants remain unchanged;
+- presentation and revocation boundaries remain unchanged;
+- replacement lineage column and FK exist when added;
+- lineage cannot self-reference;
+- direct-successor uniqueness exists when required;
+- lineage field is immutable;
+- code and event tables remain FORCE RLS;
+- no direct runtime mutation grant exists;
+- no raw-code column exists;
+- no new digest exposure exists;
+- no login-capable owner membership exists;
+- active-Hub gate remains reachable in the issuance function;
+- issuance delegates overdue expiration to the canonical helper;
+- no competing active expiration mutation remains in issuance.
+
+Avoid assertions that pass only because an object name exists.
+
+---
+
+## 18. Allowed files
+
+Expected categories:
+
+- one additive cloud migration, expected `0167_*`;
+- focused database assertions;
+- focused RLS and privilege tests;
+- one focused replacement integration/concurrency test;
+- P02B2B2B1 handoff;
+- evidence index/current-state updates required by convention.
+
+Do not modify:
+
+- migrations 0000–0166;
+- Hub migrations;
+- provisioning-service runtime;
+- Store Hub runtime;
+- UI;
+- certificate issuance;
+- pairing;
+- package dependencies;
+- production grants;
+- expiration worker code;
+- P02B3 redemption behavior.
+
+Record the exact file list before editing.
+
+---
+
+## 19. Verification sequence
+
+All canonical commands must use Node 22.23.0 with engine enforcement active.
+
+Serialize cloud and Hub database operations.
+
+Minimum fresh sequence:
+
+1. verify Node and pnpm;
+2. statically validate migration 0167;
+3. reset cloud database from zero through 0167;
+4. seed twice;
+5. run focused replacement success tests;
+6. run focused refusal and replay tests;
+7. run the two core replacement races;
+8. run focused RLS and privilege tests;
+9. run existing db:test;
+10. run existing test:rls;
+11. run migrations:validate;
+12. run db:validate;
+13. run secret:scan;
+14. run clock:check;
+15. run membership and privilege census;
+16. rebuild and test Hub DB when required;
+17. run registry suite serially.
+
+Reported baselines:
+
+- db:test: 212 PASS;
+- test:rls: 115 PASS;
+- Hub db:test: 35 PASS;
+- registry: 233/233;
+- lifecycle: 30/30;
+- census: 14/14.
+
+Do not regress these baselines.
+
+Required package tests must have zero skips.
+
+Report for each command:
+
+- exact command;
+- Node version;
+- exit;
+- PASS;
+- FAIL;
+- SKIP;
+- effective role;
+- database;
+- fresh or cached.
+
+---
+
+## 20. Completion gate
+
+P02B2B2B1 is complete only when:
+
+- Node 22 remains active;
+- migration 0167 replays from zero;
+- existing issuance behavior remains valid;
+- unexpired code returns OUTSTANDING;
+- overdue code delegates to the canonical expiration helper;
+- predecessor becomes immutable EXPIRED history;
+- exactly one replacement row is issued;
+- replacement uses a new idempotency key;
+- old-key replay cannot create a replacement;
+- replacement receives a fresh code and 15-minute expiry;
+- raw replacement code is returned once and never persisted;
+- relational replacement lineage exists when required;
+- exact expiration and created-event counts are proven;
+- active-Hub eligibility is revalidated;
+- two core concurrency cases pass;
+- no direct grant or membership residue exists;
+- presentation, lockout, revocation and expiration do not regress;
+- db:test remains at least 212;
+- test:rls remains at least 115;
+- registry remains at least 233/233;
+- lifecycle remains 30/30;
+- census remains 14/14;
+- required tests have zero skips;
+- evidence is current;
+- tree is clean;
+- push remains disabled.
+
+Choose exactly one status:
+
+- IMPLEMENTED-IN-DEV;
+- IMPLEMENTED-IN-DEV WITH RECORDED ENVIRONMENT CONDITION;
+- BLOCKED BY ENVIRONMENT;
+- BLOCKED BY OWNER VALUE;
+- BLOCKED BY REPOSITORY CONFLICT;
+- PARTIAL — SUCCESSOR PACKAGE REQUIRED.
+
+Do not mark:
+
+- replacement race hardening complete;
+- expiration worker complete;
+- P02B3 complete;
+- P02C complete;
+- WS-11-T004 complete;
+- pilot ready;
+- production ready.
+
+---
+
+## 21. Evidence deliverable
+
+Create:
+
+00_AI_HANDOFF/shared/2026-08-05__SHARED__WS-11-T004-P02B2B2B1__EXPIRED-CODE-REPLACEMENT-ISSUANCE__AI-HANDOFF.md
+
+Use the actual repository date convention when different.
+
+The handoff must contain:
+
+1. repository intake;
+2. toolchain;
+3. package authority;
+4. exact files changed;
+5. issuance decision tree;
+6. replacement-lineage design;
+7. canonical-expiration delegation;
+8. active-Hub revalidation;
+9. replacement-code contract;
+10. idempotency behavior;
+11. event behavior;
+12. core concurrency evidence;
+13. privilege evidence;
+14. exact commands and results;
+15. baseline comparison;
+16. risks and unresolved values;
+17. rollback instructions;
+18. final package status;
+19. P02B2B2B2 prerequisites.
+
+---
+
+## 22. Commit discipline
+
+Before commit:
+
+git status --short
+git diff --check
+
+Confirm:
+
+- Node 22 is active;
+- no raw code committed;
+- no digest exposed;
+- no secret;
+- no private key;
+- no prior migration modified;
+- no Hub migration modified;
+- no expiration worker added;
+- no redemption or PoP added;
+- no production grant added;
+- no unrelated formatting churn.
+
+Suggested commit:
+
+feat(ws-11): add expired terminal code replacement
+
+After commit:
+
+git status --short
+git rev-parse HEAD
+git log -1 --oneline
+git remote get-url --push origin
+node --version
+pnpm --version
+pnpm config get engine-strict
+
+Required final state:
+
+- clean tree;
+- Node 22 active;
+- engine enforcement active;
+- push disabled;
+- nothing pushed.
+
+---
+
+## 23. Required final response
+
+Return:
+
+### Repository
+
+- start SHA;
+- end SHA;
+- branch;
+- ahead count;
+- tree state;
+- push URL.
+
+### Toolchain
+
+- Node version;
+- Node binary path;
+- pnpm version;
+- engine enforcement.
+
+### Migration
+
+- migration number;
+- filename;
+- from-zero replay result;
+- confirmation that 0166 and earlier were unchanged.
+
+### Replacement issuance
+
+- issuance function signature;
+- owner and grants;
+- decision tree;
+- active-Hub validation;
+- expiration-helper delegation;
+- predecessor behavior;
+- replacement-row behavior;
+- lineage;
+- code and digest contract;
+- expiry;
+- idempotency;
+- event evidence.
+
+### Concurrency
+
+For races A and B:
+
+- backend PIDs;
+- initial state;
+- competing calls;
+- returned results;
+- predecessor final state;
+- successor count and state;
+- event residue.
+
+### Security
+
+- direct-execution posture;
+- direct-table posture;
+- raw-code census;
+- digest-exposure census;
+- membership census;
+- production-grant posture.
+
+### Verification
+
+For every command:
+
+- command;
+- Node version;
+- exit;
+- PASS;
+- FAIL;
+- SKIP;
+- role;
+- database;
+- fresh or cached.
+
+### Evidence
+
+- files changed;
+- handoff path;
+- commit SHA;
+- rollback procedure.
+
+### Status
+
+Choose exactly one:
+
+- IMPLEMENTED-IN-DEV;
+- IMPLEMENTED-IN-DEV WITH RECORDED ENVIRONMENT CONDITION;
+- BLOCKED BY ENVIRONMENT;
+- BLOCKED BY OWNER VALUE;
+- BLOCKED BY REPOSITORY CONFLICT;
+- PARTIAL — SUCCESSOR PACKAGE REQUIRED.
+
+### Next package
+
+Confirm:
+
+- broad replacement race hardening was not started;
+- no expiration worker was added;
+- P02B3 and P02C were not started;
+- recommended next package:
+
+WS-11-T004-P02B2B2B2 — replacement race and recovery hardening
+
+Do not push.
+Exit before 59 minutes and before 100 steps.

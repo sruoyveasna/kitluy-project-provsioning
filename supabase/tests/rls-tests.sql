@@ -3170,4 +3170,101 @@ begin
 end $$;
 rollback;
 
-select 'rls-tests complete: 14+9 baseline cases; cycle-5 WS5 7 negative + 7 positive and WS6 10 negative + 9 positive; cycle-6 WS7 13 negative + 6 positive and WS8 13 negative + 6 positive; cycle-10 WS11 T001 4 negative + 1 positive and T002 3 negative + 1 positive kitluy_devices cases executed; WS-11-T004-P02A 3 negative provisioning-code cases executed; WS-11-T004-P02B1 issuance-door boundary case executed; WS-11-T004-P02B2A presentation-evaluator boundary case executed; WS-11-T004-P02B2B1 revocation-door boundary case executed; WS-11-T004-P02B2B2A expiration-helper boundary case executed' as result;
+-- WS11-N15: expired-code replacement issuance (0167) added ONE nullable
+-- relational lineage column and changed NO grant boundary: the issuance door
+-- stays authenticated-only, the expiration helper stays harness-only, the
+-- evaluator and revocation boundaries stand, and no runtime identity holds
+-- direct mutation on the lineage column (or any column) of the
+-- provisioning-code tables. Catalog checks run FIRST, as the migration role.
+begin;
+do $$
+begin
+  if has_function_privilege('public',
+       'kitluy_devices.issue_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or has_function_privilege('anon',
+       'kitluy_devices.issue_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or has_function_privilege('service_role',
+       'kitluy_devices.issue_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or has_function_privilege('kitluy_worker_service',
+       'kitluy_devices.issue_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or not has_function_privilege('authenticated',
+       'kitluy_devices.issue_terminal_provisioning_code_v1(uuid, text, text)', 'execute') then
+    raise exception 'FAIL WS11-N15: the issuance door boundary drifted under 0167';
+  end if;
+  if has_function_privilege('authenticated',
+       'kitluy_devices.expire_terminal_provisioning_code_v1(uuid, uuid, text, text, text)', 'execute')
+     or has_function_privilege('service_role',
+       'kitluy_devices.expire_terminal_provisioning_code_v1(uuid, uuid, text, text, text)', 'execute')
+     or has_function_privilege('kitluy_worker_service',
+       'kitluy_devices.expire_terminal_provisioning_code_v1(uuid, uuid, text, text, text)', 'execute')
+     or not has_function_privilege('kitluy_test_harness',
+       'kitluy_devices.expire_terminal_provisioning_code_v1(uuid, uuid, text, text, text)', 'execute') then
+    raise exception 'FAIL WS11-N15: the expiration helper boundary drifted under 0167';
+  end if;
+  if has_function_privilege('authenticated',
+       'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
+     or not has_function_privilege('kitluy_test_harness',
+       'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
+     or not has_function_privilege('authenticated',
+       'kitluy_devices.revoke_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or has_function_privilege('service_role',
+       'kitluy_devices.revoke_terminal_provisioning_code_v1(uuid, text, text)', 'execute') then
+    raise exception 'FAIL WS11-N15: the evaluator or revocation boundary drifted under 0167';
+  end if;
+  -- The lineage column exists and is guarded: no runtime identity may write
+  -- ANY column of the table directly, lineage included.
+  if not exists (
+    select 1 from information_schema.columns
+     where table_schema = 'kitluy_devices' and table_name = 'device_provisioning_codes'
+       and column_name = 'replaces_provisioning_code_id'
+       and data_type = 'uuid' and is_nullable = 'YES') then
+    raise exception 'FAIL WS11-N15: the relational lineage column is missing';
+  end if;
+  if has_table_privilege('authenticated',
+       'kitluy_devices.device_provisioning_codes', 'INSERT,UPDATE,DELETE')
+     or has_table_privilege('authenticated',
+       'kitluy_devices.device_provisioning_code_events', 'INSERT,UPDATE,DELETE')
+     or has_table_privilege('service_role',
+       'kitluy_devices.device_provisioning_codes', 'INSERT,UPDATE,DELETE')
+     or has_table_privilege('kitluy_worker_service',
+       'kitluy_devices.device_provisioning_codes', 'INSERT,UPDATE,DELETE')
+     or has_column_privilege('authenticated',
+       'kitluy_devices.device_provisioning_codes', 'replaces_provisioning_code_id', 'UPDATE')
+     or has_column_privilege('service_role',
+       'kitluy_devices.device_provisioning_codes', 'replaces_provisioning_code_id', 'INSERT') then
+    raise exception 'FAIL WS11-N15: a runtime identity can mutate provisioning-code rows or lineage directly';
+  end if;
+  if exists (
+    select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = 'kitluy_devices'
+       and c.relname in ('device_provisioning_codes', 'device_provisioning_code_events')
+       and (not c.relrowsecurity or not c.relforcerowsecurity)) then
+    raise exception 'FAIL WS11-N15: FORCE RLS no longer holds on the provisioning-code tables';
+  end if;
+  raise notice 'PASS WS11-N15a: the replacement lineage column is relational and guarded; issuance stays authenticated-only; the helper stays harness-only; evaluator and revocation boundaries stand; no runtime identity holds table or lineage-column mutation';
+end $$;
+select set_config('request.jwt.claims', '{"role":"authenticated"}', true);
+set local role authenticated;
+do $$
+declare
+  v_refused boolean := false;
+begin
+  begin
+    update kitluy_devices.device_provisioning_codes
+       set replaces_provisioning_code_id = null
+     where false;
+    -- Reaching this line without a privilege error means the runtime
+    -- identity holds direct UPDATE on the table (the WHERE false keeps the
+    -- probe row-free; the privilege check fires before any row work).
+    raise exception 'FAIL WS11-N15: authenticated holds direct UPDATE on provisioning-code rows';
+  exception when insufficient_privilege then
+    v_refused := true;
+  end;
+  if not v_refused then
+    raise exception 'FAIL WS11-N15: the direct-lineage-mutation probe did not run';
+  end if;
+  raise notice 'PASS WS11-N15b: authenticated cannot mutate the lineage column (or any row) directly';
+end $$;
+rollback;
+
+select 'rls-tests complete: 14+9 baseline cases; cycle-5 WS5 7 negative + 7 positive and WS6 10 negative + 9 positive; cycle-6 WS7 13 negative + 6 positive and WS8 13 negative + 6 positive; cycle-10 WS11 T001 4 negative + 1 positive and T002 3 negative + 1 positive kitluy_devices cases executed; WS-11-T004-P02A 3 negative provisioning-code cases executed; WS-11-T004-P02B1 issuance-door boundary case executed; WS-11-T004-P02B2A presentation-evaluator boundary case executed; WS-11-T004-P02B2B1 revocation-door boundary case executed; WS-11-T004-P02B2B2A expiration-helper boundary case executed; WS-11-T004-P02B2B2B1 replacement-lineage boundary case executed' as result;

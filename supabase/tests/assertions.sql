@@ -13834,11 +13834,13 @@ begin
      or has_table_privilege('authenticated', 'kitluy_devices.device_provisioning_code_events', 'INSERT,UPDATE,DELETE') then
     raise exception 'ASSERT FAIL: a runtime identity holds privileges on the provisioning-code tables';
   end if;
-  -- No column can hold a raw code.
+  -- No column can hold a raw code. (Group 0167 added the relational
+  -- lineage identifier replaces_provisioning_code_id — a uuid referencing a
+  -- provisioning-code row, never code material; it joins the exclusion.)
   if exists (
     select 1 from information_schema.columns
      where table_schema = 'kitluy_devices' and table_name = 'device_provisioning_codes'
-       and (column_name ~ '(^|_)(code|raw|plain|secret)(_|$)' and column_name not in ('code_digest'))) then
+       and (column_name ~ '(^|_)(code|raw|plain|secret)(_|$)' and column_name not in ('code_digest', 'replaces_provisioning_code_id'))) then
     raise exception 'ASSERT FAIL: a raw-code-capable column exists on device_provisioning_codes';
   end if;
 
@@ -15863,5 +15865,762 @@ exception when others then
   raise;
 end
 $section53$;
+
+-- ============================================================================
+-- SECTION 54 — expired-code replacement issuance (migration 0167).
+--
+-- WS-11-T004-P02B2B2B1. The one issuance door now: keeps the 0163 initial
+-- path when no code is outstanding; returns the stable OUTSTANDING result
+-- for an unexpired outstanding code; delegates an overdue one to the
+-- canonical 0166 helper and issues exactly one replacement row under a new
+-- idempotency key, relationally linked to its immutable EXPIRED predecessor.
+-- Proved here: the full replacement contract, replay/idempotency behavior,
+-- refusal cases with zero residue, lineage immutability/fabrication/
+-- self-reference/second-successor rules, evaluator interop, and the
+-- unchanged privilege census.
+-- ============================================================================
+do $section54$
+declare
+  v_tenant uuid := '00000000-0000-4000-8000-000000000011';
+  v_store uuid := '00000000-0000-4000-8000-000000000015';
+  v_location uuid := '00000000-0000-4000-8000-000000000018';
+  v_profile uuid;
+  v_hub uuid;
+  v_terminal uuid;
+  v_token text;
+  v_payload text;
+  v_claim uuid;
+  v_operator uuid := gen_random_uuid();
+  v_stranger uuid := gen_random_uuid();
+  v_tassignments uuid[] := array[]::uuid[];
+  v_terminals uuid[] := array[]::uuid[];
+  v_code_ids uuid[] := array[]::uuid[];
+  v_raws text[] := array[]::text[];
+  v_expires timestamptz[] := array[]::timestamptz[];
+  v_result jsonb;
+  v_pred record;
+  v_repl record;
+  v_state record;
+  v_cnt integer;
+  v_i integer;
+  v_expected text;
+  v_refused boolean;
+  v_replacement uuid;
+  v_replacement_raw text;
+  v_replacement_expires timestamptz;
+  v_correlation uuid;
+  v_pred_correlation uuid;
+begin
+  select id into v_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+
+  insert into auth.users (id, instance_id, aud, role, email, encrypted_password,
+                          email_confirmed_at, created_at, updated_at)
+  values (v_operator, '00000000-0000-0000-0000-000000000000', 'authenticated',
+          'authenticated', 's54-operator@fixture.invalid', '', now(), now(), now()),
+         (v_stranger, '00000000-0000-0000-0000-000000000000', 'authenticated',
+          'authenticated', 's54-stranger@fixture.invalid', '', now(), now(), now());
+  set local role service_role;
+  insert into kitluy_auth.temporary_grants (subject_id, permission_key, environment, starts_at, expires_at, reason)
+  values
+    (v_operator, 'fleet.device_provisioning_code.issue', 'development',
+     now() - interval '1 minute', now() + interval '60 minutes', 'section-54 fixture: issuance'),
+    (v_operator, 'fleet.device_provisioning_code.revoke', 'development',
+     now() - interval '1 minute', now() + interval '60 minutes', 'section-54 fixture: revoked predecessor');
+  reset role;
+
+  -- A Hub, activated through the governed path (projection = the active gate).
+  v_hub := kitluy_devices.enroll_device_v1(
+    'WS11-S54-HUB-' || gen_random_uuid(), v_profile, now() - interval '30 days',
+    repeat('27', 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', '5a:27:' || substr(md5(random()::text),1,6) || ':27'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-s54hub-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-s54hub-' || gen_random_uuid())));
+  v_token := repeat('8d', 32);
+  v_payload := repeat('9c', 32);
+  v_claim := kitluy_devices.create_device_claim_v1(
+    v_hub, v_tenant, v_store, v_location, v_token, v_payload, 900, 'OP-PROBE');
+  perform kitluy_devices.redeem_device_claim_v1(v_token, v_payload, v_hub, 'HUB-AGENT');
+  perform kitluy_devices.evaluate_trusted_time_v1(
+    v_hub, 'development', null, now(), null, gen_random_uuid());
+  perform kitluy_devices.issue_device_certificate_v1(
+    v_hub, 'development', 'SERIAL-S54-HUB-' || gen_random_uuid(), repeat('27', 32), 'OP-PROBE');
+  perform kitluy_devices.attempt_activate_device_v1(v_hub, 'development', 'OP-ACTIVATE');
+
+  -- Eight terminals, eight assignments, eight initial codes (real-time clock).
+  for v_i in 1..8 loop
+    v_terminal := kitluy_devices.enroll_device_v1(
+      'WS11-S54-TERM' || v_i || '-' || gen_random_uuid(), v_profile, now() - interval '30 days',
+      repeat(lpad(to_hex(v_i + 40), 2, '0'), 32), 'ed25519', 'software', 'STATION-PROBE', 'OP-PROBE',
+      jsonb_build_array(
+        jsonb_build_object('signal_type', 'mac_address',   'signal_value', '6b:4' || v_i || ':' || substr(md5(random()::text),1,6) || ':4' || v_i),
+        jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-s54term' || v_i || '-' || gen_random_uuid()),
+        jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-s54term' || v_i || '-' || gen_random_uuid())));
+    v_token := repeat(lpad(to_hex(v_i + 180), 2, '0'), 32);
+    v_payload := repeat(lpad(to_hex(v_i + 200), 2, '0'), 32);
+    v_claim := kitluy_devices.create_device_claim_v1(
+      v_terminal, v_tenant, v_store, v_location, v_token, v_payload, 900, 'OP-PROBE');
+    perform kitluy_devices.redeem_device_claim_v1(v_token, v_payload, v_terminal, 'TERM-AGENT');
+    v_tassignments := v_tassignments || kitluy_devices.assign_terminal_profile_v1(
+      v_terminal, 1, 'laundry.t1.cashier', v_location, 'OP-PROBE');
+    v_terminals := v_terminals || v_terminal;
+  end loop;
+
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_operator, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  for v_i in 1..8 loop
+    v_result := kitluy_devices.issue_terminal_provisioning_code_v1(
+      v_tassignments[v_i], 's54-issue-' || v_i, null);
+    if v_result ->> 'outcome' <> 'ISSUED' then
+      raise exception 'ASSERT FAIL: fixture issuance % failed: %', v_i, v_result;
+    end if;
+    -- The initial-issuance response is byte-identical to the 0163 contract:
+    -- no replacement provenance key appears when nothing was replaced.
+    if v_result ? 'replaces_provisioning_code_id' then
+      raise exception 'ASSERT FAIL: initial issuance leaked a replacement key: %', v_result;
+    end if;
+    v_code_ids := v_code_ids || (v_result ->> 'provisioning_code_id')::uuid;
+    v_raws := v_raws || (v_result ->> 'code');
+    v_expires := v_expires || (v_result ->> 'expires_at')::timestamptz;
+  end loop;
+  reset role;
+
+  -- Harness for the internal helper/evaluator; sanctioned clock for due time.
+  execute format('grant kitluy_test_harness to %I', current_user);
+  insert into kitluy_ops.test_clock_policy (environment, enabled_by, decision_ref)
+  values ('test', 'section-54', 'KLD-2026-07-31-SECURITY-TEST-CLOCK-001')
+  on conflict (environment) do nothing;
+
+  -- -------------------------------------------------------------------------
+  -- T1. DUE PREDECESSOR -> CANONICAL EXPIRATION + EXACTLY ONE REPLACEMENT.
+  -- -------------------------------------------------------------------------
+  select correlation_id into v_pred_correlation
+    from kitluy_devices.device_provisioning_codes where id = v_code_ids[1];
+  perform kitluy_ops.test_clock_set_v1(v_expires[1] + interval '1 second');
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_operator, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  v_result := kitluy_devices.issue_terminal_provisioning_code_v1(
+    v_tassignments[1], 's54-replace-1', null);
+  reset role;
+  if v_result ->> 'outcome' <> 'ISSUED' then
+    raise exception 'ASSERT FAIL: the due predecessor was not replaced: %', v_result;
+  end if;
+  if (v_result ->> 'replaces_provisioning_code_id')::uuid is distinct from v_code_ids[1] then
+    raise exception 'ASSERT FAIL: the replacement did not name its predecessor: %', v_result;
+  end if;
+  v_replacement := (v_result ->> 'provisioning_code_id')::uuid;
+  v_replacement_raw := v_result ->> 'code';
+  v_replacement_expires := (v_result ->> 'expires_at')::timestamptz;
+  if v_replacement = v_code_ids[1] then
+    raise exception 'ASSERT FAIL: the replacement reused the predecessor row id';
+  end if;
+  -- The raw replacement code: eight valid Crockford characters, returned here
+  -- exactly once, never persisted.
+  if v_replacement_raw !~ '^[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{8}$' then
+    raise exception 'ASSERT FAIL: the replacement code is not eight Crockford characters: %', v_replacement_raw;
+  end if;
+  if v_replacement_raw = v_raws[1] then
+    raise exception 'ASSERT FAIL: the replacement reused the predecessor code';
+  end if;
+
+  -- The predecessor: immutable EXPIRED history, exactly one helper event.
+  select * into v_pred from kitluy_devices.device_provisioning_codes
+   where id = v_code_ids[1];
+  if v_pred.state::text <> 'expired'
+     or v_pred.expires_at <> v_expires[1]
+     or v_pred.failed_attempt_count <> 0
+     or v_pred.locked_at is not null or v_pred.revoked_at is not null
+     or v_pred.redeemed_at is not null
+     or v_pred.replaces_provisioning_code_id is not null
+     or v_pred.correlation_id <> v_pred_correlation then
+    raise exception 'ASSERT FAIL: the predecessor was mutated beyond the state transition: %', row_to_json(v_pred);
+  end if;
+  select count(*) into v_cnt from kitluy_devices.device_provisioning_code_events
+   where provisioning_code_id = v_code_ids[1] and event_type = 'EXPIRED';
+  if v_cnt <> 1 then
+    raise exception 'ASSERT FAIL: expected exactly one predecessor EXPIRED event, found %', v_cnt;
+  end if;
+  if not exists (
+    select 1 from kitluy_devices.device_provisioning_code_events
+     where provisioning_code_id = v_code_ids[1] and event_type = 'EXPIRED'
+       and actor_type = 'OPERATOR' and actor_ref = v_operator::text
+       and reason_code = 'TTL_ELAPSED'
+       and detail ->> 'trigger_source' = 'ISSUANCE_REPLACEMENT') then
+    raise exception 'ASSERT FAIL: the predecessor EXPIRED event is misattributed';
+  end if;
+  select count(*) into v_cnt from kitluy_devices.device_provisioning_code_events
+   where provisioning_code_id = v_code_ids[1] and event_type = 'CREATED';
+  if v_cnt <> 1 then
+    raise exception 'ASSERT FAIL: the predecessor gained a CREATED event';
+  end if;
+
+  -- The replacement row: fresh everything, exact scope, relational lineage.
+  select * into v_repl from kitluy_devices.device_provisioning_codes
+   where id = v_replacement;
+  if v_repl.state::text <> 'issued'
+     or v_repl.failed_attempt_count <> 0
+     or v_repl.locked_at is not null or v_repl.revoked_at is not null
+     or v_repl.redeemed_at is not null
+     or v_repl.idempotency_key is distinct from 's54-replace-1'
+     or v_repl.replaces_provisioning_code_id is distinct from v_code_ids[1]
+     or v_repl.tenant_id <> v_pred.tenant_id
+     or v_repl.digital_store_id <> v_pred.digital_store_id
+     or v_repl.store_location_id <> v_pred.store_location_id
+     or v_repl.store_hub_device_id <> v_pred.store_hub_device_id
+     or v_repl.terminal_device_id <> v_pred.terminal_device_id
+     or v_repl.terminal_assignment_id <> v_pred.terminal_assignment_id
+     or v_repl.terminal_profile_key <> v_pred.terminal_profile_key
+     or v_repl.environment <> v_pred.environment
+     or v_repl.expires_at - v_repl.created_at <> interval '15 minutes'
+     or v_repl.expires_at <> v_replacement_expires
+     or v_repl.correlation_id = v_pred.correlation_id
+     or v_repl.code_digest = v_pred.code_digest then
+    raise exception 'ASSERT FAIL: the replacement row violates the contract: %', row_to_json(v_repl);
+  end if;
+  -- Digest and payload use the existing binding contract, over the NEW code.
+  if v_repl.code_digest <> encode(extensions.digest(v_replacement_raw, 'sha256'), 'hex') then
+    raise exception 'ASSERT FAIL: the replacement digest does not bind the returned raw code';
+  end if;
+  v_expected := encode(extensions.digest(
+    'ws11-t004.code.v1' || E'\n' ||
+    v_repl.tenant_id::text || E'\n' ||
+    v_repl.digital_store_id::text || E'\n' ||
+    v_repl.store_location_id::text || E'\n' ||
+    v_repl.store_hub_device_id::text || E'\n' ||
+    v_repl.terminal_device_id::text || E'\n' ||
+    v_repl.terminal_assignment_id::text || E'\n' ||
+    v_repl.terminal_profile_key || E'\n' ||
+    v_repl.environment || E'\n' ||
+    v_repl.expires_at::text,
+    'sha256'), 'hex');
+  if v_repl.payload_sha256 <> v_expected then
+    raise exception 'ASSERT FAIL: the replacement payload does not use the canonical binding';
+  end if;
+  -- Exactly one CREATED event for the replacement, with safe provenance.
+  select count(*) into v_cnt from kitluy_devices.device_provisioning_code_events
+   where provisioning_code_id = v_replacement and event_type = 'CREATED';
+  if v_cnt <> 1 then
+    raise exception 'ASSERT FAIL: expected exactly one replacement CREATED event, found %', v_cnt;
+  end if;
+  if not exists (
+    select 1 from kitluy_devices.device_provisioning_code_events
+     where provisioning_code_id = v_replacement and event_type = 'CREATED'
+       and actor_type = 'OPERATOR' and actor_ref = v_operator::text
+       and detail ->> 'replaces_provisioning_code_id' = v_code_ids[1]::text) then
+    raise exception 'ASSERT FAIL: the replacement CREATED event lacks safe provenance';
+  end if;
+  -- No event anywhere carries the raw code or a digest.
+  if exists (
+    select 1 from kitluy_devices.device_provisioning_code_events
+     where provisioning_code_id in (v_code_ids[1], v_replacement)
+       and (detail::text like '%' || v_replacement_raw || '%'
+            or detail::text like '%' || v_raws[1] || '%'
+            or detail::text like '%' || v_repl.code_digest || '%'
+            or detail::text like '%' || v_pred.code_digest || '%')) then
+    raise exception 'ASSERT FAIL: an event carries raw-code or digest material';
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- T2. IDENTICAL REPLAY OF THE REPLACEMENT KEY: ALREADY_ISSUED, the
+  -- replacement identity, no raw code, no new row, no new events.
+  -- -------------------------------------------------------------------------
+  set local role authenticated;
+  v_result := kitluy_devices.issue_terminal_provisioning_code_v1(
+    v_tassignments[1], 's54-replace-1', null);
+  reset role;
+  if v_result ->> 'outcome' <> 'ALREADY_ISSUED'
+     or (v_result ->> 'provisioning_code_id')::uuid <> v_replacement
+     or (v_result ? 'code') then
+    raise exception 'ASSERT FAIL: replacement-key replay broke the contract: %', v_result;
+  end if;
+  select count(*) into v_cnt from kitluy_devices.device_provisioning_codes
+   where terminal_assignment_id = v_tassignments[1];
+  if v_cnt <> 2 then
+    raise exception 'ASSERT FAIL: replay created a row; expected 2, found %', v_cnt;
+  end if;
+  select count(*) into v_cnt from kitluy_devices.device_provisioning_code_events
+   where provisioning_code_id = v_code_ids[1] and event_type = 'EXPIRED';
+  if v_cnt <> 1 then
+    raise exception 'ASSERT FAIL: replay appended an EXPIRED event';
+  end if;
+  select count(*) into v_cnt from kitluy_devices.device_provisioning_code_events
+   where provisioning_code_id = v_replacement and event_type = 'CREATED';
+  if v_cnt <> 1 then
+    raise exception 'ASSERT FAIL: replay appended a CREATED event';
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- T3. REPLAY OF THE PREDECESSOR'S OLD KEY: the canonical historical result
+  -- for the predecessor — never a replacement, never a raw code.
+  -- -------------------------------------------------------------------------
+  set local role authenticated;
+  v_result := kitluy_devices.issue_terminal_provisioning_code_v1(
+    v_tassignments[1], 's54-issue-1', null);
+  reset role;
+  if v_result ->> 'outcome' <> 'ALREADY_ISSUED'
+     or (v_result ->> 'provisioning_code_id')::uuid <> v_code_ids[1]
+     or (v_result ? 'code') then
+    raise exception 'ASSERT FAIL: old-key replay did not answer the predecessor history: %', v_result;
+  end if;
+  select count(*) into v_cnt from kitluy_devices.device_provisioning_codes
+   where terminal_assignment_id = v_tassignments[1];
+  if v_cnt <> 2 then
+    raise exception 'ASSERT FAIL: old-key replay created replacement work';
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- T4. A DIFFERENT KEY WHILE THE REPLACEMENT IS OUTSTANDING (not due):
+  -- OUTSTANDING, no third row.
+  -- -------------------------------------------------------------------------
+  perform kitluy_ops.test_clock_set_v1(v_replacement_expires - interval '1 second');
+  set local role authenticated;
+  v_result := kitluy_devices.issue_terminal_provisioning_code_v1(
+    v_tassignments[1], 's54-third-1', null);
+  reset role;
+  if v_result ->> 'outcome' <> 'OUTSTANDING'
+     or v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-OUTSTANDING' then
+    raise exception 'ASSERT FAIL: a third key on a live replacement was not OUTSTANDING: %', v_result;
+  end if;
+  select count(*) into v_cnt from kitluy_devices.device_provisioning_codes
+   where terminal_assignment_id = v_tassignments[1];
+  if v_cnt <> 2 then
+    raise exception 'ASSERT FAIL: a third row exists';
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- T5. SAME REPLACEMENT KEY, DIFFERENT ASSIGNMENT: CONFLICTING_REPLAY, no
+  -- loser residue.
+  -- -------------------------------------------------------------------------
+  set local role authenticated;
+  v_result := kitluy_devices.issue_terminal_provisioning_code_v1(
+    v_tassignments[8], 's54-replace-1', null);
+  reset role;
+  if v_result ->> 'outcome' <> 'ISSUANCE_REFUSED'
+     or v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-CONFLICTING-REPLAY' then
+    raise exception 'ASSERT FAIL: a conflicting replacement-key replay was not refused: %', v_result;
+  end if;
+  select count(*) into v_cnt from kitluy_devices.device_provisioning_codes
+   where terminal_assignment_id = v_tassignments[8];
+  if v_cnt <> 1 then
+    raise exception 'ASSERT FAIL: the conflicting replay left residue on assignment 8';
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- T6. THE REPLACEMENT CODE PRESENTS: MATCH_READY through the 0164/0166
+  -- evaluator (clock still before the replacement expiry).
+  -- -------------------------------------------------------------------------
+  v_result := kitluy_devices.evaluate_terminal_provisioning_code_v1(
+    v_tassignments[1], v_replacement_raw, gen_random_uuid(), 'TERMINAL', v_terminals[1]::text);
+  if v_result ->> 'outcome' <> 'MATCH_READY'
+     or (v_result ->> 'provisioning_code_id')::uuid <> v_replacement then
+    raise exception 'ASSERT FAIL: the replacement code did not MATCH: %', v_result;
+  end if;
+  -- ...and the predecessor's code can never present again.
+  v_result := kitluy_devices.evaluate_terminal_provisioning_code_v1(
+    v_tassignments[1], v_raws[1], gen_random_uuid(), 'TERMINAL', v_terminals[1]::text);
+  if v_result ->> 'outcome' = 'MATCH_READY' then
+    raise exception 'ASSERT FAIL: the expired predecessor code still MATCHES';
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- T7. UNEXPIRED OUTSTANDING CODE (assignment 2): the stable OUTSTANDING
+  -- result, the predecessor untouched, no EXPIRED event, no second row.
+  -- -------------------------------------------------------------------------
+  perform kitluy_ops.test_clock_set_v1(v_expires[2] - interval '1 second');
+  set local role authenticated;
+  v_result := kitluy_devices.issue_terminal_provisioning_code_v1(
+    v_tassignments[2], 's54-replace-2', null);
+  reset role;
+  if v_result ->> 'outcome' <> 'OUTSTANDING' then
+    raise exception 'ASSERT FAIL: an unexpired outstanding code was not OUTSTANDING: %', v_result;
+  end if;
+  select * into v_state from kitluy_devices.device_provisioning_codes where id = v_code_ids[2];
+  if v_state.state::text <> 'issued' then
+    raise exception 'ASSERT FAIL: OUTSTANDING mutated the unexpired code';
+  end if;
+  if exists (select 1 from kitluy_devices.device_provisioning_code_events
+              where provisioning_code_id = v_code_ids[2] and event_type = 'EXPIRED') then
+    raise exception 'ASSERT FAIL: an unexpired code gained an EXPIRED event';
+  end if;
+  select count(*) into v_cnt from kitluy_devices.device_provisioning_codes
+   where terminal_assignment_id = v_tassignments[2];
+  if v_cnt <> 1 then
+    raise exception 'ASSERT FAIL: a second row exists on the unexpired assignment';
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- T8. NO PERMISSION, DUE CODE (assignment 3): the stranger is refused
+  -- BEFORE any expiration work — the predecessor stays ISSUED, no EXPIRED
+  -- event, no replacement.
+  -- -------------------------------------------------------------------------
+  perform kitluy_ops.test_clock_set_v1(v_expires[3] + interval '1 second');
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_stranger, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  v_result := kitluy_devices.issue_terminal_provisioning_code_v1(
+    v_tassignments[3], 's54-stranger-3', null);
+  reset role;
+  if v_result ->> 'outcome' <> 'ISSUANCE_REFUSED'
+     or v_result ->> 'refusal_code' is distinct from 'KLUY-PROVCODE-PERMISSION-DENIED' then
+    raise exception 'ASSERT FAIL: the unprivileged stranger was not refused: %', v_result;
+  end if;
+  select * into v_state from kitluy_devices.device_provisioning_codes where id = v_code_ids[3];
+  if v_state.state::text <> 'issued' then
+    raise exception 'ASSERT FAIL: the refused caller expired the code';
+  end if;
+  if exists (select 1 from kitluy_devices.device_provisioning_code_events
+              where provisioning_code_id = v_code_ids[3] and event_type = 'EXPIRED') then
+    raise exception 'ASSERT FAIL: the refused caller produced an EXPIRED event';
+  end if;
+  select count(*) into v_cnt from kitluy_devices.device_provisioning_codes
+   where terminal_assignment_id = v_tassignments[3];
+  if v_cnt <> 1 then
+    raise exception 'ASSERT FAIL: the refused caller left a replacement row';
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- T9. PREDECESSOR ALREADY EXPIRED (via the canonical helper, no successor):
+  -- the unchanged 0163 initial-issuance path — a fresh row with NULL lineage.
+  -- -------------------------------------------------------------------------
+  perform kitluy_ops.test_clock_set_v1(v_expires[4] + interval '1 second');
+  v_result := kitluy_devices.expire_terminal_provisioning_code_v1(
+    v_code_ids[4], gen_random_uuid(), 'TEST_HARNESS');
+  if v_result ->> 'outcome' <> 'EXPIRED' then
+    raise exception 'ASSERT FAIL: the T9 fixture did not expire: %', v_result;
+  end if;
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_operator, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  v_result := kitluy_devices.issue_terminal_provisioning_code_v1(
+    v_tassignments[4], 's54-fresh-4', null);
+  reset role;
+  if v_result ->> 'outcome' <> 'ISSUED' then
+    raise exception 'ASSERT FAIL: issuance after expiry failed: %', v_result;
+  end if;
+  select * into v_state from kitluy_devices.device_provisioning_codes
+   where id = (v_result ->> 'provisioning_code_id')::uuid;
+  if v_state.replaces_provisioning_code_id is not null then
+    raise exception 'ASSERT FAIL: the no-outstanding path fabricated lineage';
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- T10. REVOKED PREDECESSOR (assignment 5): existing issuance semantics —
+  -- a fresh row, NULL lineage, the revoked row untouched.
+  -- -------------------------------------------------------------------------
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_operator, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  v_result := kitluy_devices.revoke_terminal_provisioning_code_v1(
+    v_code_ids[5], 's54-revoke-5', 'revoking before the re-issue probe');
+  if v_result ->> 'outcome' <> 'REVOKED' then
+    reset role;
+    raise exception 'ASSERT FAIL: the T10 fixture did not revoke: %', v_result;
+  end if;
+  v_result := kitluy_devices.issue_terminal_provisioning_code_v1(
+    v_tassignments[5], 's54-fresh-5', null);
+  reset role;
+  if v_result ->> 'outcome' <> 'ISSUED' then
+    raise exception 'ASSERT FAIL: issuance after revocation regressed: %', v_result;
+  end if;
+  select * into v_state from kitluy_devices.device_provisioning_codes
+   where id = (v_result ->> 'provisioning_code_id')::uuid;
+  if v_state.replaces_provisioning_code_id is not null then
+    raise exception 'ASSERT FAIL: the revoked-predecessor path fabricated lineage';
+  end if;
+  select * into v_state from kitluy_devices.device_provisioning_codes where id = v_code_ids[5];
+  if v_state.state::text <> 'revoked' then
+    raise exception 'ASSERT FAIL: the revoked predecessor was overwritten';
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- T11. LOCKED PREDECESSOR (assignment 6): five failures lock it; a fresh
+  -- issue succeeds with NULL lineage; the locked row is untouched.
+  -- -------------------------------------------------------------------------
+  perform kitluy_ops.test_clock_set_v1(v_expires[6] - interval '60 seconds');
+  for v_i in 1..5 loop
+    v_result := kitluy_devices.evaluate_terminal_provisioning_code_v1(
+      v_tassignments[6], 'ZZZZZZZZ', gen_random_uuid(), 'TERMINAL', v_terminals[6]::text);
+  end loop;
+  select * into v_state from kitluy_devices.device_provisioning_codes where id = v_code_ids[6];
+  if v_state.state::text <> 'locked' then
+    raise exception 'ASSERT FAIL: the T11 fixture did not lock';
+  end if;
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_operator, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  v_result := kitluy_devices.issue_terminal_provisioning_code_v1(
+    v_tassignments[6], 's54-fresh-6', null);
+  reset role;
+  if v_result ->> 'outcome' <> 'ISSUED' then
+    raise exception 'ASSERT FAIL: issuance after lockout regressed: %', v_result;
+  end if;
+  select * into v_state from kitluy_devices.device_provisioning_codes
+   where id = (v_result ->> 'provisioning_code_id')::uuid;
+  if v_state.replaces_provisioning_code_id is not null then
+    raise exception 'ASSERT FAIL: the locked-predecessor path fabricated lineage';
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- T12. REDEEMED PREDECESSOR (assignment 7, governor-borrowed fixture —
+  -- P02B3 ships the real door): fresh issue, NULL lineage, row untouched.
+  -- -------------------------------------------------------------------------
+  execute format('grant kitluy_activation_governor to %I', current_user);
+  set local role kitluy_activation_governor;
+  update kitluy_devices.device_provisioning_codes
+     set state = 'redeemed', redeemed_at = now()
+   where id = v_code_ids[7] and state = 'issued';
+  if not found then
+    reset role;
+    raise exception 'ASSERT FAIL: the T12 fixture did not transition';
+  end if;
+  reset role;
+  execute format('revoke kitluy_activation_governor from %I', current_user);
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', v_operator, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  v_result := kitluy_devices.issue_terminal_provisioning_code_v1(
+    v_tassignments[7], 's54-fresh-7', null);
+  reset role;
+  if v_result ->> 'outcome' <> 'ISSUED' then
+    raise exception 'ASSERT FAIL: issuance after redemption regressed: %', v_result;
+  end if;
+  select * into v_state from kitluy_devices.device_provisioning_codes
+   where id = (v_result ->> 'provisioning_code_id')::uuid;
+  if v_state.replaces_provisioning_code_id is not null then
+    raise exception 'ASSERT FAIL: the redeemed-predecessor path fabricated lineage';
+  end if;
+  select * into v_state from kitluy_devices.device_provisioning_codes where id = v_code_ids[7];
+  if v_state.state::text <> 'redeemed' then
+    raise exception 'ASSERT FAIL: the redeemed predecessor was overwritten';
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- T13. LINEAGE IS IMMUTABLE — even the borrowed definer owner cannot move
+  -- it after insertion.
+  -- -------------------------------------------------------------------------
+  execute format('grant kitluy_activation_governor to %I', current_user);
+  set local role kitluy_activation_governor;
+  v_refused := false;
+  begin
+    update kitluy_devices.device_provisioning_codes
+       set replaces_provisioning_code_id = null
+     where id = v_replacement;
+    raise exception 'ASSERT FAIL: the lineage column was updated after insertion';
+  exception when raise_exception then
+    if sqlerrm like 'KLUY-PROVCODE-IMMUTABLE%' then
+      v_refused := true;
+    else
+      raise;
+    end if;
+  end;
+  if not v_refused then
+    raise exception 'ASSERT FAIL: the lineage immutability probe did not run';
+  end if;
+  -- ...and the predecessor cannot be pointed forward either.
+  v_refused := false;
+  begin
+    update kitluy_devices.device_provisioning_codes
+       set replaces_provisioning_code_id = v_replacement
+     where id = v_code_ids[1];
+    raise exception 'ASSERT FAIL: a forward lineage pointer was written';
+  exception when raise_exception then
+    if sqlerrm like 'KLUY-PROVCODE-IMMUTABLE%' or sqlerrm like 'KLUY-PROVCODE-CLOSED%' then
+      v_refused := true;
+    else
+      raise;
+    end if;
+  end;
+  if not v_refused then
+    raise exception 'ASSERT FAIL: the forward-pointer probe did not run';
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- T14. LINEAGE FABRICATION: a cross-assignment predecessor is refused even
+  -- for the borrowed owner.
+  -- -------------------------------------------------------------------------
+  v_refused := false;
+  begin
+    insert into kitluy_devices.device_provisioning_codes
+      (id, tenant_id, digital_store_id, store_location_id, store_hub_device_id,
+       terminal_device_id, terminal_assignment_id, terminal_profile_key, environment,
+       code_digest, payload_sha256, created_at, expires_at,
+       issued_by_operator_ref, correlation_id, replaces_provisioning_code_id)
+    select gen_random_uuid(), c.tenant_id, c.digital_store_id, c.store_location_id,
+           c.store_hub_device_id, c.terminal_device_id, c.terminal_assignment_id,
+           c.terminal_profile_key, c.environment,
+           repeat('ab', 32), repeat('cd', 32), now(), now() + interval '15 minutes',
+           's54-fabrication', gen_random_uuid(),
+           v_code_ids[4]  -- an EXPIRED code of a DIFFERENT assignment
+      from kitluy_devices.device_provisioning_codes c where c.id = v_replacement;
+    raise exception 'ASSERT FAIL: a cross-scope lineage was inserted';
+  exception when raise_exception then
+    if sqlerrm like 'KLUY-PROVCODE-LINEAGE-INCONSISTENT%' then
+      v_refused := true;
+    else
+      raise;
+    end if;
+  end;
+  if not v_refused then
+    raise exception 'ASSERT FAIL: the fabrication probe did not run';
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- T15. SELF-REFERENCE: a row can never name itself as its predecessor.
+  -- -------------------------------------------------------------------------
+  v_refused := false;
+  begin
+    insert into kitluy_devices.device_provisioning_codes
+      (id, tenant_id, digital_store_id, store_location_id, store_hub_device_id,
+       terminal_device_id, terminal_assignment_id, terminal_profile_key, environment,
+       code_digest, payload_sha256, created_at, expires_at,
+       issued_by_operator_ref, correlation_id, replaces_provisioning_code_id)
+    select v_replacement, c.tenant_id, c.digital_store_id, c.store_location_id,
+           c.store_hub_device_id, c.terminal_device_id, c.terminal_assignment_id,
+           c.terminal_profile_key, c.environment,
+           repeat('ef', 32), repeat('ab', 32), now(), now() + interval '15 minutes',
+           's54-selfref', gen_random_uuid(), v_replacement
+      from kitluy_devices.device_provisioning_codes c where c.id = v_code_ids[1];
+    raise exception 'ASSERT FAIL: a self-referencing lineage was inserted';
+  exception
+    when raise_exception then
+      if sqlerrm like 'ASSERT FAIL%' then
+        raise;
+      end if;
+      v_refused := true;  -- KLUY-PROVCODE-LINEAGE-MISSING or the no-self check
+    when check_violation or foreign_key_violation or unique_violation then
+      v_refused := true;
+  end;
+  if not v_refused then
+    raise exception 'ASSERT FAIL: the self-reference probe did not run';
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- T16. ONE DIRECT SUCCESSOR: a second row replacing the same predecessor is
+  -- a unique-constraint refusal, never a race outcome.
+  -- -------------------------------------------------------------------------
+  v_refused := false;
+  begin
+    insert into kitluy_devices.device_provisioning_codes
+      (id, tenant_id, digital_store_id, store_location_id, store_hub_device_id,
+       terminal_device_id, terminal_assignment_id, terminal_profile_key, environment,
+       code_digest, payload_sha256, created_at, expires_at,
+       issued_by_operator_ref, correlation_id, replaces_provisioning_code_id)
+    select gen_random_uuid(), c.tenant_id, c.digital_store_id, c.store_location_id,
+           c.store_hub_device_id, c.terminal_device_id, c.terminal_assignment_id,
+           c.terminal_profile_key, c.environment,
+           repeat('ba', 32), repeat('dc', 32), now(), now() + interval '15 minutes',
+           's54-second-successor', gen_random_uuid(), v_code_ids[1]
+      from kitluy_devices.device_provisioning_codes c where c.id = v_code_ids[1];
+    raise exception 'ASSERT FAIL: a second direct successor was inserted';
+  exception
+    when unique_violation then
+      v_refused := true;
+    when raise_exception then
+      if sqlerrm like 'ASSERT FAIL%' then
+        raise;
+      end if;
+      v_refused := true;
+  end;
+  if not v_refused then
+    raise exception 'ASSERT FAIL: the second-successor probe did not run';
+  end if;
+  reset role;
+  execute format('revoke kitluy_activation_governor from %I', current_user);
+
+  -- The governed path leaves exactly the two rows of the replacement pair.
+  select count(*) into v_cnt from kitluy_devices.device_provisioning_codes
+   where terminal_assignment_id = v_tassignments[1];
+  if v_cnt <> 2 then
+    raise exception 'ASSERT FAIL: the hostile probes left row residue: %', v_cnt;
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- T17. CONTROL: assignment 8 saw only its initial issuance — one row, one
+  -- CREATED event, nothing else.
+  -- -------------------------------------------------------------------------
+  select count(*) into v_cnt from kitluy_devices.device_provisioning_code_events
+   where provisioning_code_id = v_code_ids[8];
+  if v_cnt <> 1 then
+    raise exception 'ASSERT FAIL: the control assignment has unexpected event residue: %', v_cnt;
+  end if;
+
+  -- -------------------------------------------------------------------------
+  -- PRIVILEGE CENSUS: every boundary of 0163/0164/0165/0166 stands.
+  -- -------------------------------------------------------------------------
+  if has_function_privilege('public', 'kitluy_devices.issue_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or has_function_privilege('anon', 'kitluy_devices.issue_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or has_function_privilege('service_role', 'kitluy_devices.issue_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or has_function_privilege('kitluy_worker_service', 'kitluy_devices.issue_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or not has_function_privilege('authenticated', 'kitluy_devices.issue_terminal_provisioning_code_v1(uuid, text, text)', 'execute') then
+    raise exception 'ASSERT FAIL: the issuance door boundary drifted under 0167';
+  end if;
+  if has_function_privilege('authenticated', 'kitluy_devices.expire_terminal_provisioning_code_v1(uuid, uuid, text, text, text)', 'execute')
+     or has_function_privilege('service_role', 'kitluy_devices.expire_terminal_provisioning_code_v1(uuid, uuid, text, text, text)', 'execute')
+     or has_function_privilege('kitluy_worker_service', 'kitluy_devices.expire_terminal_provisioning_code_v1(uuid, uuid, text, text, text)', 'execute')
+     or not has_function_privilege('kitluy_test_harness', 'kitluy_devices.expire_terminal_provisioning_code_v1(uuid, uuid, text, text, text)', 'execute') then
+    raise exception 'ASSERT FAIL: the expiration helper boundary drifted under 0167';
+  end if;
+  if has_function_privilege('authenticated', 'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
+     or not has_function_privilege('kitluy_test_harness', 'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
+     or not has_function_privilege('authenticated', 'kitluy_devices.revoke_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or has_function_privilege('service_role', 'kitluy_devices.revoke_terminal_provisioning_code_v1(uuid, text, text)', 'execute') then
+    raise exception 'ASSERT FAIL: the evaluator or revocation boundary drifted under 0167';
+  end if;
+  if has_table_privilege('authenticated', 'kitluy_devices.device_provisioning_codes', 'INSERT,UPDATE,DELETE')
+     or has_table_privilege('authenticated', 'kitluy_devices.device_provisioning_code_events', 'INSERT,UPDATE,DELETE')
+     or has_table_privilege('service_role', 'kitluy_devices.device_provisioning_codes', 'INSERT,UPDATE,DELETE') then
+    raise exception 'ASSERT FAIL: a runtime identity holds direct mutation on provisioning-code tables';
+  end if;
+  if exists (
+    select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = 'kitluy_devices'
+       and c.relname in ('device_provisioning_codes', 'device_provisioning_code_events')
+       and (not c.relrowsecurity or not c.relforcerowsecurity)) then
+    raise exception 'ASSERT FAIL: FORCE RLS no longer holds on the provisioning-code tables';
+  end if;
+  if exists (
+    select 1 from pg_auth_members m join pg_roles r on r.oid = m.member
+     where m.roleid in ((select oid from pg_roles where rolname = 'kitluy_activation_governor'),
+                        (select oid from pg_roles where rolname = 'kitluy_credential_approval_reader'))
+       and r.rolcanlogin) then
+    raise exception 'ASSERT FAIL: a login-capable role is a member of a NOLOGIN authority';
+  end if;
+
+  -- The door delegates expiration and owns no competing state mutation.
+  if pg_get_functiondef('kitluy_devices.issue_terminal_provisioning_code_v1(uuid, text, text)'::regprocedure)
+       not like '%expire_terminal_provisioning_code_v1%'
+     or pg_get_functiondef('kitluy_devices.issue_terminal_provisioning_code_v1(uuid, text, text)'::regprocedure)
+          ~* 'update\s+kitluy_devices\.device_provisioning_codes' then
+    raise exception 'ASSERT FAIL: the issuance door lost delegation or gained a competing mutation';
+  end if;
+
+  -- Harness returned; sanctioned temporary grants removed; no residue.
+  execute format('revoke kitluy_test_harness from %I', current_user);
+  delete from kitluy_ops.test_clock_policy where environment = 'test';
+  delete from kitluy_auth.temporary_grants where subject_id in (v_operator, v_stranger);
+
+  raise notice 'PASS ws11-t004-replacement-issuance: due predecessor delegates to the canonical helper (one EXPIRED event, immutable history) and exactly one replacement row is issued under a new key (fresh Crockford code, digest, payload, correlation, 15-minute expiry, zero attempts, exact scope/Hub/profile, relational lineage, safe CREATED provenance); unexpired stays OUTSTANDING; replacement-key replay is ALREADY_ISSUED without a code; old-key replay answers predecessor history; third key on a live replacement is OUTSTANDING; conflicting replay refuses; the unprivileged are refused BEFORE expiry; expired/revoked/locked/redeemed predecessors take the unchanged initial path with NULL lineage; lineage is immutable, unfabricatable, never self-referencing and single-successor; the replacement MATCHes and the predecessor code never presents again; the 0163/0164/0165/0166 privilege boundaries stand (0167)';
+exception when others then
+  begin
+    execute format('revoke kitluy_test_harness from %I', current_user);
+  exception when others then
+    null;
+  end;
+  begin
+    execute format('revoke kitluy_activation_governor from %I', current_user);
+  exception when others then
+    null;
+  end;
+  begin
+    delete from kitluy_ops.test_clock_policy where environment = 'test';
+  exception when others then
+    null;
+  end;
+  raise;
+end
+$section54$;
 
 select 'assertions complete: groups 0010-0153 structural contract holds (incl. WS-11-T003 Step 4 Phase C — RC-022 spendability census CLOSED; governed emergency 0150–0153; RevocationGateway ships in @kitluy/device-identity)' as result;
