@@ -3677,6 +3677,11 @@ begin
      or has_table_privilege('kitluy_provisioning_service', 'kitluy_devices.device_certificates', 'SELECT,INSERT,UPDATE,DELETE') then
     raise exception 'FAIL WS11-N19: the composition role holds direct table access';
   end if;
+  -- BOTH postures are required (WS-11-T004-P02C1): no direct ACL, AND no
+  -- EFFECTIVE privilege. P02C asserted only the first, and the second was
+  -- open — service_role inherited the composer and really executed all five.
+  -- Group 0173's NOINHERIT gateway closed it; this is the check that proves
+  -- it stays closed.
   if exists (
     select 1 from pg_proc p
      join pg_namespace n on n.oid = p.pronamespace
@@ -3689,6 +3694,36 @@ begin
                         'read_terminal_provisioning_pop_challenge_context_v1')
       and a.grantee = 'service_role'::regrole::oid) then
     raise exception 'FAIL WS11-N19: service_role holds a direct provisioning grant';
+  end if;
+  if exists (
+    select 1 from pg_proc p
+     join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'kitluy_devices'
+      and p.proname in ('evaluate_terminal_provisioning_code_v1',
+                        'issue_terminal_provisioning_pop_challenge_v1',
+                        'record_terminal_provisioning_pop_verification_v1',
+                        'redeem_terminal_provisioning_code_v1',
+                        'read_terminal_provisioning_pop_challenge_context_v1')
+      and (has_function_privilege('service_role', p.oid, 'execute')
+           or has_function_privilege('kitluy_issuance_service', p.oid, 'execute')
+           or has_function_privilege('kitluy_worker_service', p.oid, 'execute'))) then
+    raise exception 'FAIL WS11-N19: an identity EFFECTIVELY holds a provisioning capability without entering the composer';
+  end if;
+  if not pg_has_role('service_role', 'kitluy_provisioning_service', 'MEMBER')
+     or pg_has_role('service_role', 'kitluy_provisioning_service', 'USAGE') then
+    raise exception 'FAIL WS11-N19: service_role must be able to ENTER the composer but never inherit it';
+  end if;
+  if not exists (
+    select 1 from pg_roles where rolname = 'kitluy_provisioning_gateway'
+       and not rolcanlogin and not rolinherit) then
+    raise exception 'FAIL WS11-N19: the NOINHERIT gateway that enforces explicit entry is missing';
+  end if;
+  if exists (
+    select 1 from pg_auth_members
+     where roleid in (select oid from pg_roles
+                       where rolname in ('kitluy_provisioning_service','kitluy_provisioning_gateway'))
+       and admin_option) then
+    raise exception 'FAIL WS11-N19: a member can re-delegate a composition role';
   end if;
   if has_function_privilege('authenticated', 'kitluy_devices.read_terminal_provisioning_pop_challenge_context_v1(uuid)', 'execute')
      or has_function_privilege('anon', 'kitluy_devices.read_terminal_provisioning_pop_challenge_context_v1(uuid)', 'execute') then

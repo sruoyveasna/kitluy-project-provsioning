@@ -218,7 +218,11 @@ describe.skipIf(!live)("controlled provisioning composition (0172), real identit
     // The test process connects as postgres, not service_role; borrow the
     // composer membership the way service_role holds it (censused, revoked
     // in afterAll) so `set local role kitluy_provisioning_service` works.
-    await keeper.query("grant kitluy_provisioning_service to postgres");
+    // No composer membership is borrowed for postgres: WS-11-T004-P02C1
+    // proved that an INHERIT member silently carries the capability, which is
+    // exactly the defect 0173 corrects. postgres is superuser and may
+    // SET ROLE without membership, so the suite exercises the real
+    // enter-the-capability path instead of an inherited one.
 
     const hub = await enrollDevice("WS11-CMP-HUB");
     await claimAndRedeem(hub.id);
@@ -263,7 +267,6 @@ describe.skipIf(!live)("controlled provisioning composition (0172), real identit
     await keeper
       .query(`delete from kitluy_ops.test_clock_policy where environment = 'test'`)
       .catch(() => undefined);
-    await keeper?.query("revoke kitluy_provisioning_service from postgres").catch(() => undefined);
     await keeper?.query("revoke kitluy_test_harness from postgres").catch(() => undefined);
     await keeper?.end().catch(() => undefined);
   });
@@ -546,6 +549,203 @@ describe.skipIf(!live)("controlled provisioning composition (0172), real identit
       [s.terminalId],
     );
     expect(Number(rows[0]?.n), "no pilot or production credential exists").toBe(0);
+  }, 60_000);
+
+  /**
+   * WS-11-T004-P02C1 Tests A–E. Effective privilege, not direct ACL: the
+   * P02C review correctly observed that "no direct grant" never proves "cannot
+   * execute". Every assertion below is a REAL call or a REAL effective-
+   * privilege check under a REAL identity.
+   */
+  const CAPABILITIES: ReadonlyArray<readonly [string, string]> = [
+    [
+      "evaluate_terminal_provisioning_code_v1",
+      `kitluy_devices.evaluate_terminal_provisioning_code_v1(gen_random_uuid(),'AAAAAAAA',gen_random_uuid(),'TERMINAL','probe')`,
+    ],
+    [
+      "issue_terminal_provisioning_pop_challenge_v1",
+      `kitluy_devices.issue_terminal_provisioning_pop_challenge_v1(gen_random_uuid())`,
+    ],
+    [
+      "read_terminal_provisioning_pop_challenge_context_v1",
+      `kitluy_devices.read_terminal_provisioning_pop_challenge_context_v1(gen_random_uuid())`,
+    ],
+    [
+      "record_terminal_provisioning_pop_verification_v1",
+      `kitluy_devices.record_terminal_provisioning_pop_verification_v1(gen_random_uuid(), true, repeat('a',64), repeat('b',64))`,
+    ],
+    [
+      "redeem_terminal_provisioning_code_v1",
+      `kitluy_devices.redeem_terminal_provisioning_code_v1(gen_random_uuid(),'AAAAAAAA',gen_random_uuid(),'k','s')`,
+    ],
+  ];
+
+  it("test A: service_role WITHOUT entering the composer cannot execute any capability (effective, not ACL)", async () => {
+    for (const [name, call] of CAPABILITIES) {
+      const effective = await keeper.query<{ e: boolean }>(
+        `select has_function_privilege('service_role', p.oid, 'execute') as e
+           from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+          where n.nspname = 'kitluy_devices' and p.proname = $1`,
+        [name],
+      );
+      expect(effective.rows[0]?.e, `${name}: service_role must not EFFECTIVELY hold execute`).toBe(
+        false,
+      );
+
+      const c = await keeper.connect();
+      try {
+        await c.query("begin");
+        await c.query("set local role service_role");
+        const who = await c.query<{ session_user: string; current_user: string }>(
+          "select session_user, current_user",
+        );
+        expect(who.rows[0]?.current_user, "the probe really is service_role").toBe("service_role");
+        await expect(c.query(`select ${call}`), `${name} as service_role`).rejects.toMatchObject({
+          code: "42501",
+        });
+      } finally {
+        await c.query("rollback").catch(() => undefined);
+        c.release();
+      }
+    }
+    // Zero residue: the denied probes created nothing.
+    const { rows } = await keeper.query<{ n: string }>(
+      `select (select count(*) from kitluy_devices.device_provisioning_pop_challenges
+                where terminal_assignment_id is null)::text as n`,
+    );
+    expect(Number(rows[0]?.n)).toBe(0);
+  }, 60_000);
+
+  it("test B: explicit transaction-local entry grants exactly the five capabilities and no table reach", async () => {
+    const c = await keeper.connect();
+    try {
+      await c.query("begin");
+      await c.query("set local role kitluy_provisioning_service");
+      const who = await c.query<{ session_user: string; current_user: string }>(
+        "select session_user, current_user",
+      );
+      expect(who.rows[0]?.current_user, "current_user becomes the composer").toBe(
+        "kitluy_provisioning_service",
+      );
+      expect(who.rows[0]?.session_user, "session_user remains the connecting identity").not.toBe(
+        "kitluy_provisioning_service",
+      );
+      // All five execute (they refuse on business grounds, never on privilege).
+      for (const [name, call] of CAPABILITIES) {
+        const r = await c.query<{ r: Record<string, unknown> }>(`select ${call} as r`);
+        expect(String(r.rows[0]?.r.outcome), `${name} reached business logic`).toMatch(
+          /REFUSED|CONTEXT/,
+        );
+      }
+      // No table reach comes with the capability.
+      await expect(
+        c.query(`select id from kitluy_devices.device_provisioning_codes limit 1`),
+      ).rejects.toMatchObject({ code: "42501" });
+    } finally {
+      await c.query("rollback").catch(() => undefined);
+      c.release();
+    }
+  }, 60_000);
+
+  it("test C: the capability dies with the transaction — after COMMIT and after ROLLBACK", async () => {
+    for (const ending of ["commit", "rollback"] as const) {
+      const c = await keeper.connect();
+      try {
+        await c.query("begin");
+        await c.query("set local role kitluy_provisioning_service");
+        expect((await c.query("select current_user")).rows[0].current_user).toBe(
+          "kitluy_provisioning_service",
+        );
+        await c.query(ending);
+        // The role is gone with the transaction.
+        expect(
+          (await c.query("select current_user")).rows[0].current_user,
+          `after ${ending} the composer is no longer active`,
+        ).not.toBe("kitluy_provisioning_service");
+        // And a fresh unentered call on the SAME pooled connection is denied.
+        await c.query("begin");
+        await c.query("set local role service_role");
+        await expect(
+          c.query(
+            `select kitluy_devices.redeem_terminal_provisioning_code_v1(gen_random_uuid(),'AAAAAAAA',gen_random_uuid(),'k','s')`,
+          ),
+          `pooled reuse after ${ending} must not retain the capability`,
+        ).rejects.toMatchObject({ code: "42501" });
+      } finally {
+        await c.query("rollback").catch(() => undefined);
+        c.release();
+      }
+    }
+  }, 60_000);
+
+  it("test D: RESET ROLE inside the transaction withdraws the capability immediately", async () => {
+    const c = await keeper.connect();
+    try {
+      await c.query("begin");
+      await c.query("set local role kitluy_provisioning_service");
+      const ok = await c.query<{ r: Record<string, unknown> }>(
+        `select kitluy_devices.read_terminal_provisioning_pop_challenge_context_v1(gen_random_uuid()) as r`,
+      );
+      expect(String(ok.rows[0]?.r.outcome)).toBe("CONTEXT_REFUSED");
+      await c.query("set local role service_role");
+      await expect(
+        c.query(
+          `select kitluy_devices.issue_terminal_provisioning_pop_challenge_v1(gen_random_uuid())`,
+        ),
+        "the post-reset call is denied",
+      ).rejects.toMatchObject({ code: "42501" });
+    } finally {
+      await c.query("rollback").catch(() => undefined);
+      c.release();
+    }
+  }, 60_000);
+
+  it("test E: unrelated service identities can neither enter nor use the capability", async () => {
+    for (const role of ["kitluy_issuance_service", "kitluy_worker_service"]) {
+      const member = await keeper.query<{ m: boolean }>(
+        `select pg_has_role($1, 'kitluy_provisioning_service', 'MEMBER') as m`,
+        [role],
+      );
+      expect(member.rows[0]?.m, `${role} must not be a member of the composer`).toBe(false);
+      for (const [name] of CAPABILITIES) {
+        const eff = await keeper.query<{ e: boolean }>(
+          `select has_function_privilege($1, p.oid, 'execute') as e
+             from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+            where n.nspname = 'kitluy_devices' and p.proname = $2`,
+          [role, name],
+        );
+        expect(eff.rows[0]?.e, `${role} must not effectively execute ${name}`).toBe(false);
+      }
+      const c = await keeper.connect();
+      try {
+        await c.query("begin");
+        await c.query(`set local role ${role}`);
+        await expect(
+          c.query(
+            `select kitluy_devices.redeem_terminal_provisioning_code_v1(gen_random_uuid(),'AAAAAAAA',gen_random_uuid(),'k','s')`,
+          ),
+          `${role} real call`,
+        ).rejects.toMatchObject({ code: "42501" });
+      } finally {
+        await c.query("rollback").catch(() => undefined);
+        c.release();
+      }
+    }
+    // service_role remains a MEMBER (so SET ROLE works) but must not INHERIT.
+    const shape = await keeper.query<{ member: boolean; usage: boolean }>(
+      `select pg_has_role('service_role','kitluy_provisioning_service','MEMBER') as member,
+              pg_has_role('service_role','kitluy_provisioning_service','USAGE') as usage`,
+    );
+    expect(shape.rows[0]?.member, "service_role may still enter the capability").toBe(true);
+    expect(shape.rows[0]?.usage, "service_role must NOT inherit the capability").toBe(false);
+    // Nobody may re-delegate either composition role.
+    const admin = await keeper.query<{ n: string }>(
+      `select count(*)::text as n from pg_auth_members
+        where roleid in (select oid from pg_roles
+                          where rolname in ('kitluy_provisioning_service','kitluy_provisioning_gateway'))
+          and admin_option`,
+    );
+    expect(Number(admin.rows[0]?.n), "no member may re-delegate a composition role").toBe(0);
   }, 60_000);
 
   it("identity: the composer executes exactly its five capabilities and nothing else; hostile identities cannot", async () => {
