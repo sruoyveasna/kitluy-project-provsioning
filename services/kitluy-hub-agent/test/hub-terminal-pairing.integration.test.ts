@@ -25,6 +25,14 @@
  *
  * The suite leaves only RUN-tagged fixture rows (terminal registrations and
  * credentials); pairing rows are governed history and deliberately remain.
+ *
+ * WS-11-T004-P03C adds the restart/recovery section: every authoritative
+ * pairing fact lives in the Hub database, so "restart" is modelled faithfully
+ * as ending every connection of one service instance (pool.end()) and
+ * constructing a fresh pool + composition against the same database — the
+ * exact recovery surface a real Hub process death exposes. Terminal-side
+ * receipt persistence has NO authoritative store yet and is deliberately NOT
+ * simulated (recorded dependency, P03C handoff).
  */
 import { randomUUID, randomBytes } from "node:crypto";
 import type pg from "pg";
@@ -92,6 +100,13 @@ describe.skipIf(!live)("hub-terminal pairing (hub group 0031)", () => {
   let hubKeyRef: string;
   let originalHubFingerprint = "";
   let originalHubExpiry = "";
+  // Memberships observed BEFORE this suite granted anything. afterAll restores
+  // the observed state instead of revoking unconditionally, so a persistent
+  // development grant (which the registry lifecycle suite depends on) survives
+  // this suite whatever the execution order (P03B handoff §9 correction).
+  let hadHubRuntime = false;
+  let hadSyncWorker = false;
+  let hadSupportRo = false;
 
   async function newTerminal(
     label: string,
@@ -269,6 +284,14 @@ describe.skipIf(!live)("hub-terminal pairing (hub group 0031)", () => {
       sign: (payload) => keys.provePossession(hubKeyRef, payload),
     };
     composition = new TerminalPairingComposition(pool, signer, logger);
+    const { rows: held } = await pool.query<{ role: string; member: boolean }>(
+      `select r.role, pg_has_role('postgres', r.role, 'member') as member
+         from (values ('kitluy_hub_runtime'), ('kitluy_sync_worker'), ('kitluy_support_ro'))
+              as r(role)`,
+    );
+    hadHubRuntime = held.some((r) => r.role === "kitluy_hub_runtime" && r.member);
+    hadSyncWorker = held.some((r) => r.role === "kitluy_sync_worker" && r.member);
+    hadSupportRo = held.some((r) => r.role === "kitluy_support_ro" && r.member);
     // Explicit literal grantee — KLRISK-HUB-001: `GRANT ... TO current_user`
     // segfaults the PG 15.8 dev server.
     await pool.query(`grant kitluy_hub_runtime to postgres`);
@@ -285,9 +308,15 @@ describe.skipIf(!live)("hub-terminal pairing (hub group 0031)", () => {
         [originalHubFingerprint, originalHubExpiry, HUB_CREDENTIAL],
       )
       .catch(() => undefined);
-    await pool?.query(`revoke kitluy_hub_runtime from postgres`).catch(() => undefined);
-    await pool?.query(`revoke kitluy_sync_worker from postgres`).catch(() => undefined);
-    await pool?.query(`revoke kitluy_support_ro from postgres`).catch(() => undefined);
+    // Restore the OBSERVED membership state — never revoke a grant this suite
+    // did not create (P03B handoff §9: the unconditional revoke made suite
+    // ordering change registry-lifecycle results).
+    if (!hadHubRuntime)
+      await pool?.query(`revoke kitluy_hub_runtime from postgres`).catch(() => undefined);
+    if (!hadSyncWorker)
+      await pool?.query(`revoke kitluy_sync_worker from postgres`).catch(() => undefined);
+    if (!hadSupportRo)
+      await pool?.query(`revoke kitluy_support_ro from postgres`).catch(() => undefined);
     await pool?.end().catch(() => undefined);
   });
 
@@ -991,4 +1020,415 @@ describe.skipIf(!live)("hub-terminal pairing (hub group 0031)", () => {
     expect(serialized.includes(challenge.terminalNonce)).toBe(false);
     expect(serialized.includes(challenge.hubNonce)).toBe(false);
   }, 90_000);
+
+  describe("P03C: restart, lost response and offline recovery", () => {
+    /**
+     * A "restarted" Hub service instance: every connection of the previous
+     * instance is ended and a brand-new pool + composition is built against
+     * the SAME database. The signer is reconstructed from the same key
+     * custody, exactly as a real process restart would.
+     */
+    function freshInstance(): { pool: pg.Pool; composition: TerminalPairingComposition } {
+      const restarted = createHubPool(process.env, 2);
+      return { pool: restarted, composition: new TerminalPairingComposition(restarted, signer) };
+    }
+
+    async function auditCount(sessionId: string): Promise<number> {
+      const { rows } = await pool.query<{ n: string }>(
+        `select count(*)::text as n from edge_audit.audit_event
+          where event_code = 'device.paired' and resource_id = $1::uuid`,
+        [sessionId],
+      );
+      return Number(rows[0]?.n);
+    }
+
+    it("restart: a committed receipt survives instance death and verifies unchanged", async () => {
+      const terminal = await newTerminal("RS1");
+      const a = freshInstance();
+      let sessionId = "";
+      let pairedAt = "";
+      let receiptId = "";
+      let transcriptHash = "";
+      try {
+        const prepared = await a.composition.preparePairing({
+          terminalDeviceId: terminal.id,
+          requestedProfileCode: terminal.profile,
+          terminalNonce: randomBytes(32).toString("hex"),
+          protocolVersion: PAIRING_PROTOCOL_VERSION,
+          environment: "development",
+          expiresAt: new Date(Date.now() + 10 * 60_000),
+        });
+        const challenge = prepared.data as PairingChallengeMaterial;
+        sessionId = challenge.pairingSessionId;
+        await a.composition.verifyTerminalProofAndRecord({
+          pairingSessionId: sessionId,
+          signatureBase64: terminalSign(terminal, challenge),
+          terminalPublicKeyPem: terminal.pem,
+        });
+        const paired = await a.composition.produceHubProofAndComplete({
+          pairingSessionId: sessionId,
+        });
+        expect(paired.result).toBe("PAIRED");
+        pairedAt = paired.data?.pairedAt ?? "";
+        receiptId = paired.data?.receiptId ?? "";
+        transcriptHash = paired.data?.transcriptHash ?? "";
+      } finally {
+        await a.pool.end();
+      }
+
+      const b = freshInstance();
+      try {
+        const reconciled = await b.composition.reconcilePairingReceipt({
+          pairingSessionId: sessionId,
+        });
+        expect(reconciled.result).toBe("RECEIPT_FOUND");
+        expect(reconciled.data?.receiptId).toBe(receiptId);
+        expect(reconciled.data?.transcriptHash).toBe(transcriptHash);
+        // Same INSTANT: the fresh-PAIRED response speaks JS ISO (ms), the
+        // reconciled row speaks PostgreSQL text (µs) — one authoritative time.
+        expect(new Date(reconciled.data?.pairedAt ?? 0).getTime()).toBe(
+          new Date(pairedAt).getTime(),
+        );
+
+        // The persisted receipt verifies under the ORIGINAL immutable
+        // transcript hash — restart changed no byte of the evidence.
+        const receipt = reconciled.data;
+        if (receipt === undefined) throw new Error("unreachable");
+        const verdict = verifyPairingReceipt(
+          receipt.receipt,
+          Buffer.from(receipt.receiptSignatureBase64, "base64"),
+          signer.publicKeyPem,
+          {
+            pairingSessionId: sessionId,
+            transcriptHash,
+            hubDeviceId: HUB_DEVICE,
+            hubCertificateFingerprint: publicKeyFingerprint(signer.publicKeyPem),
+            terminalDeviceId: terminal.id,
+            terminalCertificateFingerprint: terminal.fingerprint,
+            tenantId: TENANT,
+            digitalStoreId: STORE,
+            storeLocationId: LOCATION,
+            environment: "development",
+            terminalAssignmentGeneration: 1,
+            terminalProfileKey: terminal.profile,
+          },
+          new Date(),
+          publicKeyFingerprint,
+        );
+        expect(verdict.verified, verdict.detail ?? "").toBe(true);
+      } finally {
+        await b.pool.end();
+      }
+
+      // Restart minted nothing: one session, one receipt, one audit fact.
+      const { rows: sessions } = await pool.query<{ n: string }>(
+        `select count(*)::text as n from edge_identity.pairing_session
+          where terminal_device_id = $1::uuid`,
+        [terminal.id],
+      );
+      expect(Number(sessions[0]?.n)).toBe(1);
+      expect(await receiptCount(sessionId)).toBe(1);
+      expect(await auditCount(sessionId)).toBe(1);
+    }, 60_000);
+
+    it("restart: a lost completion response replays the ORIGINAL receipt, never a second", async () => {
+      const terminal = await newTerminal("RS2");
+      const a = freshInstance();
+      let sessionId = "";
+      let original: { receiptId: string; transcriptHash: string; pairedAt: string } | null = null;
+      try {
+        const prepared = await a.composition.preparePairing({
+          terminalDeviceId: terminal.id,
+          requestedProfileCode: terminal.profile,
+          terminalNonce: randomBytes(32).toString("hex"),
+          protocolVersion: PAIRING_PROTOCOL_VERSION,
+          environment: "development",
+          expiresAt: new Date(Date.now() + 10 * 60_000),
+        });
+        const challenge = prepared.data as PairingChallengeMaterial;
+        sessionId = challenge.pairingSessionId;
+        await a.composition.verifyTerminalProofAndRecord({
+          pairingSessionId: sessionId,
+          signatureBase64: terminalSign(terminal, challenge),
+          terminalPublicKeyPem: terminal.pem,
+        });
+        const paired = await a.composition.produceHubProofAndComplete({
+          pairingSessionId: sessionId,
+        });
+        // The response is DISCARDED here — the terminal never saw it.
+        original = {
+          receiptId: paired.data?.receiptId ?? "",
+          transcriptHash: paired.data?.transcriptHash ?? "",
+          pairedAt: paired.data?.pairedAt ?? "",
+        };
+      } finally {
+        await a.pool.end();
+      }
+
+      const b = freshInstance();
+      try {
+        const retried = await b.composition.produceHubProofAndComplete({
+          pairingSessionId: sessionId,
+        });
+        expect(retried.result).toBe("ALREADY_PAIRED");
+        expect(retried.data?.receiptId).toBe(original?.receiptId);
+        expect(retried.data?.transcriptHash).toBe(original?.transcriptHash);
+        expect(new Date(retried.data?.pairedAt ?? 0).getTime()).toBe(
+          new Date(original?.pairedAt ?? 1).getTime(),
+        );
+      } finally {
+        await b.pool.end();
+      }
+      expect(await receiptCount(sessionId)).toBe(1);
+      expect(await auditCount(sessionId), "replay appended no second business fact").toBe(1);
+    }, 60_000);
+
+    it("restart: an incomplete unexpired session resumes with its ORIGINAL bindings and nonces", async () => {
+      const terminal = await newTerminal("RS3");
+      const helloNonce = randomBytes(32).toString("hex");
+      const a = freshInstance();
+      let sessionId = "";
+      let hubNonce = "";
+      try {
+        const prepared = await a.composition.preparePairing({
+          terminalDeviceId: terminal.id,
+          requestedProfileCode: terminal.profile,
+          terminalNonce: helloNonce,
+          protocolVersion: PAIRING_PROTOCOL_VERSION,
+          environment: "development",
+          expiresAt: new Date(Date.now() + 10 * 60_000),
+        });
+        const challenge = prepared.data as PairingChallengeMaterial;
+        sessionId = challenge.pairingSessionId;
+        hubNonce = challenge.hubNonce;
+      } finally {
+        await a.pool.end();
+      }
+
+      const b = freshInstance();
+      try {
+        // The SAME hello resumes the SAME session — no nonce is regenerated.
+        const resumed = await b.composition.preparePairing({
+          terminalDeviceId: terminal.id,
+          requestedProfileCode: terminal.profile,
+          terminalNonce: helloNonce,
+          protocolVersion: PAIRING_PROTOCOL_VERSION,
+          environment: "development",
+          expiresAt: new Date(Date.now() + 10 * 60_000),
+        });
+        expect(resumed.result).toBe("PAIRING_PREPARED");
+        const challenge = resumed.data as PairingChallengeMaterial;
+        expect(challenge.pairingSessionId).toBe(sessionId);
+        expect(challenge.hubNonce, "the Hub nonce survived the restart unchanged").toBe(hubNonce);
+        expect(challenge.terminalNonce).toBe(helloNonce);
+
+        await b.composition.verifyTerminalProofAndRecord({
+          pairingSessionId: sessionId,
+          signatureBase64: terminalSign(terminal, challenge),
+          terminalPublicKeyPem: terminal.pem,
+        });
+        const paired = await b.composition.produceHubProofAndComplete({
+          pairingSessionId: sessionId,
+        });
+        expect(paired.result).toBe("PAIRED");
+      } finally {
+        await b.pool.end();
+      }
+      const { rows } = await pool.query<{ n: string }>(
+        `select count(*)::text as n from edge_identity.pairing_session
+          where terminal_device_id = $1::uuid`,
+        [terminal.id],
+      );
+      expect(Number(rows[0]?.n), "resumption opened no second session").toBe(1);
+    }, 60_000);
+
+    it("restart: an expired incomplete session refuses, keeps its bindings, and its nonces stay consumed", async () => {
+      const terminal = await newTerminal("RS4");
+      const helloNonce = randomBytes(32).toString("hex");
+      const a = freshInstance();
+      let sessionId = "";
+      let challenge!: PairingChallengeMaterial;
+      try {
+        const prepared = await a.composition.preparePairing({
+          terminalDeviceId: terminal.id,
+          requestedProfileCode: terminal.profile,
+          terminalNonce: helloNonce,
+          protocolVersion: PAIRING_PROTOCOL_VERSION,
+          environment: "development",
+          expiresAt: new Date(Date.now() + 2_000),
+        });
+        challenge = prepared.data as PairingChallengeMaterial;
+        sessionId = challenge.pairingSessionId;
+      } finally {
+        await a.pool.end();
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2_500));
+
+      const b = freshInstance();
+      try {
+        // Authoritative Hub-local expiry: the late proof is refused BEFORE any
+        // door runs (bindings-first verification), so nothing is consumed yet.
+        const late = await b.composition.verifyTerminalProofAndRecord({
+          pairingSessionId: sessionId,
+          signatureBase64: terminalSign(terminal, challenge),
+          terminalPublicKeyPem: terminal.pem,
+        });
+        expect(late.result).toBe("PAIR_CHALLENGE_EXPIRED");
+        expect(await receiptCount(sessionId)).toBe(0);
+
+        // A FRESH hello pairs cleanly after the expiry — and it is the
+        // governed begin door that transitions the stale session to
+        // `expired` on its way (lazy governed cleanup, no external sweeper).
+        const fresh = await b.composition.preparePairing({
+          terminalDeviceId: terminal.id,
+          requestedProfileCode: terminal.profile,
+          terminalNonce: randomBytes(32).toString("hex"),
+          protocolVersion: PAIRING_PROTOCOL_VERSION,
+          environment: "development",
+          expiresAt: new Date(Date.now() + 10 * 60_000),
+        });
+        expect(fresh.result).toBe("PAIRING_PREPARED");
+        const freshChallenge = fresh.data as PairingChallengeMaterial;
+        expect(freshChallenge.pairingSessionId).not.toBe(sessionId);
+        const row = await sessionRow(sessionId);
+        expect(String(row.state), "the begin door expired the stale session").toBe("expired");
+
+        // The consumed hello nonce cannot open a second handshake — single-use
+        // outlives both the session and the restart.
+        const reuse = await b.composition.preparePairing({
+          terminalDeviceId: terminal.id,
+          requestedProfileCode: terminal.profile,
+          terminalNonce: helloNonce,
+          protocolVersion: PAIRING_PROTOCOL_VERSION,
+          environment: "development",
+          expiresAt: new Date(Date.now() + 10 * 60_000),
+        });
+        expect(reuse.result).toBe("PAIR_NONCE_REJECTED");
+        await b.composition.verifyTerminalProofAndRecord({
+          pairingSessionId: freshChallenge.pairingSessionId,
+          signatureBase64: terminalSign(terminal, freshChallenge),
+          terminalPublicKeyPem: terminal.pem,
+        });
+        const paired = await b.composition.produceHubProofAndComplete({
+          pairingSessionId: freshChallenge.pairingSessionId,
+        });
+        expect(paired.result).toBe("PAIRED");
+      } finally {
+        await b.pool.end();
+      }
+    }, 60_000);
+
+    it("offline: pairing consumes ONLY the Hub-local database, and the projection it trusts is recorded", async () => {
+      // Structural: the ONLY connection the composition holds is the Hub-local
+      // database — there is no cloud client to be unavailable. WAN loss
+      // therefore cannot enter the commit path (ownership classification A).
+      const { rows: db } = await pool.query<{ db: string }>(`select current_database() as db`);
+      expect(db[0]?.db).toBe("kitluy_hub_local");
+
+      const terminal = await newTerminal("OFF");
+      const prepared = await prepare(terminal);
+      expect(prepared.result).toBe("PAIRING_PREPARED");
+      const challenge = prepared.data as PairingChallengeMaterial;
+
+      // The authorization the Hub enforced comes from the ACTIVE cloud-signed
+      // snapshot projection — record exactly which one, and how fresh.
+      const { rows: projection } = await pool.query<{
+        snapshot_id: string;
+        snapshot_state: string;
+        assignment_version: number;
+        effective_from: string;
+      }>(
+        `select cs.id as snapshot_id, cs.state as snapshot_state,
+                tpa.assignment_version, tpa.effective_from::text as effective_from
+           from edge_config.terminal_profile_assignment tpa
+           join edge_config.configuration_snapshot cs on cs.id = tpa.source_snapshot_id
+          where tpa.terminal_device_id = $1::uuid`,
+        [terminal.id],
+      );
+      expect(projection[0]?.snapshot_state, "authorization came from the ACTIVE snapshot").toBe(
+        "active",
+      );
+      expect(projection[0]?.snapshot_id).toBe(ACTIVE_SNAPSHOT);
+
+      await composition.verifyTerminalProofAndRecord({
+        pairingSessionId: challenge.pairingSessionId,
+        signatureBase64: terminalSign(terminal, challenge),
+        terminalPublicKeyPem: terminal.pem,
+      });
+      const paired = await composition.produceHubProofAndComplete({
+        pairingSessionId: challenge.pairingSessionId,
+      });
+      expect(paired.result, "LAN pairing completed with no cloud round-trip").toBe("PAIRED");
+    }, 60_000);
+
+    it("stale authority: a projection withdrawn mid-handshake refuses closed with no receipt", async () => {
+      const terminal = await newTerminal("STALE");
+      const prepared = await prepare(terminal);
+      const challenge = prepared.data as PairingChallengeMaterial;
+
+      // The cloud-assigned grant ends (a superseding projection withdrew it).
+      await pool.query(
+        `update edge_config.terminal_profile_assignment
+            set enabled = false
+          where terminal_device_id = $1::uuid`,
+        [terminal.id],
+      );
+
+      const refused = await composition.verifyTerminalProofAndRecord({
+        pairingSessionId: challenge.pairingSessionId,
+        signatureBase64: terminalSign(terminal, challenge),
+        terminalPublicKeyPem: terminal.pem,
+      });
+      expect(refused.result).toBe("PAIR_PROFILE_FORBIDDEN");
+      expect(await receiptCount(challenge.pairingSessionId)).toBe(0);
+      const row = await sessionRow(challenge.pairingSessionId);
+      expect(String(row.state), "the refused handshake consumed nothing").toBe("challenge_issued");
+    }, 60_000);
+
+    it("rollback then restart: an injected fault leaves a state a NEW instance completes exactly once", async () => {
+      const terminal = await newTerminal("RS5");
+      const prepared = await prepare(terminal);
+      const challenge = prepared.data as PairingChallengeMaterial;
+      await composition.verifyTerminalProofAndRecord({
+        pairingSessionId: challenge.pairingSessionId,
+        signatureBase64: terminalSign(terminal, challenge),
+        terminalPublicKeyPem: terminal.pem,
+      });
+
+      const faultFn = `p03c_fault_${RUN}`;
+      await pool.query(
+        `create function public.${faultFn}() returns trigger language plpgsql as $f$
+           begin raise exception 'P03C-FAULT' using errcode = 'KL940'; end $f$`,
+      );
+      await pool.query(
+        `create trigger zz_p03c_fault before insert on edge_identity.pairing_receipt
+           for each row when (new.pairing_session_id = '${challenge.pairingSessionId}')
+           execute function public.${faultFn}()`,
+      );
+      try {
+        const failed = await composition.produceHubProofAndComplete({
+          pairingSessionId: challenge.pairingSessionId,
+        });
+        expect(failed.result).toBe("INTERNAL_ERROR");
+      } finally {
+        await pool.query(`drop trigger if exists zz_p03c_fault on edge_identity.pairing_receipt`);
+        await pool.query(`drop function if exists public.${faultFn}()`);
+      }
+      expect(await receiptCount(challenge.pairingSessionId)).toBe(0);
+      expect(await auditCount(challenge.pairingSessionId)).toBe(0);
+
+      // The crashed instance is gone; its successor completes ONCE.
+      const b = freshInstance();
+      try {
+        const paired = await b.composition.produceHubProofAndComplete({
+          pairingSessionId: challenge.pairingSessionId,
+        });
+        expect(paired.result).toBe("PAIRED");
+      } finally {
+        await b.pool.end();
+      }
+      expect(await receiptCount(challenge.pairingSessionId)).toBe(1);
+      expect(await auditCount(challenge.pairingSessionId)).toBe(1);
+    }, 60_000);
+  });
 });
