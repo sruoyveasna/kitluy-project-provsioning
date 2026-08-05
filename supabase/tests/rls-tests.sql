@@ -3508,4 +3508,106 @@ begin
 end $$;
 rollback;
 
-select 'rls-tests complete: 14+9 baseline cases; cycle-5 WS5 7 negative + 7 positive and WS6 10 negative + 9 positive; cycle-6 WS7 13 negative + 6 positive and WS8 13 negative + 6 positive; cycle-10 WS11 T001 4 negative + 1 positive and T002 3 negative + 1 positive kitluy_devices cases executed; WS-11-T004-P02A 3 negative provisioning-code cases executed; WS-11-T004-P02B1 issuance-door boundary case executed; WS-11-T004-P02B2A presentation-evaluator boundary case executed; WS-11-T004-P02B2B1 revocation-door boundary case executed; WS-11-T004-P02B2B2A expiration-helper boundary case executed; WS-11-T004-P02B2B2B1 replacement-lineage boundary case executed; WS-11-T004-P02B2B2B2A recovery-door boundary case executed; WS-11-T004-P02B3A pop-foundation boundary case executed' as result;
+-- WS11-N18: the atomic PoP-bound redemption (0171) added ONE harness-only
+-- composition door and three frozen redemption-reference columns and changed
+-- NOTHING else: no runtime identity may execute the door or mutate the
+-- redemption bindings; FORCE RLS holds on every redemption-path table; the
+-- one-proof/one-code/one-credential uniqueness rules exist; the 0162-0170
+-- boundaries stand. Catalog first, as the migration role; probes follow.
+begin;
+do $$
+begin
+  if has_function_privilege('public', 'kitluy_devices.redeem_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
+     or has_function_privilege('anon', 'kitluy_devices.redeem_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
+     or has_function_privilege('authenticated', 'kitluy_devices.redeem_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
+     or has_function_privilege('service_role', 'kitluy_devices.redeem_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
+     or has_function_privilege('kitluy_worker_service', 'kitluy_devices.redeem_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
+     or not has_function_privilege('kitluy_test_harness', 'kitluy_devices.redeem_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute') then
+    raise exception 'FAIL WS11-N18: the redemption door boundary is wrong under 0171';
+  end if;
+  if not exists (
+    select 1 from pg_indexes
+     where schemaname = 'kitluy_devices'
+       and indexname = 'uq_device_provisioning_codes_redemption_key')
+     or not exists (
+    select 1 from pg_indexes
+     where schemaname = 'kitluy_devices'
+       and indexname = 'uq_device_provisioning_codes_one_code_per_proof')
+     or not exists (
+    select 1 from pg_indexes
+     where schemaname = 'kitluy_devices'
+       and indexname = 'device_certificates_one_active_per_env_idx') then
+    raise exception 'FAIL WS11-N18: a redemption uniqueness rule is missing';
+  end if;
+  if exists (
+    select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = 'kitluy_devices'
+       and c.relname in ('device_provisioning_codes', 'device_provisioning_code_events',
+                         'device_provisioning_pop_challenges', 'device_certificates')
+       and (not c.relrowsecurity or not c.relforcerowsecurity)) then
+    raise exception 'FAIL WS11-N18: FORCE RLS no longer holds on a redemption-path table';
+  end if;
+  if has_table_privilege('authenticated', 'kitluy_devices.device_provisioning_codes', 'INSERT,UPDATE,DELETE')
+     or has_table_privilege('service_role', 'kitluy_devices.device_provisioning_codes', 'INSERT,UPDATE,DELETE')
+     or has_table_privilege('authenticated', 'kitluy_devices.device_provisioning_pop_challenges', 'SELECT,INSERT,UPDATE,DELETE') then
+    raise exception 'FAIL WS11-N18: a runtime identity can mutate redemption-path rows directly';
+  end if;
+  if not has_function_privilege('authenticated', 'kitluy_devices.issue_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or not has_function_privilege('authenticated', 'kitluy_devices.recover_terminal_provisioning_code_v1(uuid, text, text, text)', 'execute')
+     or has_function_privilege('authenticated', 'kitluy_devices.issue_terminal_provisioning_pop_challenge_v1(uuid)', 'execute')
+     or not has_function_privilege('kitluy_test_harness', 'kitluy_devices.issue_terminal_provisioning_pop_challenge_v1(uuid)', 'execute')
+     or has_function_privilege('authenticated', 'kitluy_devices.record_terminal_provisioning_pop_verification_v1(uuid, boolean, text, text)', 'execute')
+     or not has_function_privilege('kitluy_test_harness', 'kitluy_devices.record_terminal_provisioning_pop_verification_v1(uuid, boolean, text, text)', 'execute') then
+    raise exception 'FAIL WS11-N18: an earlier provisioning or PoP boundary drifted under 0171';
+  end if;
+  if exists (
+    select 1 from pg_auth_members m
+      join pg_roles r on r.oid = m.member
+     where m.roleid = (select oid from pg_roles where rolname = 'kitluy_activation_governor')
+       and r.rolcanlogin) then
+    raise exception 'FAIL WS11-N18: a login-capable role is a member of the governor owner';
+  end if;
+  raise notice 'PASS WS11-N18a: the redemption door is harness-only; the one-proof/one-code/one-credential rules stand; FORCE RLS holds on every redemption-path table; the 0162-0170 boundaries stand';
+end $$;
+select set_config('request.jwt.claims', '{"role":"anon"}', true);
+set local role anon;
+do $$
+declare
+  v_result jsonb;
+  v_refused boolean := false;
+begin
+  begin
+    v_result := kitluy_devices.redeem_terminal_provisioning_code_v1(
+      gen_random_uuid(), 'AAAAAAAA', gen_random_uuid(), 'rls-probe', 'rls-serial');
+    raise exception 'FAIL WS11-N18: anon reached the redemption door: %', v_result;
+  exception when insufficient_privilege then
+    v_refused := true;
+  end;
+  if not v_refused then
+    raise exception 'FAIL WS11-N18: the anon redemption probe did not run';
+  end if;
+  raise notice 'PASS WS11-N18b: anon cannot execute the redemption door';
+end $$;
+rollback;
+begin;
+select set_config('request.jwt.claims', '{"role":"authenticated"}', true);
+set local role authenticated;
+do $$
+declare
+  v_refused boolean := false;
+begin
+  begin
+    update kitluy_devices.device_provisioning_codes
+       set redemption_idempotency_key = 'stolen' where false;
+    raise exception 'FAIL WS11-N18: authenticated holds direct UPDATE on redemption bindings';
+  exception when insufficient_privilege then
+    v_refused := true;
+  end;
+  if not v_refused then
+    raise exception 'FAIL WS11-N18: the redemption-binding probe did not run';
+  end if;
+  raise notice 'PASS WS11-N18c: authenticated cannot mutate redemption bindings directly';
+end $$;
+rollback;
+
+select 'rls-tests complete: 14+9 baseline cases; cycle-5 WS5 7 negative + 7 positive and WS6 10 negative + 9 positive; cycle-6 WS7 13 negative + 6 positive and WS8 13 negative + 6 positive; cycle-10 WS11 T001 4 negative + 1 positive and T002 3 negative + 1 positive kitluy_devices cases executed; WS-11-T004-P02A 3 negative provisioning-code cases executed; WS-11-T004-P02B1 issuance-door boundary case executed; WS-11-T004-P02B2A presentation-evaluator boundary case executed; WS-11-T004-P02B2B1 revocation-door boundary case executed; WS-11-T004-P02B2B2A expiration-helper boundary case executed; WS-11-T004-P02B2B2B1 replacement-lineage boundary case executed; WS-11-T004-P02B2B2B2A recovery-door boundary case executed; WS-11-T004-P02B3A pop-foundation boundary case executed; WS-11-T004-P02B3B redemption-door boundary case executed' as result;
