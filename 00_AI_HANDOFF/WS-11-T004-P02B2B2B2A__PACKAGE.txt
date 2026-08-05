@@ -1,0 +1,874 @@
+# KIMI SWARM PACKAGE
+# WS-11-T004-P02B2B2B2A — CROSS-OPERATION REPLACEMENT RACE HARDENING
+
+Repository:
+
+/c/Users/Hello-Evo-PC/Desktop/HET-KITLUY-PROJECT
+
+## Task identity
+
+Task:
+
+WS-11-T004 — Terminal (T1–T4) assignment and provisioning
+
+Working-title authority:
+
+DERIVED FROM AUTHORITATIVE SOURCES
+
+## Package identity
+
+Package ID:
+
+WS-11-T004-P02B2B2B2A
+
+Single objective:
+
+Prove and, only where necessary, harden expired-code replacement issuance
+against concurrent revocation, presentation/lockout, Hub-state change and
+successive replacement operations.
+
+This package owns:
+
+- cross-operation concurrency tests;
+- lock-order verification;
+- terminal-state winner semantics;
+- replacement-lineage race protection;
+- exact event-residue verification;
+- narrowly scoped additive correction when a race exposes a real defect;
+- focused evidence and handoff.
+
+This package does not own:
+
+- ambiguous client outcomes after commit;
+- retry/recovery APIs;
+- durable recovery jobs;
+- expiration workers;
+- successful redemption;
+- proof-of-possession;
+- certificate issuance;
+- pairing;
+- provisioning HTTP routes;
+- final production grants;
+- Store Hub runtime changes.
+
+Do not start P02B2B2B2B, P02B2B2C, P02B3 or P02C.
+
+---
+
+## 1. Hard execution limits
+
+Finish before either hard limit:
+
+- 59 minutes;
+- 100 platform steps.
+
+Target:
+
+- 45–50 minutes;
+- 65–75 total steps;
+- 80 planned steps maximum.
+
+Reserve at least 15 steps for:
+
+- focused race execution;
+- correction of one proven defect;
+- fresh regression checks;
+- diff inspection;
+- atomic commit;
+- handoff;
+- clean exit.
+
+Checkpoints:
+
+- minute 0–5 / steps 1–10:
+  verify repository and Node 22;
+- minute 5–15 / steps 11–25:
+  inspect lock order and build the race matrix;
+- minute 15–35 / steps 26–55:
+  add race tests and execute them;
+- minute 35–47 / steps 56–72:
+  apply one narrow fix only when evidence requires it;
+- minute 47–55 / steps 73–88:
+  rerun focused gates, inspect and commit;
+- minute 55–59 / steps 89–95:
+  finish the handoff and exit cleanly.
+
+At minute 40 or step 65:
+
+- stop expanding scope.
+
+At minute 48 or step 75:
+
+- begin final verification.
+
+At minute 50 or step 80:
+
+- do not start a new substantive change.
+
+At minute 55 or step 90:
+
+- commit only verified work;
+- complete the handoff;
+- exit.
+
+When more than one independent defect is discovered:
+
+1. fix only the highest-severity defect that fits safely;
+2. record the others as successor packages;
+3. do not exceed the time or step budget;
+4. leave the tree clean.
+
+Do not reach maxSteps=100 without a handoff.
+
+---
+
+## 2. Verify repository and toolchain
+
+Run:
+
+cd /c/Users/Hello-Evo-PC/Desktop/HET-KITLUY-PROJECT
+
+pwd
+git status --short
+git branch --show-current
+git rev-parse HEAD
+git log --oneline --decorate -20
+git rev-list --count @{u}..HEAD 2>/dev/null || true
+git remote get-url --push origin
+git diff --check
+where node
+node --version
+pnpm --version
+pnpm config get engine-strict
+
+Reported checkpoint:
+
+- expected HEAD: ed9265c;
+- branch: main;
+- tree: clean;
+- approximately 98 commits ahead;
+- push URL: disabled://push-requires-owner-approval;
+- Node: v22.23.0;
+- pnpm: 9.15.9;
+- engine-strict: true;
+- cloud migrations through 0167;
+- next free migration: 0168;
+- Hub migrations through 0030;
+- db:test baseline: 215 PASS;
+- test:rls baseline: 117 PASS;
+- Hub db:test baseline: 35 PASS;
+- registry baseline: 235/235;
+- lifecycle baseline: 30/30;
+- census baseline: 14/14;
+- P02B2B2B1: IMPLEMENTED-IN-DEV.
+
+Expected Node binary:
+
+C:\Users\Hello-Evo-PC\AppData\Local\kitluy-toolchain\
+node-v22.23.0-win-x64\node.exe
+
+Use repository and live environment evidence as authority.
+
+Stop and report BLOCKED when:
+
+- the tree contains unexplained changes;
+- Node 22 is not active;
+- engine enforcement is disabled;
+- migration 0168 already exists for another purpose;
+- migrations 0162–0167 differ from recorded evidence;
+- push is no longer disabled;
+- another agent is modifying the same tests, issuance function or migration
+  boundary.
+
+Do not run canonical evidence under Node 24.
+
+---
+
+## 3. Read required authority
+
+Read in repository-required order:
+
+AGENTS.md
+CLAUDE.md
+KIMI.md
+PROJECT_HOME.md
+CONTRIBUTING.md
+SECURITY.md
+
+Then read:
+
+00_AI_HANDOFF/000_INDEX.md
+00_AI_HANDOFF/000_CURRENT_STATE.md
+00_AI_HANDOFF/000_ACTIVE_PHASE.md
+00_AI_HANDOFF/000_BLOCKERS.md
+
+Read all WS-11-T004 handoffs through:
+
+WS-11-T004-P02B2B2B1
+
+Inspect:
+
+- migration 0162 — code schema and event model;
+- migration 0163 — governed issuance;
+- migration 0164 — presentation and lockout;
+- migration 0165 — explicit revocation;
+- migration 0166 — canonical expiration;
+- migration 0167 — replacement issuance and lineage;
+- issuance, presentation, revocation and expiration race tests;
+- assignment and code locking order;
+- Hub activation projection;
+- active-Hub validation function;
+- replacement self-FK and unique-successor constraint;
+- authoritative clock;
+- capability and membership census.
+
+Do not modify migrations 0000–0167.
+
+---
+
+## 4. Audit before editing
+
+Before writing a test, produce a compact race matrix containing:
+
+| Race | Operation A | Operation B | Shared locked resources | Expected winner rules | Required final state | Required events |
+|---|---|---|---|---|---|---|
+
+Verify that the active functions consistently use:
+
+1. assignment lock;
+2. provisioning-code lock;
+3. current Hub-state validation where applicable;
+4. terminal-state recheck immediately before mutation.
+
+Identify any function that reverses this order.
+
+Do not “fix” a theoretical issue without executable evidence.
+
+---
+
+## 5. Core invariants
+
+All races must preserve these invariants:
+
+- one authoritative terminal state per code;
+- one direct successor per predecessor;
+- at most one outstanding ISSUED code per assignment;
+- no replacement from REVOKED, LOCKED or REDEEMED predecessor;
+- predecessor never returns to ISSUED;
+- replacement lineage is immutable;
+- failed-attempt count never exceeds five;
+- no terminal-state timestamp conflicts;
+- no duplicate terminal event;
+- no duplicate replacement CREATED event;
+- raw code returned only by the transaction that creates the successor;
+- raw code never persisted;
+- active-Hub rule enforced at the replacement commit boundary;
+- no uncontrolled unique/check/FK exception escapes as the public contract;
+- no role, permission, test-clock or borrowed-membership residue.
+
+---
+
+## 6. Required race A — replacement versus revocation
+
+Initial state:
+
+- one assignment;
+- one active Hub;
+- one overdue ISSUED provisioning code;
+- no successor.
+
+Race:
+
+- A: issue replacement using a new idempotency key;
+- B: revoke the overdue predecessor.
+
+Use separate PostgreSQL sessions with recorded backend PIDs and a synchronized
+barrier.
+
+Allowed final outcomes depend on serialization.
+
+### Replacement wins first
+
+Required:
+
+- predecessor becomes EXPIRED;
+- exactly one successor becomes ISSUED;
+- revocation receives a stable terminal classification;
+- predecessor remains EXPIRED;
+- successor remains ISSUED;
+- one EXPIRED event;
+- one successor CREATED event;
+- no REVOKED event on the expired predecessor.
+
+### Revocation wins first
+
+Required:
+
+- predecessor becomes REVOKED;
+- replacement issuance does not create a successor;
+- no EXPIRED event;
+- no successor CREATED event;
+- one REVOKED event;
+- replacement returns a stable terminal result.
+
+Never allow:
+
+- predecessor both EXPIRED and REVOKED;
+- successor created from a REVOKED predecessor;
+- duplicate terminal events;
+- orphan lineage;
+- uncontrolled constraint error.
+
+---
+
+## 7. Required race B — replacement versus fifth failure
+
+Initial state:
+
+- one overdue ISSUED code;
+- failed-attempt count = 4;
+- active assignment and Hub;
+- no successor.
+
+Race:
+
+- A: issue replacement;
+- B: present one incorrect code through the 0164 evaluator.
+
+Because expiry is authoritative and checked before digest/attempt mutation,
+the expected governed result is:
+
+- predecessor EXPIRED;
+- failed-attempt count remains 4;
+- no LOCKED event;
+- one EXPIRED event;
+- exactly one successor ISSUED;
+- one successor CREATED event;
+- the failed presentation receives the stable expired classification.
+
+If repository execution proves a different serializable order is permitted,
+document the exact authority before accepting it.
+
+Never allow:
+
+- predecessor both EXPIRED and LOCKED;
+- failed attempts above five;
+- successor created from a LOCKED predecessor;
+- duplicate events.
+
+---
+
+## 8. Required race C — replacement versus correct presentation
+
+Initial state:
+
+- one overdue ISSUED code;
+- active assignment and Hub;
+- no successor.
+
+Race:
+
+- A: issue replacement;
+- B: present the predecessor’s correct code.
+
+Required:
+
+- predecessor finishes EXPIRED;
+- correct presentation does not produce durable MATCH_READY after expiration;
+- no redemption occurs;
+- one successor ISSUED;
+- exactly one EXPIRED event;
+- exactly one successor CREATED event;
+- no failed-attempt increment;
+- no PRESENTED event after the expiry transition.
+
+A transient MATCH_READY returned before the replacement transaction commits
+must remain non-authoritative and must be documented as requiring P02B3’s
+mandatory state recheck.
+
+---
+
+## 9. Required race D — replacement versus Hub deactivation
+
+First inspect the actual Hub activation and deactivation authority.
+
+Use the real governed transition or sanctioned test fixture. Do not update the
+activation projection directly.
+
+Initial state:
+
+- one overdue ISSUED code;
+- Hub currently active;
+- assignment currently bound to that Hub;
+- no successor.
+
+Race:
+
+- A: replacement issuance;
+- B: governed Hub deactivation, revocation, replacement or other canonical
+  transition that makes the Hub ineligible.
+
+Required final behavior:
+
+### Replacement commits while Hub is still authoritatively active
+
+- successor may be created;
+- successor binds to the Hub state valid at commit;
+- later Hub deactivation does not rewrite historical issuance evidence;
+- follow-on terminal provisioning must still revalidate Hub eligibility where
+  required.
+
+### Hub becomes ineligible before replacement’s final validation
+
+- no successor;
+- predecessor may remain overdue ISSUED or become EXPIRED only according to
+  the transaction’s atomic contract;
+- no partial expiration without a valid replacement unless canonical
+  expiration independently commits;
+- stable fail-closed result;
+- no raw-code return.
+
+The package must determine whether migration 0167 revalidates Hub state under
+a sufficient lock immediately before successor insertion.
+
+When no safe canonical Hub-deactivation operation exists in current scope:
+
+- do not fabricate one;
+- mark this race `BLOCKED BY MISSING GOVERNED TEST DOOR`;
+- create a narrowly scoped successor package;
+- continue with races A, B and C.
+
+Do not exceed the package budget trying to build Hub lifecycle machinery.
+
+---
+
+## 10. Required race E — successive replacement lineage
+
+This is a serial-plus-concurrent lineage test.
+
+1. Issue initial code A.
+2. Expire A and replace it with B.
+3. Advance authoritative time until B is overdue.
+4. race two replacement calls for B.
+
+Required:
+
+- A remains EXPIRED;
+- B becomes EXPIRED;
+- exactly one C becomes ISSUED;
+- B replaces A;
+- C replaces B;
+- no direct second successor of A;
+- no self-reference;
+- no cycle;
+- exactly one CREATED event for B;
+- exactly one CREATED event for C;
+- exactly one EXPIRED event for A;
+- exactly one EXPIRED event for B;
+- no duplicate lineage edge.
+
+Do not create a general graph framework.
+
+Only prove the immediate-predecessor chain established by migration 0167.
+
+---
+
+## 11. Required privilege and hostile tests
+
+Prove:
+
+- callers cannot supply `replaces_provisioning_code_id`;
+- runtime identities cannot update lineage;
+- direct second-successor insertion is denied;
+- self-reference is denied;
+- cross-assignment predecessor link is denied;
+- cross-Tenant predecessor link is denied;
+- cross-Store predecessor link is denied;
+- cross-Location predecessor link is denied;
+- cross-Hub predecessor link is denied;
+- cross-profile predecessor link is denied;
+- wrong-environment predecessor link is denied;
+- no runtime identity can directly force EXPIRED before replacement;
+- no runtime identity can directly create a successor;
+- no broad owner membership exists;
+- no temporary test capability survives.
+
+Use the actual database roles.
+
+Do not treat postgres success as runtime proof.
+
+---
+
+## 12. Additive correction policy
+
+Begin with tests only.
+
+Create migration 0168 only when a race or hostile test proves a real defect in
+the active 0167 implementation.
+
+Do not create an empty or documentation-only migration.
+
+A valid 0168 correction may narrowly change:
+
+- lock ordering;
+- Hub revalidation placement;
+- terminal-state recheck;
+- lineage validation trigger;
+- stable race-result conversion;
+- function body required to prevent a proven duplicate or partial outcome.
+
+Preserve existing public signatures unless a breaking defect makes that
+impossible.
+
+Do not modify migrations 0000–0167.
+
+Do not add:
+
+- recovery jobs;
+- new public APIs;
+- expiration workers;
+- redemption;
+- PoP;
+- certificates;
+- pairing;
+- production grants.
+
+When no defect is found:
+
+- commit tests and evidence only;
+- keep migration 0168 free;
+- explicitly report `NO MIGRATION REQUIRED`.
+
+---
+
+## 13. Stable error/result behavior
+
+No expected race should surface raw PostgreSQL errors such as:
+
+- unique_violation;
+- check_violation;
+- foreign_key_violation;
+- serialization_failure without governed retry handling;
+- permission_denied from an internal expected path;
+- null-value violation.
+
+Convert expected conflicts into the repository’s stable result vocabulary.
+
+Do not hide unexpected failures.
+
+Tests must fail when an uncontrolled SQLSTATE escapes.
+
+---
+
+## 14. Required verification
+
+All canonical commands must use Node 22.23.0 and `engine-strict=true`.
+
+Minimum fresh sequence:
+
+1. verify Node and pnpm;
+2. reset cloud DB from zero through latest migration;
+3. seed twice;
+4. run the five focused replacement race scenarios;
+5. run hostile lineage tests;
+6. run focused RLS and privilege tests;
+7. run existing db:test;
+8. run existing test:rls;
+9. run migrations:validate;
+10. run db:validate;
+11. run secret:scan;
+12. run clock:check;
+13. run membership and privilege census;
+14. rebuild and test Hub DB when required;
+15. run registry suite serially.
+
+Reported baselines:
+
+- db:test: 215 PASS;
+- test:rls: 117 PASS;
+- Hub db:test: 35 PASS;
+- registry: 235/235;
+- lifecycle: 30/30;
+- census: 14/14.
+
+Do not regress these baselines.
+
+New focused race tests must have zero skips, except race D may be explicitly
+classified as blocked only when no governed Hub transition exists. A silent
+skip is not acceptable.
+
+For each race record:
+
+- backend PID;
+- start barrier;
+- initial rows;
+- operation results;
+- final code rows;
+- lineage rows;
+- event counts;
+- effective roles;
+- any SQLSTATE.
+
+---
+
+## 15. Allowed files
+
+Expected file categories:
+
+- one focused replacement-race integration test;
+- focused database assertions or RLS tests when needed;
+- migration 0168 only when a proven defect requires it;
+- P02B2B2B2A handoff;
+- evidence index/current-state updates required by repository convention.
+
+Do not modify:
+
+- migrations 0000–0167;
+- Hub migrations;
+- provisioning-service runtime;
+- Store Hub runtime;
+- UI;
+- certificate issuance;
+- pairing;
+- package dependencies;
+- production grants;
+- recovery-worker code;
+- P02B3 behavior.
+
+Record the exact allowed file list before editing.
+
+---
+
+## 16. Completion gate
+
+P02B2B2B2A is complete only when:
+
+- Node 22 remains active;
+- races A, B, C and E pass;
+- race D passes or is explicitly blocked by absence of a governed Hub
+  transition;
+- one terminal state wins every race;
+- one direct successor per predecessor is preserved;
+- no orphan or cyclic lineage exists;
+- no duplicate terminal or CREATED event exists;
+- active-Hub revalidation is proven at the correct transaction boundary;
+- no raw code is persisted;
+- expected races return governed results;
+- no broad grant or membership residue exists;
+- issuance, presentation, lockout, revocation and expiration do not regress;
+- db:test remains at least 215;
+- test:rls remains at least 117;
+- registry remains at least 235/235;
+- lifecycle remains 30/30;
+- census remains 14/14;
+- required tests have zero unexplained skips;
+- evidence is current;
+- tree is clean;
+- push remains disabled.
+
+Choose exactly one status:
+
+- IMPLEMENTED-IN-DEV;
+- IMPLEMENTED-IN-DEV — NO MIGRATION REQUIRED;
+- IMPLEMENTED-IN-DEV WITH RECORDED BLOCKED RACE;
+- BLOCKED BY ENVIRONMENT;
+- BLOCKED BY REPOSITORY CONFLICT;
+- PARTIAL — SUCCESSOR PACKAGE REQUIRED.
+
+Do not mark:
+
+- ambiguous-outcome recovery complete;
+- expiration worker complete;
+- P02B3 complete;
+- P02C complete;
+- WS-11-T004 complete;
+- pilot ready;
+- production ready.
+
+---
+
+## 17. Evidence deliverable
+
+Create:
+
+00_AI_HANDOFF/shared/2026-08-05__SHARED__WS-11-T004-P02B2B2B2A__REPLACEMENT-CROSS-OPERATION-RACE-HARDENING__AI-HANDOFF.md
+
+Use the actual repository date convention when different.
+
+The handoff must contain:
+
+1. repository intake;
+2. toolchain;
+3. authority sources;
+4. exact files changed;
+5. pre-edit lock-order audit;
+6. race matrix;
+7. each race’s backend PIDs and barrier;
+8. final row and event residue;
+9. hostile lineage results;
+10. any proven defect;
+11. any migration 0168 correction;
+12. privilege evidence;
+13. exact commands and results;
+14. baseline comparison;
+15. blocked race, when applicable;
+16. risks and unresolved values;
+17. rollback instructions;
+18. package status;
+19. prerequisites for P02B2B2B2B.
+
+---
+
+## 18. Commit discipline
+
+Before commit:
+
+git status --short
+git diff --check
+
+Inspect every changed file.
+
+Confirm:
+
+- Node 22 is active;
+- no raw code committed;
+- no secret or private key;
+- no earlier migration modified;
+- migration 0168 exists only when evidence requires it;
+- no Hub migration changed;
+- no recovery API or worker added;
+- no redemption or PoP added;
+- no production grant added;
+- no unrelated formatting churn.
+
+Suggested commit when no migration is required:
+
+test(ws-11): harden terminal replacement races
+
+Suggested commit when 0168 is required:
+
+feat(ws-11): harden terminal replacement race safety
+
+After commit:
+
+git status --short
+git rev-parse HEAD
+git log -1 --oneline
+git remote get-url --push origin
+node --version
+pnpm --version
+pnpm config get engine-strict
+
+Required final state:
+
+- clean tree;
+- Node 22 active;
+- engine enforcement active;
+- push disabled;
+- nothing pushed.
+
+---
+
+## 19. Required final response
+
+Return:
+
+### Repository
+
+- start SHA;
+- end SHA;
+- branch;
+- ahead count;
+- tree state;
+- push URL.
+
+### Toolchain
+
+- Node version;
+- Node path;
+- pnpm version;
+- engine enforcement.
+
+### Lock-order audit
+
+- issuance lock order;
+- expiration lock order;
+- revocation lock order;
+- evaluator lock order;
+- Hub-state validation point;
+- discovered conflicts.
+
+### Race results
+
+For races A–E:
+
+- backend PIDs;
+- initial state;
+- operations;
+- returned results;
+- final predecessor state;
+- successor count/state;
+- lineage;
+- event residue;
+- SQLSTATE exposure.
+
+### Correction
+
+- whether migration 0168 was required;
+- exact defect;
+- exact correction;
+- confirmation that 0167 and earlier were unchanged.
+
+### Security
+
+- hostile-lineage results;
+- direct-mutation posture;
+- raw-code census;
+- membership census;
+- production-grant posture.
+
+### Verification
+
+For every command:
+
+- command;
+- Node version;
+- exit;
+- PASS;
+- FAIL;
+- SKIP;
+- role;
+- database;
+- fresh or cached.
+
+### Evidence
+
+- files changed;
+- handoff path;
+- commit SHA;
+- rollback.
+
+### Status
+
+Choose exactly one:
+
+- IMPLEMENTED-IN-DEV;
+- IMPLEMENTED-IN-DEV — NO MIGRATION REQUIRED;
+- IMPLEMENTED-IN-DEV WITH RECORDED BLOCKED RACE;
+- BLOCKED BY ENVIRONMENT;
+- BLOCKED BY REPOSITORY CONFLICT;
+- PARTIAL — SUCCESSOR PACKAGE REQUIRED.
+
+### Next package
+
+Confirm:
+
+- ambiguous-outcome recovery was not started;
+- no expiration worker was added;
+- P02B3 and P02C were not started;
+- recommended next package:
+
+WS-11-T004-P02B2B2B2B — ambiguous-outcome and replacement recovery hardening
+
+Do not push.
+Exit before 59 minutes and before 100 steps.
