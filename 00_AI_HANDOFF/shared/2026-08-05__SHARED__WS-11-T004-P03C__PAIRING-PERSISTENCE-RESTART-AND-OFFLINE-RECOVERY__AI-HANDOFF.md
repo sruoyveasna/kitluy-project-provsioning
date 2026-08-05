@@ -111,6 +111,14 @@ new tests have zero skips.
 **WS-11-T004 is NOT complete.** The final census does not prove rows 22, 24,
 26–28; rows 34–35 are PARTIAL (Hub side proven, terminal side unbuilt).
 
+> **2026-08-05 update (WS-11-T004-P04A):** the CLOUD-BOOTSTRAP portion of the
+> first dependency above (#22) is now ruled by
+> KLD-2026-08-05-TERMINAL-TRANSPORT-001 and IMPLEMENTED-IN-DEV — three
+> versioned routes over the manufacturing-enrollment key with the owner rate
+> limit and canonical error mapping (row 22 → PARTIAL). The LAN transport
+> package (§3 ports, mTLS, wire codecs), terminal-side persistence (rows
+> 34–35), KLREQ-026 and `[REQUIRED: pairing_challenge_lifetime]` remain open.
+
 ## 6. Rollback
 
 One commit: revert it. It contains only the pairing-suite extension (hygiene

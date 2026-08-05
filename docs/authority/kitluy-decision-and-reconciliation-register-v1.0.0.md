@@ -2334,3 +2334,56 @@ KLRISK-DEVICE-012 — **CLOSED** (repaired by migration 0161, 2026-08-03).
 | Proof | From-zero chain 0000→0161 with `db:test` 196 PASS and `test:rls` 104; `key-destruction.integration.test.ts` 13/13 including the new test "destroys an ABANDONED key end-to-end, preserving the abandonment reason" (generated → abandoned → four-eyes destruction DESTROYED, reservation closed, reason preserved); full package 779 passed / 2 skipped; registry 219/219 with lifecycle 30/30 and census all zeros. |
 | Recorded, not changed | The comment/code mismatch on `abandon_generation_key_v1` ("refuses to abandon an `active` key") — the function body has no such check; the trigger's transition table is what actually refuses active→abandoned and superseded→abandoned. Correcting the comment or the behavior belongs to its own named package. |
 | Status | CLOSED (0161) |
+
+## KLD-2026-08-05-TERMINAL-TRANSPORT-001 — terminal transport and pairing completion (2026-08-05, WS-11-T004-P04A)
+
+Recorded verbatim from the WS-11-T004-P04A owner package instruction, which
+states the decisions require no further owner confirmation. Full record:
+`docs/decisions/kitluy-terminal-transport-and-pairing-completion-owner-decision-v1.0.0.md`.
+
+**Cloud bootstrap (LOCKED):** TLS 1.3 with normal cloud-server certificate
+validation; the terminal's bootstrap identity is its current authoritative
+manufacturing-enrollment key; proof algorithm and canonicalization reuse
+`@kitluy/device-identity` (`kitluy.provisioning-pop.v1`, OPTION B); the
+provisioning code authorizes one assignment attempt but is not identity; no
+browser cookie, staff session, shared terminal secret or Supabase key; the
+terminal never receives database credentials; after credential issuance the
+bootstrap identity cannot access normal Store operations.
+
+**Cloud route contract (LOCKED):** `POST /v1/terminal-provisioning/challenges`,
+`POST /v1/terminal-provisioning/challenges/{challengeId}/verify`,
+`POST /v1/terminal-provisioning/redemptions` (the service's existing approved
+`/v1/` prefix); headers `Content-Type: application/json` and
+`Idempotency-Key` required, `X-Correlation-ID` optional/generated; request
+maximum 16 KiB; rate limit 10/min burst 3 keyed by source IP plus
+manufacturing-enrollment fingerprint, malformed attempts counting, never the
+raw code or signature.
+
+**Environment posture (LOCKED):** development through the existing approved
+provisional PKI; pilot and production remain fail-closed under BLK-005.
+
+**This resolves the CLOUD-BOOTSTRAP portion of P02C Boundary B3** (terminal
+transport identity, T004 census row 22). It does NOT rule LAN mTLS, signed
+discovery, Store Hub delivery (#28), activation transport, pairing routes or
+terminal receipt persistence — P04B/P04C scope.
+
+### Recorded reconciliation — correlation-header naming divergence
+
+The shipped revocation surface reads its optional correlation label from
+`x-kitluy-correlation-id` (WS-11-T003 Step 4); the owner package mandates
+`X-Correlation-ID` for the terminal-provisioning surface. Both are label-only
+with identical semantics; no authorization reads either. Per the precedence
+rule the later owner-locked instruction governs the NEW surface; the shipped
+revocation surface is NOT silently rewritten. Unifying the older surface on
+`X-Correlation-ID` is future work under its own named package.
+
+### Recorded repair — composition mapping gap (P04A, in-scope §6)
+
+`mapRefusal` in the provisioning composition did not recognize the 0172
+context reader's `KLUY-POPCTX-NOT-FOUND`, so verifying a proof against a
+nonexistent challenge id surfaced as `INTERNAL_ERROR` (HTTP 500, retry
+guidance same-idempotency-key) instead of a safe not-found. Pre-existing
+since P02C; no earlier suite probed a ghost challenge id on the verify path.
+Repaired by an EXACT-code mapping (no family widening) to
+`CHALLENGE_NOT_FOUND`; proven by route scenario E and the unchanged 56/56
+neighbor suites.

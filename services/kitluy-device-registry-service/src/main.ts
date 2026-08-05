@@ -22,6 +22,11 @@ import { requireEnvironment, requirePort } from "@kitluy/shared-config";
 import { resolveDeviceRevocationService } from "./composition.js";
 import { handleRequest } from "./http.js";
 import { createLapseWorkerLoop } from "./lapse-worker-runtime.js";
+import { TerminalProvisioningComposition } from "./provisioning-composition.js";
+import {
+  createTerminalProvisioningRouter,
+  TERMINAL_PROVISIONING_PREFIX,
+} from "./provisioning-routes.js";
 import { SERVICE_NAME, SERVICE_VERSION } from "./index.js";
 
 const log = createLogger(SERVICE_NAME);
@@ -30,6 +35,19 @@ const port = requirePort(process.env, "PORT");
 
 // Startup-time refusal, before anything is listening.
 const revocation = resolveDeviceRevocationService(process.env);
+
+/**
+ * THE CLOUD BOOTSTRAP SURFACE (WS-11-T004-P04A). Same pool, and each
+ * composition operation enters the NOLOGIN `kitluy_provisioning_service`
+ * composer for exactly one transaction (0172/0173) — the connecting identity
+ * itself holds no effective privilege on any provisioning door.
+ */
+const provisioningRouter = createTerminalProvisioningRouter({
+  composition: new TerminalProvisioningComposition(revocation.pool, {
+    info: (fields) => log.info("terminal-provisioning", fields),
+  }),
+  logger: { info: (fields) => log.info("terminal-provisioning-route", fields) },
+});
 
 /**
  * THE DEPLOYED LAPSE WORKER.
@@ -58,8 +76,8 @@ let ready = true;
 /** Bounded body read. A governed route must not be a memory-exhaustion surface. */
 const MAX_BODY_BYTES = 64 * 1024;
 
-async function readJsonBody(req: IncomingMessage): Promise<{ ok: boolean; value: unknown }> {
-  if (req.method === "GET" || req.method === "HEAD") return { ok: true, value: undefined };
+async function readRawBody(req: IncomingMessage): Promise<{ ok: boolean; text: string }> {
+  if (req.method === "GET" || req.method === "HEAD") return { ok: true, text: "" };
   const chunks: Buffer[] = [];
   let total = 0;
   for await (const chunk of req) {
@@ -67,37 +85,57 @@ async function readJsonBody(req: IncomingMessage): Promise<{ ok: boolean; value:
     total += buf.length;
     // Refused rather than truncated: a half-read governed request is a request
     // whose meaning nobody knows.
-    if (total > MAX_BODY_BYTES) return { ok: false, value: undefined };
+    if (total > MAX_BODY_BYTES) return { ok: false, text: "" };
     chunks.push(buf);
   }
-  if (total === 0) return { ok: true, value: undefined };
-  try {
-    return { ok: true, value: JSON.parse(Buffer.concat(chunks).toString("utf8")) };
-  } catch {
-    return { ok: false, value: undefined };
-  }
+  return { ok: true, text: Buffer.concat(chunks).toString("utf8") };
 }
 
 const server = createServer((req, res) => {
   void (async () => {
-    const body = await readJsonBody(req);
-    if (!body.ok) {
+    const raw = await readRawBody(req);
+    if (!raw.ok) {
       res.writeHead(400, { "content-type": "application/json" });
       res.end(JSON.stringify({ code: "VALIDATION_FAILED", detail: "malformed or oversized body" }));
       return;
     }
+    // The bootstrap surface owns its raw text (its 16 KiB gate and JSON-shape
+    // refusals must COUNT toward its rate limit), so only the other routes
+    // are parsed here at the transport.
+    const isBootstrap = (req.url ?? "").startsWith(TERMINAL_PROVISIONING_PREFIX);
+    let parsed: unknown;
+    if (!isBootstrap && raw.text.length > 0) {
+      try {
+        parsed = JSON.parse(raw.text);
+      } catch {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(
+          JSON.stringify({ code: "VALIDATION_FAILED", detail: "malformed or oversized body" }),
+        );
+        return;
+      }
+    }
     // THE RUNTIME INVOCATION. `handleRequest` delegates `/v1/` to the governed
-    // revocation router, which authenticates and then calls the real doors.
-    const { status, body: payload } = await handleRequest(
+    // routers: terminal-provisioning bootstrap first, then revocation, each of
+    // which establishes its own request authority before calling a real door.
+    const {
+      status,
+      body: payload,
+      headers,
+    } = await handleRequest(
       {
         method: req.method ?? "GET",
         path: req.url ?? "/",
         headers: req.headers,
-        body: body.value,
+        body: parsed,
+        rawBody: raw.text,
+        // The transport-observed peer address — never a forwarded-for header
+        // (KLD-2026-08-05-TERMINAL-TRANSPORT-001 §2).
+        sourceIp: req.socket.remoteAddress ?? "",
       },
-      { ready, revocationRouter: revocation.revocationRouter },
+      { ready, revocationRouter: revocation.revocationRouter, provisioningRouter },
     );
-    res.writeHead(status, { "content-type": "application/json" });
+    res.writeHead(status, { "content-type": "application/json", ...(headers ?? {}) });
     res.end(JSON.stringify(payload));
   })().catch(() => {
     // Nothing raw reaches the socket. The routes redact their own failures; this
@@ -120,7 +158,7 @@ server.listen(port, () => {
     // Recorded so a deployment can be seen to have the real wiring. No DSN, no
     // credential and no role name is logged.
     revocationWiring: "governed-database",
-    governedRoutes: "/v1/device-credentials/*",
+    governedRoutes: "/v1/device-credentials/*, /v1/terminal-provisioning/*",
     lapseWorker: lapseWorker.identity.workerInstanceId,
   });
 });

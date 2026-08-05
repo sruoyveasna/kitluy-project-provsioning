@@ -140,7 +140,14 @@ function mapRefusal(refusalCode: string): ProvisioningResultCode {
   if (refusalCode === "FAILED_PRESENTATION" || refusalCode.includes("NO-OUTSTANDING")) {
     return "CODE_INVALID";
   }
-  if (refusalCode.includes("CHALLENGE-NOT-FOUND") || refusalCode.includes("PROOF-NOT-FOUND")) {
+  if (
+    refusalCode.includes("CHALLENGE-NOT-FOUND") ||
+    refusalCode.includes("PROOF-NOT-FOUND") ||
+    // The 0172 context reader's own not-found spelling. Exact match on
+    // purpose: mapped by CODE, not by widening a family (WS-11-T004-P04A —
+    // before this row a ghost challenge id surfaced as INTERNAL_ERROR).
+    refusalCode === "KLUY-POPCTX-NOT-FOUND"
+  ) {
     return "CHALLENGE_NOT_FOUND";
   }
   if (refusalCode.includes("ALREADY-PROVEN")) return "CODE_ALREADY_PROVEN";

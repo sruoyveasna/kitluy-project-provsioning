@@ -14,15 +14,33 @@
 import { errorEnvelope } from "@kitluy/api-errors";
 import { buildHealthReport, SERVICE_NAME, SERVICE_VERSION } from "./index.js";
 import type { RevocationRouter, RouteRequest, RouteResponse } from "./revocation-routes.js";
+import {
+  TERMINAL_PROVISIONING_PREFIX,
+  type TerminalProvisioningRouter,
+} from "./provisioning-routes.js";
 
 export interface KernelResponse {
   readonly status: number;
   readonly body: unknown;
+  /** Transport headers a route requires (e.g. Retry-After on 429). */
+  readonly headers?: Readonly<Record<string, string>>;
 }
 
 export interface KernelDeps {
   readonly ready: boolean;
   readonly revocationRouter?: RevocationRouter;
+  readonly provisioningRouter?: TerminalProvisioningRouter;
+}
+
+/**
+ * The terminal-provisioning bootstrap routes own their raw request text (16
+ * KiB gate, content type, JSON shape all count toward the rate limit), so the
+ * transport hands the undecoded body and the observed peer address through
+ * these optional fields rather than a pre-parsed body.
+ */
+export interface KernelRequest extends RouteRequest {
+  readonly rawBody?: string;
+  readonly sourceIp?: string;
 }
 
 const GOVERNED_PREFIX = "/v1/";
@@ -60,10 +78,34 @@ export function handleKernelRequest(method: string, path: string, ready: boolean
  * on a connection.
  */
 export async function handleRequest(
-  request: RouteRequest,
+  request: KernelRequest,
   deps: KernelDeps,
 ): Promise<KernelResponse> {
   const path = request.path.split("?")[0] ?? "";
+
+  // The bootstrap surface is matched BEFORE the generic `/v1/` delegation and
+  // fails CLOSED with 503 when unconfigured, for the same reason the
+  // revocation surface does: an instance without the wiring must not look
+  // like a healthy one that simply had no such route.
+  if (path.startsWith(TERMINAL_PROVISIONING_PREFIX)) {
+    if (deps.provisioningRouter === undefined) {
+      return {
+        status: 503,
+        body: errorEnvelope(
+          "DEPENDENCY_UNAVAILABLE",
+          "terminal-provisioning routes are not configured on this instance",
+        ),
+      };
+    }
+    const response = await deps.provisioningRouter.handle({
+      method: request.method,
+      path: request.path,
+      headers: request.headers,
+      sourceIp: request.sourceIp ?? "",
+      rawBody: request.rawBody ?? "",
+    });
+    return { status: response.status, body: response.body, headers: response.headers };
+  }
 
   if (path.startsWith(GOVERNED_PREFIX)) {
     if (deps.revocationRouter === undefined) {
