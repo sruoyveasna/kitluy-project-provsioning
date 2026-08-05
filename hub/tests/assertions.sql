@@ -2063,14 +2063,18 @@ begin
   -- and `revocation_snapshot_entry` (WS-11-T003 Step 4,
   -- KLD-2026-07-31-HUB-SNAPSHOT-SIGNING-001).
   -- 60 -> 62: hub group 0031 adds `pairing_session` and `pairing_receipt`
-  -- (WS-11-T004-P03B). This tally is deliberately EXACT in
-  -- both directions -- it is how an unreviewed table gets noticed -- so it is
-  -- raised by exactly the additions that were reviewed and by nothing else.
-  if v_tables <> 62 then
+  -- (WS-11-T004-P03B).
+  -- 62 -> 63: hub group 0033 adds `credential_projection`, the append-only
+  -- evidence of every terminal-credential delivery this Hub applied
+  -- (WS-11-T004-P04C1, capability-census row 28). This tally is deliberately
+  -- EXACT in both directions -- it is how an unreviewed table gets noticed --
+  -- so it is raised by exactly the additions that were reviewed and by
+  -- nothing else.
+  if v_tables <> 63 then
     raise exception
-      'ASSERT FAIL: expected 62 relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11 + 3 G0027 revocation + 2 G0031 pairing), found %',
+      'ASSERT FAIL: expected 63 relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11 + 3 G0027 revocation + 2 G0031 pairing + 1 G0033 credential projection), found %',
       v_tables;
   end if;
-  raise notice 'PASS tally: % relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11 WS-10 + 3 G0027 revocation + 2 G0031 pairing), % indexes, % triggers',
+  raise notice 'PASS tally: % relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11 WS-10 + 3 G0027 revocation + 2 G0031 pairing + 1 G0033 credential projection), % indexes, % triggers',
     v_tables, v_indexes, v_triggers;
 end $$;

@@ -2399,3 +2399,76 @@ neighbor suites.
 | Repair (0175, forward; 0170 file untouched) | `create or replace` of the door with ONE added branch: after every inherited validation, an outstanding ISSUED challenge bound to the CURRENT sealed enrollment is returned exactly as first issued; the code-row FOR UPDATE lock serializes concurrent issuance; superseded-enrollment rows are not reused; ownership borrow per the 0125–0166 pattern (first apply attempt failed `42501 must be owner of function` — the applying role is not superuser); guard re-asserts governor ownership, the reconcile branch, the surviving insert path and the 0173 effective-privilege boundary |
 | Proof | From-zero reset 0000→0175 (74 files, guard NOTICE); db:test 229 = baseline; test:rls 131 = baseline; terminal-contract suite 7/7 (test D: same id/nonce/expiry, byte-identical payload, ONE row, retry payload verifies); regression 59/59 |
 | Status | CLOSED (0175, 2026-08-05) |
+
+## KLREC-2026-08-05-P04C3 — the Hub-originated effect key has no command result (WS-11-T004-P04C3)
+
+**Recorded, not silently resolved** (repository rule 8).
+
+**The conflict.** The WS-11-T004-P04C owner package fixes the pairing-receipt
+replication effect key at `kh1.{command_result_uuid}.1`. Two properties of the
+repository make that literal form unreachable as written:
+
+1. **There is no command result.** `edge_sync.command_result` keeps the STRICT
+   terminal check `kl1.{terminal_device_uuid}.{client_sequence}` (Hub migration
+   0018) precisely because "a command result always belongs to a terminal
+   command". Pairing is a Hub-originated identity fact with no client sequence,
+   so creating a command-result row for it would require minting a synthetic
+   `kl1.*` key — the Hub claiming to be a terminal, which KLREQ-026
+   (KLD-2026-07-28-001 Group 6) forbids in as many words.
+2. **The ordinal `1` is unreachable under the command stride.**
+   `services/kitluy-hub-agent/src/hub/effect-contract.ts` derives ordinals as
+   `slot * EFFECT_ORDINAL_STRIDE + occurrenceIndex` with a stride of 1000, for
+   events emitted by REGISTERED COMMANDS. Under that formula a first declared
+   effect is ordinal 0 and a second is 1000; ordinal 1 would mean "the second
+   occurrence of the first effect", which is not what this event is.
+
+**How it was resolved, and why that preserves the higher authority.** The
+namespace UUID is the **pairing receipt id** — which is also the business
+deduplication identity the same owner package specifies, and which is immutable
+and unique per pairing session, so it is stable across replay. Stability across
+replay is the property KLREQ-026 actually requires of the namespace. The ordinal
+comes from a small DECLARED registry in
+`services/kitluy-hub-agent/src/hub/pairing-replication.ts` rather than the
+command stride: registered, deterministic, independent of insertion order, and
+an unregistered name FAILS rather than emits — which are KLREQ-026's stated
+requirements, applied to a fact that has no command contract. The owner
+package's literal `1` is therefore honoured: the shipped key is
+`kh1.{pairing_receipt_id}.1`.
+
+**What a future reviewer must know.** `kh1.*` keys now come from two
+derivations — the command-contract stride for command-emitted effects, and this
+declared registry for Hub-originated identity facts. Both are deterministic and
+both fail closed on an unregistered name. If a third derivation is ever needed,
+it belongs in this register before it is written.
+
+Evidence: `services/kitluy-hub-agent/test/pairing-replication.integration.test.ts`
+(the key is asserted verbatim and an unregistered effect is proven to fail) and
+`services/kitluy-device-registry-service/test/pairing-receipt-ingestion.integration.test.ts`
+(the cloud refuses an event whose key namespace is not its own receipt id).
+
+## KLREC-2026-08-05-P04C-CLOSEOUT — two schema-contract gaps in shipped WS-11-T004 work (2026-08-05)
+
+**Found by the T004 closeout's reset-from-zero, both FIXED FORWARD.**
+
+1. **Hub migration 0032 was never registered.** P04B (`5711466`) created
+   `0032_pairing_lifetime_and_transport_reads.sql` but did not add it to
+   `HUB_MIGRATION_ORDER`, so `hub-database.test.ts` ("lists exactly the
+   canonical §4 order and nothing else") failed from that commit onward — the
+   package ran the pairing and LAN suites but not that one. A rebuild driven by
+   the canonical list would have silently omitted the owner-locked 300-second
+   pairing clamp. Both 0032 and 0033 are now registered.
+2. **Hub migration 0033 shipped without its §8 scope index and census entry.**
+   `edge_identity.credential_projection` (P04C1) is a scoped relation, so the
+   Hub schema-contract assertions require an
+   `edge_identity_credential_projection_scope_idx` and an exact relation tally.
+   Neither was present, and the package's behavioural tests could not reach
+   either assertion. Migration **0034** adds the index ADDITIVELY — 0033 is
+   applied and keeps its journalled bytes (repository rule: never modify a
+   previously applied migration) — and the tally now expects 63 relations.
+
+**Recorded, NOT fixed** (repository rule 1): `sync-inbox.test.ts` →
+"deduplicates a redelivery of the SAME facts" fails intermittently because its
+fixture derives `providerEventId` from a truncated `uuidv7()` (~44 bits of the
+millisecond timestamp), so two tests landing within about 16 ms mint the same
+dedupe triple. It belongs to WS-10-T006 (`e2390b2`) and predates every P04
+package. Fix when that area is next opened: give the fixture a random suffix.

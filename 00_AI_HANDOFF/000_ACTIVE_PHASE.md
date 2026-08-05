@@ -100,6 +100,8 @@ A task that needs to cross this fence must stop and file a conflict/decision rec
 
 ## 10. Cycle-10 scope fence — WS-11 only (2026-07-28)
 
+> **2026-08-05 — WS-11-T004 CLOSED as IMPLEMENTED-IN-DEV.** The fence is unchanged: all work stayed inside WS-11 (`kitluy_devices` cloud groups 0162–0176, Hub groups 0031–0034, `@kitluy/device-identity`, `@kitluy/terminal-local-store`, the device-registry service and the Hub agent). No Laundry business surface, no production migration and no pilot/production claim was made; BLK-005 fail-closed behaviour was re-proven on a reset from zero. The next WS-11 task is read from the authoritative task register, not invented here.
+
 Cycle 10 is authorized for **WS-11 device provisioning and fleet management
 only**.
 

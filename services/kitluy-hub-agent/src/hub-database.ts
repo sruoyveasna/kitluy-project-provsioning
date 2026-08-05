@@ -339,6 +339,9 @@ export const HUB_MIGRATION_ORDER = [
   // WS-11-T004-P04C1: the governed terminal-credential projection door and its
   // append-only delivery evidence (capability-census row 28).
   "0033_terminal_credential_projection.sql",
+  // WS-11-T004-P04C3 closeout: the §8 scope index group 0033 owed. Additive,
+  // because 0033 is applied and keeps its journalled bytes.
+  "0034_credential_projection_scope_index.sql",
 ] as const;
 
 /**
