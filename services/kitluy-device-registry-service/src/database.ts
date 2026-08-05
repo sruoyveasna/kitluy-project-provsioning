@@ -66,6 +66,9 @@ export const REGISTRY_ROLES = {
   /** Terminal-provisioning composition (group 0172): exactly the evaluator,
    *  PoP challenge/context/attestation and redemption capabilities. */
   provisioning: "kitluy_provisioning_service",
+  /** Hub-authenticated Edge synchronization ingestion (group 0176): exactly
+   *  the pairing-receipt ingestion and read-projection capabilities. */
+  edgeSync: "kitluy_edge_sync_service",
   /** A human acting under their own `auth.uid()` (group 0150/0152). */
   human: "authenticated",
 } as const;
@@ -132,7 +135,10 @@ export async function withServiceRole<T>(
   source: ClientSource,
   role: Extract<
     RegistryRole,
-    "kitluy_issuance_service" | "kitluy_worker_service" | "kitluy_provisioning_service"
+    | "kitluy_issuance_service"
+    | "kitluy_worker_service"
+    | "kitluy_provisioning_service"
+    | "kitluy_edge_sync_service"
   >,
   fn: (client: pg.PoolClient) => Promise<T>,
 ): Promise<T> {

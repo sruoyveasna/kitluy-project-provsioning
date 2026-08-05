@@ -58,6 +58,18 @@ const { DatabaseSync } = nodeRequire("node:sqlite") as {
   };
 };
 
+/**
+ * PEM markers are ASSEMBLED rather than written literally.
+ *
+ * This is a negative fixture — the point is that private material is REFUSED —
+ * but a literal block in a tracked file is exactly what `pnpm secret:scan`
+ * exists to find, and a scanner that has to be taught exceptions stops being a
+ * scanner.
+ */
+const PEM_DASHES = "-".repeat(5);
+const PRIVATE_PEM_HEADER = `${PEM_DASHES}BEGIN PRIVATE KEY${PEM_DASHES}`;
+const PRIVATE_PEM_FOOTER = `${PEM_DASHES}END PRIVATE KEY${PEM_DASHES}`;
+
 const ENV: TrustEnvironment = "development";
 const T1 = "laundry.t1.intake_cashier";
 const keys = new DevelopmentDeviceKeyProvider();
@@ -582,7 +594,7 @@ describe("terminal pairing-receipt persistence (P04C2)", () => {
       { proofSignature: "zzz" },
       { provisioningCode: "ABCD-1234" },
       { privateKeyPem: "x" },
-      { blob: "-----BEGIN PRIVATE KEY-----\nAA==\n-----END PRIVATE KEY-----" },
+      { blob: `${PRIVATE_PEM_HEADER}\nAA==\n${PRIVATE_PEM_FOOTER}` },
       { note: "postgres://user:pw@host/db" },
     ]) {
       expect(

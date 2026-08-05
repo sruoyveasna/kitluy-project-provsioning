@@ -136,3 +136,13 @@ export {
   readLapseAuthorizationId,
   type EmergencyLapseWorker,
 } from "./lapse-worker.js";
+
+export {
+  PairingReceiptIngestion,
+  validateReceiptEventShape,
+  type AuthenticatedHubDelivery,
+  type IngestionOutcome,
+  type PairingReceiptEvent,
+  type PairingReceiptIngestionResult,
+  type TerminalPairingState,
+} from "./pairing-receipt-ingestion.js";

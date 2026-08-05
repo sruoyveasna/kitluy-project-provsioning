@@ -46,6 +46,7 @@ import {
 
 import { withHubTransaction, HUB_RUNTIME_ROLE, type HubPool, type HubClient } from "./db.js";
 import { appendAuditEvent, recordSecurityEvent } from "./repositories/audit.js";
+import { recordPairingReceiptEvent } from "./pairing-replication.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const HEX64 = /^[0-9a-f]{64}$/;
@@ -651,6 +652,39 @@ export class TerminalPairingComposition {
             payloadSha256: transcriptHash,
             details: { receiptId: storedId, protocolVersion: row.protocol_version },
             localSequence: BigInt(seq.rows[0]?.next ?? "0"),
+          });
+
+          // P04C3: the replication event is written HERE, in the same
+          // transaction as the paired state, the immutable receipt and the
+          // audit fact. There is no cloud call in this path — an unreachable
+          // WAN leaves the event pending in the outbox and pairing still
+          // commits, which is what makes LAN pairing WAN-independent (§22).
+          await recordPairingReceiptEvent(client, {
+            eventId: randomUUID(),
+            hubAssignmentGeneration: Number(row.hub_assignment_generation),
+            // The SAME transaction-stable `now()` the receipt carries, so the
+            // business date can never belong to a different day than the fact.
+            businessDate: row.now_text.slice(0, 10),
+            payload: {
+              receipt_id: storedId,
+              receipt_version: receipt.receiptVersion,
+              pairing_session_id: row.id,
+              hub_device_id: row.hub_device_id,
+              terminal_device_id: row.terminal_device_id,
+              terminal_assignment_generation: Number(row.terminal_assignment_generation),
+              terminal_profile_code: row.terminal_profile_code,
+              tenant_id: row.tenant_id,
+              digital_store_id: row.digital_store_id,
+              location_id: row.location_id,
+              environment: row.environment,
+              hub_certificate_fingerprint: row.hub_certificate_fingerprint,
+              terminal_certificate_fingerprint: row.terminal_certificate_fingerprint,
+              transcript_hash: transcriptHash,
+              paired_at: receipt.pairedAt.toISOString(),
+              hub_receipt_signature: Buffer.from(receiptSignature).toString("base64"),
+              hub_certificate_serial: this.signer.certificateSerial,
+              correlation_id: correlationId,
+            },
           });
 
           return {

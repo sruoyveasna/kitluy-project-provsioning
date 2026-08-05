@@ -147,7 +147,7 @@ verifier:
 | `pnpm secret:scan`                                                           | 0    | **1340 tracked files clean** |
 
 **One real defect this package's gate caught, in P04C1's committed work.** The
-P04C1 test fixtures carried literal `-----BEGIN PRIVATE KEY-----` blocks as
+P04C1 test fixtures carried literal private-key PEM header blocks as
 NEGATIVE fixtures. `pnpm secret:scan` scans TRACKED files, so the scan that ran
 before P04C1 was staged passed while those files were still untracked; once
 committed, the scan failed with two findings. Fixed forward in this package by

@@ -326,6 +326,19 @@ export const HUB_MIGRATION_ORDER = [
   // single-use directional nonces, one immutable Hub-signed receipt per
   // handshake (pairing protocol §8-§9).
   "0031_terminal_pairing.sql",
+  // WS-11-T004-P04B: the owner-locked 300-second pairing challenge lifetime,
+  // clamped in Hub-authoritative time, plus the LAN transport's authorization
+  // reads asserted rather than granted.
+  //
+  // REGISTERED LATE, and recorded rather than quietly added: P04B created this
+  // file but did not add it here, so `hub-database.test.ts` ("lists exactly the
+  // canonical §4 order and nothing else") has been failing since that commit —
+  // the package ran the pairing and LAN suites but not this one. Fixed forward
+  // in WS-11-T004-P04C3 alongside 0033's own registration.
+  "0032_pairing_lifetime_and_transport_reads.sql",
+  // WS-11-T004-P04C1: the governed terminal-credential projection door and its
+  // append-only delivery evidence (capability-census row 28).
+  "0033_terminal_credential_projection.sql",
 ] as const;
 
 /**
