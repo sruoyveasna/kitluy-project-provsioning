@@ -3399,4 +3399,113 @@ begin
 end $$;
 rollback;
 
-select 'rls-tests complete: 14+9 baseline cases; cycle-5 WS5 7 negative + 7 positive and WS6 10 negative + 9 positive; cycle-6 WS7 13 negative + 6 positive and WS8 13 negative + 6 positive; cycle-10 WS11 T001 4 negative + 1 positive and T002 3 negative + 1 positive kitluy_devices cases executed; WS-11-T004-P02A 3 negative provisioning-code cases executed; WS-11-T004-P02B1 issuance-door boundary case executed; WS-11-T004-P02B2A presentation-evaluator boundary case executed; WS-11-T004-P02B2B1 revocation-door boundary case executed; WS-11-T004-P02B2B2A expiration-helper boundary case executed; WS-11-T004-P02B2B2B1 replacement-lineage boundary case executed; WS-11-T004-P02B2B2B2A recovery-door boundary case executed' as result;
+-- WS11-N17: the terminal provisioning PoP foundation (0170) added ONE
+-- challenge/verification table and TWO internal doors, ALL harness-only
+-- until P02C composes production: no runtime identity (public, anon,
+-- authenticated, service_role, worker) may execute either door or reach the
+-- table; FORCE RLS holds with governor-only policies; no raw-code,
+-- private-key or stored-signature column exists; the 0162-0169 provisioning
+-- boundaries stand unchanged. Catalog checks run FIRST, as the migration
+-- role; runtime probes follow.
+begin;
+do $$
+begin
+  if has_function_privilege('public', 'kitluy_devices.issue_terminal_provisioning_pop_challenge_v1(uuid)', 'execute')
+     or has_function_privilege('anon', 'kitluy_devices.issue_terminal_provisioning_pop_challenge_v1(uuid)', 'execute')
+     or has_function_privilege('authenticated', 'kitluy_devices.issue_terminal_provisioning_pop_challenge_v1(uuid)', 'execute')
+     or has_function_privilege('service_role', 'kitluy_devices.issue_terminal_provisioning_pop_challenge_v1(uuid)', 'execute')
+     or has_function_privilege('kitluy_worker_service', 'kitluy_devices.issue_terminal_provisioning_pop_challenge_v1(uuid)', 'execute')
+     or not has_function_privilege('kitluy_test_harness', 'kitluy_devices.issue_terminal_provisioning_pop_challenge_v1(uuid)', 'execute') then
+    raise exception 'FAIL WS11-N17: the PoP challenge door boundary is wrong under 0170';
+  end if;
+  if has_function_privilege('public', 'kitluy_devices.record_terminal_provisioning_pop_verification_v1(uuid, boolean, text, text)', 'execute')
+     or has_function_privilege('anon', 'kitluy_devices.record_terminal_provisioning_pop_verification_v1(uuid, boolean, text, text)', 'execute')
+     or has_function_privilege('authenticated', 'kitluy_devices.record_terminal_provisioning_pop_verification_v1(uuid, boolean, text, text)', 'execute')
+     or has_function_privilege('service_role', 'kitluy_devices.record_terminal_provisioning_pop_verification_v1(uuid, boolean, text, text)', 'execute')
+     or has_function_privilege('kitluy_worker_service', 'kitluy_devices.record_terminal_provisioning_pop_verification_v1(uuid, boolean, text, text)', 'execute')
+     or not has_function_privilege('kitluy_test_harness', 'kitluy_devices.record_terminal_provisioning_pop_verification_v1(uuid, boolean, text, text)', 'execute') then
+    raise exception 'FAIL WS11-N17: the PoP attestation door boundary is wrong under 0170';
+  end if;
+  if has_table_privilege('authenticated', 'kitluy_devices.device_provisioning_pop_challenges', 'SELECT,INSERT,UPDATE,DELETE')
+     or has_table_privilege('anon', 'kitluy_devices.device_provisioning_pop_challenges', 'SELECT,INSERT,UPDATE,DELETE')
+     or has_table_privilege('service_role', 'kitluy_devices.device_provisioning_pop_challenges', 'SELECT,INSERT,UPDATE,DELETE')
+     or has_table_privilege('kitluy_worker_service', 'kitluy_devices.device_provisioning_pop_challenges', 'SELECT,INSERT,UPDATE,DELETE') then
+    raise exception 'FAIL WS11-N17: a runtime identity can reach the PoP challenge table directly';
+  end if;
+  if exists (
+    select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = 'kitluy_devices' and c.relname = 'device_provisioning_pop_challenges'
+       and (not c.relrowsecurity or not c.relforcerowsecurity)) then
+    raise exception 'FAIL WS11-N17: FORCE RLS does not hold on the PoP challenge table';
+  end if;
+  -- Policies exist for exactly the NOLOGIN governor and no one else.
+  if exists (
+    select 1 from pg_policies
+     where schemaname = 'kitluy_devices' and tablename = 'device_provisioning_pop_challenges'
+       and roles::text <> '{kitluy_activation_governor}') then
+    raise exception 'FAIL WS11-N17: a PoP challenge policy names a role other than the governor';
+  end if;
+  if exists (
+    select 1 from information_schema.columns
+     where table_schema = 'kitluy_devices' and table_name = 'device_provisioning_pop_challenges'
+       and ((column_name ~ '(^|_)(code|raw|plain|secret|private)(_|$)' and column_name <> 'provisioning_code_id')
+            or (column_name ~ 'signature' and column_name <> 'attested_signature_verified'))) then
+    raise exception 'FAIL WS11-N17: a raw-code, private-key or stored-signature column exists';
+  end if;
+  if not has_function_privilege('authenticated', 'kitluy_devices.issue_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or not has_function_privilege('authenticated', 'kitluy_devices.recover_terminal_provisioning_code_v1(uuid, text, text, text)', 'execute')
+     or has_function_privilege('authenticated', 'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
+     or has_function_privilege('authenticated', 'kitluy_devices.expire_terminal_provisioning_code_v1(uuid, uuid, text, text, text)', 'execute') then
+    raise exception 'FAIL WS11-N17: an earlier provisioning boundary drifted under 0170';
+  end if;
+  if exists (
+    select 1 from pg_auth_members m
+      join pg_roles r on r.oid = m.member
+     where m.roleid = (select oid from pg_roles where rolname = 'kitluy_activation_governor')
+       and r.rolcanlogin) then
+    raise exception 'FAIL WS11-N17: a login-capable role is a member of the governor owner';
+  end if;
+  raise notice 'PASS WS11-N17a: the PoP challenge and attestation doors are harness-only; the challenge table is unreachable by every runtime identity with FORCE RLS and governor-only policies; no raw-code, private-key or stored-signature column exists; the 0162-0169 boundaries stand';
+end $$;
+select set_config('request.jwt.claims', '{"role":"anon"}', true);
+set local role anon;
+do $$
+declare
+  v_result jsonb;
+  v_refused boolean := false;
+begin
+  begin
+    v_result := kitluy_devices.issue_terminal_provisioning_pop_challenge_v1(gen_random_uuid());
+    raise exception 'FAIL WS11-N17: anon reached the PoP challenge door: %', v_result;
+  exception when insufficient_privilege then
+    v_refused := true;
+  end;
+  if not v_refused then
+    raise exception 'FAIL WS11-N17: the anon PoP probe did not run';
+  end if;
+  raise notice 'PASS WS11-N17b: anon cannot execute the PoP challenge door';
+end $$;
+rollback;
+begin;
+select set_config('request.jwt.claims', '{"role":"authenticated"}', true);
+set local role authenticated;
+do $$
+declare
+  v_result jsonb;
+  v_refused boolean := false;
+begin
+  begin
+    v_result := kitluy_devices.record_terminal_provisioning_pop_verification_v1(
+      gen_random_uuid(), true, repeat('a', 64), repeat('b', 64));
+    raise exception 'FAIL WS11-N17: authenticated reached the PoP attestation door: %', v_result;
+  exception when insufficient_privilege then
+    v_refused := true;
+  end;
+  if not v_refused then
+    raise exception 'FAIL WS11-N17: the authenticated PoP probe did not run';
+  end if;
+  raise notice 'PASS WS11-N17c: authenticated cannot execute the PoP attestation door';
+end $$;
+rollback;
+
+select 'rls-tests complete: 14+9 baseline cases; cycle-5 WS5 7 negative + 7 positive and WS6 10 negative + 9 positive; cycle-6 WS7 13 negative + 6 positive and WS8 13 negative + 6 positive; cycle-10 WS11 T001 4 negative + 1 positive and T002 3 negative + 1 positive kitluy_devices cases executed; WS-11-T004-P02A 3 negative provisioning-code cases executed; WS-11-T004-P02B1 issuance-door boundary case executed; WS-11-T004-P02B2A presentation-evaluator boundary case executed; WS-11-T004-P02B2B1 revocation-door boundary case executed; WS-11-T004-P02B2B2A expiration-helper boundary case executed; WS-11-T004-P02B2B2B1 replacement-lineage boundary case executed; WS-11-T004-P02B2B2B2A recovery-door boundary case executed; WS-11-T004-P02B3A pop-foundation boundary case executed' as result;
