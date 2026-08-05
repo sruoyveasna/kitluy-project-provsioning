@@ -3267,4 +3267,136 @@ begin
 end $$;
 rollback;
 
-select 'rls-tests complete: 14+9 baseline cases; cycle-5 WS5 7 negative + 7 positive and WS6 10 negative + 9 positive; cycle-6 WS7 13 negative + 6 positive and WS8 13 negative + 6 positive; cycle-10 WS11 T001 4 negative + 1 positive and T002 3 negative + 1 positive kitluy_devices cases executed; WS-11-T004-P02A 3 negative provisioning-code cases executed; WS-11-T004-P02B1 issuance-door boundary case executed; WS-11-T004-P02B2A presentation-evaluator boundary case executed; WS-11-T004-P02B2B1 revocation-door boundary case executed; WS-11-T004-P02B2B2A expiration-helper boundary case executed; WS-11-T004-P02B2B2B1 replacement-lineage boundary case executed' as result;
+-- WS11-N16: atomic lost-code recovery (0169) added ONE authenticated-only
+-- recovery door (`recover_terminal_provisioning_code_v1`) and ONE
+-- governor-only coarse bridge (`provisioning_code_issue_held_v1`) and changed
+-- NOTHING else: no recovery lineage column exists (the shared-correlation
+-- binding is the recorded design; the 0167 expired-only replacement rule is
+-- not overloaded), the issuance/evaluator/revocation/expiration boundaries
+-- stand, no runtime identity holds direct table mutation, FORCE RLS holds and
+-- no login-capable role is a member of the NOLOGIN governor owner. Catalog
+-- checks run FIRST, as the migration role; runtime probes follow.
+begin;
+do $$
+begin
+  if has_function_privilege('public',
+       'kitluy_devices.recover_terminal_provisioning_code_v1(uuid, text, text, text)', 'execute')
+     or has_function_privilege('anon',
+       'kitluy_devices.recover_terminal_provisioning_code_v1(uuid, text, text, text)', 'execute')
+     or has_function_privilege('service_role',
+       'kitluy_devices.recover_terminal_provisioning_code_v1(uuid, text, text, text)', 'execute')
+     or has_function_privilege('kitluy_worker_service',
+       'kitluy_devices.recover_terminal_provisioning_code_v1(uuid, text, text, text)', 'execute')
+     or not has_function_privilege('authenticated',
+       'kitluy_devices.recover_terminal_provisioning_code_v1(uuid, text, text, text)', 'execute') then
+    raise exception 'FAIL WS11-N16: the recovery door boundary is wrong under 0169';
+  end if;
+  if has_function_privilege('public',
+       'kitluy_devices.provisioning_code_issue_held_v1()', 'execute')
+     or has_function_privilege('anon',
+       'kitluy_devices.provisioning_code_issue_held_v1()', 'execute')
+     or has_function_privilege('authenticated',
+       'kitluy_devices.provisioning_code_issue_held_v1()', 'execute')
+     or has_function_privilege('service_role',
+       'kitluy_devices.provisioning_code_issue_held_v1()', 'execute')
+     or not has_function_privilege('kitluy_activation_governor',
+       'kitluy_devices.provisioning_code_issue_held_v1()', 'execute') then
+    raise exception 'FAIL WS11-N16: the coarse issue bridge is not governor-only under 0169';
+  end if;
+  -- Recovery lineage is the shared correlation plus the immutable event pair:
+  -- no recovery column was added, and the 0167 replacement lineage column
+  -- keeps its expired-only meaning.
+  if exists (
+    select 1 from information_schema.columns
+     where table_schema = 'kitluy_devices' and table_name = 'device_provisioning_codes'
+       and column_name ~ 'recover') then
+    raise exception 'FAIL WS11-N16: a recovery lineage column exists; the shared-correlation binding is the recorded design';
+  end if;
+  if not has_function_privilege('authenticated',
+       'kitluy_devices.issue_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or has_function_privilege('service_role',
+       'kitluy_devices.issue_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or has_function_privilege('authenticated',
+       'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
+     or not has_function_privilege('kitluy_test_harness',
+       'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
+     or not has_function_privilege('authenticated',
+       'kitluy_devices.revoke_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or has_function_privilege('service_role',
+       'kitluy_devices.revoke_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+     or has_function_privilege('authenticated',
+       'kitluy_devices.expire_terminal_provisioning_code_v1(uuid, uuid, text, text, text)', 'execute')
+     or not has_function_privilege('kitluy_test_harness',
+       'kitluy_devices.expire_terminal_provisioning_code_v1(uuid, uuid, text, text, text)', 'execute') then
+    raise exception 'FAIL WS11-N16: an earlier door boundary drifted under 0169';
+  end if;
+  if has_table_privilege('authenticated',
+       'kitluy_devices.device_provisioning_codes', 'INSERT,UPDATE,DELETE')
+     or has_table_privilege('authenticated',
+       'kitluy_devices.device_provisioning_code_events', 'INSERT,UPDATE,DELETE')
+     or has_table_privilege('service_role',
+       'kitluy_devices.device_provisioning_codes', 'INSERT,UPDATE,DELETE')
+     or has_table_privilege('kitluy_worker_service',
+       'kitluy_devices.device_provisioning_codes', 'INSERT,UPDATE,DELETE') then
+    raise exception 'FAIL WS11-N16: a runtime identity can mutate provisioning-code rows directly';
+  end if;
+  if exists (
+    select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = 'kitluy_devices'
+       and c.relname in ('device_provisioning_codes', 'device_provisioning_code_events')
+       and (not c.relrowsecurity or not c.relforcerowsecurity)) then
+    raise exception 'FAIL WS11-N16: FORCE RLS no longer holds on the provisioning-code tables';
+  end if;
+  if exists (
+    select 1 from pg_auth_members m
+      join pg_roles r on r.oid = m.member
+     where m.roleid = (select oid from pg_roles where rolname = 'kitluy_activation_governor')
+       and r.rolcanlogin) then
+    raise exception 'FAIL WS11-N16: a login-capable role is a member of the governor owner';
+  end if;
+  raise notice 'PASS WS11-N16a: the recovery door is authenticated-only and the coarse bridge governor-only; no recovery lineage column exists; the issuance, evaluator, revocation and expiration boundaries stand; no runtime identity holds direct mutation; FORCE RLS holds; no login-capable governor membership';
+end $$;
+select set_config('request.jwt.claims', '{"role":"anon"}', true);
+set local role anon;
+do $$
+declare
+  v_result jsonb;
+  v_refused boolean := false;
+begin
+  begin
+    v_result := kitluy_devices.recover_terminal_provisioning_code_v1(
+      gen_random_uuid(), 'rls-probe-original', 'rls-probe-recovery', 'rls probe');
+    -- Any answer at all proves EXECUTE reached the door; the privilege
+    -- boundary must fire before the body.
+    raise exception 'FAIL WS11-N16: anon reached the recovery door: %', v_result;
+  exception when insufficient_privilege then
+    v_refused := true;
+  end;
+  if not v_refused then
+    raise exception 'FAIL WS11-N16: the anon recovery probe did not run';
+  end if;
+  raise notice 'PASS WS11-N16b: anon cannot execute the recovery door';
+end $$;
+rollback;
+begin;
+select set_config('request.jwt.claims', '{"role":"authenticated"}', true);
+set local role authenticated;
+do $$
+declare
+  v_held boolean;
+  v_refused boolean := false;
+begin
+  begin
+    v_held := kitluy_devices.provisioning_code_issue_held_v1();
+    raise exception 'FAIL WS11-N16: authenticated reached the coarse issue bridge directly';
+  exception when insufficient_privilege then
+    v_refused := true;
+  end;
+  if not v_refused then
+    raise exception 'FAIL WS11-N16: the bridge probe did not run';
+  end if;
+  raise notice 'PASS WS11-N16c: authenticated cannot execute the recovery bridges directly';
+end $$;
+rollback;
+
+select 'rls-tests complete: 14+9 baseline cases; cycle-5 WS5 7 negative + 7 positive and WS6 10 negative + 9 positive; cycle-6 WS7 13 negative + 6 positive and WS8 13 negative + 6 positive; cycle-10 WS11 T001 4 negative + 1 positive and T002 3 negative + 1 positive kitluy_devices cases executed; WS-11-T004-P02A 3 negative provisioning-code cases executed; WS-11-T004-P02B1 issuance-door boundary case executed; WS-11-T004-P02B2A presentation-evaluator boundary case executed; WS-11-T004-P02B2B1 revocation-door boundary case executed; WS-11-T004-P02B2B2A expiration-helper boundary case executed; WS-11-T004-P02B2B2B1 replacement-lineage boundary case executed; WS-11-T004-P02B2B2B2A recovery-door boundary case executed' as result;
