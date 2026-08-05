@@ -259,6 +259,9 @@ importers:
       '@kitluy/localization':
         specifier: workspace:*
         version: link:../../packages/localization
+      '@kitluy/terminal-local-store':
+        specifier: workspace:*
+        version: link:../../packages/terminal-local-store
       '@kitluy/web-ui':
         specifier: workspace:*
         version: link:../../packages/web-ui
@@ -803,6 +806,22 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: 5.7.3
+
+  packages/terminal-local-store:
+    dependencies:
+      '@kitluy/device-identity':
+        specifier: workspace:*
+        version: link:../device-identity
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.20.1
+      typescript:
+        specifier: 'catalog:'
+        version: 5.7.3
+      vitest:
+        specifier: 'catalog:'
+        version: 2.1.9(@types/node@22.20.1)(terser@5.49.0)
 
   packages/test-fixtures:
     devDependencies:

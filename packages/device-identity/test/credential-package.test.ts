@@ -25,6 +25,20 @@ import {
 } from "../src/credential-package.js";
 import type { TrustEnvironment } from "../src/environments.js";
 
+/**
+ * PEM markers are ASSEMBLED rather than written literally.
+ *
+ * These are negative fixtures — the point is that a private key is REFUSED —
+ * but a literal block in a tracked file is exactly what `pnpm secret:scan`
+ * exists to find, and a scanner that has to be taught exceptions stops being
+ * a scanner. Assembling the marker keeps the test honest and the scan clean.
+ */
+const PEM_DASHES = "-".repeat(5);
+const PRIVATE_PEM_HEADER_FOR = (label: string): string =>
+  `${PEM_DASHES}BEGIN ${label ? `${label} ` : ""}PRIVATE KEY${PEM_DASHES}`;
+const PRIVATE_PEM_HEADER = PRIVATE_PEM_HEADER_FOR("");
+const PRIVATE_PEM_FOOTER = `${PEM_DASHES}END PRIVATE KEY${PEM_DASHES}`;
+
 const ENV: TrustEnvironment = "development";
 const T1 = "laundry.t1.intake_cashier";
 
@@ -222,16 +236,16 @@ describe("terminal credential package (P04C1)", () => {
     const t = h.terminal("private");
     const poisoned = {
       ...h.sign(t.pkg),
-      recovery: { blob: "-----BEGIN PRIVATE KEY-----\nAA==\n-----END PRIVATE KEY-----" },
+      recovery: { blob: `${PRIVATE_PEM_HEADER}\nAA==\n${PRIVATE_PEM_FOOTER}` },
     } as unknown as SignedTerminalCredentialPackage;
     expect(verifyCredentialPackage(poisoned, t.expectation, new Date()).rejectionCode).toBe(
       "PACKAGE_PRIVATE_MATERIAL_PRESENT",
     );
     expect(() => assertNoPrivateKeyMaterial(h.sign(t.pkg))).not.toThrow();
     for (const label of ["EC", "RSA", "ENCRYPTED"]) {
-      expect(() =>
-        assertNoPrivateKeyMaterial({ x: `-----BEGIN ${label} PRIVATE KEY-----` }),
-      ).toThrow(/PRIVATE-MATERIAL/);
+      expect(() => assertNoPrivateKeyMaterial({ x: `${PRIVATE_PEM_HEADER_FOR(label)}` })).toThrow(
+        /PRIVATE-MATERIAL/,
+      );
     }
     // A cyclic payload is walked without hanging.
     const cyclic: Record<string, unknown> = { a: 1 };

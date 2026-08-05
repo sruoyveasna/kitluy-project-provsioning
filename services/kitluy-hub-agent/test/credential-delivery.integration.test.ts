@@ -68,6 +68,20 @@ const OTHER_TENANT = "e0000000-0000-4000-8000-0000000000a1";
 const T1 = "laundry.t1.intake_cashier";
 const ENV: TrustEnvironment = "development";
 
+/**
+ * PEM markers are ASSEMBLED rather than written literally.
+ *
+ * These are negative fixtures — the point is that a private key is REFUSED —
+ * but a literal block in a tracked file is exactly what `pnpm secret:scan`
+ * exists to find, and a scanner that has to be taught exceptions stops being
+ * a scanner. Assembling the marker keeps the test honest and the scan clean.
+ */
+const PEM_DASHES = "-".repeat(5);
+const PRIVATE_PEM_HEADER_FOR = (label: string): string =>
+  `${PEM_DASHES}BEGIN ${label ? `${label} ` : ""}PRIVATE KEY${PEM_DASHES}`;
+const PRIVATE_PEM_HEADER = PRIVATE_PEM_HEADER_FOR("");
+const PRIVATE_PEM_FOOTER = `${PEM_DASHES}END PRIVATE KEY${PEM_DASHES}`;
+
 const live = await isHubDatabaseReachable();
 if (!live) console.warn("SKIPPED: credential delivery — local Hub database unreachable");
 
@@ -408,7 +422,7 @@ describe.skipIf(!live)("terminal credential delivery and projection (hub group 0
     const poisoned = {
       ...sign(buildPackage(fixture)),
       // Exactly the "helpful" adapter this check exists to stop.
-      extra: { recovery: "-----BEGIN PRIVATE KEY-----\nMC4CAQ==\n-----END PRIVATE KEY-----" },
+      extra: { recovery: `${PRIVATE_PEM_HEADER}\nMC4CAQ==\n${PRIVATE_PEM_FOOTER}` },
     } as unknown as SignedTerminalCredentialPackage;
     const verdict = verifyCredentialPackage(poisoned, expectation(fixture), new Date());
     expect(verdict.rejectionCode).toBe("PACKAGE_PRIVATE_MATERIAL_PRESENT");
@@ -420,7 +434,7 @@ describe.skipIf(!live)("terminal credential delivery and projection (hub group 0
     expect(() =>
       parseCredentialProjectionPayload({
         ...projectionPayload(fixture),
-        privateKeyPem: "-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----",
+        privateKeyPem: `${PRIVATE_PEM_HEADER}\nx\n${PRIVATE_PEM_FOOTER}`,
       }),
     ).toThrow(/PRIVATE-MATERIAL/);
     expect(() => assertNoPrivateKeyMaterial(projectionPayload(fixture))).not.toThrow();

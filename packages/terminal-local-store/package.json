@@ -1,0 +1,29 @@
+{
+  "name": "@kitluy/terminal-local-store",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Encrypted relational terminal-local store — shared driver port plus the Electron T1-T4 runtime implementation (POS spec §9 storage)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "dependencies": {
+    "@kitluy/device-identity": "workspace:*"
+  }
+}
