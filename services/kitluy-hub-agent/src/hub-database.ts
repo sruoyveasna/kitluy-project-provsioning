@@ -322,6 +322,10 @@ export const HUB_MIGRATION_ORDER = [
   "0028_revocation_reader_least_privilege.sql",
   "0029_offline_device_record_enforcement.sql",
   "0030_governed_snapshot_staging.sql",
+  // WS-11-T004-P03B: Hub-local pairing authority — governed pairing sessions,
+  // single-use directional nonces, one immutable Hub-signed receipt per
+  // handshake (pairing protocol §8-§9).
+  "0031_terminal_pairing.sql",
 ] as const;
 
 /**

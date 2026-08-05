@@ -241,6 +241,8 @@ declare
     'edge_sync.provider_outcome_delivery',
     -- WS-10 additive extension G11 (KLREQ-025 signed grant projection).
     'edge_config.permission_grant_projection',
+    -- WS-11-T004-P03B additive extension G0031 (hub-terminal pairing).
+    'edge_identity.pairing_session', 'edge_identity.pairing_receipt',
     'edge_hardware.peripheral_observation', 'edge_hardware.device_heartbeat',
     'edge_audit.audit_event', 'edge_audit.support_session'
   ];
@@ -1881,6 +1883,168 @@ end $$;
 rollback;
 
 -- ---------------------------------------------------------------------------
+-- 30. Hub-terminal pairing authority (group 0031, WS-11-T004-P03B).
+-- ---------------------------------------------------------------------------
+-- Pairing is HUB-LOCAL authority: sessions, nonce consumption and the one
+-- immutable Hub-signed receipt live here, governed by the NOLOGIN
+-- kitluy_pairing_governor exactly as 0024 governs reconciliation. Nothing in
+-- this section claims delivery to the terminal, persistence across restart,
+-- or reachability — those are P03C.
+do $$
+declare
+  v_count int;
+begin
+  -- The governor is NOLOGIN and granted to NOBODY: current_user can equal it
+  -- only inside the doors it owns.
+  if not exists (select 1 from pg_roles where rolname = 'kitluy_pairing_governor' and not rolcanlogin) then
+    raise exception 'ASSERT FAIL: kitluy_pairing_governor is missing or can log in';
+  end if;
+  if exists (select 1 from pg_auth_members
+              where roleid = (select oid from pg_roles where rolname = 'kitluy_pairing_governor')) then
+    raise exception 'ASSERT FAIL: somebody is a member of kitluy_pairing_governor';
+  end if;
+
+  -- The three doors are governor-owned; the prerequisite helper stays
+  -- governor-only; PUBLIC holds none of them (the §29c gate re-proves this
+  -- globally); the runtime can call exactly the doors.
+  select count(*) into v_count
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'edge_identity'
+     and p.proname in ('begin_terminal_pairing_v1', 'record_terminal_pairing_proof_v1',
+                       'complete_terminal_pairing_v1', 'assert_pairing_prerequisites_v1')
+     and p.proowner = (select oid from pg_roles where rolname = 'kitluy_pairing_governor');
+  if v_count <> 4 then
+    raise exception 'ASSERT FAIL: expected 4 governor-owned pairing functions, found %', v_count;
+  end if;
+  if not has_function_privilege('kitluy_hub_runtime',
+       'edge_identity.begin_terminal_pairing_v1(uuid, uuid, text, text, text, text, text, timestamptz, uuid)', 'execute')
+     or not has_function_privilege('kitluy_hub_runtime',
+       'edge_identity.record_terminal_pairing_proof_v1(uuid, boolean, uuid)', 'execute')
+     or not has_function_privilege('kitluy_hub_runtime',
+       'edge_identity.complete_terminal_pairing_v1(uuid, text, uuid, text, text, timestamptz, uuid)', 'execute') then
+    raise exception 'ASSERT FAIL: kitluy_hub_runtime cannot execute a pairing door';
+  end if;
+  if has_function_privilege('kitluy_hub_runtime',
+       'edge_identity.assert_pairing_prerequisites_v1(edge_identity.pairing_session)', 'execute')
+     or has_function_privilege('kitluy_sync_worker',
+       'edge_identity.begin_terminal_pairing_v1(uuid, uuid, text, text, text, text, text, timestamptz, uuid)', 'execute')
+     or has_function_privilege('kitluy_support_ro',
+       'edge_identity.begin_terminal_pairing_v1(uuid, uuid, text, text, text, text, text, timestamptz, uuid)', 'execute') then
+    raise exception 'ASSERT FAIL: a pairing capability leaked beyond the runtime boundary';
+  end if;
+
+  -- Direct and EFFECTIVE table posture: the runtime reads, nobody but the
+  -- governor writes, the sync worker and support see nothing.
+  if has_table_privilege('kitluy_hub_runtime', 'edge_identity.pairing_session', 'INSERT,UPDATE,DELETE')
+     or has_table_privilege('kitluy_hub_runtime', 'edge_identity.pairing_receipt', 'INSERT,UPDATE,DELETE')
+     or has_table_privilege('kitluy_sync_worker', 'edge_identity.pairing_session', 'SELECT,INSERT,UPDATE,DELETE')
+     or has_table_privilege('kitluy_sync_worker', 'edge_identity.pairing_receipt', 'SELECT,INSERT,UPDATE,DELETE')
+     or has_table_privilege('kitluy_support_ro', 'edge_identity.pairing_session', 'SELECT')
+     or has_table_privilege('kitluy_support_ro', 'edge_identity.pairing_receipt', 'SELECT')
+     or not has_table_privilege('kitluy_hub_runtime', 'edge_identity.pairing_session', 'SELECT')
+     or not has_table_privilege('kitluy_hub_runtime', 'edge_identity.pairing_receipt', 'SELECT') then
+    raise exception 'ASSERT FAIL: the pairing table privilege posture is wrong';
+  end if;
+
+  -- The invariants the protocol demands are STRUCTURAL: single-use nonces
+  -- across ALL sessions, one live handshake per terminal, one receipt per
+  -- session, and the governance triggers on both relations.
+  if not exists (select 1 from pg_indexes where indexname = 'pairing_session_terminal_nonce_uq')
+     or not exists (select 1 from pg_indexes where indexname = 'pairing_session_hub_nonce_uq')
+     or not exists (select 1 from pg_indexes where indexname = 'pairing_session_active_uq')
+     or not exists (select 1 from pg_constraint where conname = 'pairing_receipt_session_uq') then
+    raise exception 'ASSERT FAIL: a pairing uniqueness invariant is missing';
+  end if;
+  select count(*) into v_count from pg_trigger t
+    join pg_class c on c.oid = t.tgrelid join pg_namespace n on n.oid = c.relnamespace
+   where n.nspname = 'edge_identity' and not t.tgisinternal
+     and t.tgname in ('pairing_session_governance', 'pairing_receipt_governance');
+  if v_count <> 2 then
+    raise exception 'ASSERT FAIL: expected both pairing governance triggers, found %', v_count;
+  end if;
+
+  -- No secret-shaped column: no private key, password, secret or raw
+  -- provisioning code anywhere on the pairing relations.
+  if exists (
+    select 1 from information_schema.columns
+     where table_schema = 'edge_identity'
+       and table_name in ('pairing_session', 'pairing_receipt')
+       and (column_name like '%private%' or column_name like '%password%'
+            or column_name like '%secret%' or column_name like '%provisioning_code%')) then
+    raise exception 'ASSERT FAIL: a secret-shaped column exists on a pairing relation';
+  end if;
+
+  raise notice 'PASS pairing-authority: the governor is NOLOGIN with zero members and owns all four pairing functions; the runtime holds exactly the three doors plus SELECT; sync worker and support hold nothing; nonces, live-handshake and receipt uniqueness are structural; both governance triggers exist; no secret-shaped column';
+end $$;
+
+-- Runtime probes: the boundary refuses what the catalog says it refuses.
+begin;
+set local role kitluy_hub_runtime;
+do $$
+declare
+  v_blocked int := 0;
+begin
+  -- Direct INSERT into pairing_session is refused for the runtime.
+  begin
+    insert into edge_identity.pairing_session
+      (id, protocol_version, purpose, tenant_id, digital_store_id, location_id,
+       environment, hub_device_id, hub_assignment_id, hub_assignment_generation,
+       hub_credential_id, hub_certificate_serial, hub_certificate_fingerprint,
+       terminal_device_id, terminal_assignment_generation, terminal_profile_code,
+       terminal_credential_id, terminal_certificate_serial,
+       terminal_certificate_fingerprint, terminal_nonce, hub_nonce, state,
+       correlation_id, expires_at)
+    values
+      (gen_random_uuid(), '1.0', 'hub_terminal_pairing',
+       'e0000000-0000-4000-8000-000000000001', 'e0000000-0000-4000-8000-000000000002',
+       'e0000000-0000-4000-8000-000000000003', 'development',
+       'e0000000-0000-4000-8000-000000000010', 'e0000000-0000-4000-8000-000000000012', 1,
+       'e0000000-0000-4000-8000-000000000013', 'DEMO-OPS-CERT-0001', repeat('a', 64),
+       'e0000000-0000-4000-8000-000000000020', 1, 'laundry.t1.intake_cashier',
+       'e0000000-0000-4000-8000-000000000013', 'DEMO-OPS-CERT-0001', repeat('b', 64),
+       repeat('c', 64), repeat('d', 64), 'challenge_issued', gen_random_uuid(),
+       now() + interval '10 minutes');
+    raise exception 'ASSERT FAIL: the runtime inserted a pairing session directly';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- A wrong protocol version is refused by its exact sentinel.
+  begin
+    perform edge_identity.begin_terminal_pairing_v1(
+      gen_random_uuid(), 'e0000000-0000-4000-8000-000000000020',
+      'laundry.t1.intake_cashier', repeat('a', 64), repeat('b', 64),
+      '9.9', 'development', now() + interval '10 minutes', gen_random_uuid());
+    raise exception 'ASSERT FAIL: an incompatible protocol version began a pairing session';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-EDGE-PAIRING-VERSION-INCOMPATIBLE%' then
+      raise exception 'ASSERT FAIL: wrong-version refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- An unknown session cannot record a proof.
+  begin
+    perform edge_identity.record_terminal_pairing_proof_v1(gen_random_uuid(), true, gen_random_uuid());
+    raise exception 'ASSERT FAIL: a proof was recorded for a session that does not exist';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-EDGE-PAIRING-SESSION-UNKNOWN%' then
+      raise exception 'ASSERT FAIL: unknown-session refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  if v_blocked <> 3 then
+    raise exception 'ASSERT FAIL: expected 3 refused pairing probes, got %', v_blocked;
+  end if;
+  raise notice 'PASS pairing-runtime-boundary: the runtime cannot write pairing state directly, and the doors refuse a wrong version and an unknown session with their exact sentinels';
+end $$;
+rollback;
+
+-- ---------------------------------------------------------------------------
 -- 29. Final tally.
 -- ---------------------------------------------------------------------------
 do $$
@@ -1897,14 +2061,16 @@ begin
   where not t.tgisinternal and n.nspname like 'edge\_%';
   -- 57 -> 60: hub group 0027 adds `revocation_trust_key`, `revocation_snapshot`
   -- and `revocation_snapshot_entry` (WS-11-T003 Step 4,
-  -- KLD-2026-07-31-HUB-SNAPSHOT-SIGNING-001). This tally is deliberately EXACT in
+  -- KLD-2026-07-31-HUB-SNAPSHOT-SIGNING-001).
+  -- 60 -> 62: hub group 0031 adds `pairing_session` and `pairing_receipt`
+  -- (WS-11-T004-P03B). This tally is deliberately EXACT in
   -- both directions -- it is how an unreviewed table gets noticed -- so it is
-  -- raised by exactly the three that were added and by nothing else.
-  if v_tables <> 60 then
+  -- raised by exactly the additions that were reviewed and by nothing else.
+  if v_tables <> 62 then
     raise exception
-      'ASSERT FAIL: expected 60 relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11 + 3 G0027 revocation), found %',
+      'ASSERT FAIL: expected 62 relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11 + 3 G0027 revocation + 2 G0031 pairing), found %',
       v_tables;
   end if;
-  raise notice 'PASS tally: % relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11 WS-10 + 3 G0027 revocation), % indexes, % triggers',
+  raise notice 'PASS tally: % relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11 WS-10 + 3 G0027 revocation + 2 G0031 pairing), % indexes, % triggers',
     v_tables, v_indexes, v_triggers;
 end $$;

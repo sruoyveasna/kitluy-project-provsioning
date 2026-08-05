@@ -790,6 +790,7 @@ export * from "./issuance-adapter.js";
 export * from "./replacement-key-pop.js";
 export * from "./provisioning-pop.js";
 export * from "./activation-ack.js";
+export * from "./pairing.js";
 export * from "./same-key-renewal-preflight.js";
 export * from "./same-key-renewal-issuance.js";
 export * from "./replacement-key-provider.js";
