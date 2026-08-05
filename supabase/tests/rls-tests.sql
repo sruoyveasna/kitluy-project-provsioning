@@ -3642,10 +3642,11 @@ end $$;
 rollback;
 
 -- WS11-N19: the provisioning composition identity (0172) is NOLOGIN, holds
--- EXACTLY five function capabilities plus schema USAGE, has zero table
--- reach, is a member of nothing, and gives service_role no direct
--- provisioning shortcut. The narrow context reader stays composer/harness
--- only and exposes no digest. Catalog first; runtime probes follow.
+-- EXACTLY eight function capabilities plus schema USAGE (five provisioning
+-- doors from 0170-0172 and three activation doors from 0174), has zero
+-- table reach, is a member of nothing, and gives service_role no direct
+-- provisioning shortcut. The narrow context readers stay composer/harness
+-- only and expose no digest. Catalog first; runtime probes follow.
 begin;
 do $$
 declare
@@ -3668,13 +3669,18 @@ begin
        'issue_terminal_provisioning_pop_challenge_v1',
        'read_terminal_provisioning_pop_challenge_context_v1',
        'record_terminal_provisioning_pop_verification_v1',
-       'redeem_terminal_provisioning_code_v1');
+       'redeem_terminal_provisioning_code_v1',
+       'prepare_terminal_provisioning_activation_v1',
+       'read_terminal_activation_challenge_context_v1',
+       'complete_terminal_provisioning_activation_v1');
   if v_extra > 0 then
-    raise exception 'FAIL WS11-N19: the composition role can execute % function(s) beyond its five capabilities', v_extra;
+    raise exception 'FAIL WS11-N19: the composition role can execute % function(s) beyond its eight capabilities', v_extra;
   end if;
   if has_table_privilege('kitluy_provisioning_service', 'kitluy_devices.device_provisioning_codes', 'SELECT,INSERT,UPDATE,DELETE')
      or has_table_privilege('kitluy_provisioning_service', 'kitluy_devices.device_provisioning_pop_challenges', 'SELECT,INSERT,UPDATE,DELETE')
-     or has_table_privilege('kitluy_provisioning_service', 'kitluy_devices.device_certificates', 'SELECT,INSERT,UPDATE,DELETE') then
+     or has_table_privilege('kitluy_provisioning_service', 'kitluy_devices.device_certificates', 'SELECT,INSERT,UPDATE,DELETE')
+     or has_table_privilege('kitluy_provisioning_service', 'kitluy_devices.device_terminal_provisioning_activations', 'SELECT,INSERT,UPDATE,DELETE')
+     or has_table_privilege('kitluy_provisioning_service', 'kitluy_devices.device_terminal_activation_challenges', 'SELECT,INSERT,UPDATE,DELETE') then
     raise exception 'FAIL WS11-N19: the composition role holds direct table access';
   end if;
   -- BOTH postures are required (WS-11-T004-P02C1): no direct ACL, AND no
@@ -3691,7 +3697,10 @@ begin
                         'issue_terminal_provisioning_pop_challenge_v1',
                         'record_terminal_provisioning_pop_verification_v1',
                         'redeem_terminal_provisioning_code_v1',
-                        'read_terminal_provisioning_pop_challenge_context_v1')
+                        'read_terminal_provisioning_pop_challenge_context_v1',
+                        'prepare_terminal_provisioning_activation_v1',
+                        'read_terminal_activation_challenge_context_v1',
+                        'complete_terminal_provisioning_activation_v1')
       and a.grantee = 'service_role'::regrole::oid) then
     raise exception 'FAIL WS11-N19: service_role holds a direct provisioning grant';
   end if;
@@ -3703,7 +3712,10 @@ begin
                         'issue_terminal_provisioning_pop_challenge_v1',
                         'record_terminal_provisioning_pop_verification_v1',
                         'redeem_terminal_provisioning_code_v1',
-                        'read_terminal_provisioning_pop_challenge_context_v1')
+                        'read_terminal_provisioning_pop_challenge_context_v1',
+                        'prepare_terminal_provisioning_activation_v1',
+                        'read_terminal_activation_challenge_context_v1',
+                        'complete_terminal_provisioning_activation_v1')
       and (has_function_privilege('service_role', p.oid, 'execute')
            or has_function_privilege('kitluy_issuance_service', p.oid, 'execute')
            or has_function_privilege('kitluy_worker_service', p.oid, 'execute'))) then
@@ -3726,10 +3738,12 @@ begin
     raise exception 'FAIL WS11-N19: a member can re-delegate a composition role';
   end if;
   if has_function_privilege('authenticated', 'kitluy_devices.read_terminal_provisioning_pop_challenge_context_v1(uuid)', 'execute')
-     or has_function_privilege('anon', 'kitluy_devices.read_terminal_provisioning_pop_challenge_context_v1(uuid)', 'execute') then
-    raise exception 'FAIL WS11-N19: the context reader leaked to a runtime identity';
+     or has_function_privilege('anon', 'kitluy_devices.read_terminal_provisioning_pop_challenge_context_v1(uuid)', 'execute')
+     or has_function_privilege('authenticated', 'kitluy_devices.read_terminal_activation_challenge_context_v1(uuid)', 'execute')
+     or has_function_privilege('anon', 'kitluy_devices.read_terminal_activation_challenge_context_v1(uuid)', 'execute') then
+    raise exception 'FAIL WS11-N19: a context reader leaked to a runtime identity';
   end if;
-  raise notice 'PASS WS11-N19a: the composition identity is NOLOGIN, member of nothing, holds exactly five capabilities with zero table reach; service_role has no direct provisioning grant; the context reader stays composer/harness only';
+  raise notice 'PASS WS11-N19a: the composition identity is NOLOGIN, member of nothing, holds exactly eight capabilities with zero table reach; service_role has no direct provisioning grant; the context readers stay composer/harness only';
 end $$;
 select set_config('request.jwt.claims', '{"role":"authenticated"}', true);
 set local role authenticated;
@@ -3769,4 +3783,94 @@ begin
 end $$;
 rollback;
 
-select 'rls-tests complete: 14+9 baseline cases; cycle-5 WS5 7 negative + 7 positive and WS6 10 negative + 9 positive; cycle-6 WS7 13 negative + 6 positive and WS8 13 negative + 6 positive; cycle-10 WS11 T001 4 negative + 1 positive and T002 3 negative + 1 positive kitluy_devices cases executed; WS-11-T004-P02A 3 negative provisioning-code cases executed; WS-11-T004-P02B1 issuance-door boundary case executed; WS-11-T004-P02B2A presentation-evaluator boundary case executed; WS-11-T004-P02B2B1 revocation-door boundary case executed; WS-11-T004-P02B2B2A expiration-helper boundary case executed; WS-11-T004-P02B2B2B1 replacement-lineage boundary case executed; WS-11-T004-P02B2B2B2A recovery-door boundary case executed; WS-11-T004-P02B3A pop-foundation boundary case executed; WS-11-T004-P02B3B redemption-door boundary case executed; WS-11-T004-P02C composition-identity boundary case executed' as result;
+-- WS11-N20: terminal activation state (0174). Activation is DISTINCT from
+-- redemption: the record is governor-only under FORCE RLS, immutable in its
+-- bindings, allows at most one outstanding acknowledgment challenge, and
+-- knows no 'delivered' state — activation is completion, and it never claims
+-- Store Hub delivery, pairing or connectivity. Catalog first; runtime after.
+begin;
+do $$
+begin
+  if not exists (select 1 from pg_roles where rolname = 'kitluy_activation_governor' and not rolcanlogin) then
+    raise exception 'FAIL WS11-N20: the activation governor is missing or can log in';
+  end if;
+  if exists (
+    select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = 'kitluy_devices'
+       and c.relname in ('device_terminal_provisioning_activations', 'device_terminal_activation_challenges')
+       and (not c.relrowsecurity or not c.relforcerowsecurity)) then
+    raise exception 'FAIL WS11-N20: an activation table is not under FORCE row security';
+  end if;
+  if exists (
+    select 1 from pg_policies
+     where schemaname = 'kitluy_devices'
+       and tablename in ('device_terminal_provisioning_activations', 'device_terminal_activation_challenges')
+       and roles::text !~ 'kitluy_activation_governor') then
+    raise exception 'FAIL WS11-N20: an activation-table policy reaches beyond the governor';
+  end if;
+  if (select count(*) from pg_trigger t
+       join pg_class c on c.oid = t.tgrelid
+       join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'kitluy_devices'
+        and t.tgname in ('trg_dtpa_integrity', 'trg_dtac_integrity')) <> 2 then
+    raise exception 'FAIL WS11-N20: an activation immutability trigger is missing';
+  end if;
+  if not exists (
+    select 1 from pg_indexes
+     where schemaname = 'kitluy_devices'
+       and indexname = 'uq_dtac_one_outstanding'
+       and indexdef like '%WHERE%') then
+    raise exception 'FAIL WS11-N20: the one-outstanding-challenge partial unique index is missing';
+  end if;
+  if exists (
+    select 1 from pg_constraint con
+      join pg_class c on c.oid = con.conrelid
+      join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = 'kitluy_devices'
+       and c.relname = 'device_terminal_provisioning_activations'
+       and pg_get_constraintdef(con.oid) ~ '''delivered''') then
+    raise exception 'FAIL WS11-N20: a delivered state was invented — activation must not claim delivery';
+  end if;
+  if (select proowner::regrole::text from pg_proc p
+       join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'kitluy_devices'
+        and p.proname = 'complete_terminal_provisioning_activation_v1') <> 'kitluy_activation_governor' then
+    raise exception 'FAIL WS11-N20: the activation completion door is not owned by the governor';
+  end if;
+  raise notice 'PASS WS11-N20a: activation state is governor-only, immutable, single-outstanding-challenge, and claims no delivery';
+end $$;
+select set_config('request.jwt.claims', '{"role":"authenticated"}', true);
+set local role authenticated;
+do $$
+declare
+  v_blocked integer := 0;
+begin
+  begin
+    perform id from kitluy_devices.device_terminal_provisioning_activations limit 1;
+  exception when insufficient_privilege then
+    v_blocked := v_blocked + 1;
+  end;
+  begin
+    perform id from kitluy_devices.device_terminal_activation_challenges limit 1;
+  exception when insufficient_privilege then
+    v_blocked := v_blocked + 1;
+  end;
+  begin
+    perform kitluy_devices.prepare_terminal_provisioning_activation_v1(gen_random_uuid(), 'ws11-n20');
+  exception when insufficient_privilege then
+    v_blocked := v_blocked + 1;
+  end;
+  begin
+    perform kitluy_devices.complete_terminal_provisioning_activation_v1(
+      gen_random_uuid(), true, repeat('a', 64), 'ws11-n20');
+  exception when insufficient_privilege then
+    v_blocked := v_blocked + 1;
+  end;
+  if v_blocked <> 4 then
+    raise exception 'FAIL WS11-N20: authenticated reached activation state (% of 4 probes blocked)', v_blocked;
+  end if;
+  raise notice 'PASS WS11-N20b: authenticated can neither read activation state nor call an activation door';
+end $$;
+rollback;
+
+select 'rls-tests complete: 14+9 baseline cases; cycle-5 WS5 7 negative + 7 positive and WS6 10 negative + 9 positive; cycle-6 WS7 13 negative + 6 positive and WS8 13 negative + 6 positive; cycle-10 WS11 T001 4 negative + 1 positive and T002 3 negative + 1 positive kitluy_devices cases executed; WS-11-T004-P02A 3 negative provisioning-code cases executed; WS-11-T004-P02B1 issuance-door boundary case executed; WS-11-T004-P02B2A presentation-evaluator boundary case executed; WS-11-T004-P02B2B1 revocation-door boundary case executed; WS-11-T004-P02B2B2A expiration-helper boundary case executed; WS-11-T004-P02B2B2B1 replacement-lineage boundary case executed; WS-11-T004-P02B2B2B2A recovery-door boundary case executed; WS-11-T004-P02B3A pop-foundation boundary case executed; WS-11-T004-P02B3B redemption-door boundary case executed; WS-11-T004-P02C composition-identity boundary case executed; WS-11-T004-P03A activation-state boundary case executed' as result;

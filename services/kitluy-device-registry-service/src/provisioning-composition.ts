@@ -41,8 +41,12 @@ import {
   provisioningChallengeBytes,
   provisioningChallengeHash,
   verifyProvisioningPop,
+  activationAckHash,
+  verifyActivationAck,
   type ProvisioningPopChallenge,
   type ProvisioningPopExpectation,
+  type ActivationAckChallenge,
+  type ActivationAckExpectation,
   type TrustedTimeEvaluation,
 } from "@kitluy/device-identity";
 
@@ -72,7 +76,17 @@ export type ProvisioningResultCode =
   | "IDEMPOTENCY_CONFLICT"
   | "PKI_UNAVAILABLE"
   | "REQUEST_INVALID"
-  | "INTERNAL_ERROR";
+  | "INTERNAL_ERROR"
+  // WS-11-T004-P03A activation results. Kept in the SAME closed vocabulary so
+  // one mapper governs every provisioning outcome.
+  | "ACTIVATION_PREPARED"
+  | "ACTIVATION_ACK_INVALID"
+  | "ACTIVATION_CHALLENGE_EXPIRED"
+  | "ACTIVATION_CHALLENGE_CONSUMED"
+  | "CREDENTIAL_INELIGIBLE"
+  | "REDEMPTION_REQUIRED"
+  | "ACTIVATED"
+  | "ALREADY_ACTIVATED";
 
 export interface SafeLogger {
   info(fields: Readonly<Record<string, string | number | boolean>>): void;
@@ -93,6 +107,26 @@ const MAX_SIGNATURE_BASE64 = 128;
  * unknown refusal maps to INTERNAL_ERROR rather than being passed through.
  */
 function mapRefusal(refusalCode: string): ProvisioningResultCode {
+  // Activation families first: their codes are namespaced KLUY-ACTIVATION-*
+  // and would otherwise be caught by the broader provisioning patterns below.
+  if (refusalCode.startsWith("KLUY-ACTIVATION-")) {
+    if (refusalCode.includes("CHALLENGE-EXPIRED")) return "ACTIVATION_CHALLENGE_EXPIRED";
+    if (refusalCode.includes("CHALLENGE-CONSUMED")) return "ACTIVATION_CHALLENGE_CONSUMED";
+    if (refusalCode.includes("SIGNATURE-REJECTED")) return "ACTIVATION_ACK_INVALID";
+    if (refusalCode.includes("CREDENTIAL")) return "CREDENTIAL_INELIGIBLE";
+    if (refusalCode.includes("CODE-NOT-REDEEMED") || refusalCode.includes("PROOF-NOT-CONSUMED")) {
+      return "REDEMPTION_REQUIRED";
+    }
+    if (refusalCode.includes("NO-REDEMPTION")) return "REDEMPTION_REQUIRED";
+    if (refusalCode.includes("HUB-INACTIVE")) return "HUB_INACTIVE";
+    if (refusalCode.includes("ASSIGNMENT")) return "ASSIGNMENT_INACTIVE";
+    if (refusalCode.includes("ENROLLMENT")) return "ENROLLMENT_INELIGIBLE";
+    if (refusalCode.includes("CHALLENGE-NOT-FOUND")) return "CHALLENGE_NOT_FOUND";
+    if (refusalCode.includes("CONTRACT") || refusalCode.includes("MALFORMED")) {
+      return "REQUEST_INVALID";
+    }
+    return "INTERNAL_ERROR";
+  }
   if (refusalCode.includes("ALREADY-REDEEMED") || refusalCode.includes("CODE-ALREADY-REDEEMED")) {
     return "CODE_REDEEMED";
   }
@@ -500,3 +534,275 @@ export class TerminalProvisioningComposition {
 
 /** Exported for tests: the canonical bytes helper this layer signs nothing with. */
 export { provisioningChallengeBytes };
+
+export interface ActivationChallengeMaterial {
+  readonly activationId: string;
+  readonly activationChallengeId: string;
+  readonly challengeVersion: string;
+  readonly purpose: string;
+  readonly nonce: string;
+  readonly issuedAt: string;
+  readonly expiresAt: string;
+  readonly certificateId: string;
+  readonly certificateSerial: string;
+  readonly certificateFingerprint: string;
+  readonly terminalProfileKey: string;
+  readonly correlationId: string;
+}
+
+export interface ActivationState {
+  readonly activationId: string;
+  readonly terminalDeviceId: string;
+  readonly terminalAssignmentId: string;
+  readonly terminalProfileKey: string;
+  readonly storeHubDeviceId: string;
+  readonly environment: string;
+  readonly certificateId: string;
+  readonly certificateFingerprint: string;
+  readonly acknowledgedAt: string;
+  readonly activatedAt: string;
+  readonly correlationId: string;
+}
+
+/**
+ * Terminal activation composition — WS-11-T004-P03A.
+ *
+ * The same discipline as the provisioning composition it extends: two typed
+ * operations, each one transaction under the explicitly entered NOLOGIN
+ * composer, every authoritative decision left in the database or the crypto
+ * authority, and a closed result vocabulary.
+ *
+ * This layer NEVER claims Store Hub delivery, LAN pairing or operational
+ * connectivity — `prepare` says only that the cloud holds what the terminal
+ * needs, and `complete` says only that the terminal proved it holds the
+ * credential.
+ */
+export class TerminalActivationComposition {
+  constructor(
+    private readonly source: ClientSource,
+    private readonly logger: SafeLogger = NO_LOG,
+  ) {}
+
+  /** Prepare activation from a COMMITTED redemption; returns challenge material. */
+  async prepareActivation(input: {
+    readonly terminalAssignmentId: string;
+    readonly redemptionIdempotencyKey: string;
+  }): Promise<CompositionResult<ActivationChallengeMaterial>> {
+    const correlationId = randomUUID();
+    if (
+      !UUID.test(input.terminalAssignmentId) ||
+      !IDEMPOTENCY_KEY.test(input.redemptionIdempotencyKey)
+    ) {
+      return { result: "REQUEST_INVALID", correlationId };
+    }
+    try {
+      const outcome = await withServiceRole(
+        this.source,
+        REGISTRY_ROLES.provisioning,
+        async (client) => {
+          const prepared = await callDoor(
+            client,
+            `kitluy_devices.prepare_terminal_provisioning_activation_v1($1::uuid, $2)`,
+            [input.terminalAssignmentId, input.redemptionIdempotencyKey],
+          );
+          if (prepared.outcome === "ALREADY_ACTIVATED") {
+            return { result: "ALREADY_ACTIVATED" } as const;
+          }
+          if (prepared.outcome !== "ACTIVATION_PREPARED") {
+            return { result: mapRefusal(String(prepared.refusal_code ?? "")) } as const;
+          }
+          const data: ActivationChallengeMaterial = {
+            activationId: String(prepared.activation_id),
+            activationChallengeId: String(prepared.activation_challenge_id),
+            challengeVersion: String(prepared.challenge_version),
+            purpose: String(prepared.purpose),
+            nonce: String(prepared.nonce),
+            issuedAt: String(prepared.created_at),
+            expiresAt: String(prepared.expires_at),
+            certificateId: String(prepared.certificate_id),
+            certificateSerial: String(prepared.certificate_serial ?? ""),
+            certificateFingerprint: String(prepared.certificate_fingerprint ?? ""),
+            terminalProfileKey: String(prepared.terminal_profile_key ?? ""),
+            correlationId: String(prepared.correlation_id),
+          };
+          return { result: "ACTIVATION_PREPARED", data } as const;
+        },
+      );
+      this.logger.info({ operation: "prepareActivation", correlationId, result: outcome.result });
+      return {
+        result: outcome.result as ProvisioningResultCode,
+        correlationId,
+        data: "data" in outcome ? outcome.data : undefined,
+      };
+    } catch {
+      this.logger.info({ operation: "prepareActivation", correlationId, result: "INTERNAL_ERROR" });
+      return { result: "INTERNAL_ERROR", correlationId };
+    }
+  }
+
+  /**
+   * Verify the terminal's acknowledgment and, only on a genuine pass,
+   * complete activation. The canonical bytes are reconstructed from
+   * AUTHORITATIVE rows — never from a caller-supplied payload.
+   */
+  async verifyAcknowledgmentAndActivate(input: {
+    readonly activationChallengeId: string;
+    readonly signatureBase64: string;
+    readonly terminalPublicKeyPem: string;
+    readonly idempotencyKey: string;
+  }): Promise<CompositionResult<ActivationState>> {
+    const correlationId = randomUUID();
+    if (
+      !UUID.test(input.activationChallengeId) ||
+      !IDEMPOTENCY_KEY.test(input.idempotencyKey) ||
+      input.signatureBase64.length === 0 ||
+      input.signatureBase64.length > MAX_SIGNATURE_BASE64 ||
+      !/^[A-Za-z0-9+/=]+$/.test(input.signatureBase64) ||
+      !input.terminalPublicKeyPem.includes("BEGIN PUBLIC KEY")
+    ) {
+      return { result: "REQUEST_INVALID", correlationId };
+    }
+    try {
+      const outcome = await withServiceRole(
+        this.source,
+        REGISTRY_ROLES.provisioning,
+        async (client) => {
+          const ctx = await callDoor(
+            client,
+            `kitluy_devices.read_terminal_activation_challenge_context_v1($1::uuid)`,
+            [input.activationChallengeId],
+          );
+          if (ctx.outcome !== "CONTEXT") {
+            return { result: mapRefusal(String(ctx.refusal_code ?? "")) } as const;
+          }
+          if (ctx.activation_state === "activated") {
+            // A replay is a stable lookup: the AUTHORITATIVE activation row
+            // answers, with its original timestamps — no re-verification, no
+            // second activation, no new work.
+            const data: ActivationState = {
+              activationId: String(ctx.activation_id),
+              terminalDeviceId: String(ctx.terminal_device_id),
+              terminalAssignmentId: String(ctx.terminal_assignment_id),
+              terminalProfileKey: String(ctx.terminal_profile_key ?? ""),
+              storeHubDeviceId: String(ctx.store_hub_device_id),
+              environment: String(ctx.environment),
+              certificateId: String(ctx.certificate_id),
+              certificateFingerprint: String(ctx.certificate_fingerprint ?? ""),
+              acknowledgedAt: String(ctx.acknowledged_at ?? ""),
+              activatedAt: String(ctx.activated_at),
+              correlationId,
+            };
+            return { result: "ALREADY_ACTIVATED", data } as const;
+          }
+          if (ctx.state !== "issued") return { result: "ACTIVATION_CHALLENGE_CONSUMED" } as const;
+
+          const challenge: ActivationAckChallenge = {
+            activationChallengeId: String(ctx.activation_challenge_id),
+            purpose: String(ctx.purpose),
+            activationId: String(ctx.activation_id),
+            tenantId: String(ctx.tenant_id),
+            digitalStoreId: String(ctx.digital_store_id),
+            storeLocationId: String(ctx.store_location_id),
+            environment: String(ctx.environment) as ActivationAckChallenge["environment"],
+            storeHubDeviceId: String(ctx.store_hub_device_id),
+            terminalDeviceId: String(ctx.terminal_device_id),
+            terminalAssignmentId: String(ctx.terminal_assignment_id),
+            terminalProfileKey: String(ctx.terminal_profile_key),
+            provisioningCodeId: String(ctx.provisioning_code_id),
+            popChallengeId: String(ctx.pop_challenge_id),
+            terminalKeyFingerprint: String(ctx.terminal_key_fingerprint),
+            certificateId: String(ctx.certificate_id),
+            certificateSerial: String(ctx.certificate_serial),
+            certificateFingerprint: String(ctx.certificate_fingerprint),
+            nonce: String(ctx.nonce),
+            issuedAt: new Date(String(ctx.created_at)),
+            expiresAt: new Date(String(ctx.expires_at)),
+          };
+          const expectation: ActivationAckExpectation = {
+            activationChallengeId: challenge.activationChallengeId,
+            purpose: challenge.purpose,
+            activationId: challenge.activationId,
+            tenantId: challenge.tenantId,
+            digitalStoreId: challenge.digitalStoreId,
+            storeLocationId: challenge.storeLocationId,
+            environment: challenge.environment,
+            storeHubDeviceId: challenge.storeHubDeviceId,
+            terminalDeviceId: challenge.terminalDeviceId,
+            terminalAssignmentId: challenge.terminalAssignmentId,
+            terminalProfileKey: challenge.terminalProfileKey,
+            provisioningCodeId: challenge.provisioningCodeId,
+            popChallengeId: challenge.popChallengeId,
+            certificateId: challenge.certificateId,
+            certificateSerial: challenge.certificateSerial,
+            certificateFingerprint: challenge.certificateFingerprint,
+            enrolledKeyFingerprint: challenge.terminalKeyFingerprint,
+            enrollmentState: String(ctx.enrollment_state),
+          };
+          const trusted: TrustedTimeEvaluation = {
+            status: "trusted",
+            trustedTime: new Date(String(ctx.authoritative_now)),
+          } as TrustedTimeEvaluation;
+          const verdict = verifyActivationAck(
+            challenge,
+            Uint8Array.from(Buffer.from(input.signatureBase64, "base64")),
+            input.terminalPublicKeyPem,
+            expectation,
+            trusted,
+            publicKeyFingerprint,
+          );
+          if (!verdict.verified) {
+            // The specific crypto refusal stays internal; the caller learns the
+            // safe family only, and the governed door is never called.
+            return { result: "ACTIVATION_ACK_INVALID" } as const;
+          }
+          const completed = await callDoor(
+            client,
+            `kitluy_devices.complete_terminal_provisioning_activation_v1($1::uuid, true, $2, $3)`,
+            [
+              challenge.activationChallengeId,
+              verdict.challengeHash ?? activationAckHash(challenge),
+              input.idempotencyKey,
+            ],
+          );
+          if (completed.outcome === "ACTIVATED" || completed.outcome === "ALREADY_ACTIVATED") {
+            const data: ActivationState = {
+              activationId: String(completed.activation_id),
+              terminalDeviceId: String(completed.terminal_device_id ?? ""),
+              terminalAssignmentId: String(completed.terminal_assignment_id ?? ""),
+              terminalProfileKey: String(completed.terminal_profile_key ?? ""),
+              storeHubDeviceId: String(completed.store_hub_device_id ?? ""),
+              environment: String(completed.environment ?? ""),
+              certificateId: String(completed.certificate_id),
+              certificateFingerprint: String(completed.certificate_fingerprint ?? ""),
+              acknowledgedAt: String(completed.acknowledged_at ?? ""),
+              activatedAt: String(completed.activated_at),
+              correlationId: String(completed.correlation_id ?? ""),
+            };
+            return {
+              result: completed.outcome === "ACTIVATED" ? "ACTIVATED" : "ALREADY_ACTIVATED",
+              data,
+            } as const;
+          }
+          return { result: mapRefusal(String(completed.refusal_code ?? "")) } as const;
+        },
+      );
+      this.logger.info({
+        operation: "verifyAcknowledgmentAndActivate",
+        correlationId,
+        result: outcome.result,
+      });
+      return {
+        result: outcome.result as ProvisioningResultCode,
+        correlationId,
+        data: "data" in outcome ? outcome.data : undefined,
+      };
+    } catch {
+      this.logger.info({
+        operation: "verifyAcknowledgmentAndActivate",
+        correlationId,
+        result: "INTERNAL_ERROR",
+      });
+      return { result: "INTERNAL_ERROR", correlationId };
+    }
+  }
+}
