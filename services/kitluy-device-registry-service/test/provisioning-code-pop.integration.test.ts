@@ -994,7 +994,12 @@ describe.skipIf(!live)("terminal provisioning proof of possession (0170)", () =>
         client.release();
       }
     };
-    for (const role of ["anon", "authenticated", "service_role"]) {
+    // `service_role` left this denial set at WS-11-T004-P02C: group 0172
+    // grants it the NOLOGIN kitluy_provisioning_service by membership, which
+    // is the INTENDED composition path (and the only one — it holds no direct
+    // grant on any door, asserted by migration 0172 and WS11-N19). The
+    // denials that still matter are the human-facing runtime identities.
+    for (const role of ["anon", "authenticated"]) {
       await deniedAsRole(
         role,
         `select kitluy_devices.issue_terminal_provisioning_pop_challenge_v1(gen_random_uuid())`,

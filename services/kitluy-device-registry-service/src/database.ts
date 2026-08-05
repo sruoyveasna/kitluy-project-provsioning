@@ -63,6 +63,9 @@ export const REGISTRY_ROLES = {
   issuance: "kitluy_issuance_service",
   /** Durable-job identity for the lapse sweeper (group 0154). */
   worker: "kitluy_worker_service",
+  /** Terminal-provisioning composition (group 0172): exactly the evaluator,
+   *  PoP challenge/context/attestation and redemption capabilities. */
+  provisioning: "kitluy_provisioning_service",
   /** A human acting under their own `auth.uid()` (group 0150/0152). */
   human: "authenticated",
 } as const;
@@ -127,14 +130,17 @@ export interface ClientSource {
  */
 export async function withServiceRole<T>(
   source: ClientSource,
-  role: Extract<RegistryRole, "kitluy_issuance_service" | "kitluy_worker_service">,
+  role: Extract<
+    RegistryRole,
+    "kitluy_issuance_service" | "kitluy_worker_service" | "kitluy_provisioning_service"
+  >,
   fn: (client: pg.PoolClient) => Promise<T>,
 ): Promise<T> {
   const client = await source.connect();
   try {
     await client.query("begin");
     // Identifier, not a parameter: `set local role` takes no bind parameters.
-    // Safe because `role` is a union of two compile-time literals and cannot
+    // Safe because `role` is a union of three compile-time literals and cannot
     // carry caller text.
     await client.query(`set local role ${role}`);
     const result = await fn(client);

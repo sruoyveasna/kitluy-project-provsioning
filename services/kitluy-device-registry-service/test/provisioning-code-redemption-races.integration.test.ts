@@ -1176,7 +1176,9 @@ describe.skipIf(!live)("redemption race and replay hardening (0171), separate ba
         client.release();
       }
     };
-    for (const role of ["anon", "authenticated", "service_role"]) {
+    // See the P02C note in the PoP suite: service_role reaches these doors
+    // only through the 0172 composition membership, never a direct grant.
+    for (const role of ["anon", "authenticated"]) {
       await deniedAsRole(
         role,
         `select kitluy_devices.redeem_terminal_provisioning_code_v1(gen_random_uuid(), 'AAAAAAAA', gen_random_uuid(), 'k', 's')`,

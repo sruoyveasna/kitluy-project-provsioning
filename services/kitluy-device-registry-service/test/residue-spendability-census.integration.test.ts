@@ -178,7 +178,13 @@ describe.skipIf(!live)("nothing left behind can authorize anything", () => {
     // row R2 observed (run d7df9017, development,
     // fleet.device_credential.emergency_revoke) expired 2026-08-01 00:16:52Z
     // and is unspendable on that fact alone.
-    expect(n, "effective grants beyond what a serial run can explain").toBeLessThanOrEqual(8);
+    // WS-11-T004-P02C raised the bound from 8 to 10: each provisioning suite
+    // grants its own operator the issue/revoke pair for the length of its
+    // run, and P02B3A-P02C added suites to that serial set. Every one of
+    // these rows is short-lived (30-minute expiry caps the spendable window)
+    // and belongs to an actor its own suite retires; the bound still catches
+    // real residue, which is what it exists for.
+    expect(n, "effective grants beyond what a serial run can explain").toBeLessThanOrEqual(10);
   });
 
   it("has ZERO login-capable members of the revocation NOLOGIN authorities", async () => {

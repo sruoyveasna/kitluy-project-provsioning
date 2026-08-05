@@ -2973,12 +2973,21 @@ begin
        'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
      or has_function_privilege('authenticated',
        'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
-     or has_function_privilege('service_role',
-       'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
      or has_function_privilege('kitluy_worker_service',
        'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
      or has_function_privilege('kitluy_issuance_service',
-       'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute') then
+       'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
+     -- Group 0172 (P02C) added EXACTLY one intended holder, the NOLOGIN
+     -- kitluy_provisioning_service. service_role holds it by MEMBERSHIP, so
+     -- the direct ACL is what must stay empty (INHERIT would otherwise report
+     -- the composer's capabilities as service_role's own).
+     or exists (
+       select 1 from pg_proc p
+        join pg_namespace n on n.oid = p.pronamespace
+        cross join lateral aclexplode(coalesce(p.proacl, '{}'::aclitem[])) a
+       where n.nspname = 'kitluy_devices'
+         and p.proname = 'evaluate_terminal_provisioning_code_v1'
+         and a.grantee = 'service_role'::regrole::oid) then
     raise exception 'FAIL WS11-N12: the evaluator is executable outside its boundary';
   end if;
   if not has_function_privilege('kitluy_test_harness',
@@ -3413,7 +3422,17 @@ begin
   if has_function_privilege('public', 'kitluy_devices.issue_terminal_provisioning_pop_challenge_v1(uuid)', 'execute')
      or has_function_privilege('anon', 'kitluy_devices.issue_terminal_provisioning_pop_challenge_v1(uuid)', 'execute')
      or has_function_privilege('authenticated', 'kitluy_devices.issue_terminal_provisioning_pop_challenge_v1(uuid)', 'execute')
-     or has_function_privilege('service_role', 'kitluy_devices.issue_terminal_provisioning_pop_challenge_v1(uuid)', 'execute')
+     -- Direct ACL, not membership: group 0172 gave service_role the NOLOGIN
+     -- composer by membership, and INHERIT would report the composer's
+     -- capabilities as service_role's own. What must stay empty is the
+     -- DIRECT grant.
+     or exists (
+       select 1 from pg_proc p
+        join pg_namespace n on n.oid = p.pronamespace
+        cross join lateral aclexplode(coalesce(p.proacl, '{}'::aclitem[])) a
+       where n.nspname = 'kitluy_devices'
+         and p.proname = 'issue_terminal_provisioning_pop_challenge_v1'
+         and a.grantee = 'service_role'::regrole::oid)
      or has_function_privilege('kitluy_worker_service', 'kitluy_devices.issue_terminal_provisioning_pop_challenge_v1(uuid)', 'execute')
      or not has_function_privilege('kitluy_test_harness', 'kitluy_devices.issue_terminal_provisioning_pop_challenge_v1(uuid)', 'execute') then
     raise exception 'FAIL WS11-N17: the PoP challenge door boundary is wrong under 0170';
@@ -3421,7 +3440,13 @@ begin
   if has_function_privilege('public', 'kitluy_devices.record_terminal_provisioning_pop_verification_v1(uuid, boolean, text, text)', 'execute')
      or has_function_privilege('anon', 'kitluy_devices.record_terminal_provisioning_pop_verification_v1(uuid, boolean, text, text)', 'execute')
      or has_function_privilege('authenticated', 'kitluy_devices.record_terminal_provisioning_pop_verification_v1(uuid, boolean, text, text)', 'execute')
-     or has_function_privilege('service_role', 'kitluy_devices.record_terminal_provisioning_pop_verification_v1(uuid, boolean, text, text)', 'execute')
+     or exists (
+       select 1 from pg_proc p
+        join pg_namespace n on n.oid = p.pronamespace
+        cross join lateral aclexplode(coalesce(p.proacl, '{}'::aclitem[])) a
+       where n.nspname = 'kitluy_devices'
+         and p.proname = 'record_terminal_provisioning_pop_verification_v1'
+         and a.grantee = 'service_role'::regrole::oid)
      or has_function_privilege('kitluy_worker_service', 'kitluy_devices.record_terminal_provisioning_pop_verification_v1(uuid, boolean, text, text)', 'execute')
      or not has_function_privilege('kitluy_test_harness', 'kitluy_devices.record_terminal_provisioning_pop_verification_v1(uuid, boolean, text, text)', 'execute') then
     raise exception 'FAIL WS11-N17: the PoP attestation door boundary is wrong under 0170';
@@ -3520,7 +3545,13 @@ begin
   if has_function_privilege('public', 'kitluy_devices.redeem_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
      or has_function_privilege('anon', 'kitluy_devices.redeem_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
      or has_function_privilege('authenticated', 'kitluy_devices.redeem_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
-     or has_function_privilege('service_role', 'kitluy_devices.redeem_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
+     or exists (
+       select 1 from pg_proc p
+        join pg_namespace n on n.oid = p.pronamespace
+        cross join lateral aclexplode(coalesce(p.proacl, '{}'::aclitem[])) a
+       where n.nspname = 'kitluy_devices'
+         and p.proname = 'redeem_terminal_provisioning_code_v1'
+         and a.grantee = 'service_role'::regrole::oid)
      or has_function_privilege('kitluy_worker_service', 'kitluy_devices.redeem_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
      or not has_function_privilege('kitluy_test_harness', 'kitluy_devices.redeem_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute') then
     raise exception 'FAIL WS11-N18: the redemption door boundary is wrong under 0171';
@@ -3610,4 +3641,97 @@ begin
 end $$;
 rollback;
 
-select 'rls-tests complete: 14+9 baseline cases; cycle-5 WS5 7 negative + 7 positive and WS6 10 negative + 9 positive; cycle-6 WS7 13 negative + 6 positive and WS8 13 negative + 6 positive; cycle-10 WS11 T001 4 negative + 1 positive and T002 3 negative + 1 positive kitluy_devices cases executed; WS-11-T004-P02A 3 negative provisioning-code cases executed; WS-11-T004-P02B1 issuance-door boundary case executed; WS-11-T004-P02B2A presentation-evaluator boundary case executed; WS-11-T004-P02B2B1 revocation-door boundary case executed; WS-11-T004-P02B2B2A expiration-helper boundary case executed; WS-11-T004-P02B2B2B1 replacement-lineage boundary case executed; WS-11-T004-P02B2B2B2A recovery-door boundary case executed; WS-11-T004-P02B3A pop-foundation boundary case executed; WS-11-T004-P02B3B redemption-door boundary case executed' as result;
+-- WS11-N19: the provisioning composition identity (0172) is NOLOGIN, holds
+-- EXACTLY five function capabilities plus schema USAGE, has zero table
+-- reach, is a member of nothing, and gives service_role no direct
+-- provisioning shortcut. The narrow context reader stays composer/harness
+-- only and exposes no digest. Catalog first; runtime probes follow.
+begin;
+do $$
+declare
+  v_extra integer;
+begin
+  if not exists (select 1 from pg_roles where rolname = 'kitluy_provisioning_service' and not rolcanlogin) then
+    raise exception 'FAIL WS11-N19: the composition role is missing or can log in';
+  end if;
+  if exists (
+    select 1 from pg_auth_members m
+     where m.member = (select oid from pg_roles where rolname = 'kitluy_provisioning_service')) then
+    raise exception 'FAIL WS11-N19: the composition role is a member of another role';
+  end if;
+  select count(*) into v_extra
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'kitluy_devices'
+     and has_function_privilege('kitluy_provisioning_service', p.oid, 'execute')
+     and p.proname not in (
+       'evaluate_terminal_provisioning_code_v1',
+       'issue_terminal_provisioning_pop_challenge_v1',
+       'read_terminal_provisioning_pop_challenge_context_v1',
+       'record_terminal_provisioning_pop_verification_v1',
+       'redeem_terminal_provisioning_code_v1');
+  if v_extra > 0 then
+    raise exception 'FAIL WS11-N19: the composition role can execute % function(s) beyond its five capabilities', v_extra;
+  end if;
+  if has_table_privilege('kitluy_provisioning_service', 'kitluy_devices.device_provisioning_codes', 'SELECT,INSERT,UPDATE,DELETE')
+     or has_table_privilege('kitluy_provisioning_service', 'kitluy_devices.device_provisioning_pop_challenges', 'SELECT,INSERT,UPDATE,DELETE')
+     or has_table_privilege('kitluy_provisioning_service', 'kitluy_devices.device_certificates', 'SELECT,INSERT,UPDATE,DELETE') then
+    raise exception 'FAIL WS11-N19: the composition role holds direct table access';
+  end if;
+  if exists (
+    select 1 from pg_proc p
+     join pg_namespace n on n.oid = p.pronamespace
+     cross join lateral aclexplode(coalesce(p.proacl, '{}'::aclitem[])) a
+    where n.nspname = 'kitluy_devices'
+      and p.proname in ('evaluate_terminal_provisioning_code_v1',
+                        'issue_terminal_provisioning_pop_challenge_v1',
+                        'record_terminal_provisioning_pop_verification_v1',
+                        'redeem_terminal_provisioning_code_v1',
+                        'read_terminal_provisioning_pop_challenge_context_v1')
+      and a.grantee = 'service_role'::regrole::oid) then
+    raise exception 'FAIL WS11-N19: service_role holds a direct provisioning grant';
+  end if;
+  if has_function_privilege('authenticated', 'kitluy_devices.read_terminal_provisioning_pop_challenge_context_v1(uuid)', 'execute')
+     or has_function_privilege('anon', 'kitluy_devices.read_terminal_provisioning_pop_challenge_context_v1(uuid)', 'execute') then
+    raise exception 'FAIL WS11-N19: the context reader leaked to a runtime identity';
+  end if;
+  raise notice 'PASS WS11-N19a: the composition identity is NOLOGIN, member of nothing, holds exactly five capabilities with zero table reach; service_role has no direct provisioning grant; the context reader stays composer/harness only';
+end $$;
+select set_config('request.jwt.claims', '{"role":"authenticated"}', true);
+set local role authenticated;
+do $$
+declare
+  v_result jsonb;
+  v_refused boolean := false;
+begin
+  begin
+    v_result := kitluy_devices.read_terminal_provisioning_pop_challenge_context_v1(gen_random_uuid());
+    raise exception 'FAIL WS11-N19: authenticated reached the context reader: %', v_result;
+  exception when insufficient_privilege then
+    v_refused := true;
+  end;
+  if not v_refused then
+    raise exception 'FAIL WS11-N19: the context-reader probe did not run';
+  end if;
+  raise notice 'PASS WS11-N19b: authenticated cannot execute the challenge-context reader';
+end $$;
+rollback;
+begin;
+set local role kitluy_provisioning_service;
+do $$
+declare
+  v_refused boolean := false;
+begin
+  begin
+    perform id from kitluy_devices.device_provisioning_codes limit 1;
+    raise exception 'FAIL WS11-N19: the composer holds direct table SELECT';
+  exception when insufficient_privilege then
+    v_refused := true;
+  end;
+  if not v_refused then
+    raise exception 'FAIL WS11-N19: the composer table probe did not run';
+  end if;
+  raise notice 'PASS WS11-N19c: the composition identity cannot read provisioning tables directly';
+end $$;
+rollback;
+
+select 'rls-tests complete: 14+9 baseline cases; cycle-5 WS5 7 negative + 7 positive and WS6 10 negative + 9 positive; cycle-6 WS7 13 negative + 6 positive and WS8 13 negative + 6 positive; cycle-10 WS11 T001 4 negative + 1 positive and T002 3 negative + 1 positive kitluy_devices cases executed; WS-11-T004-P02A 3 negative provisioning-code cases executed; WS-11-T004-P02B1 issuance-door boundary case executed; WS-11-T004-P02B2A presentation-evaluator boundary case executed; WS-11-T004-P02B2B1 revocation-door boundary case executed; WS-11-T004-P02B2B2A expiration-helper boundary case executed; WS-11-T004-P02B2B2B1 replacement-lineage boundary case executed; WS-11-T004-P02B2B2B2A recovery-door boundary case executed; WS-11-T004-P02B3A pop-foundation boundary case executed; WS-11-T004-P02B3B redemption-door boundary case executed; WS-11-T004-P02C composition-identity boundary case executed' as result;

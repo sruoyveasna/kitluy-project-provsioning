@@ -14605,13 +14605,25 @@ begin
 
   -- -------------------------------------------------------------------------
   -- PRIVILEGE CENSUS: the evaluator is internal; P02B1's door is unchanged.
+  -- Group 0172 (P02C) widened the intended boundary by EXACTLY one NOLOGIN
+  -- capability role — kitluy_provisioning_service, member of nothing, holding
+  -- five function grants and zero table reach. `service_role` is checked by
+  -- DIRECT ACL below rather than by has_function_privilege, because it holds
+  -- the composer by membership and INHERIT would otherwise report the
+  -- composer's capabilities as its own (the 0127-recorded posture).
   -- -------------------------------------------------------------------------
   if has_function_privilege('public', 'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
      or has_function_privilege('anon', 'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
      or has_function_privilege('authenticated', 'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
-     or has_function_privilege('service_role', 'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
-     or has_function_privilege('kitluy_worker_service', 'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute') then
-    raise exception 'ASSERT FAIL: the evaluator is executable outside the governor/harness boundary';
+     or has_function_privilege('kitluy_worker_service', 'kitluy_devices.evaluate_terminal_provisioning_code_v1(uuid, text, uuid, text, text)', 'execute')
+     or exists (
+       select 1 from pg_proc p
+        join pg_namespace n on n.oid = p.pronamespace
+        cross join lateral aclexplode(coalesce(p.proacl, '{}'::aclitem[])) a
+       where n.nspname = 'kitluy_devices'
+         and p.proname = 'evaluate_terminal_provisioning_code_v1'
+         and a.grantee = 'service_role'::regrole::oid) then
+    raise exception 'ASSERT FAIL: the evaluator is executable outside the governor/harness/composer boundary';
   end if;
   if not has_function_privilege('authenticated', 'kitluy_devices.issue_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
      or has_function_privilege('service_role', 'kitluy_devices.issue_terminal_provisioning_code_v1(uuid, text, text)', 'execute') then
