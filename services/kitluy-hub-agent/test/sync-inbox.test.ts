@@ -36,10 +36,20 @@ if (!available) {
   console.warn("SKIPPED kitluy-hub-agent sync-inbox suite: Hub database unreachable");
 }
 
+// T007 D4 (WS-10-T006 fixture correction): `uuidv7().slice(0, 12)` is ONLY
+// the millisecond timestamp — zero random bits — so two fixtures minted in
+// the same instant carried the SAME dedupe identity and the redelivery test
+// flaked. Test identity is now a per-run random prefix plus a counter:
+// collision-free within the run, unique across runs, product dedupe
+// behavior untouched.
+const RUN_PREFIX = uuidv7().slice(-8);
+let fixtureSeq = 0;
+const nextFixtureId = (): string => `${RUN_PREFIX}-${String(fixtureSeq++).padStart(4, "0")}`;
+
 const outcome = (overrides: Partial<ProviderOutcome> = {}): ProviderOutcome => ({
   providerCode: "DEV_KHQR_SIM",
   providerAccountReference: "ACC-001",
-  providerEventId: `EVT-${uuidv7().slice(0, 12)}`,
+  providerEventId: `EVT-${nextFixtureId()}`,
   providerTransactionId: "TXN-1",
   paymentId: null,
   status: "SUCCEEDED",
@@ -234,7 +244,9 @@ describe.skipIf(!available)("WS-10-T006 signed delivery against the Hub database
   });
 
   it("refuses to apply past a gap in the cloud sequence", async () => {
-    const streamCode = `control-${uuidv7().slice(0, 8)}`;
+    // Same D4 correction: slice(0, 8) was a 32-bit timestamp prefix that
+    // only changes every ~65 s — every same-run call collided.
+    const streamCode = `control-${nextFixtureId()}`;
     await expect(
       withHubTransaction(p, (client) => assertContiguous(client, LOCATION, streamCode, 5n)),
     ).rejects.toThrow(/does not follow 0/);
