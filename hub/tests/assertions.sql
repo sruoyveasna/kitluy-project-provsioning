@@ -243,6 +243,8 @@ declare
     'edge_config.permission_grant_projection',
     -- WS-11-T004-P03B additive extension G0031 (hub-terminal pairing).
     'edge_identity.pairing_session', 'edge_identity.pairing_receipt',
+    -- WS-11-T005 hub group 0035: local terminal health and containment.
+    'edge_hardware.terminal_health_status', 'edge_identity.containment_directive',
     'edge_hardware.peripheral_observation', 'edge_hardware.device_heartbeat',
     'edge_audit.audit_event', 'edge_audit.support_session'
   ];
@@ -2045,6 +2047,257 @@ end $$;
 rollback;
 
 -- ---------------------------------------------------------------------------
+-- 31. WS-11-T005 — local terminal health authority (hub group 0035).
+-- ---------------------------------------------------------------------------
+begin;
+set local role kitluy_hub_runtime;
+do $$
+declare
+  v_blocked int := 0;
+begin
+  -- The runtime derives and maintains the CURRENT local status.
+  insert into edge_hardware.terminal_health_status
+    (terminal_device_id, tenant_id, digital_store_id, location_id,
+     derived_state, health_reasons, last_heartbeat_at, heartbeat_count,
+     software_version, derived_at, updated_at)
+  values
+    ('e0000000-0000-4000-8000-000000000020',
+     'e0000000-0000-4000-8000-000000000001',
+     'e0000000-0000-4000-8000-000000000002',
+     'e0000000-0000-4000-8000-000000000003',
+     'healthy', array['heartbeat_fresh'], now(), 42, '1.0.0', now(), now());
+
+  update edge_hardware.terminal_health_status
+  set derived_state = 'unknown', health_reasons = array['no_valid_observation'],
+      updated_at = now()
+  where terminal_device_id = 'e0000000-0000-4000-8000-000000000020';
+
+  -- unknown stays DISTINCT from offline_local: both are legal, neither implies
+  -- the other, and an illegal collapsed value is refused by the CHECK.
+  begin
+    update edge_hardware.terminal_health_status
+    set derived_state = 'stale'
+    where terminal_device_id = 'e0000000-0000-4000-8000-000000000020';
+    raise exception 'ASSERT FAIL: a non-canonical derived_state was accepted';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- Local health is superseded, never erased. TWO layers refuse: the runtime
+  -- holds no DELETE grant at all, and the trigger refuses even a superuser.
+  begin
+    delete from edge_hardware.terminal_health_status
+    where terminal_device_id = 'e0000000-0000-4000-8000-000000000020';
+    raise exception 'ASSERT FAIL: a terminal health row was deleted by the runtime';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%permission denied%' then
+      raise exception 'ASSERT FAIL: the runtime holds an unexpected DELETE path: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+  reset role;
+  begin
+    delete from edge_hardware.terminal_health_status
+    where terminal_device_id = 'e0000000-0000-4000-8000-000000000020';
+    raise exception 'ASSERT FAIL: a terminal health row was deleted past the trigger';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-EDGE-HEALTH-NO-DELETE%' then
+      raise exception 'ASSERT FAIL: health delete refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  if v_blocked <> 3 then
+    raise exception 'ASSERT FAIL: expected 3 refused health probes, got %', v_blocked;
+  end if;
+  raise notice 'PASS terminal-health-authority: the runtime maintains the current local status, unknown stays distinct from offline_local, non-canonical states are refused, and health rows cannot be deleted';
+end $$;
+rollback;
+
+-- ---------------------------------------------------------------------------
+-- 32. WS-11-T005 — containment directives enforced locally (hub group 0035).
+-- ---------------------------------------------------------------------------
+begin;
+do $$
+declare
+  v_blocked int := 0;
+  v_session uuid := gen_random_uuid();
+begin
+  -- The sync path records a received quarantine decision (sequence 1).
+  set local role kitluy_sync_worker;
+  insert into edge_identity.containment_directive
+    (id, device_uuid, tenant_id, digital_store_id, location_id, directive,
+     directive_sequence, reason, source_ref, received_via, received_at)
+  values
+    (gen_random_uuid(), 'e0000000-0000-4000-8000-000000000020',
+     'e0000000-0000-4000-8000-000000000001',
+     'e0000000-0000-4000-8000-000000000002',
+     'e0000000-0000-4000-8000-000000000003',
+     'quarantined', 1, 'containment probe', 'cloud-correlation-1',
+     'cloud_inbox', now());
+
+  -- A REPLAYED directive (same device, same sequence) collides instead of
+  -- applying twice.
+  begin
+    insert into edge_identity.containment_directive
+      (id, device_uuid, tenant_id, digital_store_id, location_id, directive,
+       directive_sequence, reason, source_ref, received_via, received_at)
+    values
+      (gen_random_uuid(), 'e0000000-0000-4000-8000-000000000020',
+       'e0000000-0000-4000-8000-000000000001',
+       'e0000000-0000-4000-8000-000000000002',
+       'e0000000-0000-4000-8000-000000000003',
+       'quarantined', 1, 'replayed probe', 'cloud-correlation-1-replayed',
+       'cloud_inbox', now());
+    raise exception 'ASSERT FAIL: a replayed containment directive was applied twice';
+  exception
+    when unique_violation then
+      v_blocked := v_blocked + 1;
+    when others then
+      if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+      raise exception 'ASSERT FAIL: replay refusal used % instead of the dedupe pair', sqlerrm;
+  end;
+
+  -- Received directives are append-only evidence. TWO layers refuse: the sync
+  -- worker holds no UPDATE grant, and the trigger refuses even a superuser.
+  begin
+    update edge_identity.containment_directive
+    set reason = 'rewritten'
+    where device_uuid = 'e0000000-0000-4000-8000-000000000020';
+    raise exception 'ASSERT FAIL: a containment directive was rewritten by the sync worker';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%permission denied%' then
+      raise exception 'ASSERT FAIL: the sync worker holds an unexpected UPDATE path: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+  reset role;
+  begin
+    update edge_identity.containment_directive
+    set reason = 'rewritten'
+    where device_uuid = 'e0000000-0000-4000-8000-000000000020';
+    raise exception 'ASSERT FAIL: a containment directive was rewritten past the trigger';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-EDGE-APPEND-ONLY%' then
+      raise exception 'ASSERT FAIL: directive rewrite refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- Enforcement is LOCAL: with the directive on disk (and no cloud in this
+  -- transaction at all), the contained terminal can neither open an
+  -- authorization session nor a pairing session.
+  set local role kitluy_hub_runtime;
+  begin
+    insert into edge_identity.terminal_session
+      (id, tenant_id, digital_store_id, location_id, terminal_device_id,
+       actor_id, profile_code, opened_at, expires_at, session_generation,
+       last_event_sequence, status)
+    values
+      (v_session, 'e0000000-0000-4000-8000-000000000001',
+       'e0000000-0000-4000-8000-000000000002',
+       'e0000000-0000-4000-8000-000000000003',
+       'e0000000-0000-4000-8000-000000000020', gen_random_uuid(),
+       'laundry.t4.pickup_scan_out', now(), now() + interval '8 hours', 99, 0,
+       'active');
+    raise exception 'ASSERT FAIL: a quarantined terminal opened a session';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-EDGE-TERMINAL-CONTAINED%' then
+      raise exception 'ASSERT FAIL: contained-session refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+  -- The pairing gate: the runtime cannot insert pairing rows AT ALL (0031
+  -- grant boundary), so the containment gate is probed as the harness
+  -- superuser — trigger order puts the containment gate BEFORE governance,
+  -- so the containment sentinel is the one that must fire.
+  reset role;
+  begin
+    insert into edge_identity.pairing_session
+      (id, protocol_version, purpose, tenant_id, digital_store_id, location_id,
+       environment, hub_device_id, hub_assignment_id, hub_assignment_generation,
+       hub_credential_id, hub_certificate_serial, hub_certificate_fingerprint,
+       terminal_device_id, terminal_assignment_generation, terminal_profile_code,
+       terminal_credential_id, terminal_certificate_serial,
+       terminal_certificate_fingerprint, terminal_nonce, hub_nonce, state,
+       correlation_id, expires_at)
+    values
+      (gen_random_uuid(), '1.0', 'hub_terminal_pairing',
+       'e0000000-0000-4000-8000-000000000001', 'e0000000-0000-4000-8000-000000000002',
+       'e0000000-0000-4000-8000-000000000003', 'development',
+       'e0000000-0000-4000-8000-000000000010', 'e0000000-0000-4000-8000-000000000012', 1,
+       'e0000000-0000-4000-8000-000000000013', 'DEMO-OPS-CERT-0001', repeat('a', 64),
+       'e0000000-0000-4000-8000-000000000020', 1, 'laundry.t1.intake_cashier',
+       'e0000000-0000-4000-8000-000000000013', 'DEMO-OPS-CERT-0001', repeat('b', 64),
+       repeat('c', 64), repeat('d', 64), 'challenge_issued', gen_random_uuid(),
+       now() + interval '10 minutes');
+    raise exception 'ASSERT FAIL: a quarantined terminal began pairing';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-EDGE-TERMINAL-CONTAINED%' then
+      raise exception 'ASSERT FAIL: contained-pairing refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- Recovery is an EXPLICIT received decision: a 'cleared' directive with a
+  -- HIGHER sequence lifts the containment, and the session opens.
+  set local role kitluy_sync_worker;
+  insert into edge_identity.containment_directive
+    (id, device_uuid, tenant_id, digital_store_id, location_id, directive,
+     directive_sequence, reason, source_ref, received_via, received_at)
+  values
+    (gen_random_uuid(), 'e0000000-0000-4000-8000-000000000020',
+     'e0000000-0000-4000-8000-000000000001',
+     'e0000000-0000-4000-8000-000000000002',
+     'e0000000-0000-4000-8000-000000000003',
+     'cleared', 3, 'authorized recovery probe', 'cloud-correlation-3',
+     'cloud_inbox', now());
+  set local role kitluy_hub_runtime;
+  insert into edge_identity.terminal_session
+    (id, tenant_id, digital_store_id, location_id, terminal_device_id,
+     actor_id, profile_code, opened_at, expires_at, session_generation,
+     last_event_sequence, status)
+  values
+    (v_session, 'e0000000-0000-4000-8000-000000000001',
+     'e0000000-0000-4000-8000-000000000002',
+     'e0000000-0000-4000-8000-000000000003',
+     'e0000000-0000-4000-8000-000000000020', gen_random_uuid(),
+     'laundry.t4.pickup_scan_out', now(), now() + interval '8 hours', 99, 0,
+     'active');
+
+  -- A DELAYED stale directive (sequence 2 arriving after 3) is recorded as
+  -- history but never overrides the newer clearance.
+  set local role kitluy_sync_worker;
+  insert into edge_identity.containment_directive
+    (id, device_uuid, tenant_id, digital_store_id, location_id, directive,
+     directive_sequence, reason, source_ref, received_via, received_at)
+  values
+    (gen_random_uuid(), 'e0000000-0000-4000-8000-000000000020',
+     'e0000000-0000-4000-8000-000000000001',
+     'e0000000-0000-4000-8000-000000000002',
+     'e0000000-0000-4000-8000-000000000003',
+     'quarantined', 2, 'delayed stale probe', 'cloud-correlation-2',
+     'cloud_inbox', now());
+  if (select directive from edge_identity.effective_containment
+       where device_uuid = 'e0000000-0000-4000-8000-000000000020') <> 'cleared' then
+    raise exception 'ASSERT FAIL: a delayed stale directive overrode a newer clearance';
+  end if;
+
+  if v_blocked <> 5 then
+    raise exception 'ASSERT FAIL: expected 5 refused containment probes, got %', v_blocked;
+  end if;
+  raise notice 'PASS containment-enforcement: a received quarantine blocks sessions and pairing locally with their exact sentinel, replay collides, history is append-only, an explicit higher-sequence clearance restores service, and a delayed stale directive never overrides it';
+end $$;
+rollback;
+
+-- ---------------------------------------------------------------------------
 -- 29. Final tally.
 -- ---------------------------------------------------------------------------
 do $$
@@ -2066,15 +2319,18 @@ begin
   -- (WS-11-T004-P03B).
   -- 62 -> 63: hub group 0033 adds `credential_projection`, the append-only
   -- evidence of every terminal-credential delivery this Hub applied
-  -- (WS-11-T004-P04C1, capability-census row 28). This tally is deliberately
+  -- (WS-11-T004-P04C1, capability-census row 28).
+  -- 63 -> 65: hub group 0035 adds `terminal_health_status` (the Hub's CURRENT
+  -- local health authority) and `containment_directive` (received containment
+  -- decisions, enforced locally) — WS-11-T005. This tally is deliberately
   -- EXACT in both directions -- it is how an unreviewed table gets noticed --
   -- so it is raised by exactly the additions that were reviewed and by
   -- nothing else.
-  if v_tables <> 63 then
+  if v_tables <> 65 then
     raise exception
-      'ASSERT FAIL: expected 63 relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11 + 3 G0027 revocation + 2 G0031 pairing + 1 G0033 credential projection), found %',
+      'ASSERT FAIL: expected 65 relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11 + 3 G0027 revocation + 2 G0031 pairing + 1 G0033 credential projection + 2 G0035 health/containment), found %',
       v_tables;
   end if;
-  raise notice 'PASS tally: % relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11 WS-10 + 3 G0027 revocation + 2 G0031 pairing + 1 G0033 credential projection), % indexes, % triggers',
+  raise notice 'PASS tally: % relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11 WS-10 + 3 G0027 revocation + 2 G0031 pairing + 1 G0033 credential projection + 2 G0035 health/containment), % indexes, % triggers',
     v_tables, v_indexes, v_triggers;
 end $$;

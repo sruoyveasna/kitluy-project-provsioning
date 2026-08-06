@@ -16635,4 +16635,817 @@ exception when others then
 end
 $section54$;
 
-select 'assertions complete: groups 0010-0153 structural contract holds (incl. WS-11-T003 Step 4 Phase C — RC-022 spendability census CLOSED; governed emergency 0150–0153; RevocationGateway ships in @kitluy/device-identity)' as result;
+-- ============================================================================
+-- SECTION 55 — fleet health, support access and governed containment
+-- (migration 0177).
+--
+-- WS-11-T005. Proved here: Hub-only health ingestion with kh1 idempotency,
+-- wrong-Hub / non-Hub / stale-generation refusals, sequence-ordered
+-- projection that a delayed or clock-anomalous report cannot move, freshness
+-- classification that fails closed without a governed policy, the
+-- fleet_health_read truth labels; support sessions under policy §3 (ticket
+-- always, consent for C2+, independent approver for C3+, clamp, immediate
+-- revocation, clock-fail-closed expiry, worker sweeper); containment doors
+-- composing the 0120/0122 lifecycle (four-eyes for suspend/quarantine and
+-- for ALL recovery, §10 condition-4 escalation, wrong-store/stale-generation/
+-- replay refusals, idempotent duplicates, append-only events); and the
+-- privilege boundary.
+-- ============================================================================
+
+-- Shared fixture: one certified terminal profile for WS-11-T005 assertions.
+insert into kitluy_devices.hardware_profiles
+  (profile_key, display_name, device_class, manufacturer, model_identifier,
+   required_signal_types, certification_status)
+values
+  ('WS11-T005-TERM-PROBE', 'WS-11-T005 assertion terminal profile', 'terminal',
+   'ASSERTION-FIXTURE', 'PROBE-T5',
+   array['mac_address', 'board_serial', 'storage_serial']::kitluy_devices.hardware_signal_type[],
+   'CERTIFIED')
+on conflict (profile_key) do nothing;
+
+-- ---------------------------------------------------------------------------
+-- 55a — health ingestion, isolation, ordering and freshness.
+-- ---------------------------------------------------------------------------
+do $section55a$
+declare
+  v_tenant uuid := '00000000-0000-4000-8000-000000000011';
+  v_store uuid := '00000000-0000-4000-8000-000000000015';
+  v_location uuid := '00000000-0000-4000-8000-000000000018';
+  v_tenant_b uuid := '00000000-0000-4000-8000-000000000012';
+  v_store_b uuid := '00000000-0000-4000-8000-000000000017';
+  v_location_b uuid := '00000000-0000-4000-8000-000000000450';
+  v_hub_profile uuid;
+  v_term_profile uuid;
+  v_hub uuid;
+  v_term uuid;
+  v_hub_b uuid;
+  v_gen integer;
+  v_r jsonb;
+  v_refused boolean;
+begin
+  select id into v_hub_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+  select id into v_term_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T005-TERM-PROBE';
+
+  v_hub := kitluy_devices.enroll_device_v1(
+    'WS11-T005-HUBA-' || gen_random_uuid(), v_hub_profile, now(),
+    encode(sha256(convert_to('t5-hub-a-' || gen_random_uuid(), 'UTF8')), 'hex'),
+    'ed25519', 'software', 'STATION-T005', 'OP-T005',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'f5:01:' || substr(md5(random()::text),1,6) || ':01'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-t5ha-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-t5ha-' || gen_random_uuid())));
+  v_term := kitluy_devices.enroll_device_v1(
+    'WS11-T005-TERM-' || gen_random_uuid(), v_term_profile, now(),
+    encode(sha256(convert_to('t5-term-' || gen_random_uuid(), 'UTF8')), 'hex'),
+    'ed25519', 'software', 'STATION-T005', 'OP-T005',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'f5:02:' || substr(md5(random()::text),1,6) || ':02'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-t5tm-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-t5tm-' || gen_random_uuid())));
+  v_hub_b := kitluy_devices.enroll_device_v1(
+    'WS11-T005-HUBB-' || gen_random_uuid(), v_hub_profile, now(),
+    encode(sha256(convert_to('t5-hub-b-' || gen_random_uuid(), 'UTF8')), 'hex'),
+    'ed25519', 'software', 'STATION-T005', 'OP-T005',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'f5:03:' || substr(md5(random()::text),1,6) || ':03'),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-t5hb-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-t5hb-' || gen_random_uuid())));
+
+  perform kitluy_devices.create_device_claim_v1(
+    v_hub, v_tenant, v_store, v_location,
+    encode(sha256(convert_to('t5-tok-1', 'UTF8')), 'hex'),
+    encode(sha256(convert_to('t5-pay-1', 'UTF8')), 'hex'), 900, 'OP-T005');
+  perform kitluy_devices.redeem_device_claim_v1(
+    encode(sha256(convert_to('t5-tok-1', 'UTF8')), 'hex'),
+    encode(sha256(convert_to('t5-pay-1', 'UTF8')), 'hex'), v_hub, 'HUB-T005');
+  perform kitluy_devices.create_device_claim_v1(
+    v_term, v_tenant, v_store, v_location,
+    encode(sha256(convert_to('t5-tok-2', 'UTF8')), 'hex'),
+    encode(sha256(convert_to('t5-pay-2', 'UTF8')), 'hex'), 900, 'OP-T005');
+  perform kitluy_devices.redeem_device_claim_v1(
+    encode(sha256(convert_to('t5-tok-2', 'UTF8')), 'hex'),
+    encode(sha256(convert_to('t5-pay-2', 'UTF8')), 'hex'), v_term, 'HUB-T005');
+  perform kitluy_devices.create_device_claim_v1(
+    v_hub_b, v_tenant_b, v_store_b, v_location_b,
+    encode(sha256(convert_to('t5-tok-3', 'UTF8')), 'hex'),
+    encode(sha256(convert_to('t5-pay-3', 'UTF8')), 'hex'), 900, 'OP-T005');
+  perform kitluy_devices.redeem_device_claim_v1(
+    encode(sha256(convert_to('t5-tok-3', 'UTF8')), 'hex'),
+    encode(sha256(convert_to('t5-pay-3', 'UTF8')), 'hex'), v_hub_b, 'HUB-T005-B');
+
+  select assignment_generation into v_gen from kitluy_devices.device_assignments
+   where device_id = v_term and state in ('pending_trust', 'active');
+
+  -- The Edge-sync identity reports: fresh heartbeat -> healthy local status,
+  -- projected.
+  set local role kitluy_edge_sync_service;
+  v_r := kitluy_devices.ingest_device_health_report_v1(
+    'kh1.' || gen_random_uuid() || '.1', v_hub, v_term, 'development', v_gen,
+    1, 'healthy', array['heartbeat_fresh'], 'laundry.t1.cashier', '1.0.0',
+    'cfg-7', 'rel-3', now(), now(), gen_random_uuid());
+  if v_r->>'outcome' <> 'PROJECTED' then
+    raise exception 'ASSERT FAIL: a valid Hub health report was not projected: %', v_r;
+  end if;
+
+  -- Duplicate report (same effect key) has ONE business effect.
+  declare
+    v_key text := 'kh1.' || gen_random_uuid() || '.2';
+  begin
+    v_r := kitluy_devices.ingest_device_health_report_v1(
+      v_key, v_hub, v_term, 'development', v_gen,
+      3, 'degraded', array['printer_offline'], 'laundry.t1.cashier', '1.0.0',
+      'cfg-7', 'rel-3', now(), now(), gen_random_uuid());
+    if v_r->>'outcome' <> 'PROJECTED' then
+      raise exception 'ASSERT FAIL: sequence-3 report was not projected: %', v_r;
+    end if;
+    v_r := kitluy_devices.ingest_device_health_report_v1(
+      v_key, v_hub, v_term, 'development', v_gen,
+      3, 'degraded', array['printer_offline'], 'laundry.t1.cashier', '1.0.0',
+      'cfg-7', 'rel-3', now(), now(), gen_random_uuid());
+    if v_r->>'outcome' <> 'DUPLICATE_IGNORED' then
+      raise exception 'ASSERT FAIL: a redelivered report was not idempotent: %', v_r;
+    end if;
+  end;
+
+  -- A DELAYED report (sequence 2 after 3) is kept as history and does not
+  -- move the projection backwards.
+  v_r := kitluy_devices.ingest_device_health_report_v1(
+    'kh1.' || gen_random_uuid() || '.3', v_hub, v_term, 'development', v_gen,
+    2, 'healthy', array[]::text[], 'laundry.t1.cashier', '1.0.0',
+    'cfg-7', 'rel-3', now(), now(), gen_random_uuid());
+  if v_r->>'outcome' <> 'STALE_IGNORED' then
+    raise exception 'ASSERT FAIL: a delayed report was not STALE_IGNORED: %', v_r;
+  end if;
+
+  -- A clock-anomalous report is recorded and flagged, and does not become the
+  -- newest authoritative observation.
+  v_r := kitluy_devices.ingest_device_health_report_v1(
+    'kh1.' || gen_random_uuid() || '.4', v_hub, v_term, 'development', v_gen,
+    5, 'healthy', array[]::text[], 'laundry.t1.cashier', '1.0.0',
+    'cfg-7', 'rel-3', now(), now() + interval '2 hours', gen_random_uuid());
+  if v_r->>'outcome' <> 'ANOMALY_RECORDED' then
+    raise exception 'ASSERT FAIL: a future-claimed observation was not ANOMALY_RECORDED: %', v_r;
+  end if;
+
+  -- Another Hub cannot claim the terminal.
+  v_refused := false;
+  begin
+    perform kitluy_devices.ingest_device_health_report_v1(
+      'kh1.' || gen_random_uuid() || '.5', v_hub_b, v_term, 'development', v_gen,
+      6, 'healthy', array[]::text[], null, null, null, null, now(), now(), null);
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-FLEET-REPORT-WRONG-HUB%' then
+      raise exception 'ASSERT FAIL: foreign-Hub refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := true;
+  end;
+  if not v_refused then
+    raise exception 'ASSERT FAIL: a foreign Hub reported health for another Store''s terminal';
+  end if;
+
+  -- A terminal cannot report for another device.
+  v_refused := false;
+  begin
+    perform kitluy_devices.ingest_device_health_report_v1(
+      'kh1.' || gen_random_uuid() || '.6', v_term, v_hub, 'development', 1,
+      1, 'healthy', array[]::text[], null, null, null, null, now(), now(), null);
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-FLEET-REPORT-NOT-HUB%' then
+      raise exception 'ASSERT FAIL: non-Hub refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := true;
+  end;
+  if not v_refused then
+    raise exception 'ASSERT FAIL: a terminal-class device reported fleet health';
+  end if;
+
+  -- A stale assignment generation cannot update the current projection.
+  v_refused := false;
+  begin
+    perform kitluy_devices.ingest_device_health_report_v1(
+      'kh1.' || gen_random_uuid() || '.7', v_hub, v_term, 'development', v_gen + 1,
+      7, 'healthy', array[]::text[], null, null, null, null, now(), now(), null);
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-FLEET-REPORT-STALE-GENERATION%' then
+      raise exception 'ASSERT FAIL: stale-generation refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := true;
+  end;
+  if not v_refused then
+    raise exception 'ASSERT FAIL: a wrong assignment generation reported fleet health';
+  end if;
+
+  reset role;
+
+  -- The projection is at sequence 3 with the sequence-3 classification, and
+  -- the full history (accepted and refused) is preserved.
+  if (select projection_version from kitluy_devices.device_health_projections
+       where observed_device_id = v_term) <> 3 then
+    raise exception 'ASSERT FAIL: the projection version is not the newest accepted sequence';
+  end if;
+  if (select health_classification from kitluy_devices.device_health_projections
+       where observed_device_id = v_term) <> 'degraded' then
+    raise exception 'ASSERT FAIL: the projection does not carry the newest reported status';
+  end if;
+  if (select count(*) from kitluy_devices.device_health_reports
+       where observed_device_id = v_term) <> 4 then
+    raise exception 'ASSERT FAIL: expected 4 history rows (2 accepted + 1 stale + 1 anomaly)';
+  end if;
+  if (select count(*) from kitluy_devices.device_health_reports
+       where observed_device_id = v_term and clock_anomaly) <> 1 then
+    raise exception 'ASSERT FAIL: the clock anomaly was not flagged in history';
+  end if;
+
+  -- Freshness: current within the governed threshold; stale beyond it; a
+  -- missing observation is UNKNOWN; a missing policy row can never be CURRENT.
+  -- (Run as the fleet service: the connecting harness role deliberately holds
+  -- no EXECUTE on any 0177 door.)
+  set local role kitluy_fleet_service;
+  if kitluy_devices.classify_fleet_freshness_v1('development', now()) <> 'CURRENT_CLOUD_PROJECTION' then
+    raise exception 'ASSERT FAIL: a fresh receipt did not classify CURRENT';
+  end if;
+  if kitluy_devices.classify_fleet_freshness_v1('development', now() - interval '1 hour') <> 'STALE_CLOUD_PROJECTION' then
+    raise exception 'ASSERT FAIL: an old receipt did not classify STALE';
+  end if;
+  if kitluy_devices.classify_fleet_freshness_v1('development', null) <> 'UNKNOWN_NO_OBSERVATION' then
+    raise exception 'ASSERT FAIL: a missing observation did not classify UNKNOWN';
+  end if;
+  if kitluy_devices.classify_fleet_freshness_v1('pilot', now()) <> 'STALE_CLOUD_PROJECTION' then
+    raise exception 'ASSERT FAIL: a missing policy row yielded a CURRENT claim (must fail closed)';
+  end if;
+
+  -- The read model keeps the truth labels APART: the fleet service reads a
+  -- row whose lifecycle, containment, reported local status and cloud
+  -- freshness are separate columns; the unobserved Hub-B reads UNKNOWN.
+  if not exists (
+    select 1 from kitluy_devices.fleet_health_read
+     where device_record_id = v_term
+       and reported_local_status = 'degraded'
+       and cloud_freshness = 'CURRENT_CLOUD_PROJECTION'
+       and containment_state = 'none'
+       and lifecycle_state = 'awaiting_trust') then
+    raise exception 'ASSERT FAIL: fleet_health_read does not carry the four separate truth labels';
+  end if;
+  if not exists (
+    select 1 from kitluy_devices.fleet_health_read
+     where device_record_id = v_hub_b
+       and reported_local_status is null
+       and cloud_freshness = 'UNKNOWN_NO_OBSERVATION') then
+    raise exception 'ASSERT FAIL: an unobserved device did not read UNKNOWN_NO_OBSERVATION';
+  end if;
+  reset role;
+
+  raise notice 'PASS ws11-t005-health-freshness: Hub-only ingestion is idempotent on the kh1 key; a foreign Hub, a non-Hub reporter and a stale generation are refused by their exact sentinels; a delayed report and a clock anomaly are kept as flagged history without moving the projection; freshness fails closed without a governed policy; fleet_health_read keeps lifecycle, containment, local status and cloud freshness as separate truth labels (0177)';
+end
+$section55a$;
+
+-- ---------------------------------------------------------------------------
+-- 55b — support access under policy §3.
+-- ---------------------------------------------------------------------------
+do $section55b$
+declare
+  v_tenant uuid := '00000000-0000-4000-8000-000000000011';
+  v_store uuid := '00000000-0000-4000-8000-000000000015';
+  v_location uuid := '00000000-0000-4000-8000-000000000018';
+  v_tenant_b uuid := '00000000-0000-4000-8000-000000000012';
+  v_store_b uuid := '00000000-0000-4000-8000-000000000017';
+  v_term uuid;
+  v_r jsonb;
+  v_c1 uuid;
+  v_c3 uuid;
+  v_refused integer := 0;
+begin
+  select d.id into v_term
+  from kitluy_devices.devices d
+  join kitluy_devices.hardware_profiles hp on hp.id = d.hardware_profile_id
+  where hp.profile_key = 'WS11-T005-TERM-PROBE'
+  order by d.created_at desc limit 1;
+
+  set local role kitluy_fleet_service;
+
+  -- C1 metadata access: ticket + permission, no consent, no approver.
+  v_r := kitluy_devices.open_support_access_session_v1(
+    v_tenant, v_store, v_location, v_term, 'SUP-OP-1', null,
+    'terminal offline triage', 'TICKET-1001', 'C1_METADATA', null,
+    'development', 30);
+  if v_r->>'outcome' <> 'OPENED' then
+    raise exception 'ASSERT FAIL: a correctly scoped C1 session was refused: %', v_r;
+  end if;
+  v_c1 := (v_r->>'session_id')::uuid;
+
+  -- C2 without consent evidence fails.
+  begin
+    perform kitluy_devices.open_support_access_session_v1(
+      v_tenant, v_store, v_location, v_term, 'SUP-OP-1', null,
+      'read booking metadata', 'TICKET-1002', 'C2_SENSITIVE_READ', null,
+      'development', 30);
+    raise exception 'ASSERT FAIL: a C2 session opened without consent';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-SUPPORT-CONSENT-REQUIRED%' then
+      raise exception 'ASSERT FAIL: missing-consent refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+
+  -- C3 without an approver fails; self-approval fails; a distinct approver
+  -- with consent succeeds.
+  begin
+    perform kitluy_devices.open_support_access_session_v1(
+      v_tenant, v_store, v_location, null, 'SUP-OP-1', null,
+      'impersonated view', 'TICKET-1003', 'C3_IMPERSONATED_VIEW', 'CONSENT-9',
+      'development', 30);
+    raise exception 'ASSERT FAIL: a C3 session opened without an approver';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-SUPPORT-UNAPPROVED%' then
+      raise exception 'ASSERT FAIL: missing-approver refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+  begin
+    perform kitluy_devices.open_support_access_session_v1(
+      v_tenant, v_store, v_location, null, 'SUP-OP-1', 'SUP-OP-1',
+      'impersonated view', 'TICKET-1003', 'C3_IMPERSONATED_VIEW', 'CONSENT-9',
+      'development', 30);
+    raise exception 'ASSERT FAIL: a support actor approved their own session';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-SUPPORT-SELF-APPROVAL%' then
+      raise exception 'ASSERT FAIL: self-approval refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+  v_r := kitluy_devices.open_support_access_session_v1(
+    v_tenant, v_store, v_location, null, 'SUP-OP-1', 'SUP-APPROVER-2',
+    'impersonated view', 'TICKET-1003', 'C3_IMPERSONATED_VIEW', 'CONSENT-9',
+    'development', 240);
+  if v_r->>'outcome' <> 'OPENED' then
+    raise exception 'ASSERT FAIL: a fully authorized C3 session was refused: %', v_r;
+  end if;
+  -- The duration clamp held: 240 requested, the governed maximum granted.
+  if (v_r->>'granted_minutes')::integer <> 60 then
+    raise exception 'ASSERT FAIL: the session duration was not clamped to the governed maximum';
+  end if;
+  v_c3 := (v_r->>'session_id')::uuid;
+
+  -- Missing reason and missing ticket fail.
+  begin
+    perform kitluy_devices.open_support_access_session_v1(
+      v_tenant, v_store, v_location, null, 'SUP-OP-1', null,
+      '  ', 'TICKET-1004', 'C1_METADATA', null, 'development', 30);
+    raise exception 'ASSERT FAIL: a session opened with a blank reason';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-SUPPORT-REASON-REQUIRED%' then
+      raise exception 'ASSERT FAIL: blank-reason refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+  begin
+    perform kitluy_devices.open_support_access_session_v1(
+      v_tenant, v_store, v_location, null, 'SUP-OP-1', null,
+      'triage', '', 'C1_METADATA', null, 'development', 30);
+    raise exception 'ASSERT FAIL: a session opened without a ticket';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-SUPPORT-TICKET-REQUIRED%' then
+      raise exception 'ASSERT FAIL: missing-ticket refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+
+  -- Cross-Tenant device scope fails: the device belongs to tenant A.
+  begin
+    perform kitluy_devices.open_support_access_session_v1(
+      v_tenant_b, v_store_b, null, v_term, 'SUP-OP-1', null,
+      'cross-tenant probe', 'TICKET-1005', 'C1_METADATA', null,
+      'development', 30);
+    raise exception 'ASSERT FAIL: a support session crossed Tenants';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-SUPPORT-SCOPE-MISMATCH%' then
+      raise exception 'ASSERT FAIL: cross-Tenant refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+
+  -- Explicit revocation is immediate and idempotent, and the gate fails
+  -- closed afterwards.
+  v_r := kitluy_devices.revoke_support_access_session_v1(v_c3, 'PARTNER-OWNER-1', 'partner revoked consent');
+  if v_r->>'outcome' <> 'REVOKED' then
+    raise exception 'ASSERT FAIL: revocation did not take effect: %', v_r;
+  end if;
+  v_r := kitluy_devices.revoke_support_access_session_v1(v_c3, 'PARTNER-OWNER-1', 'again');
+  if v_r->>'outcome' <> 'ALREADY_REVOKED' then
+    raise exception 'ASSERT FAIL: re-revocation was not idempotent: %', v_r;
+  end if;
+  begin
+    perform kitluy_devices.assert_support_session_active_v1(v_c3);
+    raise exception 'ASSERT FAIL: a revoked session passed the active gate';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-SUPPORT-SESSION-INACTIVE%' then
+      raise exception 'ASSERT FAIL: revoked-session refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+
+  -- Expiry fails closed on the CLOCK even before the sweeper runs, and the
+  -- sweeper then converts the session with an audit event. The governor
+  -- membership is BORROWED for the one clock-aging UPDATE and handed back
+  -- (the section-54 discipline).
+  reset role;
+  execute format('grant kitluy_fleet_governor to %I', current_user);
+  set local role kitluy_fleet_governor;
+  update kitluy_devices.support_access_sessions
+  set starts_at = now() - interval '2 minutes',
+      expires_at = now() - interval '1 minute', updated_at = now()
+  where id = v_c1;
+  reset role;
+  execute format('revoke kitluy_fleet_governor from %I', current_user);
+  set local role kitluy_fleet_service;
+  begin
+    perform kitluy_devices.assert_support_session_active_v1(v_c1);
+    raise exception 'ASSERT FAIL: a past-expiry session passed the active gate before sweeping';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-SUPPORT-SESSION-INACTIVE%' then
+      raise exception 'ASSERT FAIL: expiry fail-closed used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+  reset role;
+  set local role kitluy_worker_service;
+  v_r := kitluy_devices.expire_support_access_sessions_v1('development');
+  if (v_r->>'expired_count')::integer < 1 then
+    raise exception 'ASSERT FAIL: the sweeper expired nothing: %', v_r;
+  end if;
+  reset role;
+
+  if (select status from kitluy_devices.support_access_sessions where id = v_c1) <> 'expired' then
+    raise exception 'ASSERT FAIL: the swept session is not expired';
+  end if;
+  if not exists (select 1 from kitluy_devices.support_access_events
+                  where session_id = v_c1 and event_type = 'SESSION_EXPIRED') then
+    raise exception 'ASSERT FAIL: expiry left no audit event';
+  end if;
+
+  -- No secret-shaped column exists: there is no credential to hand a support
+  -- operator.
+  if exists (
+    select 1 from information_schema.columns
+     where table_schema = 'kitluy_devices' and table_name = 'support_access_sessions'
+       and column_name ~ '(token|secret|password|credential|private|key)') then
+    raise exception 'ASSERT FAIL: a secret-shaped column exists on support_access_sessions';
+  end if;
+
+  if v_refused <> 8 then
+    raise exception 'ASSERT FAIL: expected 8 refused support probes, got %', v_refused;
+  end if;
+  raise notice 'PASS ws11-t005-support-access: ticket always, consent for C2+, an independent approver for C3+ with self-approval refused, cross-Tenant scope refused, duration clamped, revocation immediate and idempotent, expiry fails closed on the clock before the worker sweeper records it, and no secret-shaped column exists (0177)';
+exception when others then
+  begin
+    execute format('revoke kitluy_fleet_governor from %I', current_user);
+  exception when others then
+    null;
+  end;
+  raise;
+end
+$section55b$;
+
+-- ---------------------------------------------------------------------------
+-- 55c — containment, escalation, recovery.
+-- ---------------------------------------------------------------------------
+do $section55c$
+declare
+  v_store uuid := '00000000-0000-4000-8000-000000000015';
+  v_store_b uuid := '00000000-0000-4000-8000-000000000016';
+  v_term uuid;
+  v_hub uuid;
+  v_hub_b uuid;
+  v_r jsonb;
+  v_refused integer := 0;
+  v_events integer;
+begin
+  select d.id into v_term
+  from kitluy_devices.devices d
+  join kitluy_devices.hardware_profiles hp on hp.id = d.hardware_profile_id
+  where hp.profile_key = 'WS11-T005-TERM-PROBE'
+  order by d.created_at desc limit 1;
+  select d.id into v_hub
+  from kitluy_devices.devices d
+  where d.asset_tag like 'WS11-T005-HUBA-%'
+  order by d.created_at desc limit 1;
+  select d.id into v_hub_b
+  from kitluy_devices.devices d
+  where d.asset_tag like 'WS11-T005-HUBB-%'
+  order by d.created_at desc limit 1;
+
+  set local role kitluy_fleet_service;
+
+  -- Quarantine without an approver, and with a self-approval, both fail.
+  begin
+    perform kitluy_devices.apply_device_containment_v1(
+      v_term, 'quarantined', 'clone suspicion', 'FLEET-OP-1');
+    raise exception 'ASSERT FAIL: quarantine was applied without an approver';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-FLEET-CONTAINMENT-UNAPPROVED%' then
+      raise exception 'ASSERT FAIL: unapproved-quarantine refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+  begin
+    perform kitluy_devices.apply_device_containment_v1(
+      v_term, 'quarantined', 'clone suspicion', 'FLEET-OP-1', 'FLEET-OP-1');
+    raise exception 'ASSERT FAIL: a requester approved their own quarantine';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-FLEET-CONTAINMENT-SELF-APPROVAL%' then
+      raise exception 'ASSERT FAIL: self-approval refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+
+  -- Wrong-Store and stale-generation containment commands fail.
+  begin
+    perform kitluy_devices.apply_device_containment_v1(
+      v_hub, 'investigation_flagged', 'wrong store probe', 'FLEET-OP-1',
+      null, null, null, v_store_b, null, null);
+    raise exception 'ASSERT FAIL: a wrong-Store containment command was applied';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-FLEET-CONTAINMENT-WRONG-STORE%' then
+      raise exception 'ASSERT FAIL: wrong-Store refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+  begin
+    perform kitluy_devices.apply_device_containment_v1(
+      v_hub, 'investigation_flagged', 'stale generation probe', 'FLEET-OP-1',
+      null, null, null, v_store, 99, null);
+    raise exception 'ASSERT FAIL: a stale-generation containment command was applied';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-FLEET-CONTAINMENT-STALE-GENERATION%' then
+      raise exception 'ASSERT FAIL: stale-generation refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+
+  -- Flagging for investigation is a decision record: the lifecycle stays put,
+  -- and a duplicate is idempotent.
+  v_r := kitluy_devices.apply_device_containment_v1(
+    v_hub, 'investigation_flagged', 'anomalous heartbeat pattern', 'FLEET-OP-1');
+  if v_r->>'outcome' <> 'CONTAINED' then
+    raise exception 'ASSERT FAIL: investigation flag was refused: %', v_r;
+  end if;
+  reset role;
+  if (select lifecycle_state from kitluy_devices.devices where id = v_hub) <> 'awaiting_trust' then
+    raise exception 'ASSERT FAIL: flagging for investigation moved the lifecycle';
+  end if;
+  set local role kitluy_fleet_service;
+  v_r := kitluy_devices.apply_device_containment_v1(
+    v_hub, 'investigation_flagged', 'anomalous heartbeat pattern', 'FLEET-OP-1');
+  if v_r->>'outcome' <> 'ALREADY_CONTAINED' then
+    raise exception 'ASSERT FAIL: duplicate containment was not idempotent: %', v_r;
+  end if;
+
+  -- Suspension: four-eyes, with a command reference; a replay of the same
+  -- command is idempotent, and the same reference for a DIFFERENT containment
+  -- conflicts.
+  v_r := kitluy_devices.apply_device_containment_v1(
+    v_hub, 'suspended', 'battery fault recall', 'FLEET-OP-1', 'FLEET-APPROVER-2',
+    'EVIDENCE-CASE-7', 'WS11-T005-CMD-1');
+  if v_r->>'outcome' <> 'CONTAINED' then
+    raise exception 'ASSERT FAIL: an approved suspension was refused: %', v_r;
+  end if;
+  reset role;
+  if (select lifecycle_state from kitluy_devices.devices where id = v_hub) <> 'suspended' then
+    raise exception 'ASSERT FAIL: suspension did not reach the lifecycle';
+  end if;
+  set local role kitluy_fleet_service;
+  v_r := kitluy_devices.apply_device_containment_v1(
+    v_hub, 'suspended', 'battery fault recall', 'FLEET-OP-1', 'FLEET-APPROVER-2',
+    'EVIDENCE-CASE-7', 'WS11-T005-CMD-1');
+  if v_r->>'outcome' <> 'DUPLICATE_IGNORED' then
+    raise exception 'ASSERT FAIL: a replayed identical command was not idempotent: %', v_r;
+  end if;
+  begin
+    perform kitluy_devices.apply_device_containment_v1(
+      v_hub, 'investigation_flagged', 'replay conflict probe', 'FLEET-OP-1',
+      null, null, 'WS11-T005-CMD-1');
+    raise exception 'ASSERT FAIL: a command reference was reused for a different containment';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-FLEET-CONTAINMENT-REPLAY-CONFLICT%' then
+      raise exception 'ASSERT FAIL: replay-conflict refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+
+  -- Operations restriction composes the 0122 restricted_investigation state,
+  -- and the §10 condition-4 escalation door quarantines only under a VERIFIED
+  -- four-eyes split.
+  v_r := kitluy_devices.apply_device_containment_v1(
+    v_term, 'operations_restricted', 'duplicate identity signal', 'FLEET-OP-1');
+  if v_r->>'outcome' <> 'CONTAINED' then
+    raise exception 'ASSERT FAIL: operations restriction was refused: %', v_r;
+  end if;
+  reset role;
+  if (select lifecycle_state from kitluy_devices.devices where id = v_term) <> 'restricted_investigation' then
+    raise exception 'ASSERT FAIL: restriction did not enter restricted_investigation';
+  end if;
+  if (select restricted_from_state from kitluy_devices.devices where id = v_term) <> 'awaiting_trust' then
+    raise exception 'ASSERT FAIL: the prior state was not preserved for restoration';
+  end if;
+  set local role kitluy_fleet_service;
+  begin
+    perform kitluy_devices.approve_incumbent_quarantine_v1(
+      v_term, 'confirmed clone', 'FLEET-OP-1', 'FLEET-OP-1', 'EVIDENCE-CASE-8');
+    raise exception 'ASSERT FAIL: a requester approved their own escalation';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-FLEET-ESCALATION-SELF-APPROVAL%' then
+      raise exception 'ASSERT FAIL: escalation self-approval refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+  v_r := kitluy_devices.approve_incumbent_quarantine_v1(
+    v_term, 'confirmed clone', 'FLEET-OP-1', 'FLEET-APPROVER-2', 'EVIDENCE-CASE-8');
+  if v_r->>'outcome' <> 'ESCALATED' then
+    raise exception 'ASSERT FAIL: an approved escalation was refused: %', v_r;
+  end if;
+  reset role;
+  if (select lifecycle_state from kitluy_devices.devices where id = v_term) <> 'quarantined' then
+    raise exception 'ASSERT FAIL: escalation did not quarantine the incumbent';
+  end if;
+  set local role kitluy_fleet_service;
+
+  -- The containment gate fails closed for the contained device and stays
+  -- open for a clean one... there is no clean probe device left in this
+  -- section, so the gate is proved one-sided here and two-sided in 55a's
+  -- fixture (Hub-B, never contained).
+  begin
+    perform kitluy_devices.assert_device_not_contained_v1(v_term);
+    raise exception 'ASSERT FAIL: a quarantined device passed the containment gate';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-FLEET-CONTAINED%' then
+      raise exception 'ASSERT FAIL: containment gate used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+  -- The argument is a RESOLVED variable, not a subselect: a function argument
+  -- evaluates in the CALLER context (the dacd3be lesson), and the fleet
+  -- service deliberately cannot read the devices table.
+  perform kitluy_devices.assert_device_not_contained_v1(v_hub_b);
+
+  -- The Store-scoped containment projection returns the contained set for
+  -- the Store, and the EMPTY set for a NULL scope (0156 rule).
+  if (select count(*) from kitluy_devices.read_fleet_containment_projection_v1('development', v_store)) < 2 then
+    raise exception 'ASSERT FAIL: the containment projection is missing contained devices';
+  end if;
+  if (select count(*) from kitluy_devices.read_fleet_containment_projection_v1(null, null)) <> 0 then
+    raise exception 'ASSERT FAIL: a NULL scope returned rows instead of the empty set';
+  end if;
+
+  -- Recovery: four-eyes always; the disposition must be a §10 runbook class;
+  -- clearance restores through legal transitions only and deletes nothing.
+  begin
+    perform kitluy_devices.clear_device_containment_v1(
+      v_term, 'data_entry_or_enrollment_error', 'verified distinct unit',
+      'FLEET-OP-1', '');
+    raise exception 'ASSERT FAIL: recovery ran without an approver';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-FLEET-RECOVERY-UNAPPROVED%' then
+      raise exception 'ASSERT FAIL: unapproved-recovery refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+  begin
+    perform kitluy_devices.clear_device_containment_v1(
+      v_term, 'seemed_fine', 'verified distinct unit', 'FLEET-OP-1', 'FLEET-APPROVER-2');
+    raise exception 'ASSERT FAIL: a non-runbook disposition was accepted';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-FLEET-RECOVERY-DISPOSITION%' then
+      raise exception 'ASSERT FAIL: disposition refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+  reset role;
+  select count(*) into v_events from kitluy_devices.device_containment_events
+   where device_id = v_term;
+  set local role kitluy_fleet_service;
+  v_r := kitluy_devices.clear_device_containment_v1(
+    v_term, 'data_entry_or_enrollment_error', 'verified distinct unit',
+    'FLEET-OP-1', 'FLEET-APPROVER-2', 'EVIDENCE-CASE-8');
+  if v_r->>'outcome' <> 'CLEARED' then
+    raise exception 'ASSERT FAIL: an approved recovery was refused: %', v_r;
+  end if;
+  reset role;
+  if (select lifecycle_state from kitluy_devices.devices where id = v_term) <> 'enrolled' then
+    raise exception 'ASSERT FAIL: a cleared quarantine did not land in enrolled (re-earning trust)';
+  end if;
+  if (select containment_state from kitluy_devices.device_containment_states
+       where device_id = v_term) <> 'none' then
+    raise exception 'ASSERT FAIL: clearance did not record state none';
+  end if;
+  if (select disposition from kitluy_devices.device_containment_states
+       where device_id = v_term) <> 'data_entry_or_enrollment_error' then
+    raise exception 'ASSERT FAIL: the disposition was not recorded';
+  end if;
+  if (select count(*) from kitluy_devices.device_containment_events
+       where device_id = v_term) <> v_events + 1 then
+    raise exception 'ASSERT FAIL: recovery did not append exactly one event';
+  end if;
+
+  -- History is append-only even for the governor that owns it: the trigger
+  -- refuses before ownership can matter. Membership borrowed and handed back.
+  execute format('grant kitluy_fleet_governor to %I', current_user);
+  set local role kitluy_fleet_governor;
+  begin
+    update kitluy_devices.device_containment_events
+    set reason = 'rewritten' where device_id = v_term;
+    raise exception 'ASSERT FAIL: a containment event was rewritten';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-FLEET-CONTAINMENT-EVENT-IMMUTABLE%' then
+      raise exception 'ASSERT FAIL: event rewrite refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+  reset role;
+  execute format('revoke kitluy_fleet_governor from %I', current_user);
+
+  if v_refused <> 10 then
+    raise exception 'ASSERT FAIL: expected 10 refused containment probes, got %', v_refused;
+  end if;
+  raise notice 'PASS ws11-t005-containment: four-eyes holds for suspension, quarantine, escalation and every recovery with self-approval refused; wrong-Store, stale-generation and conflicting-replay commands are refused; duplicates are idempotent; flagging never moves the lifecycle; restriction and the SS10 condition-4 escalation compose the 0122 state machine; clearance restores legal states only, records the runbook disposition, and appends rather than deletes (0177)';
+exception when others then
+  begin
+    execute format('revoke kitluy_fleet_governor from %I', current_user);
+  exception when others then
+    null;
+  end;
+  raise;
+end
+$section55c$;
+
+-- ---------------------------------------------------------------------------
+-- 55d — privilege census: every boundary of 0177 stands.
+-- ---------------------------------------------------------------------------
+do $section55d$
+begin
+  if exists (select 1 from pg_roles
+              where rolname in ('kitluy_fleet_governor', 'kitluy_fleet_service', 'kitluy_fleet_gateway')
+                and rolcanlogin) then
+    raise exception 'ASSERT FAIL: a fleet role can log in';
+  end if;
+  if not exists (select 1 from pg_roles
+                  where rolname = 'kitluy_fleet_gateway' and not rolinherit) then
+    raise exception 'ASSERT FAIL: the fleet gateway inherits';
+  end if;
+  if has_function_privilege('service_role',
+      'kitluy_devices.apply_device_containment_v1(uuid, text, text, text, text, text, text, uuid, integer, uuid)', 'execute')
+     or has_function_privilege('service_role',
+      'kitluy_devices.open_support_access_session_v1(uuid, uuid, uuid, uuid, text, text, text, text, text, text, text, integer)', 'execute')
+     or has_function_privilege('service_role',
+      'kitluy_devices.ingest_device_health_report_v1(text, uuid, uuid, text, integer, bigint, text, text[], text, text, text, text, timestamptz, timestamptz, uuid)', 'execute') then
+    raise exception 'ASSERT FAIL: service_role effectively reaches a fleet door';
+  end if;
+  if has_table_privilege('kitluy_fleet_service', 'kitluy_devices.support_access_sessions', 'SELECT')
+     or has_table_privilege('kitluy_edge_sync_service', 'kitluy_devices.device_health_projections', 'SELECT')
+     or has_table_privilege('authenticated', 'kitluy_devices.device_containment_states', 'SELECT')
+     or has_table_privilege('anon', 'kitluy_devices.device_health_reports', 'SELECT') then
+    raise exception 'ASSERT FAIL: a runtime identity holds direct fleet-table privilege';
+  end if;
+  if exists (
+    select 1 from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'kitluy_devices'
+      and c.relname in ('fleet_health_policy', 'device_health_reports',
+                        'device_health_projections', 'device_containment_states',
+                        'device_containment_events', 'support_access_sessions',
+                        'support_access_events')
+      and not (c.relrowsecurity and c.relforcerowsecurity)) then
+    raise exception 'ASSERT FAIL: a fleet table is missing ENABLE+FORCE RLS';
+  end if;
+  if not has_function_privilege('kitluy_worker_service',
+      'kitluy_devices.expire_support_access_sessions_v1(text)', 'execute') then
+    raise exception 'ASSERT FAIL: the worker cannot reach the support sweeper';
+  end if;
+  raise notice 'PASS ws11-t005-privileges: fleet roles are NOLOGIN with a NOINHERIT gateway, service_role/authenticated/anon reach no fleet door or table, all seven tables are RLS-forced, and the worker keeps exactly the sweeper (0177)';
+end
+$section55d$;
+
+
+select 'assertions complete: groups 0010-0153 structural contract holds (incl. WS-11-T003 Step 4 Phase C — RC-022 spendability census CLOSED; governed emergency 0150–0153; RevocationGateway ships in @kitluy/device-identity) + WS-11-T005 fleet health, support access and governed containment (0177)' as result;

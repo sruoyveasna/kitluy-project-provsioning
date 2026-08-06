@@ -342,6 +342,10 @@ export const HUB_MIGRATION_ORDER = [
   // WS-11-T004-P04C3 closeout: the §8 scope index group 0033 owed. Additive,
   // because 0033 is applied and keeps its journalled bytes.
   "0034_credential_projection_scope_index.sql",
+  // WS-11-T005: Hub-authoritative terminal health status plus the append-only
+  // containment directive log whose latest directive gates pairing_session and
+  // terminal_session inserts locally — enforceable with the WAN down.
+  "0035_terminal_health_and_containment.sql",
 ] as const;
 
 /**

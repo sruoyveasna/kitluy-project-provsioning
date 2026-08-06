@@ -2495,3 +2495,40 @@ verification remains with T007/T008). Step 8 of the dependency order
 (production signing-key custody) stays BLK-005-blocked and is assigned to no
 agent task. The rotation-mode decision (0129) remains a separate owner
 decision. Canonical task cards: `00_AI_HANDOFF/tasks/WS-11-T005.md` .. `WS-11-T008.md`.
+
+## Cycle-10 execution findings — WS-11-T005 (2026-08-06)
+
+### KLRISK-DEVICE-002 — staleness correction and position
+
+The control table in this register's KLRISK-DEVICE-002 section (2026-07-28)
+predates migration 0122 and is STALE where it says "NOT implemented": the
+restricted-investigation state (`devices.restricted_from_state`, transition
+matrix), enrollment-station containment (`enrollment_stations`,
+`record_station_duplicate_submission_v1`, threshold 2 —
+`[REQUIRED: owner confirmation of this threshold]`), and the machine-detected
+§10 escalation conditions 1–3 shipped IN 0122. The rows are retained verbatim
+as history; this note corrects them forward.
+
+**T005 delivered the remaining implementation half:** the governed §10
+condition-4 door `approve_incumbent_quarantine_v1` (VERIFIED four-eyes, not a
+free-text approval ref), the general containment/recovery doors
+(`apply_device_containment_v1` / `clear_device_containment_v1`, dispositions
+restricted to the seven runbook classes), Hub-local enforcement (hub group
+0035 containment directives gating pairing and sessions offline), and the
+runbook `docs/runbooks/kitluy-device-investigation-and-containment-runbook-v1.0.0.md`
+with the seven owner classifications. Focused tests: cloud section 55c, RLS
+WS11-N21, hub section 32.
+
+**Position: RESOLVED-IN-DEV.** The closure sentence requires "implemented and
+INDEPENDENTLY tested" — independent verification belongs to T007/T008, and
+the signed disposition remains `[REQUIRED: BLK-005 signing infrastructure]`.
+The risk is NOT closed by this session.
+
+### Recorded conflicts and gaps (NOT silently resolved)
+
+| ID | Finding | Disposition |
+| --- | --- | --- |
+| T005-RC-01 | **No RBAC key exists for device quarantine or containment clearance.** The 107-key registry covers `devices.revoke` (A3) and `devices.remote_action.high_risk` (A3+MFA) but nothing narrower for containment; adding keys is an RBAC-registry change = A4 owner-security per four-eyes policy §3. | The 0177 doors enforce the STRICTER control for every caller (independent approver mandatory for suspension, quarantine, escalation and all recovery — the group-0136 discipline). Owner decision requested; recorded in the open-decisions register. |
+| T005-RC-02 | **The audit-event registry carries no `device.quarantined`, `device.containment_cleared` or `fleet.*` event, and six event keys referenced by the RBAC CSV (e.g. `support.consent_session_started`, `fleet.diagnostics_read`) are absent from the audit registry** — the two registries are out of sync. | NOT reconciled here (owner registries). 0177 records containment/support facts in its own append-only event tables with actor/reason/scope/correlation; mapping to canonical audit event keys awaits the registry reconciliation. |
+| T005-RC-03 | **Data-dictionary naming deviation.** The DD names `kitluy_sync.device_heartbeats`/`component_health_snapshots` (deliberately not created — 0110 D3) and the read model `fleet_health_read`; the master plan §WS-11 names `device_health`. 0177 implements `kitluy_devices.device_health_reports`/`device_health_projections` + the DD's `fleet_health_read` view, keeping fleet authority in the Fleet-owned schema next to the assignment truth it validates against. | Recorded as deviation (D-series style): the DD relation names remain reserved for the sync-transport half (the Hub->cloud reporter, successor package); no duplicate relation was created. |
+| T005-RC-04 | **Support-policy value gaps.** `[REQUIRED: maximum session duration by class]` (support policy Appendix A) is still open; 0177 ships ONE per-environment cap (`fleet_health_policy.support_session_max_minutes`, dev 60) as the development posture, clamped not trusted. The support-session lifecycle implements the enforcement states (`active/expired/revoked`); the REQUESTED->PARTNER_REVIEW->GRANTED workflow half lives with the consent evidence surface (not in T005 scope) — consent evidence is carried by reference (`consent_ref`), required for C2+. | Recorded; both halves fail closed today. |

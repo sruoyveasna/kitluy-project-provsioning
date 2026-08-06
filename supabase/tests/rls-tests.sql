@@ -3873,4 +3873,79 @@ begin
 end $$;
 rollback;
 
-select 'rls-tests complete: 14+9 baseline cases; cycle-5 WS5 7 negative + 7 positive and WS6 10 negative + 9 positive; cycle-6 WS7 13 negative + 6 positive and WS8 13 negative + 6 positive; cycle-10 WS11 T001 4 negative + 1 positive and T002 3 negative + 1 positive kitluy_devices cases executed; WS-11-T004-P02A 3 negative provisioning-code cases executed; WS-11-T004-P02B1 issuance-door boundary case executed; WS-11-T004-P02B2A presentation-evaluator boundary case executed; WS-11-T004-P02B2B1 revocation-door boundary case executed; WS-11-T004-P02B2B2A expiration-helper boundary case executed; WS-11-T004-P02B2B2B1 replacement-lineage boundary case executed; WS-11-T004-P02B2B2B2A recovery-door boundary case executed; WS-11-T004-P02B3A pop-foundation boundary case executed; WS-11-T004-P02B3B redemption-door boundary case executed; WS-11-T004-P02C composition-identity boundary case executed; WS-11-T004-P03A activation-state boundary case executed' as result;
+-- WS11-N21: fleet health, support access and containment (0177). The fleet
+-- surface is doors-plus-view only: NOLOGIN roles, a NOINHERIT gateway,
+-- FORCE RLS with a governor policy, and no client-facing privilege anywhere.
+-- Catalog first; runtime after.
+begin;
+do $$
+begin
+  if not exists (select 1 from pg_roles where rolname = 'kitluy_fleet_governor' and not rolcanlogin)
+     or not exists (select 1 from pg_roles where rolname = 'kitluy_fleet_service' and not rolcanlogin)
+     or not exists (select 1 from pg_roles where rolname = 'kitluy_fleet_gateway' and not rolcanlogin and not rolinherit) then
+    raise exception 'FAIL WS11-N21: a fleet role is missing, can log in, or the gateway inherits';
+  end if;
+  if exists (
+    select 1 from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'kitluy_devices'
+      and c.relname in ('fleet_health_policy', 'device_health_reports',
+                        'device_health_projections', 'device_containment_states',
+                        'device_containment_events', 'support_access_sessions',
+                        'support_access_events')
+      and not (c.relrowsecurity and c.relforcerowsecurity)) then
+    raise exception 'FAIL WS11-N21: a fleet table is missing ENABLE+FORCE RLS';
+  end if;
+  if has_table_privilege('authenticated', 'kitluy_devices.support_access_sessions', 'SELECT')
+     or has_table_privilege('anon', 'kitluy_devices.device_health_projections', 'SELECT')
+     or has_table_privilege('authenticated', 'kitluy_devices.fleet_health_read', 'SELECT') then
+    raise exception 'FAIL WS11-N21: a client role holds fleet privileges';
+  end if;
+  raise notice 'PASS WS11-N21a: fleet roles are NOLOGIN behind a NOINHERIT gateway, all seven fleet tables are RLS-forced, and no client role holds a fleet grant';
+end $$;
+rollback;
+
+begin;
+select set_config('request.jwt.claims', '{"role":"authenticated"}', true);
+set local role authenticated;
+do $$
+declare
+  v_blocked integer := 0;
+begin
+  begin
+    perform observed_device_id from kitluy_devices.device_health_projections limit 1;
+  exception when insufficient_privilege then
+    v_blocked := v_blocked + 1;
+  end;
+  begin
+    perform id from kitluy_devices.support_access_sessions limit 1;
+  exception when insufficient_privilege then
+    v_blocked := v_blocked + 1;
+  end;
+  begin
+    perform device_record_id from kitluy_devices.fleet_health_read limit 1;
+  exception when insufficient_privilege then
+    v_blocked := v_blocked + 1;
+  end;
+  begin
+    perform kitluy_devices.open_support_access_session_v1(
+      gen_random_uuid(), gen_random_uuid(), null, null, 'ATTACKER', null,
+      'probe', 'TICKET-X', 'C1_METADATA', null, 'development', 5);
+  exception when insufficient_privilege then
+    v_blocked := v_blocked + 1;
+  end;
+  begin
+    perform kitluy_devices.apply_device_containment_v1(
+      gen_random_uuid(), 'quarantined', 'probe', 'ATTACKER', 'ATTACKER-2');
+  exception when insufficient_privilege then
+    v_blocked := v_blocked + 1;
+  end;
+  if v_blocked <> 5 then
+    raise exception 'FAIL WS11-N21: authenticated reached the fleet surface (% of 5 probes blocked)', v_blocked;
+  end if;
+  raise notice 'PASS WS11-N21b: authenticated can neither read fleet health, support sessions or the read model, nor call a support or containment door';
+end $$;
+rollback;
+
+
+select 'rls-tests complete: 14+9 baseline cases; cycle-5 WS5 7 negative + 7 positive and WS6 10 negative + 9 positive; cycle-6 WS7 13 negative + 6 positive and WS8 13 negative + 6 positive; cycle-10 WS11 T001 4 negative + 1 positive and T002 3 negative + 1 positive kitluy_devices cases executed; WS-11-T004-P02A 3 negative provisioning-code cases executed; WS-11-T004-P02B1 issuance-door boundary case executed; WS-11-T004-P02B2A presentation-evaluator boundary case executed; WS-11-T004-P02B2B1 revocation-door boundary case executed; WS-11-T004-P02B2B2A expiration-helper boundary case executed; WS-11-T004-P02B2B2B1 replacement-lineage boundary case executed; WS-11-T004-P02B2B2B2A recovery-door boundary case executed; WS-11-T004-P02B3A pop-foundation boundary case executed; WS-11-T004-P02B3B redemption-door boundary case executed; WS-11-T004-P02C composition-identity boundary case executed; WS-11-T004-P03A activation-state boundary case executed; WS-11-T005 fleet/support/containment boundary cases executed' as result;
