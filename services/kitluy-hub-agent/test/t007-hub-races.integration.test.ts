@@ -21,7 +21,10 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
+
 import pg from "pg";
+
+const RUN = randomUUID().slice(0, 8);
 
 const DSN = "postgresql://postgres:postgres@127.0.0.1:54322/kitluy_hub_local";
 const ITERATIONS = 20;
@@ -129,7 +132,7 @@ describe.skipIf(!live)("T007 hub-local concurrency race families", () => {
           `select edge_identity.set_hub_replacement_mode_v1(
              $1, case when $1 = 'normal' then null else $4::uuid end,
              $2, 'T007-RACE', $3::uuid) as r`,
-          [mode, `T007 F13 iteration ${i}`, randomUUID(), randomUUID()],
+          [mode, `T007-${RUN} F13 iteration ${i}`, randomUUID(), randomUUID()],
         );
       const [activate, retire] = await Promise.all([
         settle(change("normal")),
@@ -152,7 +155,7 @@ describe.skipIf(!live)("T007 hub-local concurrency race families", () => {
       const { rows: ev } = await pool.query<{ n: string }>(
         `select count(*)::text as n from edge_identity.hub_replacement_events
           where to_mode = 'retired_rejected' and reason = $1`,
-        [`T007 F13 iteration ${i}`],
+        [`T007-${RUN} F13 iteration ${i}`],
       );
       expect(Number(ev[0]?.n), `F13 iteration ${i}: retirement journalled once`).toBe(1);
     }
