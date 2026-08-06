@@ -201,12 +201,18 @@ the §7 integration test.
 
 ## 6. Out-of-scope findings — recorded, NOT fixed (hard rule 1)
 
-1. **`edge_config.resolve_permission_grant` is PUBLIC-executable** —
-   created in Hub 0025 without the `revoke execute from public` that 0020
-   applies to other schemas. Read-only and `stable`, but a least-privilege
-   hole of exactly the class 0020 closed; a future Hub migration should
-   revoke it. (This is also why `kitluy_hub_runtime` can call it without
-   an explicit grant.)
+1. **RETRACTED (2026-08-06 Stage A, KLREC-2026-08-06-WS12-STAGEA-001):**
+   ~~`edge_config.resolve_permission_grant` is PUBLIC-executable~~ — the
+   report was WRONG. Live reproduction shows 0025 lines 146–151 DO revoke
+   PUBLIC execute and grant only `kitluy_hub_runtime`; the live ACL is
+   `{postgres=X,kitluy_hub_runtime=X}` with no PUBLIC entry, and a freshly
+   minted grantless role cannot execute. The reviewing agent had missed
+   the privilege block at the end of 0025 and the claim was recorded here
+   without a live probe — the process failure, not the database, was the
+   defect. No Hub migration 0040 was created (it would have been empty).
+   The correct state is now PINNED by assertions.sql §28b (direct-ACL +
+   effective-execution + unrelated-governor probes), so a future recreate
+   of the function cannot silently regress to the PUBLIC default.
 2. **`staff.sessions.read` gates no served route** — declared in amendment
    002 §2; the key exists so the read surface, when approved, has its key.
 3. **`pos.t1.use` has no Hub-side enforcement point yet** — correctly

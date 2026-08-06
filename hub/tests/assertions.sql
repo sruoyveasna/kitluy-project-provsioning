@@ -2774,6 +2774,76 @@ end $$;
 rollback;
 
 -- ---------------------------------------------------------------------------
+-- 28b. Permission-resolver privilege pin (WS-12 Stage-A, 2026-08-06).
+--
+-- A P02 review REPORTED `edge_config.resolve_permission_grant` as
+-- PUBLIC-executable (0025 allegedly omitting the 0020 discipline). Live
+-- reproduction REFUTED the report: 0025 lines 146-151 revoke PUBLIC and
+-- grant only `kitluy_hub_runtime` (KLREC-2026-08-06-WS12-STAGEA-001). This
+-- section pins that state so a future recreate of the function cannot
+-- silently regress to PostgreSQL's PUBLIC-execute default — the exact
+-- failure mode the report described, now impossible to reintroduce
+-- unnoticed. Both the DIRECT ACL and EFFECTIVE execution are asserted.
+-- ---------------------------------------------------------------------------
+begin;
+do $$
+declare
+  v_sig    regprocedure;
+  v_acl    aclitem[];
+  v_public int;
+  v_role   text;
+begin
+  select p.oid::regprocedure, p.proacl into v_sig, v_acl
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'edge_config' and p.proname = 'resolve_permission_grant';
+  if v_sig is null then
+    raise exception 'ASSERT FAIL: edge_config.resolve_permission_grant does not exist';
+  end if;
+
+  -- Direct ACL: a NULL acl means the built-in default, which INCLUDES
+  -- public execute — refused outright, not just probed.
+  if v_acl is null then
+    raise exception 'ASSERT FAIL: resolver has a NULL acl (PostgreSQL default = PUBLIC may execute)';
+  end if;
+  select count(*) into v_public from aclexplode(v_acl) a where a.grantee = 0;
+  if v_public <> 0 then
+    raise exception 'ASSERT FAIL: resolver acl carries % PUBLIC entr(y/ies)', v_public;
+  end if;
+
+  -- Effective execution: a freshly minted role with NO memberships stands
+  -- in for PUBLIC/anonymous/general application roles.
+  execute 'create role stagea_probe_no_grants nologin';
+  if has_function_privilege('stagea_probe_no_grants', v_sig, 'execute') then
+    execute 'drop role stagea_probe_no_grants';
+    raise exception 'ASSERT FAIL: a grantless role can execute the resolver';
+  end if;
+  execute 'drop role stagea_probe_no_grants';
+
+  -- Unrelated Hub governors must NOT hold execute (directly or by
+  -- inheritance). The pairing/sync/provisioning families evaluate no staff
+  -- permission and have no business calling the resolver.
+  for v_role in select r.rolname from pg_roles r
+                 where r.rolname in ('kitluy_pairing_governor',
+                                     'kitluy_edge_sync_service',
+                                     'kitluy_provisioning_service',
+                                     'kitluy_backup',
+                                     'kitluy_support_ro')
+  loop
+    if has_function_privilege(v_role, v_sig, 'execute') then
+      raise exception 'ASSERT FAIL: unrelated role % can execute the resolver', v_role;
+    end if;
+  end loop;
+
+  -- The ONE approved evaluator keeps execute.
+  if not has_function_privilege('kitluy_hub_runtime', v_sig, 'execute') then
+    raise exception 'ASSERT FAIL: kitluy_hub_runtime lost execute on the resolver';
+  end if;
+
+  raise notice 'PASS resolver-privilege-pin: no PUBLIC entry, grantless and unrelated roles refused, kitluy_hub_runtime retained (0025 discipline confirmed; Stage-A report refuted)';
+end $$;
+rollback;
+
+-- ---------------------------------------------------------------------------
 -- 29. Final tally.
 -- ---------------------------------------------------------------------------
 do $$

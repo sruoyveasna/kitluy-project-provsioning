@@ -2688,3 +2688,26 @@ had made them equal and one refactor briefly treated them as one domain.
 The discovery record is now authenticated (bindings + signature) BEFORE
 its TLS fingerprint may direct any connection. Full record:
 `00_AI_HANDOFF/shared/2026-08-06__SHARED__WS-12-T001-P02__REAL-HUB-BOOTSTRAP-CONTRACT-SESSION-AUTHORIZATION-AND-DISCOVERY__AI-HANDOFF.md`.
+
+## KLREC-2026-08-06-WS12-STAGEA-001 — resolver PUBLIC-execute finding REFUTED (2026-08-06, WS-12 Stage A)
+
+**Status: RECONCILED — FINDING RETRACTED.** The WS-12 pre-T002 hardening
+package ordered a fix for `edge_config.resolve_permission_grant` being
+PUBLIC-executable, conditioned on reproduction ("create Hub migration 0040
+when the report is confirmed"). Reproduction REFUTED the report: Hub
+migration 0025 (lines 146–151) revokes EXECUTE from PUBLIC and grants only
+`kitluy_hub_runtime`, exactly the 0020 discipline; the live catalog shows
+`proacl = {postgres=X/postgres,kitluy_hub_runtime=X/postgres}` (no PUBLIC
+entry, and a NULL-acl default state — the only way PUBLIC could execute —
+does not exist); a freshly minted grantless role and the unrelated
+pairing/sync/provisioning/backup/support governors all fail
+`has_function_privilege(..., 'execute')`, while `kitluy_hub_runtime`
+passes. The original P02 review claim (recorded in the P02 handoff §6 item
+1, now corrected in place) came from a file read that missed the privilege
+block at the end of 0025 and was never live-probed — the same class of
+error as the RETRACTED tenancy defect at 1cee32c. **No migration 0040 was
+created** (prohibition on empty migrations); instead assertions.sql §28b
+pins the correct state permanently (direct-ACL + effective-execution
+probes; hub:db:test now 44 PASS), so the regression the report described
+cannot be reintroduced unnoticed. T1 session authorization re-verified
+green after the pin (routes suite 16/16).
