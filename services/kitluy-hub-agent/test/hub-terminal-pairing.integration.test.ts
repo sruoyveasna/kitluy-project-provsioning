@@ -667,6 +667,34 @@ describe.skipIf(!live)("hub-terminal pairing (hub group 0031)", () => {
     expect(String(row.state)).toBe("paired");
   }, 60_000);
 
+  it("race A determinism (T007 D1): 20 simultaneous completions always yield one PAIRED, one ALREADY_PAIRED with the original receipt", async () => {
+    // KLD-2026-08-06-WS11-T007-001 rule 7: >=20 controlled iterations on
+    // genuinely separate pool connections. Every iteration must produce the
+    // SAME governed pair of outcomes — a single INTERNAL_ERROR or raw
+    // SQLSTATE anywhere fails the run.
+    for (let i = 0; i < 20; i += 1) {
+      const terminal = await newTerminal(`RD${String(i).padStart(2, "0")}`);
+      const prepared = await prepare(terminal);
+      const challenge = prepared.data as PairingChallengeMaterial;
+      await composition.verifyTerminalProofAndRecord({
+        pairingSessionId: challenge.pairingSessionId,
+        signatureBase64: terminalSign(terminal, challenge),
+        terminalPublicKeyPem: terminal.pem,
+      });
+      const [r1, r2] = await Promise.all([
+        composition.produceHubProofAndComplete({ pairingSessionId: challenge.pairingSessionId }),
+        composition.produceHubProofAndComplete({ pairingSessionId: challenge.pairingSessionId }),
+      ]);
+      const outcomes = [r1.result, r2.result].sort();
+      expect(outcomes, `iteration ${i}: [${r1.result}, ${r2.result}]`).toEqual([
+        "ALREADY_PAIRED",
+        "PAIRED",
+      ]);
+      expect(r1.data?.receiptId, `iteration ${i} receipt identity`).toBe(r2.data?.receiptId);
+      expect(await receiptCount(challenge.pairingSessionId)).toBe(1);
+    }
+  }, 120_000);
+
   it("race B: a valid and a forged proof — the forgery can neither win nor unwind the valid state", async () => {
     const terminal = await newTerminal("RB");
     const other = await newTerminal("RB2");

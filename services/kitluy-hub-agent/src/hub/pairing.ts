@@ -711,9 +711,63 @@ export class TerminalPairingComposition {
       return { result: outcome.result, correlationId, data };
     } catch (error) {
       const result = mapSentinel(messageOf(error));
+      // T007 D1 (KLD-2026-08-06-WS11-T007-001): under a TRUE simultaneous
+      // completion the loser surfaces the winner's commit either as the
+      // door's CONSUMED family or as a sentinel-less uniqueness error — the
+      // pre-transaction ALREADY_PAIRED branch only catches a LATE loser.
+      // The governed outcome is the ORIGINAL receipt, proven by re-reading
+      // the authoritative row (never by trusting the error text): only a
+      // session that IS 'paired' and HAS its one receipt converts.
+      if (result === "PAIR_SESSION_CONSUMED" || result === "INTERNAL_ERROR") {
+        const recovered = await this.recoverPairedState(input.pairingSessionId).catch(() => null);
+        if (recovered !== null) {
+          this.logger.info({
+            operation: "produceHubProofAndComplete",
+            correlationId,
+            result: "ALREADY_PAIRED",
+          });
+          return { result: "ALREADY_PAIRED", correlationId, data: recovered };
+        }
+      }
       this.logger.info({ operation: "produceHubProofAndComplete", correlationId, result });
       return { result, correlationId };
     }
+  }
+
+  /**
+   * T007 D1: the completion loser's recovery read. Returns the paired state
+   * ONLY when the session is authoritatively 'paired' with its single
+   * stored receipt; anything else returns null and the caller keeps the
+   * mapped refusal.
+   */
+  private async recoverPairedState(pairingSessionId: string): Promise<PairedState | null> {
+    return withHubTransaction(
+      this.pool,
+      async (client) => {
+        const row = await readSession(client, pairingSessionId);
+        if (row === null || row.state !== "paired") return null;
+        const existing = await client.query<ReceiptRow>(
+          `select ${RECEIPT_COLUMNS} from edge_identity.pairing_receipt r
+            where r.pairing_session_id = $1`,
+          [row.id],
+        );
+        const receiptRow = existing.rows[0];
+        if (receiptRow === undefined) return null;
+        const transcript = transcriptFromRow(row);
+        return {
+          pairingSessionId: row.id,
+          receiptId: receiptRow.id,
+          transcriptHash: receiptRow.transcript_hash,
+          receipt: receiptFromRow(receiptRow),
+          receiptSignatureBase64: receiptRow.signature_b64,
+          hubProofSignatureBase64: Buffer.from(
+            this.signer.sign(hubPairingProofBytes(transcript)),
+          ).toString("base64"),
+          pairedAt: receiptRow.paired_text,
+        };
+      },
+      HUB_RUNTIME_ROLE,
+    );
   }
 
   /** Replay/reconciliation: the stored receipt answers, byte-for-byte. */
