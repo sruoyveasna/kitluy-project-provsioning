@@ -34,7 +34,7 @@ against the current corpus is a registered follow-up owner task.
 
 | ID | Required value / decision | State |
 | --- | --- | --- |
-| KLREQ-008 | `kitluy-testing-and-evidence-system-v1.0.0` — cited as source_document by 41 of 524 test-registry cases; not physically present anywhere | OPEN — supply or re-source (KLREC-2026-07-26-018) |
+| KLREQ-008 | `kitluy-testing-and-evidence-system-v1.0.0` — cited as source_document by 41 of 524 test-registry cases; not physically present anywhere | **OPEN — NARROWED (2026-08-06, WS-11-T008).** The EXECUTABLE half is discharged for WS-11 and the shared platform gates by `docs/security/kitluy-security-test-plan-phase1-v1.0.0.md` (toolchain, migration/seed order, key generation, every command, expected outcomes, failure diagnosis, rollback, and each executed family bound to a file+command+result). REMAINING: the 41 non-WS-11 registry rows still cite a document that does not exist — supplying it or re-sourcing them is an OWNER evidence-policy decision spanning all workstreams, not WS-11 work |
 | KLREQ-009 | Owner confirmation of the engineering-pack toolchain (`selected_versions`) as the target, and approval of the coordinated upgrade task KL-ENG-001 (Node 24 / pnpm 11 / TS 6 / React 19 / RN 0.86+Expo 57 / Electron 43 / tool-versions.json / tsconfig flags) | OPEN (KLREC-2026-07-26-014/-019) |
 | KLREQ-010 | AI Swarm Operating System adoption decision: replace repo-root governance + handoff system with the pack, map handoff/evidence vocabularies onto the 11-status model, migrate existing handoff records | OPEN (KLREC-2026-07-26-015/-020) |
 | KLREQ-011 | Canonical security test plan selection/merge (batch-1 phase1 plan vs batch-2 plan, incompatible ID namespaces) | OPEN (KLREC-2026-07-26-017) |
