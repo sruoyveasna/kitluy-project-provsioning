@@ -9,6 +9,7 @@ import {
   EDGE_PERMISSION_GAPS,
   EDGE_REGISTERED_PERMISSIONS,
   EDGE_ROUTES,
+  EDGE_T002_INTAKE_ROUTES,
   EDGE_V1_BASE_PATH,
   EDGE_V1_LAUNDRY_BASE_PATH,
   GENERIC_EDGE_ROUTES,
@@ -18,6 +19,7 @@ import {
   REGISTERED_EDGE_SCOPES,
   REJECTED_ROUTE_SHAPES,
   RUNTIME_BOOTSTRAP_READ_SCOPES,
+  T002_INTAKE_SCOPES,
   RETIRED_TERMINAL_PROFILE_IDS,
   SCOPE_NAME_RECONCILIATION,
   TERMINAL_PROFILE_PATTERN,
@@ -91,6 +93,7 @@ function rbacAmendmentKeys(): ReadonlySet<string> {
   for (const amendment of [
     "kitluy-suite-rbac-permission-registry-amendment-001-device-containment-v1.0.0.md",
     "kitluy-suite-rbac-permission-registry-amendment-002-t1-staff-sessions-v1.0.0.md",
+    "kitluy-suite-rbac-permission-registry-amendment-003-t1-customer-and-consent-v1.0.0.md",
   ]) {
     const url = new URL(`../../../docs/security/${amendment}`, import.meta.url);
     // Only §1 "New keys" registers keys; later sections are reconciliations.
@@ -180,7 +183,10 @@ describe("2. rejected route shapes are absent", () => {
   });
 
   it("points every rejected shape at an approved replacement or an explicit null", () => {
-    const approved = new Set(registryPaths);
+    // A replacement may live in EDGE_ROUTES or on an owner-approved surface
+    // held outside it (T002 intake, KLD-2026-08-06-WS12-T002-001 — the
+    // bootstrap-read precedent).
+    const approved = new Set([...registryPaths, ...EDGE_T002_INTAKE_ROUTES.map((r) => r.path)]);
     for (const rejected of REJECTED_ROUTE_SHAPES) {
       if (rejected.replacedBy !== null) {
         expect(approved.has(rejected.replacedBy), rejected.shape).toBe(true);
@@ -272,7 +278,8 @@ describe("3. mutation metadata completeness", () => {
     expect(rbacRegistryKeys().size).toBe(107);
     // Amendment 001 (device containment, 2 keys) + Amendment 002 (T1 staff
     // sessions, 5 keys) — read from the amendment documents themselves.
-    expect(rbacAmendmentKeys().size).toBe(7);
+    // 2 (Amendment 001) + 5 (Amendment 002) + 3 (Amendment 003) = 10.
+    expect(rbacAmendmentKeys().size).toBe(10);
     const registryKeys = canonicalKeys();
     for (const route of EDGE_ROUTES) {
       const permissions = [route.permission, ...route.conditionalPermissions];
@@ -477,6 +484,7 @@ describe("6. scope and permission separation", () => {
     const used = new Set<string>([
       ...EDGE_ROUTES.map((r) => r.scope),
       ...RUNTIME_BOOTSTRAP_READ_SCOPES,
+      ...T002_INTAKE_SCOPES,
     ]);
     for (const scope of ADDITIVE_EDGE_SCOPES) {
       expect(

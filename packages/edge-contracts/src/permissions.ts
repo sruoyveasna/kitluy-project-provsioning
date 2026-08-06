@@ -51,6 +51,21 @@ export const EDGE_REGISTERED_PERMISSIONS = [
   "staff.sessions.close",
   /** "Operate the T1 POS Cashier / Intake shell" — session membership alone never grants it. */
   "pos.t1.use",
+  // Amendment 003 (KLD-2026-08-06-WS12-T002-001 §2/§3): T1 customer intake
+  // and consent. Quoted from docs/security/kitluy-suite-rbac-permission-
+  // registry-amendment-003-t1-customer-and-consent-v1.0.0.md. Booking-DRAFT
+  // permissions are deliberately NOT new keys: draft read reuses
+  // `laundry.bookings.read` and draft create/update/cancel reuse
+  // `laundry.bookings.create` (the recorded command-registry precedent —
+  // no synonymous duplicates, owner rule).
+  /** "Search and read scoped customer records at an authorized terminal". */
+  "customers.read",
+  /** "Create a minimal unverified customer during T1 intake". */
+  "customers.create",
+  /** "Record an explicit customer consent decision with immutable evidence". */
+  "customers.consent.record",
+  /** "Read Laundry Booking and custody status" — registry row 94; gates draft reads. */
+  "laundry.bookings.read",
 ] as const;
 
 export type EdgeRegisteredPermission = (typeof EDGE_REGISTERED_PERMISSIONS)[number];

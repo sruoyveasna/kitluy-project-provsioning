@@ -19,6 +19,7 @@
     "@kitluy/audit": "workspace:*",
     "@kitluy/device-identity": "workspace:*",
     "@kitluy/edge-contracts": "workspace:*",
+    "@kitluy/localization": "workspace:*",
     "@kitluy/event-contracts": "workspace:*",
     "@kitluy/money": "workspace:*",
     "@kitluy/observability": "workspace:*",

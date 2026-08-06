@@ -58,6 +58,13 @@ export const PERMISSION_STAFF_SESSIONS_REFRESH = "staff.sessions.refresh" as con
 export const PERMISSION_STAFF_SESSIONS_CLOSE = "staff.sessions.close" as const;
 export const PERMISSION_POS_T1_USE = "pos.t1.use" as const;
 
+/** T002 intake permissions (Amendment 003 + the recorded draft reuse). */
+export const PERMISSION_CUSTOMERS_READ = "customers.read" as const;
+export const PERMISSION_CUSTOMERS_CREATE = "customers.create" as const;
+export const PERMISSION_CONSENT_RECORD = "customers.consent.record" as const;
+export const PERMISSION_BOOKINGS_READ = "laundry.bookings.read" as const;
+export const PERMISSION_BOOKINGS_CREATE = "laundry.bookings.create" as const;
+
 // ---------------------------------------------------------------------------
 // Authority time (§1)
 // ---------------------------------------------------------------------------
@@ -667,6 +674,11 @@ async function effectivePermissions(
     PERMISSION_STAFF_SESSIONS_REFRESH,
     PERMISSION_STAFF_SESSIONS_CLOSE,
     PERMISSION_POS_T1_USE,
+    PERMISSION_CUSTOMERS_READ,
+    PERMISSION_CUSTOMERS_CREATE,
+    PERMISSION_CONSENT_RECORD,
+    PERMISSION_BOOKINGS_READ,
+    PERMISSION_BOOKINGS_CREATE,
   ];
   const held: string[] = [];
   for (const key of keys) {
@@ -919,6 +931,83 @@ async function loadOwnedOpenSession(
     return { ok: false, refusal: "SESSION_CLOSED", detail: "the session is closed" };
   }
   return { ok: true, row };
+}
+
+/** The authorized T1 intake context an intake route operates under. */
+export interface T1IntakeAuthority {
+  readonly sessionId: string;
+  readonly actorId: string;
+  readonly tenantId: string;
+  readonly digitalStoreId: string;
+  readonly locationId: string;
+  readonly profileCode: string;
+}
+
+export type T1IntakeAuthorization =
+  | { readonly ok: true; readonly authority: T1IntakeAuthority }
+  | {
+      readonly ok: false;
+      readonly refusal: SessionRefusal | "T1_NOT_AUTHORIZED";
+      readonly detail: string;
+    };
+
+/**
+ * The full T002 authorization stack for one intake request (owner decision
+ * §6): the presented session must exist, be OWNED by the authenticated
+ * terminal, be open and unexpired; the session's profile must be T1; the
+ * actor must hold `pos.t1.use` AND the route-specific permission — all
+ * re-resolved from the projection on EVERY request, nothing cached. The
+ * caller supplies only the session id and the route permission; scope,
+ * actor and terminal identity come from Hub relational authority.
+ */
+export async function authorizeT1IntakeSession(
+  client: HubClient,
+  input: {
+    readonly terminalDeviceId: string;
+    readonly sessionId: string;
+    readonly routePermission: string;
+  },
+): Promise<T1IntakeAuthorization> {
+  const owned = await loadOwnedOpenSession(client, input.sessionId, input.terminalDeviceId);
+  if (!owned.ok) return { ok: false, refusal: owned.refusal, detail: owned.detail };
+  const row = owned.row;
+  const nowRow = await client.query<{ now: Date }>(`select now() as now`);
+  const now = nowRow.rows[0];
+  if (now === undefined) {
+    return { ok: false, refusal: "SESSION_UNKNOWN", detail: "no transaction time" };
+  }
+  if (row.expires_at.getTime() <= now.now.getTime()) {
+    return { ok: false, refusal: "SESSION_EXPIRED", detail: "the session already expired" };
+  }
+  if (row.profile_code !== T1_PROFILE_CODE) {
+    return { ok: false, refusal: "T1_NOT_AUTHORIZED", detail: "the session is not a T1 session" };
+  }
+  const scope = sessionScope(row);
+  if ((await resolveGrant(client, scope, row.actor_id, PERMISSION_POS_T1_USE)) !== "allow") {
+    return {
+      ok: false,
+      refusal: "T1_NOT_AUTHORIZED",
+      detail: `${PERMISSION_POS_T1_USE} is not granted`,
+    };
+  }
+  if ((await resolveGrant(client, scope, row.actor_id, input.routePermission)) !== "allow") {
+    return {
+      ok: false,
+      refusal: "SESSION_PERMISSION_DENIED",
+      detail: `${input.routePermission} is not granted`,
+    };
+  }
+  return {
+    ok: true,
+    authority: {
+      sessionId: row.id,
+      actorId: row.actor_id,
+      tenantId: row.tenant_id,
+      digitalStoreId: row.digital_store_id,
+      locationId: row.location_id,
+      profileCode: row.profile_code,
+    },
+  };
 }
 
 export async function refreshStaffSession(

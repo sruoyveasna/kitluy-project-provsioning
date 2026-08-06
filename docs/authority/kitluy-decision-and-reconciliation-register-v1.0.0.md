@@ -2711,3 +2711,21 @@ pins the correct state permanently (direct-ACL + effective-execution
 probes; hub:db:test now 44 PASS), so the regression the report described
 cannot be reintroduced unnoticed. T1 session authorization re-verified
 green after the pin (routes suite 16/16).
+
+## KLD-2026-08-06-WS12-T002-001 — T1 customer, consent and Booking Draft (2026-08-06, WS-12-T002)
+
+**Status: OWNER-APPROVED — LOCKED.** Full record:
+`docs/decisions/kitluy-t1-customer-consent-and-booking-draft-owner-decision-v1.0.0.md`.
+Locks: phone as the Phase 1 LOOKUP input (E.164 `+855` normalization, raw
+preserved; customer ID stays the identity; no auto-merge ever; exact
+matches only within the authenticated Tenant + Digital Store; ambiguity is
+an explicit state), the five distinct consent categories with append-only
+evidence and no preselection, the Hub-authoritative mutable Booking DRAFT
+(immutable customer snapshot, monotonic version, lifecycle
+open/cancelled/expired/converted/superseded, NO conversion in T002 — a
+draft is not a Booking, price, capacity, payment or custody fact), the six
+offline truth labels, and the full per-request authorization stack.
+Registers `customers.read`/`customers.create`/`customers.consent.record`
+(Amendment 003, 114→117) with draft routes REUSING
+`laundry.bookings.read`/`.create`; supersedes the Group 1 REJECTED
+PATCH-draft shape with the T002 intake surface held outside EDGE_ROUTES.

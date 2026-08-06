@@ -1166,6 +1166,9 @@ importers:
       '@kitluy/event-contracts':
         specifier: workspace:*
         version: link:../../packages/event-contracts
+      '@kitluy/localization':
+        specifier: workspace:*
+        version: link:../../packages/localization
       '@kitluy/money':
         specifier: workspace:*
         version: link:../../packages/money

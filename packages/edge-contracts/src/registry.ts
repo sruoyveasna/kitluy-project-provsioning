@@ -173,9 +173,9 @@ export const REJECTED_ROUTE_SHAPES: readonly RejectedRouteShape[] = [
   {
     shape: "/edge/v1/laundry/bookings/drafts/{id}",
     source: "Edge Operations API v1.0.0 §9.2 (PATCH draft)",
-    replacedBy: null,
+    replacedBy: "/edge/v1/laundry/bookings/drafts/{draftId}",
     reason:
-      "Not part of the Group 1 approved catalogue. A draft-update route requires a separate owner decision; it must not be inferred.",
+      "Not part of the Group 1 approved catalogue. A draft-update route requires a separate owner decision; it must not be inferred. SUPERSEDED 2026-08-06: KLD-2026-08-06-WS12-T002-001 §4.1 is that owner decision — the PATCH/read/cancel draft routes are served from the T002 intake surface (EDGE_T002_INTAKE_ROUTES, held outside EDGE_ROUTES like the bootstrap reads), still never inferred from this Group 1 catalogue.",
   },
   {
     shape: "/edge/v1/laundry/bookings/{id}/finalize",

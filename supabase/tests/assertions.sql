@@ -287,8 +287,18 @@ begin
   -- evidence. The 58 -> 61 movement was Ruling 2's OWNER-APPROVED widening of
   -- the approval-reader surface; this one touches a different table for a
   -- different reason and is recorded rather than folded into that number.
-  if v_select <> 62 then
-    raise exception 'ASSERT FAIL: expected 62 SELECT policies, found %', v_select;
+  -- 62 -> 72 at group 0186 (WS-12-T002, KLD-2026-08-06-WS12-T002-001): the
+  -- kitluy_customer_ingestion_governor SELECT policies. Ten, all scoped
+  -- to that NOLOGIN governor and to exactly the tables its two ingestion
+  -- doors read: customers, customer_contacts, customer_store_relationships,
+  -- consent_grants, consent_withdrawals, consent_purposes,
+  -- consent_purpose_versions, tenants, digital_stores (scope existence
+  -- checks), plus its own customer_ingestion_effects journal. The governor
+  -- is granted to nobody; current_user can equal it only inside the doors
+  -- it owns. The WS12-T002 section proves the doors' behaviour and that
+  -- PUBLIC holds no EXECUTE on them.
+  if v_select <> 72 then
+    raise exception 'ASSERT FAIL: expected 72 SELECT policies, found %', v_select;
   end if;
 
   -- Cycle-5 schemas: kitluy_laundry 3 + kitluy_config 4 + kitluy_notifications 1
@@ -315,8 +325,30 @@ begin
                        'kitluy_laundry', 'kitluy_config', 'kitluy_storefront', 'kitluy_notifications',
                        'kitluy_orders', 'kitluy_payments', 'kitluy_finance')
     and cmd in ('INSERT', 'UPDATE', 'DELETE', 'ALL');
+  -- 0 -> 6 at group 0186 (WS-12-T002, KLD-2026-08-06-WS12-T002-001): the
+  -- FIRST write policies in these schemas, and deliberately so. The PC-RPC
+  -- model means writes-through-governed-RPCs; until 0186 the only write
+  -- path was the globally-BYPASSRLS service_role grant — exactly the
+  -- posture group 0140 moved the approval gate away from. The six are ALL
+  -- INSERT-only (never UPDATE/DELETE/ALL) and ALL scoped to the NOLOGIN,
+  -- granted-to-nobody kitluy_customer_ingestion_governor, reachable only
+  -- inside the two SECURITY DEFINER ingestion doors it owns: customers,
+  -- customer_contacts, customer_store_relationships, consent_grants,
+  -- consent_withdrawals, customer_ingestion_effects. The exactness checks
+  -- below refuse any seventh policy, any non-INSERT command and any other
+  -- grantee, so this widening cannot silently grow.
+  if v_writes <> 6 then
+    raise exception 'ASSERT FAIL: expected exactly the six 0186 governor INSERT policies (PC-RPC model), found %', v_writes;
+  end if;
+  select count(*) into v_writes from pg_policies
+  where schemaname in ('kitluy_core', 'kitluy_auth', 'kitluy_admin', 'kitluy_audit',
+                       'kitluy_laundry', 'kitluy_config', 'kitluy_storefront', 'kitluy_notifications',
+                       'kitluy_orders', 'kitluy_payments', 'kitluy_finance')
+    and cmd in ('INSERT', 'UPDATE', 'DELETE', 'ALL')
+    and (cmd <> 'INSERT'
+         or roles::text[] <> array['kitluy_customer_ingestion_governor']);
   if v_writes <> 0 then
-    raise exception 'ASSERT FAIL: expected 0 write/ALL policies (PC-RPC model), found %', v_writes;
+    raise exception 'ASSERT FAIL: a write policy exists beyond the six 0186 governor INSERTs, found % stray', v_writes;
   end if;
 
   select count(*) into v_anon from pg_policies
@@ -18076,3 +18108,191 @@ $section57$;
 
 
 select 'assertions complete: groups 0010-0153 structural contract holds (incl. WS-11-T003 Step 4 Phase C — RC-022 spendability census CLOSED; governed emergency 0150–0153; RevocationGateway ships in @kitluy/device-identity) + WS-11-T005 fleet health, support access and governed containment (0177) + WS-11-T006-P01 hub replacement authority (0179) + WS-11-T006-P03 signed release authority (0180)' as result;
+
+
+
+
+
+-- ===========================================================================
+-- WS12-T002: group 0186 — T1 customer and consent-decision ingestion doors.
+-- Idempotency, collision-as-conflict, policy-version fail-closed, privacy
+-- pairing, withdrawal preservation, and the privilege boundary.
+-- The section is TRANSACTIONAL (begin/rollback): its probe customer must
+-- not survive into the RLS suite's exact WS-06 censuses.
+-- ===========================================================================
+begin;
+do $$
+declare
+  v_tenant  uuid := '00000000-0000-4000-8000-000000000011';
+  v_store   uuid := '00000000-0000-4000-8000-000000000015';
+  v_key1    text := 'kh1.' || gen_random_uuid() || '.1';
+  v_key2    text := 'kh1.' || gen_random_uuid() || '.1';
+  v_key3    text := 'kh1.' || gen_random_uuid() || '.1';
+  v_key4    text := 'kh1.' || gen_random_uuid() || '.1';
+  v_key5    text := 'kh1.' || gen_random_uuid() || '.1';
+  v_key6    text := 'kh1.' || gen_random_uuid() || '.1';
+  v_key7    text := 'kh1.' || gen_random_uuid() || '.1';
+  v_hash    char(64) := repeat('a', 64);
+  v_hash2   char(64) := repeat('b', 64);
+  v_result  jsonb;
+  v_cust    uuid;
+  v_grant   uuid;
+  v_refused int := 0;
+begin
+  execute format('grant kitluy_test_harness to %I', current_user);
+  set role kitluy_test_harness;
+
+  -- APPLIED: a minimal unverified customer lands once, with an UNVERIFIED
+  -- primary phone contact and a store relationship.
+  v_result := kitluy_core.ingest_local_customer_v1(
+    v_key1, v_hash, v_tenant, v_store, 'T002 Ingest Probe',
+    '+85577001122', '077 001 122', 'km-KH', 't1_intake', gen_random_uuid());
+  if v_result ->> 'outcome' <> 'APPLIED' then
+    raise exception 'ASSERT FAIL: customer ingestion did not apply: %', v_result;
+  end if;
+  v_cust := (v_result ->> 'cloudCustomerId')::uuid;
+  reset role;
+  if not exists (select 1 from kitluy_core.customer_contacts
+                  where customer_id = v_cust and type = 'PHONE'
+                    and status = 'UNVERIFIED' and verified_at is null) then
+    raise exception 'ASSERT FAIL: the ingested phone contact is not UNVERIFIED';
+  end if;
+  if not exists (select 1 from kitluy_core.customer_store_relationships
+                  where customer_id = v_cust and digital_store_id = v_store) then
+    raise exception 'ASSERT FAIL: no store relationship was recorded';
+  end if;
+  set role kitluy_test_harness;
+
+  -- DUPLICATE_IGNORED: replay returns the original verdict, one effect.
+  v_result := kitluy_core.ingest_local_customer_v1(
+    v_key1, v_hash, v_tenant, v_store, 'T002 Ingest Probe',
+    '+85577001122', '077 001 122', 'km-KH', 't1_intake', gen_random_uuid());
+  if v_result ->> 'outcome' <> 'DUPLICATE_IGNORED'
+     or (v_result ->> 'cloudCustomerId')::uuid <> v_cust then
+    raise exception 'ASSERT FAIL: customer replay was not a duplicate no-op: %', v_result;
+  end if;
+
+  -- Conflicting idempotency (same key, different payload) refuses.
+  begin
+    v_result := kitluy_core.ingest_local_customer_v1(
+      v_key1, v_hash2, v_tenant, v_store, 'Another Person',
+      null, null, 'km-KH', 't1_intake', gen_random_uuid());
+    raise exception 'ASSERT FAIL: conflicting effect-key reuse was accepted';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-CUSTOMER-INGEST-IDEMPOTENCY%' then
+      raise exception 'ASSERT FAIL: wrong idempotency sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+
+  -- ACTIVE normalized-phone collision => CONFLICT verdict, NO customer
+  -- created, NO identity disclosed (seeded ACTIVE contact +85512345678).
+  v_result := kitluy_core.ingest_local_customer_v1(
+    v_key2, v_hash, v_tenant, v_store, 'Collision Probe',
+    '+85512345678', '012 345 678', 'km-KH', 't1_intake', gen_random_uuid());
+  if v_result ->> 'outcome' <> 'CONFLICT'
+     or v_result ? 'cloudCustomerId' then
+    raise exception 'ASSERT FAIL: phone collision did not yield a bare CONFLICT: %', v_result;
+  end if;
+
+  -- Consent: granted applies against the seeded v1 policy version.
+  v_result := kitluy_core.ingest_consent_decision_v1(
+    v_key3, v_hash, v_tenant, v_cust, 'sms_marketing', 1, 'granted',
+    't1_terminal', 'staff_assisted', 'hub-evidence-ref-1', gen_random_uuid());
+  if v_result ->> 'outcome' <> 'APPLIED' or v_result ->> 'consentGrantId' is null then
+    raise exception 'ASSERT FAIL: consent grant did not apply: %', v_result;
+  end if;
+  v_grant := (v_result ->> 'consentGrantId')::uuid;
+
+  -- Replay returns the original outcome (one grant only).
+  v_result := kitluy_core.ingest_consent_decision_v1(
+    v_key3, v_hash, v_tenant, v_cust, 'sms_marketing', 1, 'granted',
+    't1_terminal', 'staff_assisted', 'hub-evidence-ref-1', gen_random_uuid());
+  if v_result ->> 'outcome' <> 'DUPLICATE_IGNORED' then
+    raise exception 'ASSERT FAIL: consent replay re-applied: %', v_result;
+  end if;
+
+  -- Withdrawal creates a NEW fact and preserves the grant row.
+  v_result := kitluy_core.ingest_consent_decision_v1(
+    v_key4, v_hash, v_tenant, v_cust, 'sms_marketing', 1, 'withdrawn',
+    't1_terminal', 'staff_assisted', 'hub-evidence-ref-2', gen_random_uuid());
+  if v_result ->> 'outcome' <> 'APPLIED' then
+    raise exception 'ASSERT FAIL: withdrawal did not apply: %', v_result;
+  end if;
+  reset role;
+  if not exists (select 1 from kitluy_core.consent_grants where id = v_grant) then
+    raise exception 'ASSERT FAIL: withdrawal erased the grant evidence';
+  end if;
+  if not exists (select 1 from kitluy_core.consent_withdrawals where consent_grant_id = v_grant) then
+    raise exception 'ASSERT FAIL: no withdrawal fact exists';
+  end if;
+  set role kitluy_test_harness;
+
+  -- Withdrawal with nothing left to withdraw is recorded, non-destructive.
+  v_result := kitluy_core.ingest_consent_decision_v1(
+    v_key5, v_hash, v_tenant, v_cust, 'sms_marketing', 1, 'withdrawn',
+    't1_terminal', 'staff_assisted', 'hub-evidence-ref-3', gen_random_uuid());
+  if v_result ->> 'outcome' <> 'WITHDRAWN_NO_GRANT' then
+    raise exception 'ASSERT FAIL: repeat withdrawal was not WITHDRAWN_NO_GRANT: %', v_result;
+  end if;
+
+  -- Privacy acknowledgement pairs ONLY with the privacy purpose.
+  begin
+    v_result := kitluy_core.ingest_consent_decision_v1(
+      v_key6, v_hash, v_tenant, v_cust, 'sms_marketing', 1, 'acknowledged',
+      't1_terminal', 'staff_assisted', 'hub-evidence-ref-4', gen_random_uuid());
+    raise exception 'ASSERT FAIL: acknowledged was accepted for a marketing purpose';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    v_refused := v_refused + 1;
+  end;
+
+  -- An unpublished policy version fails CLOSED (owner values pending).
+  begin
+    v_result := kitluy_core.ingest_consent_decision_v1(
+      v_key7, v_hash, v_tenant, v_cust, 'sms_marketing', 99, 'granted',
+      't1_terminal', 'staff_assisted', 'hub-evidence-ref-5', gen_random_uuid());
+    raise exception 'ASSERT FAIL: an unknown policy version was accepted';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-CONSENT-INGEST-POLICY-VERSION-UNKNOWN%' then
+      raise exception 'ASSERT FAIL: wrong policy-version sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+
+  reset role;
+  execute format('revoke kitluy_test_harness from %I', current_user);
+
+  -- Privilege boundary: PUBLIC holds no EXECUTE; the journal is append-only.
+  if has_function_privilege('public',
+      'kitluy_core.ingest_local_customer_v1(text,text,uuid,uuid,text,text,text,text,text,uuid)'::regprocedure,
+      'execute') then
+    raise exception 'ASSERT FAIL: PUBLIC can execute the customer ingestion door';
+  end if;
+  begin
+    delete from kitluy_core.customer_ingestion_effects where effect_key = v_key1;
+    raise exception 'ASSERT FAIL: the ingestion journal accepted a delete';
+  exception when others then
+    -- Refused either by the missing DELETE grant (42501) or, for a caller
+    -- that somehow held one, by the append-only trigger — both are the
+    -- fail-closed answer.
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    v_refused := v_refused + 1;
+  end;
+
+  if v_refused <> 4 then
+    raise exception 'ASSERT FAIL: expected 4 refused 0186 probes, got %', v_refused;
+  end if;
+  raise notice 'PASS ws12-t002-ingestion: minimal customer applied once (UNVERIFIED contact, store relationship), replay duplicate-ignored, conflicting key refused, ACTIVE-phone collision a bare CONFLICT, consent grant/withdrawal append-only with evidence preserved, unpublished policy versions fail closed, PUBLIC excluded, journal append-only (0186)';
+exception when others then
+  begin
+    reset role;
+    execute format('revoke kitluy_test_harness from %I', current_user);
+  exception when others then null;
+  end;
+  raise;
+end $$;
+
+rollback;

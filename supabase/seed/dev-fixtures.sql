@@ -1074,3 +1074,20 @@ values
    'CAPTURED', 'ATK-PAY-0001', '2026-07-27T08:05:00Z',
    '00000000-0000-4000-8000-000000000006')
 on conflict do nothing;
+
+-- ---------------------------------------------------------------------------
+-- Case 17 (WS-12-T002): DEV v1 policy versions for the five 0186 consent
+-- purposes. Notice text is SYNTHETIC fixture material — the production
+-- versions are owner legal values and are never seeded (0186 §4 guard
+-- refuses versions arriving from a migration).
+-- ---------------------------------------------------------------------------
+insert into kitluy_core.consent_purpose_versions
+  (consent_purpose_id, version, policy_ref, notice_text, effective_from)
+select p.id, 1, 'DEMO-' || upper(p.purpose_key),
+       'Demo notice v1 (fixture) for ' || p.purpose_key,
+       '2026-08-06T00:00:00Z'
+  from kitluy_core.consent_purposes p
+ where p.purpose_key in ('privacy_notice_acknowledgement', 'operational_communication',
+                         'sms_marketing', 'telegram_marketing', 'email_marketing')
+   and not exists (select 1 from kitluy_core.consent_purpose_versions v
+                    where v.consent_purpose_id = p.id and v.version = 1);

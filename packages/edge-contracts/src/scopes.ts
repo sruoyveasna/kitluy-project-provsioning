@@ -79,6 +79,17 @@ export const ADDITIVE_EDGE_SCOPES = [
   "edge.runtime.eligibility_read",
   /** Read the current signed configuration delivery for this terminal (§3). */
   "edge.configuration.read",
+  // KLD-2026-08-06-WS12-T002-001: T1 customer intake. `edge.customers.search`
+  // and `edge.customers.create` are NAMED by Edge Ops API §9.2 and absent
+  // from registry §5; the read and consent scopes are new keys.
+  /** Scoped exact-match customer search (§2 of the T002 decision). */
+  "edge.customers.search",
+  /** Read one scoped customer record. */
+  "edge.customers.read",
+  /** Create a minimal unverified customer at T1 (§2.6). */
+  "edge.customers.create",
+  /** Record an explicit consent decision with immutable evidence (§3). */
+  "edge.customers.consent_record",
 ] as const;
 
 export const EDGE_API_SCOPES = [...REGISTERED_EDGE_SCOPES, ...ADDITIVE_EDGE_SCOPES] as const;
@@ -93,6 +104,20 @@ export const RUNTIME_BOOTSTRAP_READ_SCOPES = [
   "edge.runtime.time_read",
   "edge.runtime.eligibility_read",
   "edge.configuration.read",
+] as const;
+
+/**
+ * Scopes consumed by the owner-approved T002 intake surface
+ * (`EDGE_T002_INTAKE_ROUTES`, KLD-2026-08-06-WS12-T002-001), held outside
+ * the Group 1 registry like the bootstrap reads. The draft routes consume
+ * the REGISTERED `edge.bookings.create` / `edge.bookings.update_draft`
+ * scopes (§5 — update_draft finally gains its consumer).
+ */
+export const T002_INTAKE_SCOPES = [
+  "edge.customers.search",
+  "edge.customers.read",
+  "edge.customers.create",
+  "edge.customers.consent_record",
 ] as const;
 
 export type EdgeApiScope = (typeof EDGE_API_SCOPES)[number];

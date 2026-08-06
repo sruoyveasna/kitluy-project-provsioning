@@ -203,9 +203,11 @@ describe("@kitluy/rbac", () => {
   it("reproduces the canonical registry exactly", () => {
     // 107 v1.0.0 keys + 2 from Amendment 001 (device containment,
     // WS-11-T005-P02 owner package 2026-08-06) + 5 from Amendment 002
-    // (T1 staff sessions, KLD-2026-08-06-WS12-T001-EDGE-BOOTSTRAP-001 §4).
-    expect(CANONICAL_PERMISSION_KEYS).toHaveLength(114);
-    expect(new Set(CANONICAL_PERMISSION_KEYS).size).toBe(114);
+    // (T1 staff sessions, KLD-2026-08-06-WS12-T001-EDGE-BOOTSTRAP-001 §4)
+    // + 3 from Amendment 003 (T1 customer and consent,
+    // KLD-2026-08-06-WS12-T002-001 §2/§3).
+    expect(CANONICAL_PERMISSION_KEYS).toHaveLength(117);
+    expect(new Set(CANONICAL_PERMISSION_KEYS).size).toBe(117);
     expect(CANONICAL_PERMISSION_KEYS).toContain("device.containment.apply");
     expect(CANONICAL_PERMISSION_KEYS).toContain("device.containment.clear");
     expect(CANONICAL_PERMISSION_KEYS).toContain("staff.sessions.open");

@@ -9,7 +9,7 @@
  *     registry-amendment-001-device-containment-v1.0.0.md) and the 5 keys
  *     of Amendment 002 (docs/security/kitluy-suite-rbac-permission-
  *     registry-amendment-002-t1-staff-sessions-v1.0.0.md,
- *     KLD-2026-08-06-WS12-T001-EDGE-BOOTSTRAP-001 §4) = 114.
+ *     KLD-2026-08-06-WS12-T001-EDGE-BOOTSTRAP-001 §4) + 3 (Amendment 003, KLD-2026-08-06-WS12-T002-001 §2/§3) = 117.
  *   - Owner decision KLD-2026-07-26-002 Group 3 (APPROVED, KL-DEC-001):
  *     lowercase dot-separated grammar, immutable released keys, unknown or
  *     deprecated keys fail closed, production wildcards prohibited.
@@ -122,7 +122,7 @@ export function isValidPermissionKey(key: string): boolean {
  * Registry v1.0.0 (column `permission`, verbatim and in registry order) plus
  * the 2 keys of Amendment 001 (device containment, WS-11-T005-P02 owner
  * package 2026-08-06) plus the 5 keys of Amendment 002 (T1 staff sessions,
- * KLD-2026-08-06-WS12-T001-EDGE-BOOTSTRAP-001 §4) = 114. Released keys are
+ * KLD-2026-08-06-WS12-T001-EDGE-BOOTSTRAP-001 §4) + 3 (Amendment 003, KLD-2026-08-06-WS12-T002-001 §2/§3) = 117. Released keys are
  * immutable; additions and deprecations go through
  * `rbac.permission_registry_manage` (A4_OWNER_SECURITY) — each amendment is
  * exactly such an owner ruling.
@@ -221,6 +221,15 @@ export const CANONICAL_PERMISSION_KEYS: readonly PermissionKey[] = [
   "staff.sessions.refresh",
   "staff.sessions.close",
   "pos.t1.use",
+  // Amendment 003 (KLD-2026-08-06-WS12-T002-001 §2/§3, WS-12-T002,
+  // 2026-08-06): T1 customer intake and consent. Owner identifiers recorded
+  // VERBATIM. Booking-DRAFT permissions are deliberately NOT new keys —
+  // draft read reuses `laundry.bookings.read`, draft mutations reuse
+  // `laundry.bookings.create` (the recorded command-registry precedent).
+  // No phone-verification key exists: no T1 path may mark a phone verified.
+  "customers.read",
+  "customers.create",
+  "customers.consent.record",
   "support.ticket.manage",
   "support.evidence.read",
   "support.consent_session.start",

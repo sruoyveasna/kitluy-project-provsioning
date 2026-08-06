@@ -118,6 +118,18 @@ user can never select or override Tenant, Digital Store, Location, Hub,
 environment, terminal profile or assignment generation. BLK-005/BLK-006
 stay fail-closed; the T1–T4 model of §2 is unchanged.
 
+> **2026-08-06 (T002 close) — WS-12-T002 PARTIAL — SUCCESSOR PACKAGE
+> REQUIRED.** Stage A first: the resolver PUBLIC-execute report was REFUTED
+> and retracted (0025 already held the discipline; §28b pins it). T002
+> delivered the customer/consent/draft AUTHORITY end to end in dev — Hub
+> 0040, cloud 0186 (the first governed doors over WS-06), eight served
+> intake routes under the full §6 stack, Amendment 003, durable outbox
+> facts — all live-proven (Hub 45 PASS, cloud 243 PASS incl. RLS, routes
+> 20/20, hub-agent 388). The fence held: no pricing, payment, custody or
+> conversion; a draft is not a Booking; no auto-merge anywhere; consent is
+> never a preselected boolean. PARTIAL: the §7 T1 interface and the
+> cloud-consumer wiring are the successor package. T003 NOT STARTED.
+
 > **2026-08-06 (P02 close) — WS-12-T001 COMPLETE — IMPLEMENTED-IN-DEV.**
 > The successor package delivered the real Hub bootstrap contract
 > (KLD-2026-08-06-WS12-T001-EDGE-BOOTSTRAP-001): the three `/edge/v1`

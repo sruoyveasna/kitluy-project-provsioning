@@ -109,3 +109,64 @@ export const EDGE_RUNTIME_BOOTSTRAP_READ_PATHS = [
   EDGE_ROUTE_RUNTIME_ELIGIBILITY,
   EDGE_ROUTE_CONFIGURATION_CURRENT,
 ] as const;
+
+// ---------------------------------------------------------------------------
+// T1 customer intake and Booking Draft routes
+//
+// OWNER-APPROVED by KLD-2026-08-06-WS12-T002-001 (LOCKED). Held OUTSIDE
+// `EDGE_ROUTES` (the bootstrap-read precedent) so the Group 1 approved-route
+// count stays exact. Repository-conventional shapes: customers are NEUTRAL
+// CORE, so the customer surface lives in the generic namespace (Edge Ops API
+// §9.2 names `edge.customers.search`/`.create`); the Booking Draft is
+// LAUNDRY, so its routes live under the existing approved draft resource
+// `/edge/v1/laundry/bookings/drafts` — the generic `/edge/v1/booking-drafts`
+// placement would repeat the exact namespace violation the Group 1 rejected-
+// shape list records. The PATCH draft shape, rejected in Group 1 as
+// "requires a separate owner decision", is SUPERSEDED by the T002 decision
+// (§4.1 approves create/read/edit/cancel of an OPEN draft); the rejected-
+// shape entry carries the supersession note.
+//
+// Draft-route permissions reuse `laundry.bookings.read` (read) and
+// `laundry.bookings.create` (create/update/cancel — the recorded
+// command-registry precedent); customer routes carry the Amendment 003 keys.
+// ---------------------------------------------------------------------------
+
+export const EDGE_ROUTE_CUSTOMERS_SEARCH = "/edge/v1/customers/search";
+export const EDGE_ROUTE_CUSTOMERS_CREATE = "/edge/v1/customers";
+export const EDGE_ROUTE_CUSTOMER_READ_TEMPLATE = "/edge/v1/customers/{customerId}";
+export const EDGE_ROUTE_CUSTOMER_CONSENT_TEMPLATE =
+  "/edge/v1/customers/{customerId}/consent-decisions";
+export const EDGE_ROUTE_BOOKING_DRAFT_CREATE = "/edge/v1/laundry/bookings/drafts";
+export const EDGE_ROUTE_BOOKING_DRAFT_READ_TEMPLATE = "/edge/v1/laundry/bookings/drafts/{draftId}";
+export const EDGE_ROUTE_BOOKING_DRAFT_UPDATE_TEMPLATE =
+  "/edge/v1/laundry/bookings/drafts/{draftId}";
+export const EDGE_ROUTE_BOOKING_DRAFT_CANCEL_TEMPLATE =
+  "/edge/v1/laundry/bookings/drafts/{draftId}/cancel";
+
+/** The owner-approved T002 intake surface (T002 decision §5/§6). */
+export const EDGE_T002_INTAKE_ROUTES = [
+  { method: "GET", path: EDGE_ROUTE_CUSTOMERS_SEARCH, permission: "customers.read" },
+  { method: "GET", path: EDGE_ROUTE_CUSTOMER_READ_TEMPLATE, permission: "customers.read" },
+  { method: "POST", path: EDGE_ROUTE_CUSTOMERS_CREATE, permission: "customers.create" },
+  {
+    method: "POST",
+    path: EDGE_ROUTE_CUSTOMER_CONSENT_TEMPLATE,
+    permission: "customers.consent.record",
+  },
+  {
+    method: "GET",
+    path: EDGE_ROUTE_BOOKING_DRAFT_READ_TEMPLATE,
+    permission: "laundry.bookings.read",
+  },
+  { method: "POST", path: EDGE_ROUTE_BOOKING_DRAFT_CREATE, permission: "laundry.bookings.create" },
+  {
+    method: "PATCH",
+    path: EDGE_ROUTE_BOOKING_DRAFT_UPDATE_TEMPLATE,
+    permission: "laundry.bookings.create",
+  },
+  {
+    method: "POST",
+    path: EDGE_ROUTE_BOOKING_DRAFT_CANCEL_TEMPLATE,
+    permission: "laundry.bookings.create",
+  },
+] as const;

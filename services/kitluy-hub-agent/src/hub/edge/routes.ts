@@ -66,7 +66,29 @@ import {
   readCurrentConfigurationDelivery,
   readRuntimeEligibility,
   refreshStaffSession,
+  authorizeT1IntakeSession,
+  PERMISSION_CUSTOMERS_READ,
+  PERMISSION_CUSTOMERS_CREATE,
+  PERMISSION_CONSENT_RECORD,
+  PERMISSION_BOOKINGS_READ,
+  PERMISSION_BOOKINGS_CREATE,
+  type T1IntakeAuthority,
 } from "./runtime-bootstrap.js";
+import {
+  CONSENT_PURPOSE_KEYS,
+  DRAFT_CANCEL_REASONS,
+  IntakeRefusalError,
+  cancelBookingDraft,
+  createBookingDraft,
+  readBookingDraft,
+  readCustomer,
+  recordConsentDecision,
+  registerLocalCustomer,
+  searchCustomersByPhone,
+  sha256Hex,
+  updateBookingDraft,
+} from "../t1-intake.js";
+import { normalizeCambodianPhone } from "@kitluy/localization";
 import type { EdgeDiscoveryAuthority } from "./discovery.js";
 import type { EdgeRequest, EdgeResponse, EdgeRequestHandler } from "./transport.js";
 
@@ -96,6 +118,19 @@ export const EDGE_CONFIGURATION_CURRENT_PATH = "/edge/v1/configuration/current";
 export const EDGE_SESSIONS_OPEN_PATH = "/edge/v1/sessions/open";
 export const EDGE_SESSIONS_REFRESH_PATH = "/edge/v1/sessions/refresh";
 export const EDGE_SESSIONS_CLOSE_PATH = "/edge/v1/sessions/close";
+
+// T1 intake surface (KLD-2026-08-06-WS12-T002-001 §5; literals mirrored in
+// @kitluy/edge-contracts EDGE_T002_INTAKE_ROUTES). Every route additionally
+// demands an ACTIVE staff session (x-kitluy-session-id header), the T1
+// profile, `pos.t1.use` AND its route-specific permission — the full §6
+// stack, re-derived per request in `authorizeT1IntakeSession`.
+export const EDGE_CUSTOMERS_SEARCH_PATH = "/edge/v1/customers/search";
+export const EDGE_CUSTOMERS_PATH = "/edge/v1/customers";
+export const EDGE_BOOKING_DRAFTS_PATH = "/edge/v1/laundry/bookings/drafts";
+/** Route-level bound: intake bodies are small structured text. */
+export const MAX_INTAKE_BODY_BYTES = 8 * 1024;
+/** The header carrying the staff session id on every T002 intake request. */
+export const INTAKE_SESSION_HEADER = "x-kitluy-session-id";
 
 // ---------------------------------------------------------------------------
 // The cloud activation gateway port (§5)
@@ -242,6 +277,18 @@ const CANONICAL_ERROR: Readonly<Record<string, KitluyErrorCode>> = {
   STAFF_DISABLED: "AUTHENTICATION_REQUIRED",
   STAFF_CREDENTIAL_INVALID: "AUTHENTICATION_REQUIRED",
   STAFF_SCOPE_MISMATCH: "SCOPE_PERMISSION_DENIED",
+  // WS-12-T002 intake (closed vocabulary; scoped-missing merges with
+  // cross-scope so no row-existence oracle exists).
+  CUSTOMER_UNKNOWN: "RESOURCE_NOT_FOUND",
+  DRAFT_UNKNOWN: "RESOURCE_NOT_FOUND",
+  DRAFT_NOT_OPEN: "RESOURCE_VERSION_CONFLICT",
+  DRAFT_VERSION_STALE: "RESOURCE_VERSION_CONFLICT",
+  CUSTOMER_IDEMPOTENCY_CONFLICT: "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST",
+  CONSENT_IDEMPOTENCY_CONFLICT: "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST",
+  DRAFT_IDEMPOTENCY_CONFLICT: "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST",
+  REQUEST_INVALID_SHAPE: "VALIDATION_FAILED",
+  PHONE_INVALID: "VALIDATION_FAILED",
+  T1_NOT_AUTHORIZED: "SCOPE_PERMISSION_DENIED",
   STAFF_PROFILE_NOT_AUTHORIZED: "PROFILE_NOT_ALLOWED",
   SESSION_PERMISSION_DENIED: "SCOPE_PERMISSION_DENIED",
   SESSION_OCCUPIED: "RESOURCE_VERSION_CONFLICT",
@@ -481,6 +528,15 @@ type Matched =
   | {
       readonly route: "pairing-proof" | "pairing-complete" | "pairing-receipt";
       readonly sessionId: string;
+    }
+  | { readonly route: "customers-search" | "customers-create" | "drafts-create" }
+  | {
+      readonly route: "customers-read" | "customers-consent";
+      readonly customerId: string;
+    }
+  | {
+      readonly route: "drafts-read" | "drafts-update" | "drafts-cancel";
+      readonly draftId: string;
     };
 
 function matchRoute(method: string, path: string): Matched | "METHOD_NOT_ALLOWED" | null {
@@ -517,6 +573,36 @@ function matchRoute(method: string, path: string): Matched | "METHOD_NOT_ALLOWED
   }
   if (clean === EDGE_SESSIONS_CLOSE_PATH) {
     return method === "POST" ? { route: "sessions-close" } : "METHOD_NOT_ALLOWED";
+  }
+  // WS-12-T002 intake surface (KLD-2026-08-06-WS12-T002-001 §5).
+  if (clean === EDGE_CUSTOMERS_SEARCH_PATH) {
+    return method === "GET" ? { route: "customers-search" } : "METHOD_NOT_ALLOWED";
+  }
+  if (clean === EDGE_CUSTOMERS_PATH) {
+    return method === "POST" ? { route: "customers-create" } : "METHOD_NOT_ALLOWED";
+  }
+  const customer = /^\/edge\/v1\/customers\/([^/]+)(?:\/(consent-decisions))?$/.exec(clean);
+  if (customer !== null) {
+    const customerId = customer[1] ?? "";
+    if (!UUID.test(customerId)) return null;
+    if (customer[2] === "consent-decisions") {
+      return method === "POST" ? { route: "customers-consent", customerId } : "METHOD_NOT_ALLOWED";
+    }
+    return method === "GET" ? { route: "customers-read", customerId } : "METHOD_NOT_ALLOWED";
+  }
+  if (clean === EDGE_BOOKING_DRAFTS_PATH) {
+    return method === "POST" ? { route: "drafts-create" } : "METHOD_NOT_ALLOWED";
+  }
+  const draft = /^\/edge\/v1\/laundry\/bookings\/drafts\/([^/]+)(?:\/(cancel))?$/.exec(clean);
+  if (draft !== null) {
+    const draftId = draft[1] ?? "";
+    if (!UUID.test(draftId)) return null;
+    if (draft[2] === "cancel") {
+      return method === "POST" ? { route: "drafts-cancel", draftId } : "METHOD_NOT_ALLOWED";
+    }
+    if (method === "GET") return { route: "drafts-read", draftId };
+    if (method === "PATCH") return { route: "drafts-update", draftId };
+    return "METHOD_NOT_ALLOWED";
   }
   const sub =
     /^\/edge\/v1\/terminal-pairing\/sessions\/([^/]+)\/(terminal-proof|complete|receipt)$/.exec(
@@ -621,6 +707,15 @@ export function createEdgeTerminalRouter(deps: EdgeTerminalRouterDeps): EdgeRequ
         "sessions-open",
         "sessions-refresh",
         "sessions-close",
+        // T002: every intake route refuses query strings EXCEPT the search
+        // read, whose single bounded `phone` parameter is parsed explicitly.
+        "customers-create",
+        "customers-read",
+        "customers-consent",
+        "drafts-create",
+        "drafts-read",
+        "drafts-update",
+        "drafts-cancel",
       ];
       if (QUERYLESS_ROUTES.includes(matched.route) && queryString !== "") {
         return finish(
@@ -832,6 +927,27 @@ export function createEdgeTerminalRouter(deps: EdgeTerminalRouterDeps): EdgeRequ
               outcome.result,
             );
           }
+          case "customers-search":
+          case "customers-read":
+          case "customers-create":
+          case "customers-consent":
+          case "drafts-create":
+          case "drafts-read":
+          case "drafts-update":
+          case "drafts-cancel":
+            return finish(
+              operation,
+              await handleT1Intake(
+                deps,
+                terminal,
+                matched,
+                request,
+                body,
+                queryString,
+                correlationId,
+              ),
+              "HANDLED",
+            );
           case "activation-challenges":
             return finish(
               operation,
@@ -1431,4 +1547,335 @@ async function handleTerminalHealthHeartbeat(
     status: 200,
     body: { result: outcome.result, correlationId, heartbeat: outcome },
   };
+}
+
+// ---------------------------------------------------------------------------
+// WS-12-T002 — the T1 intake surface (KLD-2026-08-06-WS12-T002-001).
+// ---------------------------------------------------------------------------
+
+const INTAKE_ROUTE_PERMISSION: Readonly<Record<string, string>> = {
+  "customers-search": PERMISSION_CUSTOMERS_READ,
+  "customers-read": PERMISSION_CUSTOMERS_READ,
+  "customers-create": PERMISSION_CUSTOMERS_CREATE,
+  "customers-consent": PERMISSION_CONSENT_RECORD,
+  "drafts-read": PERMISSION_BOOKINGS_READ,
+  "drafts-create": PERMISSION_BOOKINGS_CREATE,
+  "drafts-update": PERMISSION_BOOKINGS_CREATE,
+  "drafts-cancel": PERMISSION_BOOKINGS_CREATE,
+};
+
+const INTAKE_MUTATIONS: readonly string[] = [
+  "customers-create",
+  "customers-consent",
+  "drafts-create",
+  "drafts-update",
+  "drafts-cancel",
+];
+
+const NOTES_MAX = 2000;
+const NAME_MAX = 200;
+
+async function handleT1Intake(
+  deps: EdgeTerminalRouterDeps,
+  terminal: { readonly terminalDeviceId: string; readonly activated: boolean },
+  matched:
+    | { readonly route: "customers-search" | "customers-create" | "drafts-create" }
+    | { readonly route: "customers-read" | "customers-consent"; readonly customerId: string }
+    | {
+        readonly route: "drafts-read" | "drafts-update" | "drafts-cancel";
+        readonly draftId: string;
+      },
+  request: EdgeRequest,
+  body: Record<string, unknown> | null,
+  queryString: string,
+  correlationId: string,
+): Promise<EdgeResponse> {
+  if (!terminal.activated) return refusal("ACTIVATION_REQUIRED", correlationId);
+  if (Buffer.byteLength(request.rawBody ?? "", "utf8") > MAX_INTAKE_BODY_BYTES) {
+    return invalid(correlationId, "the request body exceeds the intake bound");
+  }
+
+  // §6: the caller supplies NO authoritative scope, staff identity, terminal
+  // identity or timestamps — only the session id (header) and route inputs.
+  const sessionHeader = request.headers[INTAKE_SESSION_HEADER];
+  const sessionId = typeof sessionHeader === "string" ? sessionHeader : "";
+  if (!UUID.test(sessionId)) {
+    return invalid(correlationId, `a ${INTAKE_SESSION_HEADER} header is required`);
+  }
+  const routePermission = INTAKE_ROUTE_PERMISSION[matched.route];
+  if (routePermission === undefined) return refusal("INTERNAL_ERROR", correlationId);
+
+  const authorization = await withHubTransaction(
+    deps.pool,
+    (client) =>
+      authorizeT1IntakeSession(client, {
+        terminalDeviceId: terminal.terminalDeviceId,
+        sessionId,
+        routePermission,
+      }),
+    HUB_RUNTIME_ROLE,
+  );
+  if (!authorization.ok) return refusal(authorization.refusal, correlationId);
+  const authority: T1IntakeAuthority = authorization.authority;
+  const intakeBody: Record<string, unknown> = body ?? {};
+
+  const isMutation = INTAKE_MUTATIONS.includes(matched.route);
+  let requestKey = "";
+  let requestHash = "";
+  if (isMutation) {
+    const key = idempotencyKeyFrom(request.headers);
+    if (key === null) {
+      return invalid(correlationId, "an Idempotency-Key header is required");
+    }
+    requestKey = key;
+    requestHash = sha256Hex(
+      JSON.stringify({
+        m: request.method,
+        p: request.path.split("?")[0] ?? "",
+        b: body,
+        t: terminal.terminalDeviceId,
+        s: sessionId,
+      }),
+    );
+  }
+
+  try {
+    switch (matched.route) {
+      case "customers-search": {
+        // The ONE route that accepts a query: exactly `phone=`, bounded.
+        const params = new URLSearchParams(queryString);
+        const keys = [...params.keys()];
+        if (keys.length !== 1 || keys[0] !== "phone") {
+          return invalid(correlationId, "exactly one `phone` query parameter is required");
+        }
+        const raw = params.get("phone") ?? "";
+        if (raw.length < 3 || raw.length > 32) {
+          return refusal("PHONE_INVALID", correlationId);
+        }
+        const normalized = normalizeCambodianPhone(raw);
+        if (normalized === null) return refusal("PHONE_INVALID", correlationId);
+        const matches = await searchCustomersByPhone(deps.pool, authority, normalized.e164);
+        // Every eligible match is returned; AMBIGUITY is the terminal's
+        // explicit state (owner decision §2.5), never resolved here.
+        return {
+          status: 200,
+          body: {
+            result: "CUSTOMER_SEARCH",
+            correlationId,
+            normalizedPhone: normalized.e164,
+            matches,
+          },
+        };
+      }
+      case "customers-read": {
+        const customer = await readCustomer(deps.pool, authority, matched.customerId);
+        if (customer === null) return refusal("CUSTOMER_UNKNOWN", correlationId);
+        return { status: 200, body: { result: "CUSTOMER", correlationId, customer } };
+      }
+      case "customers-create": {
+        const unknown = unknownFields(intakeBody, ["displayName", "phone", "preferredLanguage"]);
+        if (unknown.length > 0) return invalid(correlationId, "unknown fields", unknown);
+        const displayName =
+          typeof body?.["displayName"] === "string" ? body["displayName"].trim() : "";
+        if (displayName.length < 1 || displayName.length > NAME_MAX) {
+          return invalid(correlationId, "displayName of 1..200 characters is required");
+        }
+        const phoneRaw = typeof body?.["phone"] === "string" ? body["phone"] : null;
+        let phoneE164: string | null = null;
+        if (phoneRaw !== null) {
+          const normalized = normalizeCambodianPhone(phoneRaw);
+          if (normalized === null) return refusal("PHONE_INVALID", correlationId);
+          phoneE164 = normalized.e164;
+        }
+        const language = body?.["preferredLanguage"] === "en-US" ? "en-US" : "km-KH";
+        const outcome = await registerLocalCustomer(deps.pool, {
+          authority,
+          terminalDeviceId: terminal.terminalDeviceId,
+          displayName,
+          phoneE164,
+          phoneRaw,
+          preferredLanguage: language,
+          requestKey,
+          requestHash,
+          correlationId,
+        });
+        return {
+          status: 200,
+          body: {
+            result: outcome.created ? "CUSTOMER_CREATED" : "CUSTOMER_ALREADY_CREATED",
+            correlationId,
+            customer: outcome.customer,
+          },
+        };
+      }
+      case "customers-consent": {
+        const unknown = unknownFields(intakeBody, [
+          "purposeKey",
+          "policyRef",
+          "policyVersion",
+          "decision",
+          "channel",
+          "staffAssisted",
+        ]);
+        if (unknown.length > 0) return invalid(correlationId, "unknown fields", unknown);
+        const purposeKey = String(body?.["purposeKey"] ?? "");
+        if (!(CONSENT_PURPOSE_KEYS as readonly string[]).includes(purposeKey)) {
+          return invalid(correlationId, "purposeKey is not a registered consent purpose");
+        }
+        const decision = String(body?.["decision"] ?? "");
+        if (!["granted", "declined", "withdrawn", "acknowledged"].includes(decision)) {
+          return invalid(correlationId, "decision is not a consent decision");
+        }
+        const policyRef = String(body?.["policyRef"] ?? "");
+        if (policyRef.length < 1 || policyRef.length > 200) {
+          return invalid(correlationId, "policyRef is required");
+        }
+        const policyVersion = Number(body?.["policyVersion"]);
+        if (!Number.isInteger(policyVersion) || policyVersion < 1) {
+          return invalid(correlationId, "policyVersion must be a positive integer");
+        }
+        const channel = String(body?.["channel"] ?? "t1_terminal");
+        if (channel.length < 1 || channel.length > 64) {
+          return invalid(correlationId, "channel is out of bounds");
+        }
+        // Staff-assisted labelling is structural: the T1 surface IS staff
+        // operated, so anything not explicitly customer-self is assisted —
+        // staff cannot fabricate customer self-verification (§3).
+        const staffAssisted = body?.["staffAssisted"] === false ? false : true;
+        const outcome = await recordConsentDecision(deps.pool, {
+          authority,
+          terminalDeviceId: terminal.terminalDeviceId,
+          customerId: matched.customerId,
+          purposeKey,
+          policyRef,
+          policyVersion,
+          decision,
+          channel,
+          staffAssisted,
+          requestKey,
+          requestHash,
+          correlationId,
+        });
+        return {
+          status: 200,
+          body: {
+            result: outcome.created ? "CONSENT_RECORDED" : "CONSENT_ALREADY_RECORDED",
+            correlationId,
+            decisionId: outcome.decisionId,
+            recordedAt: outcome.recordedAt,
+          },
+        };
+      }
+      case "drafts-create": {
+        const unknown = unknownFields(intakeBody, [
+          "customerId",
+          "walkIn",
+          "preferredLanguage",
+          "intakeSource",
+          "customerNotes",
+          "staffNotes",
+        ]);
+        if (unknown.length > 0) return invalid(correlationId, "unknown fields", unknown);
+        const walkIn = body?.["walkIn"] === true;
+        const customerId = walkIn ? null : requireShaped(intakeBody, "customerId", UUID);
+        if (!walkIn && customerId === null) {
+          return invalid(correlationId, "customerId or walkIn is required");
+        }
+        const customerNotes = String(body?.["customerNotes"] ?? "");
+        const staffNotes = String(body?.["staffNotes"] ?? "");
+        if (customerNotes.length > NOTES_MAX || staffNotes.length > NOTES_MAX) {
+          return invalid(correlationId, "notes exceed the bound");
+        }
+        const intakeSource = String(body?.["intakeSource"] ?? "t1_walkup");
+        if (intakeSource.length < 1 || intakeSource.length > 64) {
+          return invalid(correlationId, "intakeSource is out of bounds");
+        }
+        const draft = await createBookingDraft(deps.pool, {
+          authority,
+          terminalDeviceId: terminal.terminalDeviceId,
+          environment: deps.environment ?? "development",
+          customerId,
+          walkIn,
+          preferredLanguage: body?.["preferredLanguage"] === "en-US" ? "en-US" : "km-KH",
+          intakeSource,
+          customerNotes,
+          staffNotes,
+          requestKey,
+          requestHash,
+          correlationId,
+        });
+        return { status: 200, body: { result: "DRAFT", correlationId, draft } };
+      }
+      case "drafts-read": {
+        const draft = await readBookingDraft(deps.pool, authority, matched.draftId);
+        if (draft === null) return refusal("DRAFT_UNKNOWN", correlationId);
+        return { status: 200, body: { result: "DRAFT", correlationId, draft } };
+      }
+      case "drafts-update": {
+        const unknown = unknownFields(intakeBody, [
+          "expectedVersion",
+          "customerNotes",
+          "staffNotes",
+          "preferredLanguage",
+        ]);
+        if (unknown.length > 0) return invalid(correlationId, "unknown fields", unknown);
+        const expectedVersion = Number(body?.["expectedVersion"]);
+        if (!Number.isInteger(expectedVersion) || expectedVersion < 1) {
+          return invalid(correlationId, "expectedVersion must be a positive integer");
+        }
+        const customerNotes =
+          typeof body?.["customerNotes"] === "string" ? body["customerNotes"] : undefined;
+        const staffNotes =
+          typeof body?.["staffNotes"] === "string" ? body["staffNotes"] : undefined;
+        if (
+          (customerNotes !== undefined && customerNotes.length > NOTES_MAX) ||
+          (staffNotes !== undefined && staffNotes.length > NOTES_MAX)
+        ) {
+          return invalid(correlationId, "notes exceed the bound");
+        }
+        const preferredLanguage =
+          body?.["preferredLanguage"] === "en-US"
+            ? "en-US"
+            : body?.["preferredLanguage"] === "km-KH"
+              ? "km-KH"
+              : undefined;
+        const draft = await updateBookingDraft(deps.pool, {
+          authority,
+          terminalDeviceId: terminal.terminalDeviceId,
+          draftId: matched.draftId,
+          expectedVersion,
+          customerNotes,
+          staffNotes,
+          preferredLanguage,
+          requestKey,
+          requestHash,
+          correlationId,
+        });
+        return { status: 200, body: { result: "DRAFT", correlationId, draft } };
+      }
+      case "drafts-cancel": {
+        const unknown = unknownFields(intakeBody, ["reasonCode"]);
+        if (unknown.length > 0) return invalid(correlationId, "unknown fields", unknown);
+        const reasonCode = String(body?.["reasonCode"] ?? "");
+        if (!(DRAFT_CANCEL_REASONS as readonly string[]).includes(reasonCode)) {
+          return invalid(correlationId, "reasonCode is not a governed cancel reason");
+        }
+        const draft = await cancelBookingDraft(deps.pool, {
+          authority,
+          terminalDeviceId: terminal.terminalDeviceId,
+          draftId: matched.draftId,
+          reasonCode,
+          requestKey,
+          requestHash,
+          correlationId,
+        });
+        return { status: 200, body: { result: "DRAFT_CANCELLED", correlationId, draft } };
+      }
+    }
+  } catch (error) {
+    if (error instanceof IntakeRefusalError) {
+      return refusal(error.refusal, correlationId);
+    }
+    throw error;
+  }
 }

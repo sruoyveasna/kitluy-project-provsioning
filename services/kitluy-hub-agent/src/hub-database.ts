@@ -364,6 +364,12 @@ export const HUB_MIGRATION_ORDER = [
   // owner §6 one-automatic-rollback rule enforced in schema, every
   // transition auto-journalled append-only.
   "0039_release_installation_state.sql",
+  // WS-12-T002 (KLD-2026-08-06-WS12-T002-001): the T1 customer projection
+  // additions (origin + §5 truth labels + creation idempotency), the
+  // append-only consent-decision facts, and the Hub-authoritative Booking
+  // DRAFT with append-only mutation receipts — a draft is NOT a Booking
+  // and no conversion path exists in the group.
+  "0040_t1_customer_consent_and_booking_draft.sql",
 ] as const;
 
 /**

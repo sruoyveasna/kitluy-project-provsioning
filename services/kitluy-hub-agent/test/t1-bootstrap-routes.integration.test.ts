@@ -1084,6 +1084,460 @@ describe.skipIf(!live)("T1 bootstrap routes and staff sessions (WS-12-T001-P02)"
   });
 
   // -------------------------------------------------------------------------
+  // WS-12-T002 — the T1 intake surface (customers, consent, Booking Drafts)
+  // over the same live mTLS transport (KLD-2026-08-06-WS12-T002-001).
+  // -------------------------------------------------------------------------
+
+  const INTAKE_KEYS = [
+    ...FIVE_KEYS,
+    "customers.read",
+    "customers.create",
+    "customers.consent.record",
+    "laundry.bookings.read",
+    "laundry.bookings.create",
+  ];
+
+  async function openIntakeSession(
+    t: LanTerminal,
+    keys: readonly string[] = INTAKE_KEYS,
+  ): Promise<{ sessionId: string; actorId: string }> {
+    const staff = await insertStaff([T1]);
+    for (const key of keys) await grant(staff.actorId, key);
+    const opened = await call(
+      t,
+      "POST",
+      EDGE_SESSIONS_OPEN_PATH,
+      { actorId: staff.actorId, passcode: staff.passcode, profileCode: T1 },
+      { "idempotency-key": `t002-open-${RUN}-${randomUUID().slice(0, 8)}` },
+    );
+    expect(opened.status, JSON.stringify(opened.body)).toBe(200);
+    return {
+      sessionId: String((opened.body["session"] as Record<string, unknown>)["sessionId"]),
+      actorId: staff.actorId,
+    };
+  }
+
+  function intakeCall(
+    t: LanTerminal,
+    sessionId: string,
+    method: string,
+    path: string,
+    body?: unknown,
+    idempotencyKey?: string,
+  ): Promise<TerminalHttpResponse> {
+    return call(t, method, path, body, {
+      "x-kitluy-session-id": sessionId,
+      ...(idempotencyKey === undefined ? {} : { "idempotency-key": idempotencyKey }),
+    });
+  }
+
+  it("T002: creates a minimal customer ONCE, searches it scoped, labels it honestly", async () => {
+    const t = await readyTerminal("t002-cust");
+    const { sessionId } = await openIntakeSession(t);
+    const key = `t002-cust-${RUN}-1`;
+    const created = await intakeCall(
+      t,
+      sessionId,
+      "POST",
+      "/edge/v1/customers",
+      { displayName: "Sokneang Test", phone: "012 911 222", preferredLanguage: "km-KH" },
+      key,
+    );
+    expect(created.status, JSON.stringify(created.body)).toBe(200);
+    expect(created.body["result"]).toBe("CUSTOMER_CREATED");
+    const customer = created.body["customer"] as Record<string, unknown>;
+    expect(customer["origin"]).toBe("local_created");
+    expect(customer["syncState"]).toBe("pending_sync"); // never cloud-labelled early
+    expect(customer["phoneVerified"]).toBe(false); // presence is not verification
+    const customerId = String(customer["customerId"]);
+
+    // Idempotent replay: SAME key + body = the ORIGINAL effect, once.
+    const replay = await intakeCall(
+      t,
+      sessionId,
+      "POST",
+      "/edge/v1/customers",
+      { displayName: "Sokneang Test", phone: "012 911 222", preferredLanguage: "km-KH" },
+      key,
+    );
+    expect(replay.body["result"]).toBe("CUSTOMER_ALREADY_CREATED");
+    expect(String((replay.body["customer"] as Record<string, unknown>)["customerId"])).toBe(
+      customerId,
+    );
+    const events = await pool.query(
+      `select count(*)::int as n from edge_sync.local_event
+        where event_type = 'customer.local_customer_created' and aggregate_id = $1::uuid`,
+      [customerId],
+    );
+    expect(events.rows[0]?.n).toBe(1); // one durable outbox fact
+
+    // Conflicting reuse of the key refuses.
+    const conflicting = await intakeCall(
+      t,
+      sessionId,
+      "POST",
+      "/edge/v1/customers",
+      { displayName: "Different Person", preferredLanguage: "km-KH" },
+      key,
+    );
+    expect(conflicting.status).toBe(409);
+    expect(detailsOf(conflicting)["result"]).toBe("CUSTOMER_IDEMPOTENCY_CONFLICT");
+
+    // Scoped exact search over the NORMALIZED phone; raw input accepted.
+    const search = await intakeCall(
+      t,
+      sessionId,
+      "GET",
+      "/edge/v1/customers/search?phone=012911222",
+    );
+    expect(search.status, JSON.stringify(search.body)).toBe(200);
+    expect(search.body["normalizedPhone"]).toBe("+85512911222");
+    const matches = search.body["matches"] as readonly Record<string, unknown>[];
+    expect(matches.map((m) => m["customerId"])).toContain(customerId);
+
+    // A malformed phone is refused, never fabricated into zero results.
+    const bad = await intakeCall(t, sessionId, "GET", "/edge/v1/customers/search?phone=abc");
+    expect(bad.status).toBe(422);
+    // An unknown query parameter is rejected outright.
+    const widened = await intakeCall(
+      t,
+      sessionId,
+      "GET",
+      "/edge/v1/customers/search?phone=012911222&tenant=other",
+    );
+    expect(widened.status).toBe(422);
+  });
+
+  it("T002: consent decisions are explicit, purpose-separated, append-only and idempotent", async () => {
+    const t = await readyTerminal("t002-consent");
+    const { sessionId } = await openIntakeSession(t);
+    const created = await intakeCall(
+      t,
+      sessionId,
+      "POST",
+      "/edge/v1/customers",
+      { displayName: "Consent Probe", phone: "012 933 444" },
+      `t002-consent-cust-${RUN}`,
+    );
+    const customerId = String((created.body["customer"] as Record<string, unknown>)["customerId"]);
+    const consentPath = `/edge/v1/customers/${customerId}/consent-decisions`;
+
+    // Privacy acknowledgement — its own decision kind.
+    const ack = await intakeCall(
+      t,
+      sessionId,
+      "POST",
+      consentPath,
+      {
+        purposeKey: "privacy_notice_acknowledgement",
+        policyRef: "DEMO-PRIVACY",
+        policyVersion: 1,
+        decision: "acknowledged",
+        channel: "t1_terminal",
+        staffAssisted: true,
+      },
+      `t002-ack-${RUN}`,
+    );
+    expect(ack.status, JSON.stringify(ack.body)).toBe(200);
+    // `granted` for the privacy notice is refused (one purpose never
+    // authorizes another; acknowledgement is not consent).
+    const wrongPair = await intakeCall(
+      t,
+      sessionId,
+      "POST",
+      consentPath,
+      {
+        purposeKey: "privacy_notice_acknowledgement",
+        policyRef: "DEMO-PRIVACY",
+        policyVersion: 1,
+        decision: "granted",
+        channel: "t1_terminal",
+        staffAssisted: true,
+      },
+      `t002-wrongpair-${RUN}`,
+    );
+    expect(wrongPair.status).toBe(422);
+
+    // SMS marketing granted, then WITHDRAWN — a NEW fact, nothing erased.
+    const grantKey = `t002-sms-grant-${RUN}`;
+    const granted = await intakeCall(
+      t,
+      sessionId,
+      "POST",
+      consentPath,
+      {
+        purposeKey: "sms_marketing",
+        policyRef: "DEMO-SMS",
+        policyVersion: 1,
+        decision: "granted",
+        channel: "t1_terminal",
+        staffAssisted: true,
+      },
+      grantKey,
+    );
+    expect(granted.body["result"]).toBe("CONSENT_RECORDED");
+    const replay = await intakeCall(
+      t,
+      sessionId,
+      "POST",
+      consentPath,
+      {
+        purposeKey: "sms_marketing",
+        policyRef: "DEMO-SMS",
+        policyVersion: 1,
+        decision: "granted",
+        channel: "t1_terminal",
+        staffAssisted: true,
+      },
+      grantKey,
+    );
+    expect(replay.body["result"]).toBe("CONSENT_ALREADY_RECORDED");
+    expect(replay.body["decisionId"]).toBe(granted.body["decisionId"]);
+    const withdrawn = await intakeCall(
+      t,
+      sessionId,
+      "POST",
+      consentPath,
+      {
+        purposeKey: "sms_marketing",
+        policyRef: "DEMO-SMS",
+        policyVersion: 1,
+        decision: "withdrawn",
+        channel: "t1_terminal",
+        staffAssisted: true,
+      },
+      `t002-sms-withdraw-${RUN}`,
+    );
+    expect(withdrawn.status).toBe(200);
+    const ledger = await pool.query(
+      `select decision, staff_assisted from edge_core.consent_decision
+        where customer_id = $1::uuid order by recorded_at asc`,
+      [customerId],
+    );
+    // Three facts, all preserved, all labelled staff-assisted.
+    expect(ledger.rows.map((r) => (r as { decision: string }).decision)).toEqual([
+      "acknowledged",
+      "granted",
+      "withdrawn",
+    ]);
+    for (const row of ledger.rows) {
+      expect((row as { staff_assisted: boolean }).staff_assisted).toBe(true);
+    }
+    const facts = await pool.query(
+      `select count(*)::int as n from edge_sync.local_event
+        where event_type = 'customer.consent_decision_recorded'
+          and payload -> 'payload' ->> 'local_customer_id' = $1`,
+      [customerId],
+    );
+    expect(facts.rows[0]?.n).toBe(3); // every decision is a durable outbox fact
+  });
+
+  it("T002: the Booking Draft lifecycle — snapshot frozen, version exact, terminal states final", async () => {
+    const t = await readyTerminal("t002-draft");
+    const { sessionId } = await openIntakeSession(t);
+    const created = await intakeCall(
+      t,
+      sessionId,
+      "POST",
+      "/edge/v1/customers",
+      { displayName: "Draft Customer", phone: "012 955 666" },
+      `t002-draft-cust-${RUN}`,
+    );
+    const customerId = String((created.body["customer"] as Record<string, unknown>)["customerId"]);
+
+    const draftKey = `t002-draft-${RUN}-1`;
+    const draftCreated = await intakeCall(
+      t,
+      sessionId,
+      "POST",
+      "/edge/v1/laundry/bookings/drafts",
+      { customerId, walkIn: false, customerNotes: "wash and fold" },
+      draftKey,
+    );
+    expect(draftCreated.status, JSON.stringify(draftCreated.body)).toBe(200);
+    const draft = draftCreated.body["draft"] as Record<string, unknown>;
+    const draftId = String(draft["draftId"]);
+    expect(draft["lifecycle"]).toBe("open");
+    expect(draft["version"]).toBe(1);
+    expect(draft["syncState"]).toBe("local_authoritative");
+    // No Booking, no money: the draft carries no price/payment surface.
+    expect(Object.keys(draft).join(",")).not.toMatch(/price|payment|total|amount/i);
+
+    // Replay of the create returns the SAME draft.
+    const createReplay = await intakeCall(
+      t,
+      sessionId,
+      "POST",
+      "/edge/v1/laundry/bookings/drafts",
+      { customerId, walkIn: false, customerNotes: "wash and fold" },
+      draftKey,
+    );
+    expect(String((createReplay.body["draft"] as Record<string, unknown>)["draftId"])).toBe(
+      draftId,
+    );
+
+    // The snapshot is IMMUTABLE: a later customer-master edit changes nothing.
+    await pool.query(`update edge_core.customer set display_name = 'Renamed Later' where id = $1`, [
+      customerId,
+    ]);
+    const reread = await intakeCall(
+      t,
+      sessionId,
+      "GET",
+      `/edge/v1/laundry/bookings/drafts/${draftId}`,
+    );
+    const snapshot = (reread.body["draft"] as Record<string, unknown>)[
+      "customerSnapshot"
+    ] as Record<string, unknown>;
+    expect(snapshot["displayName"]).toBe("Draft Customer");
+
+    // Update requires the EXACT current version; duplicate replays once.
+    const updateKey = `t002-draft-upd-${RUN}`;
+    const updated = await intakeCall(
+      t,
+      sessionId,
+      "PATCH",
+      `/edge/v1/laundry/bookings/drafts/${draftId}`,
+      { expectedVersion: 1, staffNotes: "stain on collar" },
+      updateKey,
+    );
+    expect((updated.body["draft"] as Record<string, unknown>)["version"]).toBe(2);
+    const updateReplay = await intakeCall(
+      t,
+      sessionId,
+      "PATCH",
+      `/edge/v1/laundry/bookings/drafts/${draftId}`,
+      { expectedVersion: 1, staffNotes: "stain on collar" },
+      updateKey,
+    );
+    expect((updateReplay.body["draft"] as Record<string, unknown>)["version"]).toBe(2);
+    const stale = await intakeCall(
+      t,
+      sessionId,
+      "PATCH",
+      `/edge/v1/laundry/bookings/drafts/${draftId}`,
+      { expectedVersion: 1, staffNotes: "second edit on stale version" },
+      `t002-draft-stale-${RUN}`,
+    );
+    expect(stale.status).toBe(409);
+    expect(detailsOf(stale)["result"]).toBe("DRAFT_VERSION_STALE");
+
+    // Cancel with a governed reason; a cancelled draft is FINAL.
+    const cancelled = await intakeCall(
+      t,
+      sessionId,
+      "POST",
+      `/edge/v1/laundry/bookings/drafts/${draftId}/cancel`,
+      { reasonCode: "customer_left" },
+      `t002-draft-cancel-${RUN}`,
+    );
+    expect(cancelled.status, JSON.stringify(cancelled.body)).toBe(200);
+    expect((cancelled.body["draft"] as Record<string, unknown>)["lifecycle"]).toBe("cancelled");
+    const editAfter = await intakeCall(
+      t,
+      sessionId,
+      "PATCH",
+      `/edge/v1/laundry/bookings/drafts/${draftId}`,
+      { expectedVersion: 3, staffNotes: "edit after cancel" },
+      `t002-draft-after-${RUN}`,
+    );
+    expect(editAfter.status).toBe(409);
+    expect(detailsOf(editAfter)["result"]).toBe("DRAFT_NOT_OPEN");
+
+    // An ungoverned cancel reason is refused.
+    const walkInDraft = await intakeCall(
+      t,
+      sessionId,
+      "POST",
+      "/edge/v1/laundry/bookings/drafts",
+      { walkIn: true },
+      `t002-draft-walkin-${RUN}`,
+    );
+    const walkInId = String((walkInDraft.body["draft"] as Record<string, unknown>)["draftId"]);
+    const badReason = await intakeCall(
+      t,
+      sessionId,
+      "POST",
+      `/edge/v1/laundry/bookings/drafts/${walkInId}/cancel`,
+      { reasonCode: "because" },
+      `t002-draft-badreason-${RUN}`,
+    );
+    expect(badReason.status).toBe(422);
+  });
+
+  it("T002: the full §6 authorization stack gates every intake route", async () => {
+    const t = await readyTerminal("t002-authz");
+
+    // No session header at all.
+    const bare = await call(t, "GET", "/edge/v1/customers/search?phone=012911222");
+    expect(bare.status).toBe(422);
+
+    // A fabricated session id.
+    const forged = await intakeCall(
+      t,
+      randomUUID(),
+      "GET",
+      "/edge/v1/customers/search?phone=012911222",
+    );
+    expect(forged.status).toBe(404);
+
+    // A session WITHOUT pos.t1.use cannot use any intake route.
+    const noShell = await openIntakeSession(t, ["staff.sessions.open", "customers.read"]);
+    const refusedShell = await intakeCall(
+      t,
+      noShell.sessionId,
+      "GET",
+      "/edge/v1/customers/search?phone=012911222",
+    );
+    expect(refusedShell.status).toBe(403);
+    expect(detailsOf(refusedShell)["result"]).toBe("T1_NOT_AUTHORIZED");
+
+    // pos.t1.use alone is not the route permission either. (One active
+    // session per terminal, so each stage uses a fresh terminal.)
+    const t2 = await readyTerminal("t002-authz-2");
+    const noRouteKey = await openIntakeSession(t2, ["staff.sessions.open", "pos.t1.use"]);
+    const refusedRoute = await intakeCall(
+      t2,
+      noRouteKey.sessionId,
+      "GET",
+      "/edge/v1/customers/search?phone=012911222",
+    );
+    expect(refusedRoute.status).toBe(403);
+    expect(detailsOf(refusedRoute)["result"]).toBe("SESSION_PERMISSION_DENIED");
+
+    // A session from ANOTHER terminal never authorizes this one.
+    const other = await readyTerminal("t002-authz-other");
+    const foreign = await openIntakeSession(other);
+    const crossTerminal = await intakeCall(
+      t,
+      foreign.sessionId,
+      "GET",
+      "/edge/v1/customers/search?phone=012911222",
+    );
+    expect(crossTerminal.status).toBe(404);
+    expect(detailsOf(crossTerminal)["result"]).toBe("SESSION_UNKNOWN");
+
+    // Mutations additionally demand an Idempotency-Key.
+    const t3 = await readyTerminal("t002-authz-3");
+    const session = await openIntakeSession(t3);
+    const noKey = await intakeCall(t3, session.sessionId, "POST", "/edge/v1/customers", {
+      displayName: "No Key",
+    });
+    expect(noKey.status).toBe(422);
+
+    // Unknown body fields are rejected, not ignored.
+    const unknownField = await intakeCall(
+      t3,
+      session.sessionId,
+      "POST",
+      "/edge/v1/customers",
+      { displayName: "X", tenantId: "attacker-supplied" },
+      `t002-unknown-${RUN}`,
+    );
+    expect(unknownField.status).toBe(422);
+  });
+
+  // -------------------------------------------------------------------------
   // Security census
   // -------------------------------------------------------------------------
 

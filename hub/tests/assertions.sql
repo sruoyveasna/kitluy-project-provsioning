@@ -2774,6 +2774,176 @@ end $$;
 rollback;
 
 -- ---------------------------------------------------------------------------
+-- 37. T1 customer, consent and Booking Draft authority (group 0040,
+--     WS-12-T002, KLD-2026-08-06-WS12-T002-001).
+-- ---------------------------------------------------------------------------
+begin;
+do $$
+declare
+  v_tenant   uuid := 'e0000000-0000-4000-8000-000000000001';
+  v_store    uuid := 'e0000000-0000-4000-8000-000000000002';
+  v_location uuid := 'e0000000-0000-4000-8000-000000000003';
+  v_terminal uuid;
+  v_session  uuid;
+  v_cust     edge_core.customer;
+  v_cust2    edge_core.customer;
+  v_dec      edge_core.consent_decision;
+  v_dec2     edge_core.consent_decision;
+  v_draft_id uuid := gen_random_uuid();
+  v_blocked  int := 0;
+  v_hash     char(64) := repeat('a', 64);
+  v_hash2    char(64) := repeat('b', 64);
+begin
+  set local role kitluy_hub_runtime;
+  select id into v_terminal from edge_identity.terminal_device
+   where tenant_id = v_tenant limit 1;
+  select id into v_session from edge_identity.terminal_session limit 1;
+  if v_terminal is null or v_session is null then
+    raise exception 'ASSERT FAIL: fixtures supply no terminal/session for §37';
+  end if;
+
+  -- 37.1 Customer door: create, idempotent replay, conflicting-hash refusal.
+  v_cust := edge_core.register_local_customer_v1(
+    gen_random_uuid(), v_tenant, v_store, v_location, 'Sokha Test',
+    '+85512345678', encode(sha256('+85512345678'::bytea), 'hex'), '+855••••5678',
+    'km-KH', 't1_intake', 'kl-test-37-cust-1', v_hash, gen_random_uuid());
+  if v_cust.origin <> 'local_created' or v_cust.sync_state <> 'pending_sync' then
+    raise exception 'ASSERT FAIL: local customer not labelled local_created/pending_sync';
+  end if;
+  v_cust2 := edge_core.register_local_customer_v1(
+    v_cust.id, v_tenant, v_store, v_location, 'Sokha Test',
+    '+85512345678', encode(sha256('+85512345678'::bytea), 'hex'), '+855••••5678',
+    'km-KH', 't1_intake', 'kl-test-37-cust-1', v_hash, gen_random_uuid());
+  if v_cust2.id <> v_cust.id then
+    raise exception 'ASSERT FAIL: customer replay produced a second business effect';
+  end if;
+  begin
+    perform edge_core.register_local_customer_v1(
+      gen_random_uuid(), v_tenant, v_store, v_location, 'Different Person',
+      null, null, null, 'km-KH', 't1_intake', 'kl-test-37-cust-1', v_hash2,
+      gen_random_uuid());
+    raise exception 'ASSERT FAIL: conflicting idempotency reuse was accepted';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-EDGE-CUSTOMER-IDEMPOTENCY-CONFLICT%' then
+      raise exception 'ASSERT FAIL: wrong idempotency-conflict sentinel: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- 37.2 Consent: privacy pairing enforced, append-only, replay = original.
+  v_dec := edge_core.record_consent_decision_v1(
+    gen_random_uuid(), v_tenant, v_store, v_location, v_cust.id,
+    'sms_marketing', 'consent/sms_marketing', 1, 'granted', 't1_terminal',
+    'staff_assisted', true, gen_random_uuid(), v_terminal, v_session,
+    'kl-test-37-consent-1', v_hash, gen_random_uuid());
+  v_dec2 := edge_core.record_consent_decision_v1(
+    gen_random_uuid(), v_tenant, v_store, v_location, v_cust.id,
+    'sms_marketing', 'consent/sms_marketing', 1, 'granted', 't1_terminal',
+    'staff_assisted', true, gen_random_uuid(), v_terminal, v_session,
+    'kl-test-37-consent-1', v_hash, gen_random_uuid());
+  if v_dec2.id <> v_dec.id then
+    raise exception 'ASSERT FAIL: consent replay produced a second decision';
+  end if;
+  begin
+    perform edge_core.record_consent_decision_v1(
+      gen_random_uuid(), v_tenant, v_store, v_location, v_cust.id,
+      'privacy_notice_acknowledgement', 'privacy/v1', 1, 'granted', 't1_terminal',
+      'customer_self', false, gen_random_uuid(), v_terminal, v_session,
+      'kl-test-37-consent-2', v_hash, gen_random_uuid());
+    raise exception 'ASSERT FAIL: privacy notice accepted decision=granted';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    v_blocked := v_blocked + 1;
+  end;
+  begin
+    update edge_core.consent_decision set decision = 'withdrawn' where id = v_dec.id;
+    raise exception 'ASSERT FAIL: a consent decision was updated in place';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    v_blocked := v_blocked + 1;
+  end;
+  begin
+    perform edge_core.record_consent_decision_v1(
+      gen_random_uuid(), 'e0000000-0000-4000-8000-0000000000a1'::uuid, v_store,
+      v_location, v_cust.id, 'sms_marketing', 'consent/sms_marketing', 1,
+      'withdrawn', 't1_terminal', 'staff_assisted', true, gen_random_uuid(),
+      v_terminal, v_session, 'kl-test-37-consent-3', v_hash, gen_random_uuid());
+    raise exception 'ASSERT FAIL: cross-tenant consent write was accepted';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-EDGE-CONSENT-CUSTOMER-UNKNOWN%' then
+      raise exception 'ASSERT FAIL: cross-scope refusal leaked detail: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- 37.3 Draft: frozen snapshot, monotonic version, terminal lifecycle.
+  insert into edge_laundry.booking_draft
+    (id, tenant_id, digital_store_id, location_id, environment,
+     terminal_device_id, session_id, staff_actor_id, customer_id, walk_in,
+     customer_snapshot, preferred_language, intake_source,
+     created_request_key, created_request_hash, correlation_id)
+  values
+    (v_draft_id, v_tenant, v_store, v_location, 'development',
+     v_terminal, v_session, gen_random_uuid(), v_cust.id, false,
+     jsonb_build_object('displayName', 'Sokha Test', 'phoneE164', '+85512345678'),
+     'km-KH', 't1_walkup', 'kl-test-37-draft-1', v_hash, gen_random_uuid());
+  update edge_laundry.booking_draft
+     set customer_notes = 'wash and fold', version = 2 where id = v_draft_id;
+  begin
+    update edge_laundry.booking_draft
+       set customer_snapshot = '{"displayName":"Rewritten"}'::jsonb, version = 3
+     where id = v_draft_id;
+    raise exception 'ASSERT FAIL: the customer snapshot was rewritten';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-EDGE-DRAFT-IMMUTABLE%' then
+      raise exception 'ASSERT FAIL: wrong snapshot-freeze sentinel: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+  begin
+    update edge_laundry.booking_draft
+       set staff_notes = 'skipped a version', version = 4 where id = v_draft_id;
+    raise exception 'ASSERT FAIL: a version jump was accepted';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-EDGE-DRAFT-VERSION%' then
+      raise exception 'ASSERT FAIL: wrong version sentinel: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+  update edge_laundry.booking_draft
+     set lifecycle = 'cancelled', cancel_reason_code = 'customer_left', version = 3
+   where id = v_draft_id;
+  begin
+    update edge_laundry.booking_draft
+       set customer_notes = 'edit after cancel', version = 4 where id = v_draft_id;
+    raise exception 'ASSERT FAIL: a cancelled draft accepted an edit';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-EDGE-DRAFT-NOT-OPEN%' then
+      raise exception 'ASSERT FAIL: wrong terminal-lifecycle sentinel: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+  begin
+    delete from edge_laundry.booking_draft where id = v_draft_id;
+    raise exception 'ASSERT FAIL: a draft was hard-deleted';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  if v_blocked <> 8 then
+    raise exception 'ASSERT FAIL: expected 8 refused probes in §37, got %', v_blocked;
+  end if;
+  raise notice 'PASS t1-customer-consent-draft: local creation labelled honestly, idempotent replay single-effect, conflicting reuse refused, privacy pairing enforced, consent append-only and scope-merged, draft snapshot frozen, version monotonic, terminal lifecycle final, no hard delete';
+end $$;
+rollback;
+
+-- ---------------------------------------------------------------------------
 -- 28b. Permission-resolver privilege pin (WS-12 Stage-A, 2026-08-06).
 --
 -- A P02 review REPORTED `edge_config.resolve_permission_grant` as
@@ -2872,11 +3042,16 @@ begin
   -- EXACT in both directions -- it is how an unreviewed table gets noticed --
   -- so it is raised by exactly the additions that were reviewed and by
   -- nothing else.
-  if v_tables <> 72 then
+  -- 72 -> 75: hub group 0040 adds `edge_core.consent_decision` (append-only
+  -- consent-decision facts), `edge_laundry.booking_draft` (the Hub-
+  -- authoritative WORKING draft — not a Booking) and
+  -- `edge_laundry.booking_draft_event` (append-only mutation receipts) —
+  -- WS-12-T002, KLD-2026-08-06-WS12-T002-001.
+  if v_tables <> 75 then
     raise exception
-      'ASSERT FAIL: expected 72 relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11 + 3 G0027 revocation + 2 G0031 pairing + 1 G0033 credential projection + 2 G0035 health/containment + 1 G0036 report evidence + 2 G0037 replacement state + 2 G0038 release trust/cache + 2 G0039 installation state), found %',
+      'ASSERT FAIL: expected 75 relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11 + 3 G0027 revocation + 2 G0031 pairing + 1 G0033 credential projection + 2 G0035 health/containment + 1 G0036 report evidence + 2 G0037 replacement state + 2 G0038 release trust/cache + 2 G0039 installation state + 3 G0040 customer/consent/draft), found %',
       v_tables;
   end if;
-  raise notice 'PASS tally: % relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11 WS-10 + 3 G0027 revocation + 2 G0031 pairing + 1 G0033 credential projection + 2 G0035 health/containment + 1 G0036 report evidence + 2 G0037 replacement state + 2 G0038 release trust/cache + 2 G0039 installation state), % indexes, % triggers',
+  raise notice 'PASS tally: % relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11 WS-10 + 3 G0027 revocation + 2 G0031 pairing + 1 G0033 credential projection + 2 G0035 health/containment + 1 G0036 report evidence + 2 G0037 replacement state + 2 G0038 release trust/cache + 2 G0039 installation state + 3 G0040 customer/consent/draft), % indexes, % triggers',
     v_tables, v_indexes, v_triggers;
 end $$;
