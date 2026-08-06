@@ -23,12 +23,41 @@
  * This command never connects to a database and never applies anything
  * (KL-INF-P1-037, OWNER-LOCKED).
  */
+import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const MIGRATIONS_DIR = "hub/migrations";
 const NAME_PATTERN = /^(\d{4})_[a-z0-9_]+\.sql$/;
 const MARKER = /^--\s*kitluy:hub:migration:(\d{4})\s*$/m;
+
+// T007 D5 (KLD-2026-08-06-WS11-T007-001): checksum-pinned legacy-marker
+// compatibility. Hub migrations 0028-0030 predate the
+// '-- kitluy:hub:migration:NNNN' rule and are IMMUTABLE applied history
+// carrying the historical '-- kitluy:hub:group:NNNN' form. The registry
+// accepts EXACTLY these three paths, at EXACTLY these committed bytes
+// (sha256 over LF-normalized content, so checkout line-ending conversion
+// changes nothing), with the historical marker matching the filename
+// sequence. A mutated legacy file fails; a NEW file using the legacy form
+// is not in the registry and fails; every other migration must satisfy the
+// current marker standard.
+const LEGACY_MARKER = /^--\s*kitluy:hub:group:(\d{4})\s*$/m;
+const LEGACY_MARKER_REGISTRY = new Map([
+  [
+    "0028_revocation_reader_least_privilege.sql",
+    "e752a5932e65cba88dd17aff5da601f0b9ad63cbf2125e2c2c770656349d053a",
+  ],
+  [
+    "0029_offline_device_record_enforcement.sql",
+    "677e8bc74ed4c0fe4cb3462bbd0426e43aa9e2f2e3fc392286ecae3a068b5f1b",
+  ],
+  [
+    "0030_governed_snapshot_staging.sql",
+    "9c7146ba02299dc028b2a72d40bdfa1007d89949af6b826ec659a6aad0690bfd",
+  ],
+]);
+const sha256Lf = (content) =>
+  createHash("sha256").update(content.replace(/\r\n/g, "\n"), "utf8").digest("hex");
 const DESTRUCTIVE =
   /\b(DROP\s+TABLE|DROP\s+SCHEMA|DROP\s+DATABASE|TRUNCATE|DELETE\s+FROM|DROP\s+COLUMN)\b/i;
 const FLOAT_TYPES = /\b(float4|float8|real|double\s+precision|money)\b/i;
@@ -161,10 +190,23 @@ for (const f of files) {
   pass(`naming:${f}`);
   const sequence = Number(nameMatch[1]);
 
-  // 2. Marker.
+  // 2. Marker (current standard, or the checksum-pinned legacy registry).
   const marker = MARKER.exec(content);
+  const pinnedLegacy = LEGACY_MARKER_REGISTRY.get(f);
   if (marker && Number(marker[1]) === sequence) {
     pass(`marker:${f}`, `kitluy:hub:migration:${nameMatch[1]}`);
+  } else if (pinnedLegacy !== undefined) {
+    const legacy = LEGACY_MARKER.exec(content);
+    if (legacy && Number(legacy[1]) === sequence && sha256Lf(content) === pinnedLegacy) {
+      pass(`marker:${f}`, `legacy kitluy:hub:group:${nameMatch[1]} accepted (checksum-pinned)`);
+    } else if (legacy && Number(legacy[1]) === sequence) {
+      fail(
+        `marker:${f}`,
+        "legacy-marker bytes do not match the pinned checksum — applied migrations are immutable",
+      );
+    } else {
+      fail(`marker:${f}`, "registered legacy migration no longer carries its historical marker");
+    }
   } else if (marker) {
     fail(`marker:${f}`, `marker ${marker[1]} does not match filename sequence ${nameMatch[1]}`);
   } else {
