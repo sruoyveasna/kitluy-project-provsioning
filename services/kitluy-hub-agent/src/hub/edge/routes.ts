@@ -614,17 +614,25 @@ export function createEdgeTerminalRouter(deps: EdgeTerminalRouterDeps): EdgeRequ
       // outright — the unknown-fields discipline applied to the URL.
       const queryString = request.path.split("?")[1] ?? "";
       const environment = deps.environment ?? "development";
+      const QUERYLESS_ROUTES: readonly string[] = [
+        "runtime-authority-time",
+        "runtime-eligibility",
+        "configuration-current",
+        "sessions-open",
+        "sessions-refresh",
+        "sessions-close",
+      ];
+      if (QUERYLESS_ROUTES.includes(matched.route) && queryString !== "") {
+        return finish(
+          operation,
+          invalid(correlationId, "query parameters are not accepted"),
+          "REQUEST_INVALID",
+        );
+      }
 
       try {
         switch (matched.route) {
           case "runtime-authority-time": {
-            if (queryString !== "") {
-              return finish(
-                operation,
-                invalid(correlationId, "query parameters are not accepted"),
-                "REQUEST_INVALID",
-              );
-            }
             const payload = await readAuthorityTime(deps.pool);
             return finish(
               operation,
@@ -633,13 +641,6 @@ export function createEdgeTerminalRouter(deps: EdgeTerminalRouterDeps): EdgeRequ
             );
           }
           case "runtime-eligibility": {
-            if (queryString !== "") {
-              return finish(
-                operation,
-                invalid(correlationId, "query parameters are not accepted"),
-                "REQUEST_INVALID",
-              );
-            }
             if (!terminal.activated) {
               return finish(
                 operation,
@@ -670,13 +671,6 @@ export function createEdgeTerminalRouter(deps: EdgeTerminalRouterDeps): EdgeRequ
             );
           }
           case "configuration-current": {
-            if (queryString !== "") {
-              return finish(
-                operation,
-                invalid(correlationId, "query parameters are not accepted"),
-                "REQUEST_INVALID",
-              );
-            }
             if (!terminal.activated) {
               return finish(
                 operation,

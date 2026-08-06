@@ -41,7 +41,7 @@ import { REJECTED_TERMINAL_IDENTIFIERS } from "@kitluy-verticals/phase1-laundry"
 import type { OperationalEligibility, StoredPairingReceipt } from "@kitluy/terminal-local-store";
 import { createHash } from "node:crypto";
 
-import { HubTimeAnchor, parseAuthorityTime } from "./hub-time.js";
+import { HUB_TIME_MAX_CACHE_AGE_SECONDS, HubTimeAnchor, parseAuthorityTime } from "./hub-time.js";
 import type {
   CachedConfigurationRecord,
   ConfigurationDeliveryWire,
@@ -265,15 +265,67 @@ export async function bootstrapT1(
       detail: resolution.detail,
     });
   }
-  // The pin is the RECORD's TLS fingerprint: the session below runs against
-  // it under CA chain validation, and the record's signature is verified
-  // with the first Hub-time anchor before anything the session read is used
-  // beyond authority time. A forged record fails there and nothing proceeds.
+  // §3.5: no candidate is trust. Before the record's TLS fingerprint may
+  // direct ANY connection, the record itself is AUTHENTICATED — bindings
+  // and Ed25519 signature under the provisioned Hub operational key. The
+  // freshness window is judged again below under Hub authority time (the
+  // provisional instant here is the record's own issue instant, which
+  // proves nothing about freshness and is used for nothing else).
+  const wire = resolution.payload.record;
+  const signature = decodeBase64Url(resolution.payload.signature);
+  const issuedAt = new Date(wire.issuedAt);
+  const expiresAt = new Date(wire.expiresAt);
+  if (
+    resolution.payload.signatureAlgorithm !== "ed25519" ||
+    signature === null ||
+    Number.isNaN(issuedAt.getTime()) ||
+    Number.isNaN(expiresAt.getTime()) ||
+    !(TRUST_ENVIRONMENTS as readonly string[]).includes(wire.environment)
+  ) {
+    return finish("hub_unavailable", {
+      refusalCode: "DISCOVERY_MALFORMED",
+      detail: "the discovery payload is not a well-formed signed record",
+    });
+  }
+  const record: EdgeDiscoveryRecord = {
+    protocolVersion: wire.protocolVersion,
+    recordId: wire.recordId,
+    hubDeviceId: wire.hubDeviceId,
+    hubCertificateFingerprint: wire.hubCertificateFingerprint,
+    tenantId: wire.tenantId,
+    digitalStoreId: wire.digitalStoreId,
+    storeLocationId: wire.storeLocationId,
+    environment: wire.environment as TrustEnvironment,
+    hostname: wire.hostname,
+    port: wire.port,
+    issuedAt,
+    expiresAt,
+  };
+  const preVerdict = verifyEdgeDiscoveryRecord(
+    record,
+    signature,
+    identity.hubOperationalPublicKeyPem,
+    { ...identity.discoveryExpectation, hubDeviceId: identity.receiptExpectation.hubDeviceId },
+    issuedAt,
+  );
+  if (!preVerdict.verified) {
+    const wrongHub =
+      preVerdict.refusalCode === "DISCOVERY_WRONG_HUB" ||
+      preVerdict.refusalCode === "DISCOVERY_WRONG_SCOPE" ||
+      preVerdict.refusalCode === "DISCOVERY_WRONG_ENVIRONMENT";
+    return finish(wrongHub ? "assignment_invalid" : "hub_unavailable", {
+      refusalCode: preVerdict.refusalCode ?? "DISCOVERY_SIGNATURE_INVALID",
+      detail: preVerdict.detail ?? "the discovery record did not authenticate",
+    });
+  }
+  // The pin is the AUTHENTICATED record's TLS fingerprint: only a record
+  // whose signature verified under the provisioned Hub operational key can
+  // direct the connection below.
   const endpoint: VerifiedHubEndpoint = {
-    hubDeviceId: resolution.payload.record.hubDeviceId,
+    hubDeviceId: record.hubDeviceId,
     hostname: resolution.hostname,
     port: resolution.port,
-    pinnedCertificateFingerprint: resolution.payload.record.hubCertificateFingerprint,
+    pinnedCertificateFingerprint: record.hubCertificateFingerprint,
   };
   const established = await ports.edgeSession.establish(endpoint, identity);
   if (established.outcome === "unreachable") {
@@ -323,7 +375,7 @@ export async function bootstrapT1(
         hub: hubSummary,
       });
     }
-    anchor.set(new Date(parsed.authorityTime));
+    anchor.set(new Date(parsed.authorityTime), parsed.maxCacheAgeSeconds);
     const anchored = anchor.current();
     if (anchored === null) {
       return finish("hub_unavailable", {
@@ -338,38 +390,11 @@ export async function bootstrapT1(
   if (initialTime instanceof Date === false) return initialTime;
   let hubNow: Date = initialTime;
 
-  // Step 4 — verify the signed discovery record under Hub time.
-  const wire = resolution.payload.record;
-  const signature = decodeBase64Url(resolution.payload.signature);
-  const issuedAt = new Date(wire.issuedAt);
-  const expiresAt = new Date(wire.expiresAt);
-  if (
-    resolution.payload.signatureAlgorithm !== "ed25519" ||
-    signature === null ||
-    Number.isNaN(issuedAt.getTime()) ||
-    Number.isNaN(expiresAt.getTime()) ||
-    !(TRUST_ENVIRONMENTS as readonly string[]).includes(wire.environment)
-  ) {
-    return finish("hub_unavailable", {
-      refusalCode: "DISCOVERY_MALFORMED",
-      detail: "the discovery payload is not a well-formed signed record",
-      hub: hubSummary,
-    });
-  }
-  const record: EdgeDiscoveryRecord = {
-    protocolVersion: wire.protocolVersion,
-    recordId: wire.recordId,
-    hubDeviceId: wire.hubDeviceId,
-    hubCertificateFingerprint: wire.hubCertificateFingerprint,
-    tenantId: wire.tenantId,
-    digitalStoreId: wire.digitalStoreId,
-    storeLocationId: wire.storeLocationId,
-    environment: wire.environment as TrustEnvironment,
-    hostname: wire.hostname,
-    port: wire.port,
-    issuedAt,
-    expiresAt,
-  };
+  // Step 4 — the discovery record's FRESHNESS, judged under Hub time. The
+  // bindings and signature were authenticated before the connection was
+  // permitted; what remains is the validity window, which only the Hub
+  // authority-time anchor may judge (§5: no wall clock, no lower-bound
+  // grace; NOT_YET_VALID and EXPIRED are named, retryable refusals).
   const discoveryVerdict = verifyEdgeDiscoveryRecord(
     record,
     signature,
@@ -440,6 +465,33 @@ export async function bootstrapT1(
   }
   if (isRefusal(eligibilityOutcome)) return routeRefused(eligibilityOutcome, { hub: hubSummary });
   const eligibility: RuntimeEligibilityWire = eligibilityOutcome.eligibility;
+  // §6: eligibility response FRESHNESS is judged under Hub authority time —
+  // the response's own authority timestamp must sit within the locked
+  // 30-second anchor window of the current Hub-anchored instant. A stale or
+  // replayed eligibility answer is refused, retryably; it authorizes nothing.
+  {
+    const freshAt = await acquireHubTime();
+    if (freshAt instanceof Date === false) return freshAt;
+    hubNow = freshAt;
+    const eligibilityAt = new Date(eligibility.authorityTime);
+    if (Number.isNaN(eligibilityAt.getTime())) {
+      return finish("hub_unavailable", {
+        refusalCode: "ELIGIBILITY_TIME_MALFORMED",
+        detail: "the eligibility response carries no parseable authority timestamp",
+        hub: hubSummary,
+      });
+    }
+    if (
+      Math.abs(hubNow.getTime() - eligibilityAt.getTime()) >
+      HUB_TIME_MAX_CACHE_AGE_SECONDS * 1000
+    ) {
+      return finish("hub_unavailable", {
+        refusalCode: "ELIGIBILITY_STALE",
+        detail: "the eligibility response is outside the authority-time freshness window",
+        hub: hubSummary,
+      });
+    }
+  }
   const operational: OperationalEligibility = {
     hubDeviceId: eligibility.hubDeviceId,
     hubCertificateFingerprint: identity.receiptExpectation.hubCertificateFingerprint,

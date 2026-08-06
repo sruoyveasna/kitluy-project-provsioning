@@ -15,7 +15,7 @@
  */
 import { createHash } from "node:crypto";
 import { request, type RequestOptions } from "node:https";
-import type { PeerCertificate } from "node:tls";
+import { checkServerIdentity as defaultCheckServerIdentity, type PeerCertificate } from "node:tls";
 
 export interface TransportCredentials {
   readonly certificatePem: string;
@@ -84,6 +84,11 @@ export function pinnedHubRequest(input: {
       port: input.port,
       method: input.method,
       path: input.path,
+      // NEVER a pooled socket: a reused keep-alive connection skips the TLS
+      // handshake, and with it `checkServerIdentity` — a request pinned to
+      // fingerprint A could silently ride a socket verified for B. One
+      // request, one handshake, one identity check.
+      agent: false,
       cert: input.credentials.certificatePem,
       key: input.credentials.keyPem,
       ca: input.credentials.hubCaPem,
@@ -96,9 +101,14 @@ export function pinnedHubRequest(input: {
           : { "content-type": "application/json", "content-length": String(payload.length) }),
         ...input.headers,
       },
-      checkServerIdentity: (_host: string, certificate: PeerCertificate): Error | undefined => {
+      checkServerIdentity: (host: string, certificate: PeerCertificate): Error | undefined => {
         const pin = input.pinnedCertificateFingerprint;
-        if (pin === undefined) return undefined; // chain validation still ran
+        if (pin === undefined) {
+          // Pinning replaces hostname verification only when a pin exists.
+          // Without one, Node's DEFAULT server-identity check runs — an
+          // unpinned request must never silently disable name binding.
+          return defaultCheckServerIdentity(host, certificate);
+        }
         return serverCertificateMatchesPin(certificate.raw, pin)
           ? undefined
           : new Error(

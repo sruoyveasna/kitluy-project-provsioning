@@ -354,8 +354,12 @@ describe.skipIf(!available)("Hub authorisation matrix — fail closed on every d
     );
   });
 
-  it("keeps the nine permission-less Edge routes INACTIVE and fails them closed (KLREQ-015)", () => {
-    expect(INACTIVE_ROUTE_COMMANDS.length).toBe(9);
+  it("keeps the five permission-less Edge routes INACTIVE and fails them closed (KLREQ-015)", () => {
+    // WS-12-T001-P02: the four staff-session routes left this census when
+    // KLD-2026-08-06-WS12-T001-EDGE-BOOTSTRAP-001 registered their permission
+    // keys (registry amendment 002). The five remaining are the T2 display
+    // routes, still awaiting their owner keys.
+    expect(INACTIVE_ROUTE_COMMANDS.length).toBe(5);
     for (const definition of INACTIVE_ROUTE_COMMANDS) {
       expect(definition.active).toBe(false);
       expect(definition.permission.startsWith("[REQUIRED:")).toBe(true);

@@ -26,7 +26,11 @@ export interface AuthorityTimeResponse {
 }
 
 export class HubTimeAnchor {
-  #anchor: { readonly authorityMs: number; readonly monotonicAtMs: number } | null = null;
+  #anchor: {
+    readonly authorityMs: number;
+    readonly monotonicAtMs: number;
+    readonly maxAgeMs: number;
+  } | null = null;
   readonly #monotonic: MonotonicClock;
   readonly #maxAgeMs: number;
 
@@ -38,11 +42,23 @@ export class HubTimeAnchor {
     this.#maxAgeMs = maxCacheAgeSeconds * 1000;
   }
 
-  /** Record a freshly obtained Hub authority timestamp. */
-  set(authorityTime: Date): void {
+  /**
+   * Record a freshly obtained Hub authority timestamp. A Hub-reported
+   * `maxCacheAgeSeconds` LOWER than the locked 30-second bound tightens
+   * this anchor; a higher or malformed value never widens it (§1 — the
+   * locked value is a ceiling, not a suggestion).
+   */
+  set(authorityTime: Date, maxCacheAgeSeconds?: number): void {
+    const reportedMs =
+      maxCacheAgeSeconds !== undefined &&
+      Number.isFinite(maxCacheAgeSeconds) &&
+      maxCacheAgeSeconds > 0
+        ? maxCacheAgeSeconds * 1000
+        : this.#maxAgeMs;
     this.#anchor = {
       authorityMs: authorityTime.getTime(),
       monotonicAtMs: this.#monotonic(),
+      maxAgeMs: Math.min(this.#maxAgeMs, reportedMs),
     };
   }
 
@@ -54,7 +70,7 @@ export class HubTimeAnchor {
   current(): Date | null {
     if (this.#anchor === null) return null;
     const elapsed = this.#monotonic() - this.#anchor.monotonicAtMs;
-    if (elapsed < 0 || elapsed > this.#maxAgeMs) return null;
+    if (elapsed < 0 || elapsed > this.#anchor.maxAgeMs) return null;
     return new Date(this.#anchor.authorityMs + elapsed);
   }
 

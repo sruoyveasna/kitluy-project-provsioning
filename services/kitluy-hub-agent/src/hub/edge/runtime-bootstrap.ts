@@ -31,6 +31,7 @@
 import { createHash, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
 
 import {
+  publicKeyFingerprint,
   terminalConfigurationDeliveryBytes,
   type TerminalConfigurationDelivery,
   type TrustEnvironment,
@@ -400,6 +401,16 @@ export interface ConfigurationDeliveryBody {
   readonly payloadJson: string;
   /** Hub operational key over the canonical delivery bytes (base64url). */
   readonly deliverySignature: string;
+  /**
+   * The DELIVERY signer's identity (owner decision §3: "signer and
+   * public-key identifier"). `delivery.signingKeyId` names the CLOUD
+   * manifest key (provenance); these two name the Hub operational key that
+   * produced `deliverySignature`. Envelope metadata, not signed bytes — the
+   * terminal verifies the signature under the key it bound at pairing and
+   * cross-checks this fingerprint against that same trusted key.
+   */
+  readonly deliverySignerCertificateSerial: string;
+  readonly deliverySignerPublicKeyFingerprint: string;
   readonly rollbackReference: number | null;
 }
 
@@ -556,6 +567,8 @@ export async function readCurrentConfigurationDelivery(
           },
           payloadJson,
           deliverySignature,
+          deliverySignerCertificateSerial: signer.certificateSerial,
+          deliverySignerPublicKeyFingerprint: publicKeyFingerprint(signer.publicKeyPem),
           rollbackReference:
             rollbackRow === undefined ? null : Number(rollbackRow.snapshot_version),
         },

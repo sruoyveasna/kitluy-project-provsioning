@@ -15,6 +15,7 @@
  *   FAIL-CLOSED  staff acquisition (no durable session exists; a restart
  *                always re-authenticates interactively)
  */
+import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
 
@@ -110,6 +111,87 @@ export interface T1RuntimeOptions {
   readonly staffSession?: T1BootstrapPorts["staffSession"];
 }
 
+/** Injectable dependencies for the locked six-source endpoint walk. */
+export interface EndpointResolutionDeps {
+  readonly readLastVerified: () => StoredEndpoint | null;
+  readonly mdnsCandidates: () => Promise<readonly StoredEndpoint[]>;
+  readonly cloudReportedEndpoint?: () => Promise<StoredEndpoint | null>;
+  readonly fetchDiscovery: (
+    hostname: string,
+    port: number,
+  ) => Promise<SignedDiscoveryWirePayload | null>;
+}
+
+/**
+ * The §5 endpoint walk in the LOCKED order: assigned private IP → assigned
+ * hostname → signed mDNS discovery → last verified endpoint →
+ * cloud-reported verified endpoint → manual recovery IP. Every candidate
+ * merely produces a discovery payload; NO candidate is trust — the machine
+ * authenticates the record's signature before the endpoint may pin any
+ * session, whatever the source (a manual recovery IP included).
+ */
+export async function resolveHubEndpoint(
+  identity: ProtectedTerminalIdentity,
+  deps: EndpointResolutionDeps,
+): Promise<EndpointResolution> {
+  const attempts: Array<{ source: EndpointSource; endpoint: StoredEndpoint | null }> = [
+    {
+      source: "assigned_private_ip",
+      endpoint:
+        typeof identity.assignedPrivateIp === "string"
+          ? { hostname: identity.assignedPrivateIp, port: identity.hubEndpointHint.port }
+          : null,
+    },
+    { source: "assigned_hostname", endpoint: identity.hubEndpointHint },
+  ];
+  // Source 3: signed mDNS discovery — candidates only; trust follows.
+  let mdnsCandidates: readonly StoredEndpoint[] = [];
+  try {
+    mdnsCandidates = await deps.mdnsCandidates();
+  } catch {
+    mdnsCandidates = [];
+  }
+  for (const candidate of mdnsCandidates) {
+    attempts.push({ source: "signed_mdns_discovery", endpoint: candidate });
+  }
+  attempts.push({ source: "last_verified_endpoint", endpoint: deps.readLastVerified() });
+  if (deps.cloudReportedEndpoint !== undefined) {
+    try {
+      attempts.push({
+        source: "cloud_reported_endpoint",
+        endpoint: await deps.cloudReportedEndpoint(),
+      });
+    } catch {
+      attempts.push({ source: "cloud_reported_endpoint", endpoint: null });
+    }
+  }
+  attempts.push({
+    source: "manual_recovery_ip",
+    endpoint:
+      typeof identity.manualRecoveryIp === "string"
+        ? { hostname: identity.manualRecoveryIp, port: identity.hubEndpointHint.port }
+        : null,
+  });
+
+  for (const attempt of attempts) {
+    if (attempt.endpoint === null) continue;
+    const payload = await deps.fetchDiscovery(attempt.endpoint.hostname, attempt.endpoint.port);
+    if (payload !== null) {
+      return {
+        outcome: "reached",
+        source: attempt.source,
+        hostname: attempt.endpoint.hostname,
+        port: attempt.endpoint.port,
+        payload,
+      };
+    }
+  }
+  return {
+    outcome: "unreachable",
+    detail: "no endpoint candidate answered with a discovery payload",
+  };
+}
+
 /** Compose the production-shaped runtime and run one full bootstrap. */
 export async function runT1Bootstrap(
   safeStorage: OsEncryptionFacility,
@@ -131,8 +213,12 @@ export async function runT1Bootstrap(
     port: number,
   ): Promise<SignedDiscoveryWirePayload | null> => {
     try {
-      // The discovery fetch is CA-anchored (provisioned Hub CA); the SIGNED
-      // record then names the TLS fingerprint every later connection pins.
+      // The discovery fetch is CA-anchored (provisioned Hub CA) with the
+      // DEFAULT TLS server-identity check — hostname/IP binding is never
+      // disabled. Trust still does not come from this connection: the
+      // record's Ed25519 signature must verify under the provisioned Hub
+      // operational key BEFORE its TLS fingerprint may pin any session
+      // (machine.ts step 2), and freshness is re-judged under Hub time.
       const response = await pinnedHubRequest({
         hostname,
         port,
@@ -156,78 +242,24 @@ export async function runT1Bootstrap(
         store().receipts.authorizeOperationalUse(stored, eligibility),
     },
     hubEndpoint: {
-      async resolve(identity): Promise<EndpointResolution> {
-        const attempts: Array<{ source: EndpointSource; endpoint: StoredEndpoint | null }> = [
-          {
-            source: "assigned_private_ip",
-            endpoint:
-              typeof identity.assignedPrivateIp === "string"
-                ? { hostname: identity.assignedPrivateIp, port: identity.hubEndpointHint.port }
-                : null,
+      resolve: (identity): Promise<EndpointResolution> =>
+        resolveHubEndpoint(identity, {
+          readLastVerified: () => readLastVerifiedEndpoint(userDataPath),
+          mdnsCandidates: async () => {
+            const socket = (options.mdnsSocket ?? multicastSocket)();
+            try {
+              return (
+                await discoverKitluyHubCandidates(socket, options.mdnsTimeoutMs ?? 1_500)
+              ).map((c) => ({ hostname: c.hostname, port: c.port }));
+            } finally {
+              socket.close();
+            }
           },
-          { source: "assigned_hostname", endpoint: identity.hubEndpointHint },
-        ];
-        // Source 3: signed mDNS discovery — candidates only; trust follows.
-        let mdnsCandidates: readonly StoredEndpoint[] = [];
-        try {
-          const socket = (options.mdnsSocket ?? multicastSocket)();
-          try {
-            mdnsCandidates = (
-              await discoverKitluyHubCandidates(socket, options.mdnsTimeoutMs ?? 1_500)
-            ).map((c) => ({ hostname: c.hostname, port: c.port }));
-          } finally {
-            socket.close();
-          }
-        } catch {
-          mdnsCandidates = [];
-        }
-        for (const candidate of mdnsCandidates) {
-          attempts.push({ source: "signed_mdns_discovery", endpoint: candidate });
-        }
-        attempts.push({
-          source: "last_verified_endpoint",
-          endpoint: readLastVerifiedEndpoint(userDataPath),
-        });
-        if (options.cloudReportedEndpoint !== undefined) {
-          try {
-            attempts.push({
-              source: "cloud_reported_endpoint",
-              endpoint: await options.cloudReportedEndpoint(),
-            });
-          } catch {
-            attempts.push({ source: "cloud_reported_endpoint", endpoint: null });
-          }
-        }
-        attempts.push({
-          source: "manual_recovery_ip",
-          endpoint:
-            typeof identity.manualRecoveryIp === "string"
-              ? { hostname: identity.manualRecoveryIp, port: identity.hubEndpointHint.port }
-              : null,
-        });
-
-        for (const attempt of attempts) {
-          if (attempt.endpoint === null) continue;
-          const payload = await fetchDiscoveryAt(
-            identity,
-            attempt.endpoint.hostname,
-            attempt.endpoint.port,
-          );
-          if (payload !== null) {
-            return {
-              outcome: "reached",
-              source: attempt.source,
-              hostname: attempt.endpoint.hostname,
-              port: attempt.endpoint.port,
-              payload,
-            };
-          }
-        }
-        return {
-          outcome: "unreachable",
-          detail: "no endpoint candidate answered with a discovery payload",
-        };
-      },
+          ...(options.cloudReportedEndpoint === undefined
+            ? {}
+            : { cloudReportedEndpoint: options.cloudReportedEndpoint }),
+          fetchDiscovery: (hostname, port) => fetchDiscoveryAt(identity, hostname, port),
+        }),
     },
     edgeSession: {
       async establish(endpoint: VerifiedHubEndpoint): Promise<EdgeSessionResult> {
@@ -268,8 +300,11 @@ export async function runT1Bootstrap(
             };
           },
           async openStaffSession(input) {
+            // One key per LOGICAL open attempt, minted once so a transport
+            // retry replays the same request. Never the wall clock — the
+            // runtime reads no wall clock (owner decision §1).
             const response = await call("POST", SESSIONS_OPEN_PATH, input, {
-              "idempotency-key": `t1-open-${input.actorId}-${Date.now()}`,
+              "idempotency-key": `t1-open-${input.actorId}-${randomUUID()}`,
             });
             if (response.status !== 200) return refusalFrom(response.status, response.body);
             const body = response.body as { readonly session: StaffSessionWire };

@@ -118,6 +118,28 @@ user can never select or override Tenant, Digital Store, Location, Hub,
 environment, terminal profile or assignment generation. BLK-005/BLK-006
 stay fail-closed; the T1–T4 model of §2 is unchanged.
 
+> **2026-08-06 (P02 close) — WS-12-T001 COMPLETE — IMPLEMENTED-IN-DEV.**
+> The successor package delivered the real Hub bootstrap contract
+> (KLD-2026-08-06-WS12-T001-EDGE-BOOTSTRAP-001): the three `/edge/v1`
+> bootstrap reads served over the P04B mTLS transport (authority-time from
+> the Hub DATABASE transaction, override-free eligibility with the full
+> fail-closed matrix, the Hub-attested signed configuration envelope),
+> staff sessions under the five canonical permission keys (registry
+> amendment 002, 109→114; census of permission-less Edge routes 9→5), the
+> real mDNS `_kitluy-edge._tcp.local` listener with the locked six-source
+> endpoint order proven order-exact, and the atomic protected-identity
+> writer. A real terminal runtime reaches **`ready`** through the public
+> routes and **`offline_ready`** with the delivery unavailable (§7 e2e,
+> real Hub DB + real TLS + real Ed25519, terminal touching only public
+> adapters). NO cloud/Hub migration — no relational route or permission
+> registry exists; keys resolve from cloud-authored grant rows and zero
+> rows fail closed. Four security defects in the pre-existing P02 commit
+> were fixed and test-pinned (recorded: KLREC-2026-08-06-WS12-T001-P02-001).
+> The fence, BLK-005/BLK-006 and the T1-composition rule are unchanged —
+> T1 still creates no Booking, pricing, payment, receipt or printing
+> truth. NEXT: WS-12-T002 (Customer Identity, Consent and Booking Draft)
+> NOT STARTED.
+
 > **2026-08-06 (close) — WS-12-T001 PARTIAL — SUCCESSOR PACKAGE REQUIRED.**
 > Delivered in dev with executed evidence: the §5 thirteen-state bootstrap
 > machine and ten-step startup sequence, verified signed-discovery endpoint

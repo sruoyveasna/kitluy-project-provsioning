@@ -2664,3 +2664,27 @@ prior-file preservation, no private key in identity JSON, immutable local
 installation acknowledgment). BLK-005 custody gates unchanged. This
 decision resolves the WS-12-T001 PARTIAL prerequisites (route registration
 and permission keys).
+
+## KLREC-2026-08-06-WS12-T001-P02-001 — P02 checkpoint deviation and evidence reconciliation (2026-08-06)
+
+**Status: RECONCILED.** The WS-12-T001-P02 execution prompt named starting
+checkpoint `b820f00` (clean tree); the repository was found at `9d7a64d` —
+an owner-authored commit already carrying most of the P02 implementation
+but NO evidence: no handoff, no state-file updates, no recorded
+verification, and several §8 required proofs missing (NOT_YET_VALID
+non-consumption, cross-Store transplants, endpoint-order proof, manual-IP
+verification, revoked-grant-after-open, delivery-signature log census).
+The closeout session preserved the commit (higher authority: owner work on
+`main`), verified every claim against a live Hub, and closed the gaps.
+Four security defects found in the committed implementation are fixed and
+test-pinned, the most significant being: unpinned TLS requests disabled
+hostname verification entirely, and Node's keep-alive agent could reuse a
+socket across different fingerprint pins so `checkServerIdentity` never
+ran (observed live in the e2e). A related domain conflation is RECORDED as
+truth: the pairing receipt's `hubCertificateFingerprint` binds the Hub
+CREDENTIAL (operational key) fingerprint, while the discovery record's
+names the TLS certificate — two distinct key domains; development fixtures
+had made them equal and one refactor briefly treated them as one domain.
+The discovery record is now authenticated (bindings + signature) BEFORE
+its TLS fingerprint may direct any connection. Full record:
+`00_AI_HANDOFF/shared/2026-08-06__SHARED__WS-12-T001-P02__REAL-HUB-BOOTSTRAP-CONTRACT-SESSION-AUTHORIZATION-AND-DISCOVERY__AI-HANDOFF.md`.

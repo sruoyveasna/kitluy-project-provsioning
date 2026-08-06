@@ -891,4 +891,113 @@ describe("WS-12-T001 T1 bootstrap acceptance (P02 contract)", () => {
     }
     h.close();
   });
+
+  it("15. a NOT-YET-VALID configuration is refused, retryable and consumes NOTHING", async () => {
+    // Owner decision §1: NOT_YET_VALID remains retryable and non-consuming.
+    const h = makeHarness();
+    const seeded = await run(h);
+    expect(seeded.state).toBe("ready"); // v7 is now the cache
+    const future = h.makeDelivery({
+      configurationVersion: 8,
+      effectiveAt: new Date(NOW.getTime() + 3_600_000).toISOString(),
+    });
+    h.overrides.configuration = () =>
+      Promise.resolve({ outcome: "delivery" as const, wire: future });
+    const refused = await run(h);
+    expect(refused.state).toBe("configuration_incompatible");
+    expect(refused.refusalCode).toBe("CONFIG_NOT_YET_VALID");
+    // Nothing was consumed: the cache still carries v7 …
+    expect(h.stores.configuration.loadCurrent()?.snapshot.configurationVersion).toBe(7);
+    // … and version 8, retried once effective, installs cleanly — the
+    // refusal burned neither the version nor the store.
+    const effective = h.makeDelivery({ configurationVersion: 8 });
+    h.overrides.configuration = () =>
+      Promise.resolve({ outcome: "delivery" as const, wire: effective });
+    const retried = await run(h);
+    expect(retried.state).toBe("ready");
+    expect(h.stores.configuration.loadCurrent()?.snapshot.configurationVersion).toBe(8);
+    h.close();
+  });
+
+  it("16. a NOT-YET-VALID discovery record is refused retryably and consumes nothing", async () => {
+    const h = makeHarness();
+    h.overrides.resolve = () =>
+      Promise.resolve({
+        outcome: "reached" as const,
+        source: "assigned_hostname" as const,
+        hostname: "hub.store.lan",
+        port: EDGE_LAN_PORT,
+        payload: h.discoveryPayload({
+          issuedAt: new Date(NOW.getTime() + 60_000),
+          expiresAt: new Date(NOW.getTime() + 150_000),
+        }),
+      });
+    const refused = await run(h);
+    expect(refused.state).toBe("hub_unavailable");
+    expect(refused.refusalCode).toBe("DISCOVERY_NOT_YET_VALID");
+    // Non-consuming: the stored receipt is untouched and the next run, with
+    // a currently-valid record, walks straight through to the shell.
+    delete h.overrides.resolve;
+    const retried = await run(h);
+    expect(retried.state).toBe("ready");
+    h.close();
+  });
+
+  it("17. eligibility freshness is judged under Hub time — stale and malformed responses refuse", async () => {
+    const h = makeHarness();
+    h.overrides.eligibility = () =>
+      Promise.resolve({
+        outcome: "eligible" as const,
+        eligibility: h.eligibilityWire({
+          authorityTime: new Date(NOW.getTime() - 60_000).toISOString(),
+        }),
+      });
+    const stale = await run(h);
+    expect(stale.state).toBe("hub_unavailable");
+    expect(stale.refusalCode).toBe("ELIGIBILITY_STALE");
+    h.overrides.eligibility = () =>
+      Promise.resolve({
+        outcome: "eligible" as const,
+        eligibility: h.eligibilityWire({ authorityTime: "not-an-instant" }),
+      });
+    const malformed = await run(h);
+    expect(malformed.state).toBe("hub_unavailable");
+    expect(malformed.refusalCode).toBe("ELIGIBILITY_TIME_MALFORMED");
+    h.close();
+  });
+
+  it("18. the configuration delivery signature never reaches a terminal log line", async () => {
+    const h = makeHarness();
+    const wire = h.makeDelivery();
+    h.overrides.configuration = () => Promise.resolve({ outcome: "delivery" as const, wire });
+    const report = await run(h);
+    expect(report.state).toBe("ready");
+    const serialized = JSON.stringify(h.logs);
+    expect(serialized).not.toContain(wire.deliverySignature);
+    expect(serialized).not.toContain(wire.deliverySignature.slice(0, 24));
+    h.close();
+  });
+
+  it("19. a manual recovery IP gains no verification bypass — an altered record still refuses", async () => {
+    // §3.5: a manual IP is endpoint-order position 6, nothing more. The
+    // record it serves is verified with the SAME full discipline.
+    const h = makeHarness();
+    const genuine = h.discoveryPayload();
+    const forged: typeof genuine = {
+      ...genuine,
+      record: { ...genuine.record, hubDeviceId: randomUUID() },
+    };
+    h.overrides.resolve = () =>
+      Promise.resolve({
+        outcome: "reached" as const,
+        source: "manual_recovery_ip" as const,
+        hostname: "10.99.99.9",
+        port: EDGE_LAN_PORT,
+        payload: forged,
+      });
+    const refused = await run(h);
+    expect(refused.state).toBe("assignment_invalid");
+    expect(refused.refusalCode).toBe("DISCOVERY_WRONG_HUB");
+    h.close();
+  });
 });

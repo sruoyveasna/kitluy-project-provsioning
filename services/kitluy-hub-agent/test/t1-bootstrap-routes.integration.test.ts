@@ -51,6 +51,7 @@ const LOCATION = "e0000000-0000-4000-8000-000000000003";
 const HUB_CREDENTIAL = "e0000000-0000-4000-8000-000000000013";
 const ACTIVE_SNAPSHOT = "e0000000-0000-4000-8000-000000000050";
 const ATTACKER_TENANT = "e0000000-0000-4000-8000-0000000000a1";
+const ATTACKER_STORE = "e0000000-0000-4000-8000-0000000000a2";
 const T1 = "laundry.t1.intake_cashier";
 const T3 = "laundry.t3.ready_scan_in";
 
@@ -382,7 +383,12 @@ describe.skipIf(!live)("T1 bootstrap routes and staff sessions (WS-12-T001-P02)"
     return { actorId, passcode };
   }
 
-  async function grant(actorId: string, permissionKey: string, effect = "allow"): Promise<void> {
+  async function grant(
+    actorId: string,
+    permissionKey: string,
+    effect = "allow",
+    projectionVersion = 1,
+  ): Promise<void> {
     await pool.query(
       `insert into edge_config.permission_grant_projection
          (id, tenant_id, digital_store_id, location_id, source_snapshot_id,
@@ -392,12 +398,22 @@ describe.skipIf(!live)("T1 bootstrap routes and staff sessions (WS-12-T001-P02)"
           expires_at, revoked_at, offline_validity_seconds,
           offline_policy_reference, signature, signature_algorithm,
           signing_key_id, received_at)
-       values ($1, $2, $3, $4, $5, 1, $6, $7, $8, 'terminal_session',
+       values ($1, $2, $3, $4, $5, $9, $6, $7, $8, 'terminal_session',
                'store_location', $4, 'development', false, false, false,
                now() - interval '1 hour', now() - interval '1 hour',
                null, null, 3600, 'dev-offline-policy', decode('c0ffee00','hex'),
                'ed25519', 'demo-signing-key-1', now())`,
-      [randomUUID(), TENANT, STORE, LOCATION, ACTIVE_SNAPSHOT, actorId, permissionKey, effect],
+      [
+        randomUUID(),
+        TENANT,
+        STORE,
+        LOCATION,
+        ACTIVE_SNAPSHOT,
+        actorId,
+        permissionKey,
+        effect,
+        projectionVersion,
+      ],
     );
   }
 
@@ -649,6 +665,17 @@ describe.skipIf(!live)("T1 bootstrap routes and staff sessions (WS-12-T001-P02)"
     expect(cleared.status, JSON.stringify(cleared.body)).toBe(200);
   });
 
+  it("fails closed on cross-Store transplant — same Tenant, another Digital Store", async () => {
+    // §2: the transplant matrix is two-dimensional. Cross-Tenant is proven
+    // above; this proves the SAME-Tenant, different-Store axis separately —
+    // a terminal projected under another Digital Store never derives
+    // eligibility from this Hub.
+    const crossStore = await newLanTerminal("elig-cross-store", { store: ATTACKER_STORE });
+    const refused = await call(crossStore, "GET", EDGE_RUNTIME_ELIGIBILITY_PATH);
+    expect(refused.status).toBe(403);
+    expect(detailsOf(refused)["result"]).toBe("ASSIGNMENT_SCOPE_MISMATCH");
+  });
+
   it("fails closed while the Hub is in a replacement state, and recovers on normal", async () => {
     const t = await newLanTerminal("elig-replacement");
     await pairTerminal(t);
@@ -689,6 +716,14 @@ describe.skipIf(!live)("T1 bootstrap routes and staff sessions (WS-12-T001-P02)"
     expect(delivery["terminalDeviceId"]).toBe(t.deviceId);
     expect(delivery["terminalProfileCode"]).toBe(T1);
     expect(delivery["assignmentGeneration"]).toBe(1);
+    // The DELIVERY signer self-describes (owner decision §3 "signer and
+    // public-key identifier"): the envelope names the Hub operational key
+    // that produced the signature — distinct from delivery.signingKeyId,
+    // which is the CLOUD manifest key (provenance).
+    expect(response.body["deliverySignerCertificateSerial"]).toBe(signer.certificateSerial);
+    expect(response.body["deliverySignerPublicKeyFingerprint"]).toBe(
+      publicKeyFingerprint(signer.publicKeyPem),
+    );
     // Terminal-side INDEPENDENT verification with the REAL verifier:
     const verdict = verifyTerminalConfigurationDelivery(
       {
@@ -975,6 +1010,77 @@ describe.skipIf(!live)("T1 bootstrap routes and staff sessions (WS-12-T001-P02)"
       sessionId: foreignSession,
     });
     expect(missingKey.status).toBe(422);
+  });
+
+  it("refuses a cross-Store staff transplant — same Tenant, another Digital Store", async () => {
+    // §8 staff-session matrix: cross-STORE, not merely cross-Tenant. A staff
+    // member cached under another Digital Store of the SAME Tenant never
+    // opens a session on this Store's terminal.
+    const t = await readyTerminal("sess-cross-store");
+    const crossStore = await insertStaff([T1], { store: ATTACKER_STORE });
+    await grant(crossStore.actorId, "staff.sessions.open");
+    const transplant = await call(
+      t,
+      "POST",
+      EDGE_SESSIONS_OPEN_PATH,
+      { actorId: crossStore.actorId, passcode: crossStore.passcode, profileCode: T1 },
+      { "idempotency-key": `xstore-${RUN}-1` },
+    );
+    expect(transplant.status).toBe(403);
+    expect(detailsOf(transplant)["result"]).toBe("STAFF_SCOPE_MISMATCH");
+  });
+
+  it("a grant revoked after open takes effect at the very next session action", async () => {
+    // §8: "revoked staff membership fails" — beyond the disabled flag. The
+    // projection is cloud-authored and deny-anywhere-wins (0025 resolver);
+    // a deny row landing AFTER a session opened must bite on the next
+    // action, because every route re-resolves — nothing is cached.
+    const t = await readyTerminal("sess-revoked-grant");
+    const staff = await insertStaff([T1]);
+    for (const key of FIVE_KEYS) await grant(staff.actorId, key);
+    const opened = await call(
+      t,
+      "POST",
+      EDGE_SESSIONS_OPEN_PATH,
+      { actorId: staff.actorId, passcode: staff.passcode, profileCode: T1 },
+      { "idempotency-key": `revk-${RUN}-1` },
+    );
+    expect(opened.status, JSON.stringify(opened.body)).toBe(200);
+    const sessionId = String((opened.body["session"] as Record<string, unknown>)["sessionId"]);
+    await grant(staff.actorId, "staff.sessions.refresh", "deny", 2);
+    const refreshDenied = await call(
+      t,
+      "POST",
+      EDGE_SESSIONS_REFRESH_PATH,
+      { sessionId },
+      { "idempotency-key": `revk-${RUN}-2` },
+    );
+    expect(refreshDenied.status).toBe(403);
+    expect(detailsOf(refreshDenied)["result"]).toBe("SESSION_PERMISSION_DENIED");
+    // Close still works under its own (unrevoked) key — the deny is exact.
+    const closed = await call(
+      t,
+      "POST",
+      EDGE_SESSIONS_CLOSE_PATH,
+      { sessionId },
+      { "idempotency-key": `revk-${RUN}-3` },
+    );
+    expect(closed.status, JSON.stringify(closed.body)).toBe(200);
+  });
+
+  it("session routes refuse query parameters outright — the URL carries no inputs", async () => {
+    const t = await readyTerminal("sess-query");
+    const staff = await insertStaff([T1]);
+    for (const key of FIVE_KEYS) await grant(staff.actorId, key);
+    const widened = await call(
+      t,
+      "POST",
+      `${EDGE_SESSIONS_OPEN_PATH}?actorId=someone-else`,
+      { actorId: staff.actorId, passcode: staff.passcode, profileCode: T1 },
+      { "idempotency-key": `qs-${RUN}-1` },
+    );
+    expect(widened.status).toBe(422);
+    expect(widened.body["error"]).toBeDefined();
   });
 
   // -------------------------------------------------------------------------

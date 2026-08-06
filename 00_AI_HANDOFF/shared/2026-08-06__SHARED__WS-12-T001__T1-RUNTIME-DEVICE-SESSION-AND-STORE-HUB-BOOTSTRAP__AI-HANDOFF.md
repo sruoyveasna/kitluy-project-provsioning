@@ -4,7 +4,7 @@
 | ---------- | ----------------------------------------------------------------------------- |
 | Date       | 2026-08-06 · Asia/Phnom_Penh                                                  |
 | Authority  | KLD-2026-08-06-WS12-TASKS-001 (WS-12 task register); WS-12-T001 owner package |
-| Status     | **WS-12-T001 PARTIAL — SUCCESSOR PACKAGE REQUIRED**                           |
+| Status     | **SUPERSEDED — WS-12-T001 COMPLETE — IMPLEMENTED-IN-DEV (closed by P02, see 2026-08-06 P02 handoff)** |
 | Workstream | WS-12 T1 Intake/Cashier — IN PROGRESS (T001 of 8; nothing else started)       |
 | Push       | NOT PUSHED                                                                    |
 
@@ -163,22 +163,24 @@ machine-level proof is complete, the composition is production-shaped and
 fail-closed, and the status is honestly **PARTIAL — SUCCESSOR PACKAGE
 REQUIRED** (the WS-11-T005 precedent).
 
-## 5. T001 capability census
+## 5. T001 capability census — REFRESHED at P02 closeout (2026-08-06)
 
 | Capability                                          | State                                                              |
 | --------------------------------------------------- | ------------------------------------------------------------------ |
 | §5 state vocabulary (13 states, closed)             | IMPLEMENTED-IN-DEV (tested)                                        |
-| Ten-step bootstrap sequence                         | IMPLEMENTED-IN-DEV (tested, transitions asserted)                  |
-| Protected identity load (safeStorage custody)       | IMPLEMENTED-IN-DEV (adapter; no writer wired)                      |
+| Ten-step bootstrap sequence                         | IMPLEMENTED-IN-DEV (tested, transitions asserted, e2e to `ready`)  |
+| Protected identity load (safeStorage custody)       | IMPLEMENTED-IN-DEV (atomic post-provisioning WRITER wired, 7 tests)|
 | Pairing-receipt startup verification + §11 re-check | IMPLEMENTED-IN-DEV (real store + crypto)                           |
-| Verified discovery → pinned endpoint                | IMPLEMENTED-IN-DEV (real signatures)                               |
-| mTLS establishment w/ pinning                       | IMPLEMENTED-IN-DEV (client built; credentials BLK-005 fail-closed) |
-| Eligibility / Hub time / config delivery over LAN   | FAIL-CLOSED — no approved route (owner decision)                   |
-| Signed-config verification + schema gate            | IMPLEMENTED-IN-DEV (real verifier; C4 signer gap unchanged)        |
-| Offline config cache (durable, sealed, monotonic)   | IMPLEMENTED-IN-DEV (new store, 6 tests)                            |
-| Staff restore + T1 profile authorization            | IMPLEMENTED-IN-DEV (machine level; Hub sessions route gap)         |
+| Verified discovery → pinned endpoint                | IMPLEMENTED-IN-DEV (record authenticated BEFORE its pin is used)   |
+| mTLS establishment w/ pinning                       | IMPLEMENTED-IN-DEV (per-request handshake; credentials BLK-005)    |
+| Eligibility / Hub time / config delivery over LAN   | IMPLEMENTED-IN-DEV — three served `/edge/v1` routes, live-proven   |
+| Staff-session routes + permission keys              | IMPLEMENTED-IN-DEV — 5 canonical keys (amendment 002), enforced    |
+| mDNS/DNS-SD discovery (`_kitluy-edge._tcp.local`)   | IMPLEMENTED-IN-DEV — real listener; locked six-source order proven |
+| Signed-config verification + schema gate            | IMPLEMENTED-IN-DEV (delivery attested by Hub operational key)      |
+| Offline config cache (durable, sealed, monotonic)   | IMPLEMENTED-IN-DEV (`offline_ready` proven e2e)                    |
+| Staff restore + T1 profile authorization            | IMPLEMENTED-IN-DEV (`pos.t1.use` required beyond session open)     |
 | Read-only renderer bridge + bilingual state surface | IMPLEMENTED-IN-DEV                                                 |
-| Non-selectability of scope/Hub/profile/generation   | IMPLEMENTED-IN-DEV (structural; no input path)                     |
+| Non-selectability of scope/Hub/profile/generation   | IMPLEMENTED-IN-DEV (structural; routes accept no overrides)        |
 | Booking/pricing/payment/receipt/printing            | NOT IN T001 — untouched (T002–T006)                                |
 
 ## 6. Security result
