@@ -17459,4 +17459,397 @@ end
 $section55d$;
 
 
-select 'assertions complete: groups 0010-0153 structural contract holds (incl. WS-11-T003 Step 4 Phase C — RC-022 spendability census CLOSED; governed emergency 0150–0153; RevocationGateway ships in @kitluy/device-identity) + WS-11-T005 fleet health, support access and governed containment (0177)' as result;
+-- ============================================================================
+-- SECTION 56 — governed Hub replacement and cutover (migration 0179).
+--
+-- WS-11-T006-P01. Proved here: the full replacement lifecycle for full-Pi,
+-- same-Pi NVMe and compromised-loss; reauthentication + four-eyes with
+-- self-approval refused; identity rules (same UUID for NVMe, NEW UUID for a
+-- replacement Pi, never transferred); scope refusal; stale-generation and
+-- conflicting-idempotency refusal; idempotent retry after commit; dual-active
+-- refusal; composition of the 0120/0121 doors (assignment revoked, terminals
+-- revoked, projection dropped, certificates revoked, no key carry-over);
+-- cancellation/failure boundaries; append-only audit; privilege census.
+-- ============================================================================
+do $section56$
+declare
+  v_tenant_b uuid := '00000000-0000-4000-8000-000000000012';
+  v_store_b uuid := '00000000-0000-4000-8000-000000000017';
+  v_location_b uuid := '00000000-0000-4000-8000-000000000450';
+  v_store_a uuid := '00000000-0000-4000-8000-000000000015';
+  v_hub_profile uuid;
+  v_old uuid;
+  v_new uuid;
+  v_nvme uuid;
+  v_c2 uuid;
+  v_cross uuid;
+  v_stray record;
+  v_op uuid;
+  v_op2 uuid;
+  v_r jsonb;
+  v_refused integer := 0;
+  v_idem text := 'T006-P01-' || gen_random_uuid();
+begin
+  select id into v_hub_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+
+  -- Fixture isolation: revoke any live store_hub assignment already sitting
+  -- in the tenant-B Location (section 55a left one), so the dual-active
+  -- census below measures THIS section's devices only.
+  execute format('grant kitluy_fleet_governor to %I', current_user);
+  set local role kitluy_fleet_governor;
+  for v_stray in
+    select a.device_id from kitluy_devices.device_assignments a
+      join kitluy_devices.devices d on d.id = a.device_id
+     where a.store_location_id = v_location_b
+       and a.state in ('pending_trust', 'active') and d.device_class = 'store_hub'
+  loop
+    perform kitluy_devices.revoke_device_assignment_v1(
+      v_stray.device_id, 'T006-P01 fixture isolation', 'OP-T006');
+  end loop;
+  reset role;
+  execute format('revoke kitluy_fleet_governor from %I', current_user);
+
+  -- Enroll and claim the cast: OLD and NEW at tenant B / loc 450.
+  v_old := kitluy_devices.enroll_device_v1(
+    'T006-OLD-' || gen_random_uuid(), v_hub_profile, now(),
+    encode(sha256(convert_to('t6-old-' || gen_random_uuid(), 'UTF8')), 'hex'),
+    'ed25519', 'software', 'STATION-T006', 'OP-T006',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'f6:01:' || substr(md5(random()::text),1,6)),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-t6o-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-t6o-' || gen_random_uuid())));
+  v_new := kitluy_devices.enroll_device_v1(
+    'T006-NEW-' || gen_random_uuid(), v_hub_profile, now(),
+    encode(sha256(convert_to('t6-new-' || gen_random_uuid(), 'UTF8')), 'hex'),
+    'ed25519', 'software', 'STATION-T006', 'OP-T006',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'f6:02:' || substr(md5(random()::text),1,6)),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-t6n-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-t6n-' || gen_random_uuid())));
+  perform kitluy_devices.create_device_claim_v1(v_old, v_tenant_b, v_store_b, v_location_b,
+    encode(sha256(convert_to('t6-tok-o', 'UTF8')), 'hex'),
+    encode(sha256(convert_to('t6-pay-o', 'UTF8')), 'hex'), 900, 'OP-T006');
+  perform kitluy_devices.redeem_device_claim_v1(
+    encode(sha256(convert_to('t6-tok-o', 'UTF8')), 'hex'),
+    encode(sha256(convert_to('t6-pay-o', 'UTF8')), 'hex'), v_old, 'HUB-T006');
+  perform kitluy_devices.create_device_claim_v1(v_new, v_tenant_b, v_store_b, v_location_b,
+    encode(sha256(convert_to('t6-tok-n', 'UTF8')), 'hex'),
+    encode(sha256(convert_to('t6-pay-n', 'UTF8')), 'hex'), 900, 'OP-T006');
+  perform kitluy_devices.redeem_device_claim_v1(
+    encode(sha256(convert_to('t6-tok-n', 'UTF8')), 'hex'),
+    encode(sha256(convert_to('t6-pay-n', 'UTF8')), 'hex'), v_new, 'HUB-T006');
+
+  set local role kitluy_fleet_service;
+
+  -- Reauthentication is mandatory.
+  begin
+    perform kitluy_devices.request_hub_replacement_v1(
+      v_old, 'full_pi', 'nvme controller dead', 'FLEET-OP-1', '  ',
+      'T006-NOREAUTH-' || gen_random_uuid(), gen_random_uuid());
+    raise exception 'ASSERT FAIL: a replacement opened without reauthentication';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-HUBREPL-REAUTH-REQUIRED%' then
+      raise exception 'ASSERT FAIL: missing-reauth refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+
+  v_r := kitluy_devices.request_hub_replacement_v1(
+    v_old, 'full_pi', 'board failure', 'FLEET-OP-1', 'REAUTH-EV-1',
+    v_idem, gen_random_uuid());
+  v_op := (v_r->>'operation_id')::uuid;
+
+  -- Duplicate request with the SAME key returns the original; a CONFLICTING
+  -- reuse is refused.
+  v_r := kitluy_devices.request_hub_replacement_v1(
+    v_old, 'full_pi', 'board failure retry', 'FLEET-OP-1', 'REAUTH-EV-1',
+    v_idem, gen_random_uuid());
+  if v_r->>'outcome' <> 'EXISTING' or (v_r->>'operation_id')::uuid <> v_op then
+    raise exception 'ASSERT FAIL: an identical replacement retry did not return the original: %', v_r;
+  end if;
+  begin
+    perform kitluy_devices.request_hub_replacement_v1(
+      v_new, 'nvme_same_pi', 'different op, same key', 'FLEET-OP-1', 'REAUTH-EV-1',
+      v_idem, gen_random_uuid());
+    raise exception 'ASSERT FAIL: a conflicting idempotency key was accepted';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-HUBREPL-IDEMPOTENCY-CONFLICT%' then
+      raise exception 'ASSERT FAIL: idempotency-conflict refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+
+  -- Cutover cannot skip approval or eligibility.
+  begin
+    perform kitluy_devices.commit_hub_replacement_cutover_v1(
+      v_op, 1, 'FLEET-OP-1', 'REVOKE-REF-1', true);
+    raise exception 'ASSERT FAIL: cutover ran without approval';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-HUBREPL-STATE%' then
+      raise exception 'ASSERT FAIL: skipped-approval refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+
+  -- Four-eyes: self-approval refused, independent approver accepted.
+  begin
+    perform kitluy_devices.approve_hub_replacement_v1(v_op, 'FLEET-OP-1');
+    raise exception 'ASSERT FAIL: the requester approved their own replacement';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-HUBREPL-SELF-APPROVAL%' then
+      raise exception 'ASSERT FAIL: self-approval refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+  perform kitluy_devices.approve_hub_replacement_v1(v_op, 'FLEET-APPROVER-2');
+
+  -- Identity rules: a full-Pi replacement must be a DIFFERENT enrolled Hub
+  -- with a live same-scope assignment.
+  begin
+    perform kitluy_devices.register_replacement_hub_v1(v_op, v_old, 'FLEET-OP-1');
+    raise exception 'ASSERT FAIL: the old identity was transferred to the replacement';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-HUBREPL-IDENTITY%' then
+      raise exception 'ASSERT FAIL: identity-transfer refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+  perform kitluy_devices.register_replacement_hub_v1(v_op, v_new, 'FLEET-OP-1');
+  perform kitluy_devices.mark_replacement_restore_ready_v1(v_op, gen_random_uuid(), 'FLEET-OP-1');
+  perform kitluy_devices.mark_replacement_cutover_ready_v1(v_op, 'FLEET-OP-1');
+
+  -- Stale generation refused; the recorded revocation is mandatory.
+  begin
+    perform kitluy_devices.commit_hub_replacement_cutover_v1(
+      v_op, 99, 'FLEET-OP-1', 'REVOKE-REF-1', true);
+    raise exception 'ASSERT FAIL: a stale generation cut over';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-HUBREPL-STALE-GENERATION%' then
+      raise exception 'ASSERT FAIL: stale-generation refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+  begin
+    perform kitluy_devices.commit_hub_replacement_cutover_v1(
+      v_op, 1, 'FLEET-OP-1', '', true);
+    raise exception 'ASSERT FAIL: cutover ran without a recorded certificate revocation';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-HUBREPL-REVOCATION-REQUIRED%' then
+      raise exception 'ASSERT FAIL: missing-revocation refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+
+  v_r := kitluy_devices.commit_hub_replacement_cutover_v1(
+    v_op, 1, 'FLEET-OP-1', 'REVOKE-REF-1', true);
+  if v_r->>'outcome' <> 'CUTOVER_COMMITTED' then
+    raise exception 'ASSERT FAIL: a ready cutover was refused: %', v_r;
+  end if;
+  -- Retry returns the ORIGINAL result (§7.7) — a concurrent second caller
+  -- serializes on the row lock and lands on the same branch.
+  v_r := kitluy_devices.commit_hub_replacement_cutover_v1(
+    v_op, 1, 'FLEET-OP-1', 'REVOKE-REF-1', true);
+  if v_r->>'outcome' <> 'CUTOVER_ALREADY_COMMITTED' then
+    raise exception 'ASSERT FAIL: a cutover retry did not return the original: %', v_r;
+  end if;
+
+  -- Cancellation after commit is impossible.
+  begin
+    perform kitluy_devices.cancel_hub_replacement_v1(v_op, 'FLEET-OP-1', 'too late');
+    raise exception 'ASSERT FAIL: a committed cutover was cancelled';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-HUBREPL-STATE%' then
+      raise exception 'ASSERT FAIL: cancel-after-commit refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+
+  perform kitluy_devices.retire_old_hub_replacement_v1(v_op, 'FLEET-OP-1');
+  begin
+    perform kitluy_devices.complete_hub_replacement_v1(v_op, 'FLEET-OP-1', ' ');
+    raise exception 'ASSERT FAIL: completion ran without new-credential activation evidence';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-HUBREPL-ACTIVATION-REQUIRED%' then
+      raise exception 'ASSERT FAIL: missing-activation refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+  v_r := kitluy_devices.complete_hub_replacement_v1(v_op, 'FLEET-OP-1', 'ACT-REF-NEW-1');
+  if (v_r->>'terminal_repair_required')::boolean is not true then
+    raise exception 'ASSERT FAIL: completion did not carry the terminal re-pairing requirement';
+  end if;
+
+  reset role;
+
+  -- The composed effects: old assignment revoked, old device REPLACED with
+  -- replaced_by set, projection gone, exactly one live store_hub assignment
+  -- (the NEW identity) in the Location, history intact.
+  if (select state from kitluy_devices.device_assignments
+       where device_id = v_old order by assignment_generation desc limit 1) <> 'revoked' then
+    raise exception 'ASSERT FAIL: the old assignment was not revoked by cutover';
+  end if;
+  if (select lifecycle_state from kitluy_devices.devices where id = v_old) <> 'replaced'
+     or (select replaced_by_device_id from kitluy_devices.devices where id = v_old) <> v_new then
+    raise exception 'ASSERT FAIL: the old Hub identity was not marked replaced by the new one';
+  end if;
+  if exists (select 1 from kitluy_devices.device_assignment_projections where device_id = v_old) then
+    raise exception 'ASSERT FAIL: the old offline projection survived cutover';
+  end if;
+  if (select count(*) from kitluy_devices.device_assignments a
+       join kitluy_devices.devices d on d.id = a.device_id
+      where a.store_location_id = v_location_b
+        and a.state in ('pending_trust', 'active') and d.device_class = 'store_hub') <> 1 then
+    raise exception 'ASSERT FAIL: the Location does not have exactly one live Store Hub after cutover';
+  end if;
+
+  -- Same-Pi NVMe: the SAME UUID is kept; a different device is refused; the
+  -- composed 0120 door revokes certificates and pins no key carry-over.
+  v_nvme := kitluy_devices.enroll_device_v1(
+    'T006-NVME-' || gen_random_uuid(), v_hub_profile, now(),
+    encode(sha256(convert_to('t6-nv-' || gen_random_uuid(), 'UTF8')), 'hex'),
+    'ed25519', 'software', 'STATION-T006', 'OP-T006',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'f6:03:' || substr(md5(random()::text),1,6)),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-t6v-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-t6v-' || gen_random_uuid())));
+  -- (v_nvme stays unclaimed: it exists to prove the same-Pi identity rule;
+  -- the Location already holds the NEW hub live)
+  set local role kitluy_fleet_service;
+  v_r := kitluy_devices.request_hub_replacement_v1(
+    v_new, 'nvme_same_pi', 'nvme wear-out', 'FLEET-OP-1', 'REAUTH-EV-2',
+    'T006-NVME-' || gen_random_uuid(), gen_random_uuid());
+  v_op2 := (v_r->>'operation_id')::uuid;
+  perform kitluy_devices.approve_hub_replacement_v1(v_op2, 'FLEET-APPROVER-2');
+  begin
+    perform kitluy_devices.register_replacement_hub_v1(v_op2, v_nvme, 'FLEET-OP-1');
+    raise exception 'ASSERT FAIL: same-Pi NVMe replacement accepted a different identity';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-HUBREPL-IDENTITY%' then
+      raise exception 'ASSERT FAIL: nvme identity refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+  perform kitluy_devices.register_replacement_hub_v1(v_op2, v_new, 'FLEET-OP-1');
+  perform kitluy_devices.mark_replacement_restore_ready_v1(v_op2, gen_random_uuid(), 'FLEET-OP-1');
+  perform kitluy_devices.mark_replacement_cutover_ready_v1(v_op2, 'FLEET-OP-1');
+  v_r := kitluy_devices.commit_hub_replacement_cutover_v1(
+    v_op2, 1, 'FLEET-OP-1', 'REVOKE-REF-2', true);
+  if v_r->>'outcome' <> 'CUTOVER_COMMITTED' then
+    raise exception 'ASSERT FAIL: the NVMe cutover was refused: %', v_r;
+  end if;
+  perform kitluy_devices.retire_old_hub_replacement_v1(v_op2, 'FLEET-OP-1');
+  perform kitluy_devices.complete_hub_replacement_v1(v_op2, 'FLEET-OP-1', 'ACT-REF-NEW-2');
+  reset role;
+
+  if (select lifecycle_state from kitluy_devices.devices where id = v_new) <> 'quarantined' then
+    raise exception 'ASSERT FAIL: the NVMe-replaced Hub is not quarantined pending governed re-enrollment';
+  end if;
+  if not exists (select 1 from kitluy_devices.device_replacements
+                  where device_id = v_new and private_key_carried_over = false) then
+    raise exception 'ASSERT FAIL: the storage replacement did not pin no-key-carry-over';
+  end if;
+  if (select assignment_generation from kitluy_devices.devices where id = v_new) <> 0 then
+    raise exception 'ASSERT FAIL: the NVMe-replaced Hub kept a live generation';
+  end if;
+
+  -- Cross-Tenant/Store scope refusal for provisioning: a hub assigned in
+  -- TENANT A cannot be registered into a tenant-B operation. Resolved to a
+  -- VARIABLE first — a function argument evaluates in the caller's context
+  -- (the dacd3be lesson) and the fleet service cannot read devices.
+  select d.id into v_cross from kitluy_devices.devices d
+    join kitluy_devices.device_assignments a on a.device_id = d.id
+   where d.device_class = 'store_hub' and a.state in ('pending_trust', 'active')
+     and a.digital_store_id = v_store_a limit 1;
+  set local role kitluy_fleet_service;
+  -- The compromised variant anchors on a device whose assignment was ALREADY
+  -- revoked (v_old — the emergency-containment shape the owner decision §2
+  -- names): the request falls back to the latest historical assignment.
+  v_r := kitluy_devices.request_hub_replacement_v1(
+    v_old, 'compromised_loss', 'stolen from site', 'FLEET-OP-1', 'REAUTH-EV-3',
+    'T006-COMP-' || gen_random_uuid(), gen_random_uuid());
+  v_op := (v_r->>'operation_id')::uuid;
+  perform kitluy_devices.approve_hub_replacement_v1(v_op, 'FLEET-APPROVER-2');
+  begin
+    perform kitluy_devices.register_replacement_hub_v1(v_op, v_cross, 'FLEET-OP-1');
+    raise exception 'ASSERT FAIL: a cross-Tenant hub was registered as the replacement';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-HUBREPL-SCOPE%' then
+      raise exception 'ASSERT FAIL: cross-scope refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+  -- Failure injection: the operation can be failed with a recorded reason,
+  -- and a cancelled/failed operation stays terminal.
+  perform kitluy_devices.fail_hub_replacement_v1(v_op, 'FLEET-OP-1', 'replacement unit DOA');
+  begin
+    perform kitluy_devices.mark_replacement_restore_ready_v1(v_op, gen_random_uuid(), 'FLEET-OP-1');
+    raise exception 'ASSERT FAIL: a failed operation kept advancing';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-HUBREPL-STATE%' then
+      raise exception 'ASSERT FAIL: failed-state refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+  reset role;
+
+  -- Append-only audit; complete evidence.
+  -- TWO layers refuse a rewrite: the harness holds no UPDATE grant, and the
+  -- trigger refuses even a privileged writer.
+  begin
+    update kitluy_devices.hub_replacement_events set actor_ref = 'rewritten';
+    raise exception 'ASSERT FAIL: replacement audit was rewritten';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-HUBREPL-EVENT-IMMUTABLE%'
+       and sqlerrm not like '%permission denied%' then
+      raise exception 'ASSERT FAIL: audit rewrite refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+  execute format('grant kitluy_fleet_governor to %I', current_user);
+  set local role kitluy_fleet_governor;
+  begin
+    update kitluy_devices.hub_replacement_events set actor_ref = 'rewritten';
+    raise exception 'ASSERT FAIL: replacement audit was rewritten past the trigger';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-HUBREPL-EVENT-IMMUTABLE%' then
+      raise exception 'ASSERT FAIL: trigger rewrite refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+  end;
+  reset role;
+  execute format('revoke kitluy_fleet_governor from %I', current_user);
+  if (select count(*) from kitluy_devices.hub_replacement_events
+       where operation_id = v_op2) < 6 then
+    raise exception 'ASSERT FAIL: the NVMe operation is missing transition evidence';
+  end if;
+
+  if v_refused <> 13 then
+    raise exception 'ASSERT FAIL: expected 13 refused replacement probes, got %', v_refused;
+  end if;
+  raise notice 'PASS ws11-t006-hub-replacement: full-Pi, same-Pi NVMe and compromised replacements run the governed lifecycle end to end — reauth + four-eyes with self-approval refused, identity never cloned or transferred, scope/stale-generation/conflicting-idempotency refused, cutover atomic and idempotent with exactly one live Hub left in the Location, certificates revoked with no key carry-over, terminal re-pairing required, history append-only (0179)';
+exception when others then
+  begin
+    execute format('revoke kitluy_fleet_governor from %I', current_user);
+  exception when others then
+    null;
+  end;
+  raise;
+end
+$section56$;
+
+
+select 'assertions complete: groups 0010-0153 structural contract holds (incl. WS-11-T003 Step 4 Phase C — RC-022 spendability census CLOSED; governed emergency 0150–0153; RevocationGateway ships in @kitluy/device-identity) + WS-11-T005 fleet health, support access and governed containment (0177) + WS-11-T006-P01 hub replacement authority (0179)' as result;

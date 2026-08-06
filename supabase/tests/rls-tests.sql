@@ -3948,4 +3948,54 @@ end $$;
 rollback;
 
 
-select 'rls-tests complete: 14+9 baseline cases; cycle-5 WS5 7 negative + 7 positive and WS6 10 negative + 9 positive; cycle-6 WS7 13 negative + 6 positive and WS8 13 negative + 6 positive; cycle-10 WS11 T001 4 negative + 1 positive and T002 3 negative + 1 positive kitluy_devices cases executed; WS-11-T004-P02A 3 negative provisioning-code cases executed; WS-11-T004-P02B1 issuance-door boundary case executed; WS-11-T004-P02B2A presentation-evaluator boundary case executed; WS-11-T004-P02B2B1 revocation-door boundary case executed; WS-11-T004-P02B2B2A expiration-helper boundary case executed; WS-11-T004-P02B2B2B1 replacement-lineage boundary case executed; WS-11-T004-P02B2B2B2A recovery-door boundary case executed; WS-11-T004-P02B3A pop-foundation boundary case executed; WS-11-T004-P02B3B redemption-door boundary case executed; WS-11-T004-P02C composition-identity boundary case executed; WS-11-T004-P03A activation-state boundary case executed; WS-11-T005 fleet/support/containment boundary cases executed' as result;
+-- WS11-N22: hub replacement authority (0179). Doors-only surface: NOLOGIN
+-- governor owns everything, clients reach nothing.
+begin;
+do $$
+begin
+  if exists (
+    select 1 from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'kitluy_devices'
+      and c.relname in ('hub_replacement_operations', 'hub_replacement_events')
+      and not (c.relrowsecurity and c.relforcerowsecurity)) then
+    raise exception 'FAIL WS11-N22: a replacement table is missing ENABLE+FORCE RLS';
+  end if;
+  if has_table_privilege('authenticated', 'kitluy_devices.hub_replacement_operations', 'SELECT')
+     or has_table_privilege('anon', 'kitluy_devices.hub_replacement_events', 'SELECT')
+     or has_function_privilege('service_role',
+        'kitluy_devices.commit_hub_replacement_cutover_v1(uuid, integer, text, text, boolean)', 'execute') then
+    raise exception 'FAIL WS11-N22: a client or service_role identity reaches the replacement authority';
+  end if;
+  raise notice 'PASS WS11-N22a: replacement tables are RLS-forced and unreachable by client identities';
+end $$;
+rollback;
+
+begin;
+select set_config('request.jwt.claims', '{"role":"authenticated"}', true);
+set local role authenticated;
+do $$
+declare
+  v_blocked integer := 0;
+begin
+  begin
+    perform id from kitluy_devices.hub_replacement_operations limit 1;
+  exception when insufficient_privilege then
+    v_blocked := v_blocked + 1;
+  end;
+  begin
+    perform kitluy_devices.request_hub_replacement_v1(
+      gen_random_uuid(), 'full_pi', 'probe', 'ATTACKER', 'FAKE-REAUTH',
+      'ATTACK-KEY', gen_random_uuid());
+  exception when insufficient_privilege then
+    v_blocked := v_blocked + 1;
+  end;
+  if v_blocked <> 2 then
+    raise exception 'FAIL WS11-N22: authenticated reached the replacement surface (% of 2 blocked)', v_blocked;
+  end if;
+  raise notice 'PASS WS11-N22b: authenticated can neither read replacement operations nor open one';
+end $$;
+rollback;
+
+
+select 'rls-tests complete: 14+9 baseline cases; cycle-5 WS5 7 negative + 7 positive and WS6 10 negative + 9 positive; cycle-6 WS7 13 negative + 6 positive and WS8 13 negative + 6 positive; cycle-10 WS11 T001 4 negative + 1 positive and T002 3 negative + 1 positive kitluy_devices cases executed; WS-11-T004-P02A 3 negative provisioning-code cases executed; WS-11-T004-P02B1 issuance-door boundary case executed; WS-11-T004-P02B2A presentation-evaluator boundary case executed; WS-11-T004-P02B2B1 revocation-door boundary case executed; WS-11-T004-P02B2B2A expiration-helper boundary case executed; WS-11-T004-P02B2B2B1 replacement-lineage boundary case executed; WS-11-T004-P02B2B2B2A recovery-door boundary case executed; WS-11-T004-P02B3A pop-foundation boundary case executed; WS-11-T004-P02B3B redemption-door boundary case executed; WS-11-T004-P02C composition-identity boundary case executed; WS-11-T004-P03A activation-state boundary case executed; WS-11-T005 fleet/support/containment boundary cases executed; WS-11-T006-P01 replacement boundary cases executed' as result;

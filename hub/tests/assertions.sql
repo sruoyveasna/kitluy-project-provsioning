@@ -2396,6 +2396,138 @@ end $$;
 rollback;
 
 -- ---------------------------------------------------------------------------
+-- 34. WS-11-T006-P01 — local replacement/cutover gates (group 0037).
+-- ---------------------------------------------------------------------------
+begin;
+do $$
+declare
+  v_r jsonb;
+  v_blocked int := 0;
+begin
+  -- The shipped default is operational.
+  if (select mode from edge_identity.hub_replacement_state where singleton) <> 'normal' then
+    raise exception 'ASSERT FAIL: the shipped replacement mode is not normal';
+  end if;
+
+  -- Direct writes are governed.
+  begin
+    update edge_identity.hub_replacement_state set mode = 'retired_rejected' where singleton;
+    raise exception 'ASSERT FAIL: the replacement mode was written directly';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-EDGE-REPLACEMENT-GOVERNED%'
+       and sqlerrm not like '%permission denied%' then
+      raise exception 'ASSERT FAIL: direct-write refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- A restored/prepared Hub refuses operational rows — locally, no cloud.
+  set local role kitluy_hub_runtime;
+  v_r := edge_identity.set_hub_replacement_mode_v1(
+    'restored_quarantine', null, 'restore probe', 'OP-T006', gen_random_uuid());
+  if v_r->>'outcome' <> 'CHANGED' then
+    raise exception 'ASSERT FAIL: quarantine mode was refused: %', v_r;
+  end if;
+  begin
+    insert into edge_identity.terminal_session
+      (id, tenant_id, digital_store_id, location_id, terminal_device_id,
+       actor_id, profile_code, opened_at, expires_at, session_generation,
+       last_event_sequence, status)
+    values
+      (gen_random_uuid(), 'e0000000-0000-4000-8000-000000000001',
+       'e0000000-0000-4000-8000-000000000002',
+       'e0000000-0000-4000-8000-000000000003',
+       'e0000000-0000-4000-8000-000000000020', gen_random_uuid(),
+       'laundry.t4.pickup_scan_out', now(), now() + interval '1 hour', 77, 0, 'active');
+    raise exception 'ASSERT FAIL: a quarantined Hub opened a terminal session';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-EDGE-HUB-NOT-OPERATIONAL%' then
+      raise exception 'ASSERT FAIL: quarantine session refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+  reset role;
+  begin
+    insert into edge_identity.pairing_session
+      (id, protocol_version, purpose, tenant_id, digital_store_id, location_id,
+       environment, hub_device_id, hub_assignment_id, hub_assignment_generation,
+       hub_credential_id, hub_certificate_serial, hub_certificate_fingerprint,
+       terminal_device_id, terminal_assignment_generation, terminal_profile_code,
+       terminal_credential_id, terminal_certificate_serial,
+       terminal_certificate_fingerprint, terminal_nonce, hub_nonce, state,
+       correlation_id, expires_at)
+    values
+      (gen_random_uuid(), '1.0', 'hub_terminal_pairing',
+       'e0000000-0000-4000-8000-000000000001', 'e0000000-0000-4000-8000-000000000002',
+       'e0000000-0000-4000-8000-000000000003', 'development',
+       'e0000000-0000-4000-8000-000000000010', 'e0000000-0000-4000-8000-000000000012', 1,
+       'e0000000-0000-4000-8000-000000000013', 'DEMO-OPS-CERT-0001', repeat('a', 64),
+       'e0000000-0000-4000-8000-000000000020', 1, 'laundry.t1.intake_cashier',
+       'e0000000-0000-4000-8000-000000000013', 'DEMO-OPS-CERT-0001', repeat('b', 64),
+       repeat('c', 64), repeat('d', 64), 'challenge_issued', gen_random_uuid(),
+       now() + interval '10 minutes');
+    raise exception 'ASSERT FAIL: a quarantined Hub began pairing';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-EDGE-HUB-NOT-OPERATIONAL%' then
+      raise exception 'ASSERT FAIL: quarantine pairing refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- Explicit activation restores service.
+  set local role kitluy_hub_runtime;
+  v_r := edge_identity.set_hub_replacement_mode_v1(
+    'normal', null, 'validated after restore', 'OP-T006', gen_random_uuid());
+  insert into edge_identity.terminal_session
+    (id, tenant_id, digital_store_id, location_id, terminal_device_id,
+     actor_id, profile_code, opened_at, expires_at, session_generation,
+     last_event_sequence, status)
+  values
+    (gen_random_uuid(), 'e0000000-0000-4000-8000-000000000001',
+     'e0000000-0000-4000-8000-000000000002',
+     'e0000000-0000-4000-8000-000000000003',
+     'e0000000-0000-4000-8000-000000000020', gen_random_uuid(),
+     'laundry.t4.pickup_scan_out', now(), now() + interval '1 hour', 78, 0, 'active');
+
+  -- A retired Hub is terminal LOCALLY: it cannot re-enter service.
+  perform edge_identity.set_hub_replacement_mode_v1(
+    'retired_rejected', gen_random_uuid(), 'cutover received', 'OP-T006', gen_random_uuid());
+  begin
+    perform edge_identity.set_hub_replacement_mode_v1(
+      'normal', null, 'sneak back', 'OP-T006', gen_random_uuid());
+    raise exception 'ASSERT FAIL: a retired Hub returned to service locally';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-EDGE-REPLACEMENT-RETIRED%' then
+      raise exception 'ASSERT FAIL: retired-return refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+  reset role;
+
+  -- History is append-only.
+  begin
+    update edge_identity.hub_replacement_events set reason = 'rewritten';
+    raise exception 'ASSERT FAIL: replacement history was rewritten';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-EDGE-APPEND-ONLY%' then
+      raise exception 'ASSERT FAIL: history rewrite refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  if v_blocked <> 5 then
+    raise exception 'ASSERT FAIL: expected 5 refused replacement probes, got %', v_blocked;
+  end if;
+  raise notice 'PASS hub-replacement-gates: a prepared or restored Hub refuses sessions and pairing locally, explicit activation restores service, a retired Hub cannot re-enter service, direct mode writes are governed, and the history is append-only';
+end $$;
+rollback;
+
+-- ---------------------------------------------------------------------------
 -- 29. Final tally.
 -- ---------------------------------------------------------------------------
 do $$
@@ -2424,11 +2556,11 @@ begin
   -- EXACT in both directions -- it is how an unreviewed table gets noticed --
   -- so it is raised by exactly the additions that were reviewed and by
   -- nothing else.
-  if v_tables <> 66 then
+  if v_tables <> 68 then
     raise exception
-      'ASSERT FAIL: expected 66 relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11 + 3 G0027 revocation + 2 G0031 pairing + 1 G0033 credential projection + 2 G0035 health/containment + 1 G0036 report evidence), found %',
+      'ASSERT FAIL: expected 68 relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11 + 3 G0027 revocation + 2 G0031 pairing + 1 G0033 credential projection + 2 G0035 health/containment + 1 G0036 report evidence + 2 G0037 replacement state), found %',
       v_tables;
   end if;
-  raise notice 'PASS tally: % relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11 WS-10 + 3 G0027 revocation + 2 G0031 pairing + 1 G0033 credential projection + 2 G0035 health/containment + 1 G0036 report evidence), % indexes, % triggers',
+  raise notice 'PASS tally: % relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11 WS-10 + 3 G0027 revocation + 2 G0031 pairing + 1 G0033 credential projection + 2 G0035 health/containment + 1 G0036 report evidence + 2 G0037 replacement state), % indexes, % triggers',
     v_tables, v_indexes, v_triggers;
 end $$;

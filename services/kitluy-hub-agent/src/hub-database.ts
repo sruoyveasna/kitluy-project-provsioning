@@ -351,6 +351,11 @@ export const HUB_MIGRATION_ORDER = [
   // counter the cloud stores as projection_version, and the append-only
   // report evidence whose row id is the kh1 outbox identity.
   "0036_terminal_heartbeat_and_reporter_state.sql",
+  // WS-11-T006-P01: the Hub's own replacement/cutover mode (singleton,
+  // governed door, append-only history) and the operational gates that stop
+  // a prepared, restored-quarantined or retired Hub from serving sessions
+  // or pairing — locally, restart-safe.
+  "0037_hub_replacement_local_state.sql",
 ] as const;
 
 /**
