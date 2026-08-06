@@ -141,6 +141,20 @@ function messageOf(error: unknown): string {
 function mapSentinel(message: string): PairingReceiptIngestionResult {
   if (message.includes("KLUY-PAIRING-RECEIPT-CONFLICT")) return "CONFLICT";
   if (message.includes("KLUY-PAIRING-RECEIPT-REJECTED-SCHEMA")) return "REJECTED_SCHEMA";
+  // WS-11-T008 NEW-1: group 0183 moved Hub identity, scope and generation
+  // binding INTO the door. Those refusals are scope refusals here — the
+  // same closed result the envelope check produces — so a caller cannot
+  // tell whether the consumer or the database refused, and neither leaks
+  // which scope actually owns the devices.
+  if (
+    message.includes("KLUY-PAIRING-RECEIPT-WRONG-HUB") ||
+    message.includes("KLUY-PAIRING-RECEIPT-WRONG-SCOPE") ||
+    message.includes("KLUY-PAIRING-RECEIPT-STALE-GENERATION") ||
+    message.includes("KLUY-PAIRING-RECEIPT-HUB-UNASSIGNED") ||
+    message.includes("KLUY-PAIRING-RECEIPT-DEVICE-UNASSIGNED")
+  ) {
+    return "REJECTED_SCOPE";
+  }
   return "INTERNAL_ERROR";
 }
 
