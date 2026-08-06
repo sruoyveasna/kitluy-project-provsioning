@@ -21,7 +21,7 @@ source. Dispositions are filled during T007 and finalized at closeout.
   correct (one receipt, one paired timestamp, atomic outbox).
 - **T007 obligation**: reproduce, fix the narrow mapping, prove a governed
   deterministic loser outcome over ≥20 controlled iterations.
-- **Disposition**: _pending_.
+- **Disposition**: **FIXED** (`c4145ff`): governed ALREADY_PAIRED recovery with the original receipt; 20-iteration determinism green.
 
 ## D2 — T002 claim/redemption concurrency
 
@@ -31,7 +31,7 @@ source. Dispositions are filled during T007 and finalized at closeout.
 - **T007 obligation**: true concurrent-session claim/redemption races
   (issue vs revoke, issue vs expiry, redemption vs revocation, recovery vs
   presentation), governed outcomes, no duplicate authoritative row.
-- **Disposition**: _pending_.
+- **Disposition**: **DISCHARGED**: the exact owed races execute in the post-record race suites (redemption/recovery/issuance/revocation/replacement/emergency), separate sessions, re-run green in the T007 closeout; those suites are the durable regression tests.
 
 ## D3 — T003 Step-2 trusted-time concurrency
 
@@ -40,7 +40,7 @@ source. Dispositions are filled during T007 and finalized at closeout.
 - **T007 obligation**: concurrent floor-advancement / correction races
   proving the floor is monotonic under genuine concurrency and no caller
   clock establishes expiry.
-- **Disposition**: _pending_.
+- **Disposition**: **DISCHARGED** (new t007-cloud-races D3 test): 20 two-session iterations; the floor never regressed and landed on the maximum accepted source.
 
 ## D4 — WS-10 sync-inbox fixture flake (cross-workstream)
 
@@ -51,7 +51,7 @@ source. Dispositions are filled during T007 and finalized at closeout.
 - **T007 obligation**: reproduce separately; when proven fixture-only,
   replace with deterministic collision-free test identity in a SEPARATE
   test-infrastructure commit; product sync behavior untouched.
-- **Disposition**: _pending_.
+- **Disposition**: **FIXED** (`d4431db`, separate test-infra commit): timestamp-only fixture identity reproduced (200/200 collisions) and replaced; 5x consecutive green; product behavior untouched.
 
 ## D5 — Hub 0028–0030 legacy marker validation
 
@@ -61,7 +61,7 @@ source. Dispositions are filled during T007 and finalized at closeout.
 - **T007 obligation**: checksum-pinned legacy compatibility registry —
   exact three paths, exact committed checksums, exact historical marker
   contract; mutation or new-file use of the legacy form must fail.
-- **Disposition**: _pending_.
+- **Disposition**: **FIXED** (`85418bd`): checksum-pinned legacy registry; hub validate fully green for the first time; mutation and new-legacy-form probes FAIL.
 
 ## D6 — One-active-Hub-per-Location is door-enforced, not schema-enforced
 
@@ -72,7 +72,7 @@ source. Dispositions are filled during T007 and finalized at closeout.
   the door serialization holds under genuine concurrency (race family 12);
   schema enforcement remains a recorded design decision, not silently
   added.
-- **Disposition**: _pending_.
+- **Disposition**: **VERIFIED UNDER CONCURRENCY** (t007-cloud-races F12): twenty chained double-cutover generations, one live Hub after every race; schema-level uniqueness stays a recorded design decision.
 
 ## D7 — KLRISK-DEVICE-002 independent verification
 
@@ -82,7 +82,7 @@ source. Dispositions are filled during T007 and finalized at closeout.
 - **T007 obligation**: adversarial verification of restricted state,
   station containment and condition-4 recovery under T007's isolation and
   race matrices (T008 carries the independent review).
-- **Disposition**: _pending_.
+- **Disposition**: **EXECUTED AT T007 DEPTH**: containment raced adversarially (family 11 — found and fixed the 0177 deadlock via 0181); sequential adversarial suite green from zero. T008 carries the independent review; signed disposition stays BLK-005.
 
 ## Known conditions NOT owned by T007 (report-only)
 

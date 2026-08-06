@@ -767,7 +767,7 @@ Locked rules:
 Inputs: the T007 debt census
 (`00_AI_HANDOFF/shared/2026-08-06__SHARED__WS-11-T007__DEBT-CENSUS.md`),
 which enumerates every debt explicitly assigned to T007 by T001–T006
-records with exact citations. Results: recorded at T007 closeout in
+records with exact citations. EXECUTED 2026-08-06: the WS-11 subset ran under this decision — all 16 race families with separate sessions and governed outcomes, the security/isolation/cryptographic, offline/restart/recovery and fault matrices, two defects found and fixed forward (cloud 0181), every census debt dispositioned. Results: recorded in
 `00_AI_HANDOFF/shared/2026-08-06__SHARED__WS-11-T007__DEVICE-SECURITY-OFFLINE-RECOVERY-AND-CONCURRENCY-VERIFICATION__AI-HANDOFF.md`.
 
 ## Appendix A — Open values

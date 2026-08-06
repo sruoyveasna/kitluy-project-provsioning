@@ -2588,3 +2588,5 @@ byte-for-byte from `9310168` (blob 9e80c81f, sha256 3d571e17...2ab78) in
 commit `b031cb8` with a checksum-pinned secret-scanner rejection-fixture
 exception proven to weaken nothing else. T006 remains COMPLETE —
 IMPLEMENTED-IN-DEV with the breach recorded.
+
+**KLD-2026-08-06-WS11-T007-001 closeout addendum (2026-08-06).** T007 COMPLETE — VERIFIED-IN-DEV. Census D1–D7 all dispositioned; cloud 0181 fixes the two matrix-found concurrency defects (0177 containment lock inversion; 0180 assignment idempotency escape); all 16 race families governed; pnpm verify **11/12** — Unit tests PASS (the full monorepo suite green with race-A and sync-inbox fixed); the only failing gate is the PRE-EXISTING repository-wide CRLF Format condition (876 files, T007 intersection EMPTY). One earlier verify attempt showed an uncaptured intermittent unit failure; the immediately following standalone full pnpm test (exit 0) and this complete captured verify run were both green, and the intermittent is recorded honestly, not hidden. The pairing-surface race-A defect recorded at T005-P02 is CLOSED by c4145ff. Record: the T007 SHARED handoff.
