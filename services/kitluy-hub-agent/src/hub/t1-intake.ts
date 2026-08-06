@@ -13,12 +13,13 @@
  * the draft-event unique index make the reservation atomic. A replay
  * returns the ORIGINAL effect; a reused key with a different hash refuses.
  *
- * OUTBOX: a locally created customer and every consent decision become
- * durable outbox facts (`customer.local_customer_created` v1,
- * `customer.consent_decision_recorded` v1, keys `kh1.{row_id}.1`) in the
- * SAME transaction as the local write — the terminal-health emit pattern.
- * Drafts emit nothing in T002: the Hub IS the draft authority and nothing
- * reconciles until conversion (a later task).
+ * OUTBOX: a locally created customer, every consent decision AND every
+ * draft mutation become durable outbox facts in the SAME transaction as
+ * the local write (`customer.local_customer_created` v1,
+ * `customer.consent_decision_recorded` v1, `laundry.booking_draft_recorded`
+ * v1 — the terminal-health emit pattern; census in T002_EVENT_CENSUS). The
+ * Hub REMAINS authoritative for the working draft: the cloud copy is a
+ * read-only projection and recovery aid, never a Booking (T002-P02 §3).
  */
 import { createHash, randomUUID } from "node:crypto";
 
@@ -34,7 +35,40 @@ import { authorizeT1IntakeSession, type T1IntakeAuthority } from "./edge/runtime
 
 export const CUSTOMER_CREATED_EVENT_NAME = "customer.local_customer_created" as const;
 export const CONSENT_DECISION_EVENT_NAME = "customer.consent_decision_recorded" as const;
+/** One draft event KIND; the mutation type travels in the payload. The
+ * business deduplication identity is the mutation RECEIPT id, so the effect
+ * key is `kh1.{booking_draft_event_id}.1` — every create/update/cancel is
+ * its own exactly-once fact (T002-P02 §8 census). */
+export const BOOKING_DRAFT_EVENT_NAME = "laundry.booking_draft_recorded" as const;
 export const T1_INTAKE_SCHEMA_VERSION = 1 as const;
+
+/** The complete T002 outbox event census (§8) — no kind without a consumer. */
+export const T002_EVENT_CENSUS = [
+  {
+    eventName: CUSTOMER_CREATED_EVENT_NAME,
+    schemaVersion: 1,
+    aggregateType: "customer",
+    effectKeyShape: "kh1.{local_customer_id}.1",
+    cloudDoor: "kitluy_core.ingest_local_customer_v1",
+    consumer: "LocalCustomerIngestion (kitluy-device-registry-service)",
+  },
+  {
+    eventName: CONSENT_DECISION_EVENT_NAME,
+    schemaVersion: 1,
+    aggregateType: "consent_decision",
+    effectKeyShape: "kh1.{consent_decision_id}.1",
+    cloudDoor: "kitluy_core.ingest_consent_decision_v1",
+    consumer: "ConsentDecisionIngestion (kitluy-device-registry-service)",
+  },
+  {
+    eventName: BOOKING_DRAFT_EVENT_NAME,
+    schemaVersion: 1,
+    aggregateType: "booking_draft",
+    effectKeyShape: "kh1.{booking_draft_event_id}.1",
+    cloudDoor: "kitluy_laundry.ingest_booking_draft_event_v1",
+    consumer: "BookingDraftIngestion (kitluy-device-registry-service)",
+  },
+] as const;
 
 export const CONSENT_PURPOSE_KEYS = [
   "privacy_notice_acknowledgement",
@@ -210,6 +244,10 @@ async function emitIntakeFact(
     readonly eventName: string;
     readonly aggregateType: string;
     readonly aggregateId: string;
+    /** Effect-key source row id when it differs from the aggregate (draft
+     * facts key on the mutation RECEIPT, not the draft). */
+    readonly effectSourceId?: string;
+    readonly aggregateVersion?: number;
     readonly authority: T1IntakeAuthority;
     readonly terminalDeviceId: string;
     readonly payload: Record<string, unknown>;
@@ -217,7 +255,7 @@ async function emitIntakeFact(
   },
 ): Promise<void> {
   const hub = await hubIdentity(client);
-  const idempotencyKey = buildHubEffectKey(input.aggregateId, 1);
+  const idempotencyKey = buildHubEffectKey(input.effectSourceId ?? input.aggregateId, 1);
   const nowIso = new Date().toISOString();
   const hubSequence = await syncRepo.allocateHubSequence(client);
   const envelope: DomainEventEnvelope = {
@@ -229,7 +267,11 @@ async function emitIntakeFact(
     tenant_id: input.authority.tenantId,
     digital_store_id: input.authority.digitalStoreId,
     location_id: input.authority.locationId,
-    aggregate: { type: input.aggregateType, id: input.aggregateId, version: 1 },
+    aggregate: {
+      type: input.aggregateType,
+      id: input.aggregateId,
+      version: input.aggregateVersion ?? 1,
+    },
     producer: SERVICE_NAME,
     source: {
       source_type: "store_hub",
@@ -256,7 +298,7 @@ async function emitIntakeFact(
     actorId: null,
     aggregateType: input.aggregateType,
     aggregateId: input.aggregateId,
-    aggregateVersion: 1n,
+    aggregateVersion: BigInt(input.aggregateVersion ?? 1),
     eventType: input.eventName,
     schemaVersion: T1_INTAKE_SCHEMA_VERSION,
     businessDate: nowIso.slice(0, 10),
@@ -529,7 +571,13 @@ async function loadScopedDraft(
   return rows.rows[0] ?? null;
 }
 
-/** One draft-mutation receipt; the unique request_key IS the dedup gate. */
+/**
+ * One draft-mutation receipt; the unique request_key IS the dedup gate.
+ * Every accepted mutation ALSO becomes a durable outbox fact in the same
+ * transaction (`laundry.booking_draft_recorded` v1, key
+ * `kh1.{receipt_id}.1`) so the cloud draft projection receives create,
+ * update AND cancel — no T002 event kind without a consumer (§8).
+ */
 async function recordDraftEvent(
   client: HubClient,
   input: {
@@ -539,11 +587,13 @@ async function recordDraftEvent(
     readonly requestHash: string;
     readonly changes: Record<string, unknown>;
     readonly versionAfter: number;
+    readonly draftState: DraftView;
     readonly authority: T1IntakeAuthority;
     readonly terminalDeviceId: string;
     readonly correlationId: string;
   },
 ): Promise<void> {
+  const receiptId = randomUUID();
   await client.query(
     `insert into edge_laundry.booking_draft_event
        (id, draft_id, event_type, request_key, request_hash, changes,
@@ -551,7 +601,7 @@ async function recordDraftEvent(
      values ($1::uuid, $2::uuid, $3, $4, $5, $6::jsonb, $7, $8::uuid, $9::uuid,
              $10::uuid, $11::uuid)`,
     [
-      randomUUID(),
+      receiptId,
       input.draftId,
       input.eventType,
       input.requestKey,
@@ -564,6 +614,35 @@ async function recordDraftEvent(
       input.correlationId,
     ],
   );
+  await emitIntakeFact(client, {
+    eventName: BOOKING_DRAFT_EVENT_NAME,
+    aggregateType: "booking_draft",
+    aggregateId: input.draftId,
+    effectSourceId: receiptId,
+    aggregateVersion: input.versionAfter,
+    authority: input.authority,
+    terminalDeviceId: input.terminalDeviceId,
+    correlationId: input.correlationId,
+    payload: {
+      booking_draft_event_id: receiptId,
+      hub_draft_id: input.draftId,
+      event_type: input.eventType,
+      tenant_id: input.authority.tenantId,
+      digital_store_id: input.authority.digitalStoreId,
+      location_id: input.authority.locationId,
+      walk_in: input.draftState.walkIn,
+      local_customer_id: input.draftState.customerId,
+      customer_snapshot: input.draftState.customerSnapshot,
+      lifecycle: input.draftState.lifecycle,
+      version: input.draftState.version,
+      preferred_language: input.draftState.preferredLanguage,
+      intake_source: input.draftState.intakeSource,
+      cancel_reason_code: input.draftState.cancelReasonCode,
+      hub_created_at: input.draftState.createdAt,
+      hub_updated_at: input.draftState.updatedAt,
+      correlation_id: input.correlationId,
+    },
+  });
 }
 
 async function replayedDraft(
@@ -689,6 +768,7 @@ export async function createBookingDraft(
       await recordDraftEvent(client, {
         draftId,
         eventType: "created",
+        draftState: toDraftView(row),
         requestKey: input.requestKey,
         requestHash: input.requestHash,
         changes: { created: true },
@@ -783,6 +863,7 @@ export async function updateBookingDraft(
       await recordDraftEvent(client, {
         draftId: input.draftId,
         eventType: "updated",
+        draftState: toDraftView(next),
         requestKey: input.requestKey,
         requestHash: input.requestHash,
         changes,
@@ -838,6 +919,7 @@ export async function cancelBookingDraft(
       await recordDraftEvent(client, {
         draftId: input.draftId,
         eventType: "cancelled",
+        draftState: toDraftView(next),
         requestKey: input.requestKey,
         requestHash: input.requestHash,
         changes: { cancelReasonCode: input.reasonCode },

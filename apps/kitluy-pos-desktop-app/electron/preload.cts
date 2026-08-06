@@ -23,3 +23,25 @@ contextBridge.exposeInMainWorld("kitluyT1", {
     };
   },
 });
+
+// WS-12-T002-P02 §5: exactly eight NAMED intake operations. No channel
+// pass-through, no route/method/scope input — every payload is re-validated
+// in the main process (electron/intake-ipc.ts) before any adapter runs.
+contextBridge.exposeInMainWorld("kitluyT1Intake", {
+  searchCustomers: (payload: unknown): Promise<unknown> =>
+    ipcRenderer.invoke("kitluy:t1:intake:search-customers", payload),
+  readCustomer: (payload: unknown): Promise<unknown> =>
+    ipcRenderer.invoke("kitluy:t1:intake:read-customer", payload),
+  createCustomer: (payload: unknown): Promise<unknown> =>
+    ipcRenderer.invoke("kitluy:t1:intake:create-customer", payload),
+  recordConsentDecision: (payload: unknown): Promise<unknown> =>
+    ipcRenderer.invoke("kitluy:t1:intake:record-consent", payload),
+  createDraft: (payload: unknown): Promise<unknown> =>
+    ipcRenderer.invoke("kitluy:t1:intake:create-draft", payload),
+  readDraft: (payload: unknown): Promise<unknown> =>
+    ipcRenderer.invoke("kitluy:t1:intake:read-draft", payload),
+  updateDraft: (payload: unknown): Promise<unknown> =>
+    ipcRenderer.invoke("kitluy:t1:intake:update-draft", payload),
+  cancelDraft: (payload: unknown): Promise<unknown> =>
+    ipcRenderer.invoke("kitluy:t1:intake:cancel-draft", payload),
+});

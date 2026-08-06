@@ -297,18 +297,25 @@ begin
   -- is granted to nobody; current_user can equal it only inside the doors
   -- it owns. The WS12-T002 section proves the doors' behaviour and that
   -- PUBLIC holds no EXECUTE on them.
-  if v_select <> 72 then
-    raise exception 'ASSERT FAIL: expected 72 SELECT policies, found %', v_select;
+  -- 72 -> 75 at group 0187 (WS-12-T002-P02): the draft-projection
+  -- governor's three kitluy_core reads — tenants + digital_stores (scope
+  -- existence) and the 0186 customer_ingestion_effects journal (resolving
+  -- an ingested local customer to its cloud id; read-only continuity,
+  -- never a merge). Same NOLOGIN granted-to-nobody shape as 0186.
+  if v_select <> 75 then
+    raise exception 'ASSERT FAIL: expected 75 SELECT policies, found %', v_select;
   end if;
 
   -- Cycle-5 schemas: kitluy_laundry 3 + kitluy_config 4 + kitluy_notifications 1
   -- + kitluy_storefront 0 (PC-PUBTOK deny-all by design) = 8; Cycle-6 group
-  -- 0095 adds 9 kitluy_laundry custody policies = 17.
+  -- 0095 adds 9 kitluy_laundry custody policies = 17; group 0187
+  -- (WS-12-T002-P02) adds the draft-projection governor's 2 SELECT policies
+  -- (projection + append-only history) = 19.
   select count(*) into v_select from pg_policies
   where schemaname in ('kitluy_laundry', 'kitluy_config', 'kitluy_storefront', 'kitluy_notifications')
     and cmd = 'SELECT';
-  if v_select <> 17 then
-    raise exception 'ASSERT FAIL: expected 17 SELECT policies in cycle-5 schemas (+9 cycle-6 laundry), found %', v_select;
+  if v_select <> 19 then
+    raise exception 'ASSERT FAIL: expected 19 SELECT policies in cycle-5 schemas (+9 cycle-6 laundry, +2 0187 draft projection), found %', v_select;
   end if;
 
   -- Cycle-6 schemas (group 0095 manifest): kitluy_orders 5 + kitluy_payments 10
@@ -337,18 +344,29 @@ begin
   -- consent_withdrawals, customer_ingestion_effects. The exactness checks
   -- below refuse any seventh policy, any non-INSERT command and any other
   -- grantee, so this widening cannot silently grow.
-  if v_writes <> 6 then
-    raise exception 'ASSERT FAIL: expected exactly the six 0186 governor INSERT policies (PC-RPC model), found %', v_writes;
+  -- 6 -> 9 at group 0187 (WS-12-T002-P02): the draft-projection governor's
+  -- INSERT on the projection and its append-only history, plus exactly ONE
+  -- UPDATE policy — the newest-version-wins advance on
+  -- kitluy_laundry.booking_draft_projections (a projection's current row
+  -- must move forward; the history stays INSERT-only). The exactness check
+  -- refuses any tenth policy, any DELETE/ALL, any UPDATE beyond that one
+  -- named table, and any grantee beyond the two NOLOGIN governors.
+  if v_writes <> 9 then
+    raise exception 'ASSERT FAIL: expected the six 0186 + three 0187 governor write policies (PC-RPC model), found %', v_writes;
   end if;
   select count(*) into v_writes from pg_policies
   where schemaname in ('kitluy_core', 'kitluy_auth', 'kitluy_admin', 'kitluy_audit',
                        'kitluy_laundry', 'kitluy_config', 'kitluy_storefront', 'kitluy_notifications',
                        'kitluy_orders', 'kitluy_payments', 'kitluy_finance')
     and cmd in ('INSERT', 'UPDATE', 'DELETE', 'ALL')
-    and (cmd <> 'INSERT'
-         or roles::text[] <> array['kitluy_customer_ingestion_governor']);
+    and not (
+      (cmd = 'INSERT' and roles::text[] = array['kitluy_customer_ingestion_governor'])
+      or (cmd = 'INSERT' and roles::text[] = array['kitluy_draft_projection_governor'])
+      or (cmd = 'UPDATE' and roles::text[] = array['kitluy_draft_projection_governor']
+          and tablename = 'booking_draft_projections')
+    );
   if v_writes <> 0 then
-    raise exception 'ASSERT FAIL: a write policy exists beyond the six 0186 governor INSERTs, found % stray', v_writes;
+    raise exception 'ASSERT FAIL: a write policy exists beyond the 0186/0187 governor set, found % stray', v_writes;
   end if;
 
   select count(*) into v_anon from pg_policies

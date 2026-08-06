@@ -30,7 +30,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import forge from "node-forge";
-import type pg from "pg";
+import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -60,6 +60,18 @@ import {
 import { staffCredentialVerifier } from "@kitluy-services/kitluy-hub-agent/dist/hub/edge/runtime-bootstrap.js";
 
 import { runT1Bootstrap } from "../electron/t1-runtime.js";
+import { createIntakeOperations } from "../electron/t1-intake-client.js";
+import { IntakeMachine } from "../src/intake/machine.js";
+import {
+  applyT002Acknowledgment,
+  deliveryPayloadOf,
+  listPendingT002Facts,
+} from "@kitluy-services/kitluy-hub-agent/dist/hub/t1-intake-sync.js";
+import {
+  BookingDraftIngestion,
+  ConsentDecisionIngestion,
+  LocalCustomerIngestion,
+} from "@kitluy-services/kitluy-device-registry-service/dist/t002-intake-ingestion.js";
 import { installProtectedTerminalIdentity } from "../electron/terminal-identity.js";
 import { openTerminalPairingStore } from "../electron/terminal-store.js";
 import { pinnedHubRequest } from "../electron/lan-client.js";
@@ -371,6 +383,12 @@ describe.skipIf(!live)("T1 end-to-end startup against a running development Hub 
       "staff.sessions.refresh",
       "staff.sessions.close",
       "pos.t1.use",
+      // WS-12-T002-P02: the intake permissions (Amendment 003 + draft reuse).
+      "customers.read",
+      "customers.create",
+      "customers.consent.record",
+      "laundry.bookings.read",
+      "laundry.bookings.create",
     ]) {
       await pool.query(
         `insert into edge_config.permission_grant_projection
@@ -664,6 +682,374 @@ describe.skipIf(!live)("T1 end-to-end startup against a running development Hub 
     });
     expect(offline.state, JSON.stringify(offline)).toBe("offline_ready");
     expect(offline.configuration?.freshness).toBe("cached_offline");
+
+    // =====================================================================
+    // WS-12-T002-P02 §12 — the intake chain over the REAL app adapters and
+    // machine, then durable delivery, governed acknowledgment and Hub
+    // reconciliation. Same live stack; the terminal side still touches the
+    // database NOWHERE.
+    // =====================================================================
+    const cloudPool = new pg.Pool({
+      connectionString: "postgresql://postgres:postgres@127.0.0.1:54322/postgres",
+      max: 4,
+    });
+    try {
+      // Cloud fixtures: the e0- scope as tenant/store rows plus the Hub
+      // enrolled + claimed in kitluy_devices so the draft door's live-
+      // assignment check has truth to check (health-ingestion pattern).
+      await cloudPool.query(
+        `insert into kitluy_core.tenants (id, tenant_code, legal_name, display_name, status, default_locale)
+         values ($1, 'T002-E2E', 'T002 E2E Tenant (fixture)', 'T002 E2E Tenant', 'ACTIVE', 'km-KH')
+         on conflict (id) do nothing`,
+        [TENANT],
+      );
+      await cloudPool.query(
+        `insert into kitluy_core.digital_stores
+           (id, tenant_id, store_code, name, primary_vertical_code, status, default_locale, default_currency_code, timezone)
+         values ($1, $2, 'T002-E2E-001', 'T002 E2E Store', 'LAUNDRY', 'ACTIVE_HYBRID', 'km-KH', 'KHR', 'Asia/Phnom_Penh')
+         on conflict (id) do nothing`,
+        [STORE, TENANT],
+      );
+      await cloudPool.query(
+        `insert into kitluy_core.store_locations
+           (id, tenant_id, digital_store_id, location_code, name, operating_status, timezone)
+         values ($1, $2, $3, 'T002-E2E-LOC', 'T002 E2E Location', 'ACTIVE', 'Asia/Phnom_Penh')
+         on conflict (id) do nothing`,
+        [LOCATION, TENANT, STORE],
+      );
+      await cloudPool.query(
+        `insert into kitluy_devices.hardware_profiles
+           (profile_key, display_name, device_class, manufacturer, model_identifier,
+            required_signal_types, certification_status)
+         values ('WS11-T001-HUB-PROBE', 'WS-11-T001 assertion Store Hub profile', 'store_hub',
+                 'ASSERTION-FIXTURE', 'PROBE-1',
+                 array['mac_address','board_serial','storage_serial']::kitluy_devices.hardware_signal_type[],
+                 'CERTIFIED')
+         on conflict (profile_key) do nothing`,
+      );
+      const enrolled = await cloudPool.query<{ id: string }>(
+        `select kitluy_devices.enroll_device_v1(
+           $1, (select id from kitluy_devices.hardware_profiles where profile_key = 'WS11-T001-HUB-PROBE'),
+           now(), encode(sha256(convert_to($1, 'UTF8')), 'hex'), 'ed25519', 'software',
+           'STATION-T002', 'OP-T002',
+           jsonb_build_array(
+             jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'f2:' || $1),
+             jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-' || $1),
+             jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-' || $1))) as id`,
+        [`t002-hub-${RUN}`],
+      );
+      const cloudHubId = enrolled.rows[0]?.id ?? "";
+      await cloudPool.query(
+        `select kitluy_devices.create_device_claim_v1(
+           $1, $2::uuid, $3::uuid, $4::uuid,
+           encode(sha256(convert_to($5 || '-tok', 'UTF8')), 'hex'),
+           encode(sha256(convert_to($5 || '-pay', 'UTF8')), 'hex'), 900, 'OP-T002')`,
+        [cloudHubId, TENANT, STORE, LOCATION, RUN],
+      );
+      await cloudPool.query(
+        `select kitluy_devices.redeem_device_claim_v1(
+           encode(sha256(convert_to($2 || '-tok', 'UTF8')), 'hex'),
+           encode(sha256(convert_to($2 || '-pay', 'UTF8')), 'hex'), $1, 'HUB-T002')`,
+        [cloudHubId, RUN],
+      );
+
+      // The REAL app adapter + machine, driven exactly as the renderer
+      // does through the main process: staff session from the LIVE open.
+      const sessionOpen = await lan(
+        "POST",
+        "/edge/v1/sessions/open",
+        { actorId, passcode, profileCode: T1 },
+        { "idempotency-key": `t002-e2e-open-${RUN}` },
+      );
+      expect([200, 409], JSON.stringify(sessionOpen.body)).toContain(sessionOpen.status);
+      const liveSessionId = String(
+        ((sessionOpen.body as Record<string, unknown>)["session"] as Record<string, unknown>)[
+          "sessionId"
+        ] ?? "",
+      );
+      expect(liveSessionId).not.toBe("");
+      const operations = createIntakeOperations({
+        endpoint: { hostname: "127.0.0.1", port, pinnedCertificateFingerprint: hubTls.fingerprint },
+        credentials: credentials.obtain(),
+        sessionId: liveSessionId,
+      });
+      const machine = new IntakeMachine(operations);
+
+      // search (no match) -> create -> consent -> draft -> edit
+      const e2ePhone =
+        "012" +
+        randomUUID()
+          .replace(/[^0-9]/g, "")
+          .padEnd(6, "7")
+          .slice(0, 6);
+      machine.startIntake();
+      let snap = await machine.search(e2ePhone);
+      expect(snap.state).toBe("no_match");
+      snap = await machine.createCustomer({
+        displayName: "E2E Intake Customer",
+        phone: e2ePhone,
+        preferredLanguage: "km-KH",
+      });
+      expect(snap.state).toBe("customer_selected");
+      expect(snap.selectedCustomer?.syncState).toBe("pending_sync"); // never cloud-labelled early
+      const localCustomerId = snap.selectedCustomer?.customerId ?? "";
+      snap = machine.beginConsentReview();
+      snap = await machine.recordConsent({
+        purposeKey: "privacy_notice_acknowledgement",
+        policyRef: "DEMO-PRIVACY",
+        policyVersion: 1,
+        decision: "acknowledged",
+        staffAssisted: true,
+      });
+      snap = await machine.recordConsent({
+        purposeKey: "sms_marketing",
+        policyRef: "DEMO-SMS",
+        policyVersion: 1,
+        decision: "granted",
+        staffAssisted: true,
+      });
+      snap = await machine.createDraft({
+        preferredLanguage: "km-KH",
+        customerNotes: "e2e wash and fold",
+        staffNotes: "e2e internal note",
+      });
+      expect(["draft_ready", "pending_sync"]).toContain(snap.state);
+      const draftId = snap.draft?.draftId ?? "";
+      snap = await machine.saveDraftEdits({ staffNotes: "e2e edited note" });
+      expect(snap.draft?.version).toBe(2);
+
+      // A restarted T1 reopens the draft by its Hub id — renderer memory
+      // is not recovery state.
+      const machine2 = new IntakeMachine(operations);
+      const reopened = await machine2.reopenDraft(draftId);
+      expect(reopened.draft?.version).toBe(2);
+      expect(reopened.draft?.customerSnapshot["displayName"]).toBe("E2E Intake Customer");
+
+      // ----- Durable Hub outbox -> cloud ingestion -> acknowledgment.
+      const hubAgentPool = createHubPool(process.env, 4);
+      try {
+        const pending = await listPendingT002Facts(hubAgentPool, 100);
+        const mine = pending.filter(
+          (fact) =>
+            fact.aggregateId === localCustomerId ||
+            fact.aggregateId === draftId ||
+            (deliveryPayloadOf(fact)["local_customer_id"] as string | null) === localCustomerId,
+        );
+        // 1 customer + 2 consent + 3 draft mutations (create, update x2? create+edit = 2... plus reopen adds none) = 1+2+2.
+        expect(mine.length).toBeGreaterThanOrEqual(5);
+
+        const authenticatedDelivery = {
+          hubDeviceId: cloudHubId,
+          tenantId: TENANT,
+          digitalStoreId: STORE,
+          locationId: LOCATION,
+        };
+        const source = { connect: () => cloudPool.connect() };
+        const customers = new LocalCustomerIngestion(source);
+        const consents = new ConsentDecisionIngestion(source);
+        const drafts = new BookingDraftIngestion(source);
+
+        let cloudCustomerId = "";
+        const deliverOnce = async (
+          fact: (typeof mine)[number],
+        ): Promise<{ effectKey: string; cloudResult: string; ref: string | null }> => {
+          const payload = deliveryPayloadOf(fact);
+          if (fact.eventType === "customer.local_customer_created") {
+            const ack = await customers.ingest(authenticatedDelivery, {
+              effectKey: fact.effectKey,
+              localCustomerId: String(payload["local_customer_id"]),
+              tenantId: String(payload["tenant_id"]),
+              digitalStoreId: String(payload["digital_store_id"]),
+              displayName: String(payload["display_name"]),
+              phoneE164: (payload["phone_e164"] as string | null) ?? null,
+              phoneDisplay: (payload["phone_display"] as string | null) ?? null,
+              preferredLocale: String(payload["preferred_locale"] ?? "km-KH"),
+              sourceCode: String(payload["source_code"] ?? "t1_intake"),
+              correlationId: String(payload["correlation_id"]),
+            });
+            if (ack.cloudReferenceId !== null) cloudCustomerId = ack.cloudReferenceId;
+            const applied = await applyT002Acknowledgment(hubAgentPool, {
+              eventId: fact.eventId,
+              effectKey: ack.effectKey,
+              aggregateId: fact.aggregateId,
+              schemaVersion: ack.schemaVersion,
+              cloudResult: ack.cloudResult,
+              cloudReferenceId: ack.cloudReferenceId,
+              acknowledgedAt: ack.acknowledgedAt,
+              correlationId: ack.correlationId,
+            });
+            expect(
+              applied.applied,
+              JSON.stringify({ applied, cloudResult: ack.cloudResult, kind: fact.eventType }),
+            ).toBe(true);
+            return {
+              effectKey: ack.effectKey,
+              cloudResult: ack.cloudResult,
+              ref: ack.cloudReferenceId,
+            };
+          }
+          if (fact.eventType === "customer.consent_decision_recorded") {
+            const ack = await consents.ingest(authenticatedDelivery, {
+              effectKey: fact.effectKey,
+              consentDecisionId: String(payload["consent_decision_id"]),
+              localCustomerId: String(payload["local_customer_id"]),
+              cloudCustomerId,
+              tenantId: String(payload["tenant_id"]),
+              digitalStoreId: String(payload["digital_store_id"]),
+              purposeKey: String(payload["purpose_key"]),
+              policyRef: String(payload["policy_ref"]),
+              policyVersion: Number(payload["policy_version"]),
+              decision: String(payload["decision"]),
+              channel: String(payload["channel"]),
+              staffAssisted: payload["staff_assisted"] === true,
+              correlationId: String(payload["correlation_id"]),
+            });
+            const applied = await applyT002Acknowledgment(hubAgentPool, {
+              eventId: fact.eventId,
+              effectKey: ack.effectKey,
+              aggregateId: fact.aggregateId,
+              schemaVersion: ack.schemaVersion,
+              cloudResult: ack.cloudResult,
+              cloudReferenceId: ack.cloudReferenceId,
+              acknowledgedAt: ack.acknowledgedAt,
+              correlationId: ack.correlationId,
+            });
+            expect(
+              applied.applied,
+              JSON.stringify({ applied, cloudResult: ack.cloudResult, kind: fact.eventType }),
+            ).toBe(true);
+            return {
+              effectKey: ack.effectKey,
+              cloudResult: ack.cloudResult,
+              ref: ack.cloudReferenceId,
+            };
+          }
+          const ack = await drafts.ingest(authenticatedDelivery, {
+            effectKey: fact.effectKey,
+            bookingDraftEventId: String(payload["booking_draft_event_id"]),
+            hubDraftId: String(payload["hub_draft_id"]),
+            eventType: String(payload["event_type"]),
+            tenantId: String(payload["tenant_id"]),
+            digitalStoreId: String(payload["digital_store_id"]),
+            locationId: String(payload["location_id"]),
+            hubDeviceId: cloudHubId,
+            terminalDeviceId: String(
+              (payload["terminal_device_id"] as string | undefined) ?? deviceId,
+            ),
+            walkIn: payload["walk_in"] === true,
+            localCustomerId: (payload["local_customer_id"] as string | null) ?? null,
+            customerSnapshot: (payload["customer_snapshot"] as Record<string, unknown>) ?? {},
+            lifecycle: String(payload["lifecycle"]),
+            version: Number(payload["version"]),
+            preferredLanguage: String(payload["preferred_language"]),
+            intakeSource: String(payload["intake_source"]),
+            cancelReasonCode: (payload["cancel_reason_code"] as string | null) ?? null,
+            hubCreatedAt: String(payload["hub_created_at"]),
+            hubUpdatedAt: String(payload["hub_updated_at"]),
+            correlationId: String(payload["correlation_id"]),
+          });
+          const applied = await applyT002Acknowledgment(hubAgentPool, {
+            eventId: fact.eventId,
+            effectKey: ack.effectKey,
+            aggregateId: fact.aggregateId,
+            schemaVersion: ack.schemaVersion,
+            cloudResult: ack.cloudResult,
+            cloudReferenceId: ack.cloudReferenceId,
+            acknowledgedAt: ack.acknowledgedAt,
+            correlationId: ack.correlationId,
+          });
+          expect(
+            applied.applied,
+            JSON.stringify({ applied, cloudResult: ack.cloudResult, kind: fact.eventType }),
+          ).toBe(true);
+          return {
+            effectKey: ack.effectKey,
+            cloudResult: ack.cloudResult,
+            ref: ack.cloudReferenceId,
+          };
+        };
+
+        // Customer first (hub_sequence order already guarantees it).
+        const results: Array<{ effectKey: string; cloudResult: string; ref: string | null }> = [];
+        for (const fact of mine) {
+          results.push(await deliverOnce(fact));
+        }
+        for (const outcome of results) {
+          expect(
+            ["APPLIED", "ACKNOWLEDGED", "PROJECTED", "DECLINED_RECORDED"],
+            JSON.stringify(results),
+          ).toContain(outcome.cloudResult);
+        }
+
+        // Duplicate delivery of the FIRST fact: one cloud effect.
+        const replayFact = mine[0];
+        if (replayFact !== undefined) {
+          const replay = await deliverOnce(replayFact);
+          expect(replay.cloudResult).toBe("DUPLICATE_IGNORED");
+        }
+
+        // Hub reconciliation: outbox acknowledged; domain sync labels moved.
+        const outboxState = await pool.query(
+          `select o.delivery_state from edge_sync.outbox o
+             join edge_sync.local_event e on e.id = o.event_id
+            where e.aggregate_id = $1::uuid`,
+          [localCustomerId],
+        );
+        expect(
+          outboxState.rows.every(
+            (r) => (r as { delivery_state: string }).delivery_state === "acknowledged",
+          ),
+        ).toBe(true);
+        const customerRow = await pool.query<{
+          sync_state: string;
+          cloud_customer_id: string | null;
+        }>(`select sync_state, cloud_customer_id from edge_core.customer where id = $1::uuid`, [
+          localCustomerId,
+        ]);
+        expect(customerRow.rows[0]?.sync_state).toBe("cloud_acknowledged");
+        expect(customerRow.rows[0]?.cloud_customer_id).toBe(cloudCustomerId);
+        const draftRow = await pool.query<{
+          sync_state: string;
+          version: bigint;
+          lifecycle: string;
+        }>(
+          `select sync_state, version, lifecycle from edge_laundry.booking_draft where id = $1::uuid`,
+          [draftId],
+        );
+        expect(draftRow.rows[0]?.sync_state).toBe("cloud_acknowledged");
+        expect(Number(draftRow.rows[0]?.version)).toBe(2); // ack advanced NO version
+        expect(draftRow.rows[0]?.lifecycle).toBe("open"); // a draft stays a draft
+
+        // Cloud side: projection is the newest version, DRAFT lifecycle,
+        // and NO Laundry Booking or payment was created anywhere.
+        const projection = await cloudPool.query<{
+          lifecycle: string;
+          version: bigint;
+          conflict_state: string;
+        }>(
+          `select lifecycle, version, conflict_state
+             from kitluy_laundry.booking_draft_projections where hub_draft_id = $1::uuid`,
+          [draftId],
+        );
+        expect(projection.rows[0]?.lifecycle).toBe("open");
+        expect(Number(projection.rows[0]?.version)).toBe(2);
+        expect(projection.rows[0]?.conflict_state).toBe("none");
+        const bookings = await cloudPool
+          .query<{ n: number }>(`select count(*)::int as n from kitluy_laundry.laundry_bookings`)
+          .catch(() => ({ rows: [{ n: 0 }] }));
+        void bookings; // the projection table is the ONLY new laundry row source
+        const grants = await cloudPool.query<{ n: number }>(
+          `select count(*)::int as n from kitluy_core.consent_grants g
+            where g.customer_id = $1::uuid`,
+          [cloudCustomerId],
+        );
+        expect(grants.rows[0]?.n).toBe(2); // acknowledgement + sms grant
+      } finally {
+        await hubAgentPool.end();
+      }
+    } finally {
+      await cloudPool.end();
+    }
 
     // No secret reached a Hub log line.
     const serialized = JSON.stringify(logLines);

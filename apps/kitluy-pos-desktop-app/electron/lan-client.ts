@@ -62,7 +62,7 @@ export interface LanResponse {
 export function pinnedHubRequest(input: {
   readonly hostname: string;
   readonly port: number;
-  readonly method: "GET" | "POST";
+  readonly method: "GET" | "POST" | "PATCH";
   readonly path: string;
   /**
    * SHA-256 of the exact server certificate to accept. Absent ONLY for the

@@ -179,10 +179,21 @@ describe("confirmed boundaries — finance and sync", () => {
       // generations (see hub-fixtures reserveSyncGenerationBlock), so anything
       // non-pending in generation 1 outside the shipped WS-10-shaped fixtures
       // would mean WS-09 wrote a delivery state it does not own.
+      // WS-12-T002-P02 narrowing: the T002 acknowledgment applier
+      // legitimately moves T002 facts to `acknowledged` in generation 1 —
+      // but ONLY with a REAL cloud ack (`cloud_ack_id` present; the 0009
+      // outbox_ack_ck contract). A non-pending T002 row WITHOUT an ack id
+      // would still mean someone fabricated delivery state and still fails
+      // here.
       const rows = await p.query<{ event_id: string; delivery_state: string }>(
         `select o.event_id, o.delivery_state from edge_sync.outbox o
+           join edge_sync.local_event e on e.id = o.event_id
            where o.delivery_state <> 'pending'
              and o.assignment_generation = 1
+             and not (e.event_type in ('customer.local_customer_created',
+                                       'customer.consent_decision_recorded',
+                                       'laundry.booking_draft_recorded')
+                      and o.cloud_ack_id is not null)
              and o.event_id not in (
                'e0000000-0000-4000-8000-0000000000d1',
                'e0000000-0000-4000-8000-0000000000d3')`,

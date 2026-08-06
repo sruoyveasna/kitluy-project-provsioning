@@ -15,11 +15,15 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { T1BootstrapReport } from "../src/bootstrap/states.js";
+import type { IntakeOperations } from "../src/intake/ports.js";
+import { registerIntakeIpc } from "./intake-ipc.js";
 import { runT1Bootstrap } from "./t1-runtime.js";
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 
 let latestReport: T1BootstrapReport | null = null;
+// eslint-disable-next-line prefer-const -- assigned by the intake wiring step when live operations exist
+let intakeOperations: IntakeOperations | null = null;
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -38,6 +42,11 @@ function createWindow(): BrowserWindow {
 
 void app.whenReady().then(async () => {
   ipcMain.handle("kitluy:t1:report", () => latestReport);
+  // The intake surface answers `unavailable` until a later wiring step
+  // supplies live operations (endpoint + credentials + staff session from
+  // a completed bootstrap). Handlers exist from startup so the renderer's
+  // surface is stable; they FAIL CLOSED, never crash.
+  registerIntakeIpc(ipcMain, () => intakeOperations);
 
   const window = createWindow();
   app.on("activate", () => {

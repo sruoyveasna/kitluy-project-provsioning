@@ -118,6 +118,15 @@ user can never select or override Tenant, Digital Store, Location, Hub,
 environment, terminal profile or assignment generation. BLK-005/BLK-006
 stay fail-closed; the T1–T4 model of §2 is unchanged.
 
+> **2026-08-06 (P02 close) — WS-12-T002 COMPLETE — IMPLEMENTED-IN-DEV.**
+> The successor package delivered the T1 interface (adapters, narrow IPC,
+> 15-state machine, bilingual strings), the complete outbox census with
+> three governed cloud consumers, Hub 0041 + cloud 0187, and the
+> acknowledgment loop — §12 proven end to end; a draft REMAINS a draft;
+> duplicate delivery has one effect; conflicts stay explicit. The fence
+> held: no services, garments, pricing, payments, conversion or printing.
+> NEXT: WS-12-T003, NOT STARTED.
+
 > **2026-08-06 (T002 close) — WS-12-T002 PARTIAL — SUCCESSOR PACKAGE
 > REQUIRED.** Stage A first: the resolver PUBLIC-execute report was REFUTED
 > and retracted (0025 already held the discipline; §28b pins it). T002

@@ -4,7 +4,7 @@
 | ---------- | ---------------------------------------------------------------------------------- |
 | Date       | 2026-08-06 · Asia/Phnom_Penh                                                       |
 | Authority  | KLD-2026-08-06-WS12-T002-001 (OWNER-APPROVED — LOCKED); WS-12 pre-T002 hardening   |
-| Status     | **WS-12-T002 PARTIAL — SUCCESSOR PACKAGE REQUIRED**                                |
+| Status     | **SUPERSEDED — WS-12-T002 COMPLETE — IMPLEMENTED-IN-DEV (closed by P02, see the P02 handoff)** |
 | Workstream | WS-12 T1 Intake/Cashier — IN PROGRESS (T001 closed; T003–T008 NOT STARTED)         |
 | Push       | NOT PUSHED                                                                         |
 

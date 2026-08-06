@@ -36,6 +36,7 @@
     "pg": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "@kitluy-services/kitluy-device-registry-service": "workspace:*"
   }
 }

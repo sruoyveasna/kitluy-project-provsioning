@@ -370,6 +370,10 @@ export const HUB_MIGRATION_ORDER = [
   // DRAFT with append-only mutation receipts — a draft is NOT a Booking
   // and no conversion path exists in the group.
   "0040_t1_customer_consent_and_booking_draft.sql",
+  // WS-12-T002-P02: the booking-draft guard replaced FORWARD with the
+  // sync-metadata-only acknowledgment carve-out (any lifecycle, no version
+  // advance); every 0040 business rule retained.
+  "0041_booking_draft_sync_acknowledgment.sql",
 ] as const;
 
 /**
