@@ -10,7 +10,7 @@
 
 ## 1. Independence
 
-Three independent reviewers, each a fresh agent in its **own detached git
+Three independent reviewers across five passes, each a fresh agent in its **own detached git
 worktree** containing committed state only, each read-only with respect to
 product code, none approving a correction it authored:
 
@@ -64,8 +64,11 @@ unconditional skips repository-wide.
 
 ## 4. Defects found by the review and fixed forward
 
-Four remediation groups, each committed separately and re-reviewed by an
-agent that did not author it:
+Five remediation groups, each committed separately and re-reviewed by an
+agent that did not author it. Note the chain: 0183 fixed a missing
+authority, 0184 fixed a gap in 0183's fix, 0185 fixed a gap in 0184's fix.
+Each was found by the NEXT reviewer, not by the author — which is the
+protocol working rather than failing.
 
 | Finding | Severity               | Defect                                                                                                                                                                                                                                 | Fix                                                                             |
 | ------- | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
@@ -78,6 +81,7 @@ agent that did not author it:
 | NEW-3   | Low                    | A malformed fingerprint escaped as raw 23514                                                                                                                                                                                           | **cloud 0183** — governed schema sentinel                                       |
 | NEW-4   | Low                    | The checks 0183 added were NULL-permeable: `NULL <> x` is NULL, so an absent scope field walked past the authority into a raw 23502                                                                                                    | **cloud 0184** — presence gate                                                  |
 | NEW-5   | Low                    | Only the ISSUING device's class was checked; a Hub supplied as the terminal was ingested                                                                                                                                               | **cloud 0184** — paired-side class check                                        |
+| NEW-6   | Low                    | The presence gate 0184 added was ITSELF incomplete — it omitted the effect key, environment and correlation id, whose bare predicates were NULL-permeable for the same reason, so all three escaped as raw 23502                       | **cloud 0185** — the gate names every field the door depends on                 |
 
 **A test-quality finding worth stating on its own:** the T004 receipt suite
 had invented random UUIDs for both devices, so it never exercised a real
@@ -85,16 +89,46 @@ Hub or terminal — which is precisely why the door's missing identity checks
 survived four prior tasks. The fixture now enrols and assigns real devices
 through the governed doors, and each event provisions its own terminal.
 
+Reviewer C's final pass drove **97 probes** at the corrected door and found
+**no input that produces a raw SQLSTATE**: all nineteen parameters are
+covered, sixteen by the gate and three by their own NULL-safe predicates.
+It also verified the "byte-equivalent apart from the gate" claim by
+extracting and diffing both function bodies rather than trusting it, and
+proved the new tests non-vacuous by reverting the door and watching the
+suite fail on the exact absent field.
+
 ## 5. Recorded, NOT fixed (successor scope)
 
-- **NEW-6 (INFO)**: the Hub refusal family forms a three-state
-  existence/class oracle where the sibling health door collapses to one
-  sentinel. Belongs to the receipt-ingestion surface.
+- **Refusal-oracle observation (INFO)**: the Hub refusal family forms a
+  three-state existence/class oracle where the sibling health door
+  collapses to one sentinel. Belongs to the receipt-ingestion surface.
+- **KLREC-2026-08-06-WS11-T008-001 (OPEN, owner decision)**: the pairing
+  verifier refuses `now < issuedAt` with ZERO tolerance, so a terminal whose
+  clock lags the Hub by one millisecond refuses a valid session. The
+  closeout run reproduced this as an intermittent LAN-pairing failure
+  (two of four runs at the T008 starting SHA — pre-existing, not introduced
+  here) and diagnosed it rather than retrying. NOT silently changed:
+  clock tolerance elsewhere in this system is SIGNED POLICY, so an ad-hoc
+  constant inside a cryptographic verifier is an owner decision. The test
+  now verifies against a Hub-anchored instant (what a real terminal's
+  trusted-time floor is); expiry remains Hub-authoritative and enforced.
+  Six consecutive clean runs after the change.
 - **NEW-7 (INFO, pre-existing in 0176)**: the redelivery-conflict comparison
   omits generation, profile, fingerprints, serial and version, so such a
   redelivery returns `DUPLICATE_IGNORED` rather than `CONFLICT`. The stored
   row is not corrupted.
-- Repository-wide Prettier/CRLF condition (876 files) — pre-existing,
+- **Receipt-ingestion observations O-1…O-4 (Reviewer C, all pre-existing
+  since group 0176, none in the remediated class)**: O-1 the door does not
+  bind the effect key's namespace to the receipt id (only the consumer
+  does); **O-2 (LOW, carried as debt)** there is no clock sanity on
+  `paired_at` — a year-3000 or `-infinity` value ingests, and because the
+  terminal projection orders by `paired_at desc`, a far-future value would
+  become that terminal's reported pairing state permanently, where the
+  sibling health door has an explicit clock-anomaly rule; O-3 profile code,
+  serial and version are unvalidated and unbounded; O-4 the absent-field
+  regression test covers six of the sixteen gated fields (the other ten were
+  verified governed at SQL level, so this is a narrower net, not a defect).
+- Repository-wide Prettier/CRLF condition (865 files measured at closeout) — pre-existing,
   deliberately not mass-formatted, T008 intersection empty.
 - `docs:verify` classification drift on two `docs/source/` files
   (KLSRC-0009, KLSRC-0138) — pre-existing, unrelated to WS-11, and outside
