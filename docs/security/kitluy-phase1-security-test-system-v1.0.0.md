@@ -733,6 +733,43 @@ approved risk process.
 - Status transitions for any record follow the evidence rule (§5) and the owner's
   11-status model; this document itself is a contract, not execution evidence.
 
+## 19. WS-11-T007 execution decision (KLD-2026-08-06-WS11-T007-001)
+
+| Field    | Value                                                                                                                                                                                                                                                                                                                             |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Decision | `KLD-2026-08-06-WS11-T007-001`                                                                                                                                                                                                                                                                                                    |
+| Status   | **OWNER-APPROVED — LOCKED**                                                                                                                                                                                                                                                                                                       |
+| Date     | 2026-08-06                                                                                                                                                                                                                                                                                                                        |
+| Scope    | Independent security-oriented implementation verification of WS-11-T001..T006 (authorization, isolation, effective privileges, cryptographic identity, concurrency, expiry boundaries, trusted time, offline, restart, crash recovery, idempotency, replay, replacement, backup/restore, release rollback, secret/residue safety) |
+
+This section is the T007 execution authority ordered into THIS canonical
+system (no duplicate plan document is created). It updates §18's
+"nothing executed" posture for the WS-11 subset T007 executes: execution
+status for those records moves ONLY with evidence linked from the T007
+handoff, per the §5 evidence rule.
+
+Locked rules:
+
+1. All required T007 tests run under development identities.
+2. Pilot and production remain fail-closed under BLK-005.
+3. Physical Pi and Electron certification remains a pilot gate.
+4. Production Hub-to-cloud transport remains under BLK-006.
+5. Required new T007 tests have zero skips.
+6. Concurrency tests use genuinely separate database sessions or processes.
+7. Race tests repeat enough to prove determinism (minimum 20 controlled
+   iterations per race family unless a stronger repository standard exists).
+8. Caller clocks never establish authoritative expiry.
+9. Historical append-only facts may not be rewritten to repair a test.
+10. A defect fix uses a forward migration when schema behavior must change;
+    previous migrations remain immutable.
+11. Unrelated product scope must not be added.
+
+Inputs: the T007 debt census
+(`00_AI_HANDOFF/shared/2026-08-06__SHARED__WS-11-T007__DEBT-CENSUS.md`),
+which enumerates every debt explicitly assigned to T007 by T001–T006
+records with exact citations. Results: recorded at T007 closeout in
+`00_AI_HANDOFF/shared/2026-08-06__SHARED__WS-11-T007__DEVICE-SECURITY-OFFLINE-RECOVERY-AND-CONCURRENCY-VERIFICATION__AI-HANDOFF.md`.
+
 ## Appendix A — Open values
 
 Kept verbatim from Plan A; unresolved until the owner supplies them:

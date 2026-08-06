@@ -2568,3 +2568,23 @@ disabled://push-requires-owner-approval; origin/main sits at 7ef384c, so an
 owner push of earlier history evidently occurred). The protective disabled
 posture was re-established immediately; nothing was pushed. If the owner
 intends the push url to stay live, that is an owner call to make explicitly.
+
+## KLD-2026-08-06-WS11-T007-001 — WS-11-T007 security verification execution (2026-08-06, WS-11-T007)
+
+**Status: OWNER-APPROVED — LOCKED.** Recorded INTO the canonical Phase 1
+security test system (`docs/security/kitluy-phase1-security-test-system-v1.0.0.md`
+§19) — no duplicate plan document. Authorizes the independent
+security-oriented implementation verification of WS-11-T001..T006 with the
+eleven locked rules (§19): development identities only; BLK-005/BLK-006
+stay fail-closed; physical certification stays a pilot gate; zero skips in
+required new tests; genuinely separate sessions/processes for concurrency;
+≥20-iteration determinism for races; caller clocks never establish
+expiry; append-only history never rewritten to repair a test; forward
+migrations only, previous migrations immutable; no unrelated scope.
+Pre-change input: the T007 debt census (D1–D7 with exact source
+citations). STAGE 0 RECONCILIATION RECORDED: T006's closeout commit
+`e3ec447` edited applied Hub migration 0038 (immutability breach); restored
+byte-for-byte from `9310168` (blob 9e80c81f, sha256 3d571e17...2ab78) in
+commit `b031cb8` with a checksum-pinned secret-scanner rejection-fixture
+exception proven to weaken nothing else. T006 remains COMPLETE —
+IMPLEMENTED-IN-DEV with the breach recorded.
