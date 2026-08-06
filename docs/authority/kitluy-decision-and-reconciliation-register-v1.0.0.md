@@ -2472,3 +2472,26 @@ fixture derives `providerEventId` from a truncated `uuidv7()` (~44 bits of the
 millisecond timestamp), so two tests landing within about 16 ms mint the same
 dedupe triple. It belongs to WS-10-T006 (`e2390b2`) and predates every P04
 package. Fix when that area is next opened: give the fixture a random suffix.
+
+## KLD-2026-08-06-WS11-REMAINING-TASKS-001 — WS-11 remaining task register (2026-08-06, WS-11-T005 package)
+
+**OWNER-APPROVED**, recorded verbatim from the WS-11-T005 owner package
+instruction. Full record:
+`docs/decisions/kitluy-ws-11-t005-t008-task-register-owner-decision-v1.0.0.md`.
+
+Resolves the WS-11-T005..T008 title-resolution blocker (T004 closeout §10;
+discovery record 2026-08-06). The four remaining tasks are, in unchanged
+order and count:
+
+| Task ID    | Authoritative title                                             |
+| ---------- | --------------------------------------------------------------- |
+| WS-11-T005 | Device Fleet Health, Support Access and Incident Containment    |
+| WS-11-T006 | Store Hub Replacement, Recovery and Signed Release Lifecycle    |
+| WS-11-T007 | Device Security, Offline, Recovery and Concurrency Verification |
+| WS-11-T008 | Independent WS-11 Review, Evidence Reconciliation and Closeout  |
+
+KLRISK-DEVICE-002 implementation is assigned to T005 (independent
+verification remains with T007/T008). Step 8 of the dependency order
+(production signing-key custody) stays BLK-005-blocked and is assigned to no
+agent task. The rotation-mode decision (0129) remains a separate owner
+decision. Canonical task cards: `00_AI_HANDOFF/tasks/WS-11-T005.md` .. `WS-11-T008.md`.

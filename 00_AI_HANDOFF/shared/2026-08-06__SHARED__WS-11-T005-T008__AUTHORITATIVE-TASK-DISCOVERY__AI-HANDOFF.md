@@ -224,3 +224,16 @@ No implementation, no migration, no runtime change, no production action, no
 push. Files touched: this record and `000_INDEX.md` (one row). Verification
 was deliberately limited to the package's allowance: intake check
 (`git rev-parse`, `git status`) and changed-file formatting only.
+
+## 11. Resolution (2026-08-06, same day)
+
+**The unresolved-title condition recorded by this discovery is CLOSED** by
+owner ruling `KLD-2026-08-06-WS11-REMAINING-TASKS-001`
+(`docs/decisions/kitluy-ws-11-t005-t008-task-register-owner-decision-v1.0.0.md`):
+T005 Device Fleet Health, Support Access and Incident Containment; T006 Store
+Hub Replacement, Recovery and Signed Release Lifecycle; T007 Device Security,
+Offline, Recovery and Concurrency Verification; T008 Independent WS-11
+Review, Evidence Reconciliation and Closeout. The ruling adopts this record's
+§8 placement questions verbatim: KLRISK-DEVICE-002 → T005; race debts → T007;
+review backfill → T008; step 8 → no agent task; rotation mode → separate
+owner decision. Canonical task cards exist under `00_AI_HANDOFF/tasks/`.

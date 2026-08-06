@@ -102,6 +102,8 @@ A task that needs to cross this fence must stop and file a conflict/decision rec
 
 > **2026-08-05 — WS-11-T004 CLOSED as IMPLEMENTED-IN-DEV.** The fence is unchanged: all work stayed inside WS-11 (`kitluy_devices` cloud groups 0162–0176, Hub groups 0031–0034, `@kitluy/device-identity`, `@kitluy/terminal-local-store`, the device-registry service and the Hub agent). No Laundry business surface, no production migration and no pilot/production claim was made; BLK-005 fail-closed behaviour was re-proven on a reset from zero. The next WS-11 task is read from the authoritative task register, not invented here.
 
+> **2026-08-06 — WS-11 remaining task register RULED (KLD-2026-08-06-WS11-REMAINING-TASKS-001).** The title-resolution blocker recorded by the T004 closeout and the 2026-08-06 discovery record is CLOSED. The four remaining tasks, order and count unchanged: **T005 Device Fleet Health, Support Access and Incident Containment** (owns KLRISK-DEVICE-002 implementation); **T006 Store Hub Replacement, Recovery and Signed Release Lifecycle**; **T007 Device Security, Offline, Recovery and Concurrency Verification** (owns the recorded race debts); **T008 Independent WS-11 Review, Evidence Reconciliation and Closeout** (owns the T001/T002 review backfill). Step 8 (production signing-key custody) stays BLK-005-blocked and belongs to no agent task. Canonical cards: `00_AI_HANDOFF/tasks/WS-11-T005.md`..`WS-11-T008.md`. The Cycle-10 fence, the BLK-005 gate and the IMPLEMENTED-IN-DEV promotion ceiling are unchanged.
+
 Cycle 10 is authorized for **WS-11 device provisioning and fleet management
 only**.
 
