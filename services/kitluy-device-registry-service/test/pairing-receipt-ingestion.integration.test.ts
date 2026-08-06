@@ -78,6 +78,51 @@ describe.skipIf(!live)("cloud pairing-receipt ingestion (group 0176)", () => {
   let hubDeviceId: string;
   let secondHubId: string;
 
+  const callDoor = async (e: PairingReceiptEvent, over: Record<string, string | null>) => {
+    const client = await pool.connect();
+    try {
+      await client.query("begin");
+      await client.query(
+        `do $$ begin execute format('grant kitluy_pairing_receipt_governor to %I', current_user); end $$`,
+      );
+      await client.query("set local role kitluy_pairing_receipt_governor");
+      await client.query(
+        `select kitluy_devices.ingest_terminal_pairing_receipt_v1(
+           $1, $2::uuid, $3, $4::uuid, $5::uuid, $6::uuid, $7::int, $8,
+           $9::uuid, $10::uuid, $11::uuid, $12, $13, $14, $15, $16, $17, $18::timestamptz, $19::uuid)`,
+        [
+          "effectKey" in over ? over.effectKey : e.effectKey,
+          e.receiptId,
+          e.receiptVersion,
+          e.pairingSessionId,
+          e.hubDeviceId,
+          e.terminalDeviceId,
+          e.terminalAssignmentGeneration,
+          e.terminalProfileCode,
+          "tenantId" in over ? over.tenantId : e.tenantId,
+          "digitalStoreId" in over ? over.digitalStoreId : e.digitalStoreId,
+          "locationId" in over ? over.locationId : e.locationId,
+          "environment" in over ? over.environment : e.environment,
+          e.hubCertificateFingerprint,
+          "terminalCertificateFingerprint" in over
+            ? over.terminalCertificateFingerprint
+            : e.terminalCertificateFingerprint,
+          e.hubCertificateSerial,
+          e.transcriptHash,
+          e.hubReceiptSignature,
+          e.pairedAt,
+          "correlationId" in over ? over.correlationId : e.correlationId,
+        ],
+      );
+      return { refused: false, message: "" };
+    } catch (error) {
+      return { refused: true, message: error instanceof Error ? error.message : String(error) };
+    } finally {
+      await client.query("rollback").catch(() => undefined);
+      client.release();
+    }
+  };
+
   async function liveGeneration(deviceId: string): Promise<number> {
     const { rows } = await pool.query<{ g: string }>(
       `select assignment_generation::text as g from kitluy_devices.device_assignments
@@ -440,48 +485,6 @@ describe.skipIf(!live)("cloud pairing-receipt ingestion (group 0176)", () => {
     // the point is that the DATABASE governs these, not only the caller.
     const replay = await event();
     const malformed = await event();
-    const callDoor = async (e: PairingReceiptEvent, over: Record<string, string | null>) => {
-      const client = await pool.connect();
-      try {
-        await client.query("begin");
-        await client.query(
-          `do $$ begin execute format('grant kitluy_pairing_receipt_governor to %I', current_user); end $$`,
-        );
-        await client.query("set local role kitluy_pairing_receipt_governor");
-        await client.query(
-          `select kitluy_devices.ingest_terminal_pairing_receipt_v1(
-             $1, $2::uuid, $3, $4::uuid, $5::uuid, $6::uuid, $7::int, $8,
-             $9::uuid, $10::uuid, $11::uuid, $12, $13, $14, $15, $16, $17, $18::timestamptz, $19::uuid)`,
-          [
-            over.effectKey ?? e.effectKey,
-            e.receiptId,
-            e.receiptVersion,
-            e.pairingSessionId,
-            e.hubDeviceId,
-            e.terminalDeviceId,
-            e.terminalAssignmentGeneration,
-            e.terminalProfileCode,
-            over.tenantId === null ? null : e.tenantId,
-            e.digitalStoreId,
-            e.locationId,
-            e.environment,
-            e.hubCertificateFingerprint,
-            over.terminalCertificateFingerprint ?? e.terminalCertificateFingerprint,
-            e.hubCertificateSerial,
-            e.transcriptHash,
-            e.hubReceiptSignature,
-            e.pairedAt,
-            e.correlationId,
-          ],
-        );
-        return { refused: false, message: "" };
-      } catch (error) {
-        return { refused: true, message: error instanceof Error ? error.message : String(error) };
-      } finally {
-        await client.query("rollback").catch(() => undefined);
-        client.release();
-      }
-    };
 
     // B6: a DIFFERENT receipt id reusing an already-delivered effect key —
     // was a raw 23505 unique violation from tpr_effect_key_uq.
@@ -498,26 +501,58 @@ describe.skipIf(!live)("cloud pairing-receipt ingestion (group 0176)", () => {
     expect(malformedOutcome.message).toContain("KLUY-PAIRING-RECEIPT-REJECTED-SCHEMA");
     expect(malformedOutcome.message).not.toMatch(/violates check constraint/i);
 
-    // T008 NEW-4: an ABSENT scope field must be a governed schema refusal,
-    // not a three-valued comparison walking past the authority into a raw
-    // not-null violation.
-    const nullScope = await event();
-    const nullOutcome = await callDoor(nullScope, { tenantId: null });
-    expect(nullOutcome.refused, "a null Tenant was accepted").toBe(true);
-    expect(nullOutcome.message).toContain("KLUY-PAIRING-RECEIPT-REJECTED-SCHEMA");
-    expect(nullOutcome.message).not.toMatch(/null value in column|not-null constraint/i);
-
-    // T008 NEW-5: the PAIRED side must be a terminal — a Hub fed as the
-    // terminal was previously ingested.
-    const hubAsTerminal = await event({ terminalDeviceId: hubDeviceId, hubDeviceId: secondHubId });
-    const classOutcome = await callDoor(hubAsTerminal, {});
-    expect(classOutcome.refused, "a Hub was accepted as the paired terminal").toBe(true);
-    expect(classOutcome.message).toContain("KLUY-PAIRING-RECEIPT-WRONG-HUB");
-
     const { rows } = await pool.query<{ n: string }>(
       `select count(*)::text as n from kitluy_devices.terminal_pairing_receipts
         where receipt_id = any($1::uuid[])`,
-      [[replay.receiptId, malformed.receiptId, nullScope.receiptId, hubAsTerminal.receiptId]],
+      [[replay.receiptId, malformed.receiptId]],
+    );
+    expect(rows[0]?.n).toBe("0");
+  });
+
+  it("T008 NEW-4/NEW-6: EVERY absent field the door depends on is a governed schema refusal, never a raw not-null violation", async () => {
+    // Three-valued logic: `NULL <> x` is NULL, not true, so an absent field
+    // would walk past the identity/scope authority and die at the column
+    // constraint — which the consumer maps to INTERNAL_ERROR, i.e. a caller
+    // retries a delivery that can never succeed. NEW-4 covered the scope
+    // fields; NEW-6 found the gate still omitted the effect key, the
+    // environment and the correlation id.
+    const absent: Array<Record<string, null>> = [
+      { tenantId: null },
+      { digitalStoreId: null },
+      { locationId: null },
+      { effectKey: null },
+      { environment: null },
+      { correlationId: null },
+    ];
+    const receiptIds: string[] = [];
+    for (const over of absent) {
+      const e = await event();
+      receiptIds.push(e.receiptId);
+      const outcome = await callDoor(e, over);
+      const field = Object.keys(over)[0];
+      expect(outcome.refused, `an absent ${field} was accepted`).toBe(true);
+      expect(outcome.message, `absent ${field}`).toContain("KLUY-PAIRING-RECEIPT-REJECTED-SCHEMA");
+      expect(outcome.message, `absent ${field} escaped ungoverned`).not.toMatch(
+        /null value in column|not-null constraint/i,
+      );
+    }
+    const { rows } = await pool.query<{ n: string }>(
+      `select count(*)::text as n from kitluy_devices.terminal_pairing_receipts
+        where receipt_id = any($1::uuid[])`,
+      [receiptIds],
+    );
+    expect(rows[0]?.n).toBe("0");
+  });
+
+  it("T008 NEW-5: the PAIRED side must be a terminal, never another Hub", async () => {
+    const hubAsTerminal = await event({ terminalDeviceId: hubDeviceId, hubDeviceId: secondHubId });
+    const outcome = await callDoor(hubAsTerminal, {});
+    expect(outcome.refused, "a Hub was accepted as the paired terminal").toBe(true);
+    expect(outcome.message).toContain("KLUY-PAIRING-RECEIPT-WRONG-HUB");
+    const { rows } = await pool.query<{ n: string }>(
+      `select count(*)::text as n from kitluy_devices.terminal_pairing_receipts
+        where receipt_id = $1::uuid`,
+      [hubAsTerminal.receiptId],
     );
     expect(rows[0]?.n).toBe("0");
   });
