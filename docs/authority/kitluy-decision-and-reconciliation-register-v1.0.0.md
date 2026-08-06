@@ -2541,3 +2541,30 @@ The risk is NOT closed by this session.
 | T005-P02-C01 | **Hub group 0035 shipped a reachability defect:** the containment-gate trigger executes as the INSERTING identity, and the pairing door's NOLOGIN governor held no SELECT on `containment_directive`/`effective_containment`, so EVERY governed pairing failed 42501 from 0035 onward. Undetected by the T005 fast gate (which ran hub:db:test, whose pairing probe runs as the harness role) and caught by the pairing suites in this closeout. | FIXED FORWARD in 0036 (two SELECT grants); pairing suites re-green (18/19). The RC-028 lesson restated: a trigger's reads are part of every writer's privilege surface. |
 | T005-P02-C02 | **Pairing race-A loser result-code mapping:** under a truly simultaneous duplicate completion the LOSER returns `INTERNAL_ERROR` instead of `ALREADY_PAIRED` (the door's `KLUY-EDGE-PAIRING-CONSUMED` family maps to `PAIR_SESSION_CONSUMED`; the TS `ALREADY_PAIRED` branch only catches a late loser). One receipt, one paired timestamp and outbox atomicity all HOLD — the defect is the losing caller's result code. Verified independent of this package (fails with the 0035/0036 triggers dropped). | RECORDED for the pairing surface owner / WS-11-T007 (race verification is T007's charter); not patched incidentally (rule 1). The losing caller recovers via GET .../receipt. |
 | T005-P02-C03 | RBAC registry grew 107→109 by amendment 001 under the owner package's explicit identifiers (`device.containment.apply`/`.clear`, singular prefix recorded verbatim); `device.fleet.read` and `device.support_session.manage` reconciled onto existing keys. Audit registry amendment 001 registers 6 events incl. the two RBAC-referenced names it lacked (closes that half of T005-RC-02). | Recorded; imported v1.0.0 originals untouched (amendment pattern). |
+
+
+## KLD-2026-08-06-WS11-T006-001 — Store Hub replacement, recovery and release (2026-08-06, WS-11-T006)
+
+**OWNER-APPROVED — LOCKED**, recorded verbatim from the WS-11-T006 master
+execution prompt. Full record:
+`docs/decisions/kitluy-storehub-replacement-recovery-and-release-owner-decision-v1.0.0.md`.
+
+Locks: no Hub-identity cloning (same-Pi NVMe keeps the UUID with a NEW key +
+certificate and old-cert revocation; replacement Pi gets a NEW UUID with
+explicit assignment cutover); one active Hub per Location; four-eyes +
+reauthentication + idempotency for replacement/cutover; recovery truth order
+(surviving DB → newest verified encrypted backup → cloud projections for
+reconciliation ONLY); backup development defaults (15-min encrypted
+snapshots, 96/30 retention, 02:00 daily full, async upload never blocking);
+release trust (manifest v1, SHA-256, Ed25519, Internal→Pilot→Stable with no
+skips, Pilot/Stable fail-closed under BLK-005); the development health gate
+(5 min / 20 s / 3 probes / one automatic rollback → failed_rolled_back);
+configuration publication separate from releases, signed, idempotent,
+rollback-capable.
+
+**Repository-state observation recorded at intake:** the origin PUSH url was
+found RESTORED to the real GitHub url (KLRISK-REPO-001 posture is
+disabled://push-requires-owner-approval; origin/main sits at 7ef384c, so an
+owner push of earlier history evidently occurred). The protective disabled
+posture was re-established immediately; nothing was pushed. If the owner
+intends the push url to stay live, that is an owner call to make explicitly.

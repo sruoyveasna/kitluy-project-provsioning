@@ -157,3 +157,12 @@ triage policy.
 | Fleet/support audit event keys      | Canonical audit-registry names for containment and support-session facts; reconciliation of the six RBAC-referenced keys the audit registry lacks | OPEN (T005-RC-02). 0177 keeps its own append-only evidence rows meanwhile                                                                                                          |
 | `[REQUIRED: maximum session duration by class]` | Support policy Appendix A — per-class session caps                                                                        | OPEN (T005-RC-04). Development posture: one per-environment cap, 60 min, clamped                                                                                                    |
 | Hub->cloud health reporter          | The Hub-agent heartbeat derivation loop, the /edge/v1 terminal heartbeat surface, and the outbox event kind carrying the versioned health projection to `ingest_device_health_report_v1` | **RESOLVED 2026-08-06** by WS-11-T005-P02 (owner-locked values; heartbeat route + reporter + outbox event + cloud consumer all built and proven). Still open within it: C4/C5 session caps (clamped to the C3 value meanwhile) and pilot/production monitoring thresholds (signed configuration only) |
+
+### WS-11-T006 additions (replacement, recovery, release — 2026-08-06)
+
+| ID / value | Open decision or required value | State |
+| --- | --- | --- |
+| T006 backup schedule/retention (pilot/production) | Owner ruled DEVELOPMENT defaults only (KLD-2026-08-06-WS11-T006-001 §4); pilot/production values arrive by signed policy | OPEN under BLK-005/BLK-006 |
+| Backup upload provider | Object-storage provider/credentials for asynchronous backup upload | OPEN under BLK-006 |
+| Production release signing custody | Ed25519 production signer for Pilot/Stable manifests | OPEN under BLK-005 (fail-closed enforcement shipped by T006 P03) |
+| Backup encryption production key custody | Development posture is the fenced local dev key; production custody is BLK-005 material | OPEN |
