@@ -249,6 +249,8 @@ declare
     'edge_hardware.terminal_health_report',
     -- WS-11-T006-P03 hub group 0038: verified release artifact cache.
     'edge_config.release_cache',
+    -- WS-11-T006-P04 hub group 0039: durable A/B installation state.
+    'edge_config.release_installation',
     'edge_hardware.peripheral_observation', 'edge_hardware.device_heartbeat',
     'edge_audit.audit_event', 'edge_audit.support_session'
   ];
@@ -2652,6 +2654,126 @@ end $$;
 rollback;
 
 -- ---------------------------------------------------------------------------
+-- 36. WS-11-T006-P04 — installation matrix and one-rollback rule (group 0039).
+-- ---------------------------------------------------------------------------
+begin;
+set local role kitluy_hub_runtime;
+do $$
+declare
+  v_cache uuid := gen_random_uuid();
+  v_inst uuid := gen_random_uuid();
+  v_blocked int := 0;
+begin
+  insert into edge_config.release_trust_key
+    (key_id, key_version, algorithm, public_key_pem, state, activated_at)
+  values ('t006-p04-key', 1, 'ed25519',
+          '-----BEGIN PUBLIC KEY-----probe-----END PUBLIC KEY-----', 'current', now())
+  on conflict (key_id, key_version) do nothing;
+  insert into edge_config.release_cache
+    (id, tenant_id, digital_store_id, location_id, product_key, version,
+     build_id, architecture, hardware_profile, environment, channel,
+     artifact_digest_sha256, artifact_size_bytes, manifest_version,
+     signing_key_id, signing_key_version, signature_b64,
+     min_schema_version, max_schema_version, state, verified_at, cached_at)
+  values
+    (v_cache, 'e0000000-0000-4000-8000-000000000001',
+     'e0000000-0000-4000-8000-000000000002', 'e0000000-0000-4000-8000-000000000003',
+     'kitluy-hub-agent', '3.0.0', 'b3', 'arm64', 'pi5-hub', 'development',
+     'internal', repeat('d', 64), 100, 1, 't006-p04-key', 1, repeat('QQQQ', 22),
+     30, 45, 'cached', now(), now());
+
+  -- Entry is assigned only; a skipped entry is refused.
+  begin
+    insert into edge_config.release_installation
+      (id, release_cache_id, device_kind, tenant_id, digital_store_id,
+       location_id, state, candidate_version)
+    values (gen_random_uuid(), v_cache, 'store_hub',
+            'e0000000-0000-4000-8000-000000000001',
+            'e0000000-0000-4000-8000-000000000002',
+            'e0000000-0000-4000-8000-000000000003', 'current', '3.0.0');
+    raise exception 'ASSERT FAIL: an installation entered at current';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-EDGE-INSTALL-ENTRY%' then
+      raise exception 'ASSERT FAIL: entry refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  insert into edge_config.release_installation
+    (id, release_cache_id, device_kind, tenant_id, digital_store_id,
+     location_id, candidate_version)
+  values (v_inst, v_cache, 'store_hub',
+          'e0000000-0000-4000-8000-000000000001',
+          'e0000000-0000-4000-8000-000000000002',
+          'e0000000-0000-4000-8000-000000000003', '3.0.0');
+
+  -- A second live installation on the same device collides structurally.
+  begin
+    insert into edge_config.release_installation
+      (id, release_cache_id, device_kind, tenant_id, digital_store_id,
+       location_id, candidate_version)
+    values (gen_random_uuid(), v_cache, 'store_hub',
+            'e0000000-0000-4000-8000-000000000001',
+            'e0000000-0000-4000-8000-000000000002',
+            'e0000000-0000-4000-8000-000000000003', '3.0.1');
+    raise exception 'ASSERT FAIL: two live installations coexisted on one device';
+  exception
+    when unique_violation then
+      v_blocked := v_blocked + 1;
+    when others then
+      if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+      raise exception 'ASSERT FAIL: one-live refusal was %', sqlerrm;
+  end;
+
+  -- Skipping the matrix is refused; walking it is journalled automatically.
+  begin
+    update edge_config.release_installation set state = 'current' where id = v_inst;
+    raise exception 'ASSERT FAIL: assigned jumped straight to current';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-EDGE-INSTALL-TRANSITION%' then
+      raise exception 'ASSERT FAIL: transition refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+  update edge_config.release_installation set state = 'downloading' where id = v_inst;
+  update edge_config.release_installation set state = 'verified' where id = v_inst;
+  update edge_config.release_installation set state = 'staged' where id = v_inst;
+  update edge_config.release_installation set state = 'installing_inactive_slot' where id = v_inst;
+  update edge_config.release_installation set state = 'pending_restart', candidate_slot = 'b' where id = v_inst;
+  update edge_config.release_installation set state = 'health_checking', probes_started_at = now() where id = v_inst;
+  update edge_config.release_installation set state = 'rolling_back', failure_reason = 'probe timeout' where id = v_inst;
+  update edge_config.release_installation set state = 'failed_rolled_back' where id = v_inst;
+
+  if (select count(*) from edge_config.release_installation_event
+       where installation_id = v_inst) < 9 then
+    raise exception 'ASSERT FAIL: the auto-journal is missing transitions';
+  end if;
+  if (select rollback_attempted from edge_config.release_installation where id = v_inst) is not true then
+    raise exception 'ASSERT FAIL: the rollback attempt was not pinned';
+  end if;
+
+  -- failed_rolled_back is terminal for automatic retry.
+  begin
+    update edge_config.release_installation set state = 'health_checking' where id = v_inst;
+    raise exception 'ASSERT FAIL: a rolled-back installation resumed automatically';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-EDGE-INSTALL-TRANSITION%' then
+      raise exception 'ASSERT FAIL: terminal-state refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  if v_blocked <> 4 then
+    raise exception 'ASSERT FAIL: expected 4 refused installation probes, got %', v_blocked;
+  end if;
+  raise notice 'PASS release-installation-matrix: entry only at assigned, one live installation per device, the full walk auto-journalled, illegal jumps refused, the automatic rollback pinned to exactly one attempt, failed_rolled_back terminal';
+end $$;
+rollback;
+
+-- ---------------------------------------------------------------------------
 -- 29. Final tally.
 -- ---------------------------------------------------------------------------
 do $$
@@ -2680,11 +2802,11 @@ begin
   -- EXACT in both directions -- it is how an unreviewed table gets noticed --
   -- so it is raised by exactly the additions that were reviewed and by
   -- nothing else.
-  if v_tables <> 70 then
+  if v_tables <> 72 then
     raise exception
-      'ASSERT FAIL: expected 70 relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11 + 3 G0027 revocation + 2 G0031 pairing + 1 G0033 credential projection + 2 G0035 health/containment + 1 G0036 report evidence + 2 G0037 replacement state + 2 G0038 release trust/cache), found %',
+      'ASSERT FAIL: expected 72 relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11 + 3 G0027 revocation + 2 G0031 pairing + 1 G0033 credential projection + 2 G0035 health/containment + 1 G0036 report evidence + 2 G0037 replacement state + 2 G0038 release trust/cache + 2 G0039 installation state), found %',
       v_tables;
   end if;
-  raise notice 'PASS tally: % relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11 WS-10 + 3 G0027 revocation + 2 G0031 pairing + 1 G0033 credential projection + 2 G0035 health/containment + 1 G0036 report evidence + 2 G0037 replacement state + 2 G0038 release trust/cache), % indexes, % triggers',
+  raise notice 'PASS tally: % relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11 WS-10 + 3 G0027 revocation + 2 G0031 pairing + 1 G0033 credential projection + 2 G0035 health/containment + 1 G0036 report evidence + 2 G0037 replacement state + 2 G0038 release trust/cache + 2 G0039 installation state), % indexes, % triggers',
     v_tables, v_indexes, v_triggers;
 end $$;

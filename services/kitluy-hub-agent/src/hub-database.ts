@@ -360,6 +360,10 @@ export const HUB_MIGRATION_ORDER = [
   // the verified artifact cache (forward-only states, resumable downloads,
   // rejected-is-final, signer FK so an unknown key cannot even stage).
   "0038_release_trust_and_cache.sql",
+  // WS-11-T006-P04: durable A/B installation state — the §12 matrix and the
+  // owner §6 one-automatic-rollback rule enforced in schema, every
+  // transition auto-journalled append-only.
+  "0039_release_installation_state.sql",
 ] as const;
 
 /**
