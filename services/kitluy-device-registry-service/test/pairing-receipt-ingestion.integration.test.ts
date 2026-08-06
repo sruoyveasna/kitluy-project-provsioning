@@ -76,6 +76,7 @@ describe.skipIf(!live)("cloud pairing-receipt ingestion (group 0176)", () => {
   // devices. The previous fixture invented UUIDs for both sides, which is
   // exactly why the door's missing identity checks went unnoticed.
   let hubDeviceId: string;
+  let secondHubId: string;
 
   async function liveGeneration(deviceId: string): Promise<number> {
     const { rows } = await pool.query<{ g: string }>(
@@ -169,6 +170,7 @@ describe.skipIf(!live)("cloud pairing-receipt ingestion (group 0176)", () => {
     pool = new pg.Pool({ connectionString: DSN, max: 6 });
     ingestion = new PairingReceiptIngestion(pool, logger);
     hubDeviceId = await enrolAndAssign("WS11-T001-HUB-PROBE", "HUB");
+    secondHubId = await enrolAndAssign("WS11-T001-HUB-PROBE", "HUB2");
     delivery = {
       hubDeviceId,
       tenantId: TENANT,
@@ -438,7 +440,7 @@ describe.skipIf(!live)("cloud pairing-receipt ingestion (group 0176)", () => {
     // the point is that the DATABASE governs these, not only the caller.
     const replay = await event();
     const malformed = await event();
-    const callDoor = async (e: PairingReceiptEvent, over: Record<string, string>) => {
+    const callDoor = async (e: PairingReceiptEvent, over: Record<string, string | null>) => {
       const client = await pool.connect();
       try {
         await client.query("begin");
@@ -459,7 +461,7 @@ describe.skipIf(!live)("cloud pairing-receipt ingestion (group 0176)", () => {
             e.terminalDeviceId,
             e.terminalAssignmentGeneration,
             e.terminalProfileCode,
-            e.tenantId,
+            over.tenantId === null ? null : e.tenantId,
             e.digitalStoreId,
             e.locationId,
             e.environment,
@@ -496,10 +498,26 @@ describe.skipIf(!live)("cloud pairing-receipt ingestion (group 0176)", () => {
     expect(malformedOutcome.message).toContain("KLUY-PAIRING-RECEIPT-REJECTED-SCHEMA");
     expect(malformedOutcome.message).not.toMatch(/violates check constraint/i);
 
+    // T008 NEW-4: an ABSENT scope field must be a governed schema refusal,
+    // not a three-valued comparison walking past the authority into a raw
+    // not-null violation.
+    const nullScope = await event();
+    const nullOutcome = await callDoor(nullScope, { tenantId: null });
+    expect(nullOutcome.refused, "a null Tenant was accepted").toBe(true);
+    expect(nullOutcome.message).toContain("KLUY-PAIRING-RECEIPT-REJECTED-SCHEMA");
+    expect(nullOutcome.message).not.toMatch(/null value in column|not-null constraint/i);
+
+    // T008 NEW-5: the PAIRED side must be a terminal — a Hub fed as the
+    // terminal was previously ingested.
+    const hubAsTerminal = await event({ terminalDeviceId: hubDeviceId, hubDeviceId: secondHubId });
+    const classOutcome = await callDoor(hubAsTerminal, {});
+    expect(classOutcome.refused, "a Hub was accepted as the paired terminal").toBe(true);
+    expect(classOutcome.message).toContain("KLUY-PAIRING-RECEIPT-WRONG-HUB");
+
     const { rows } = await pool.query<{ n: string }>(
       `select count(*)::text as n from kitluy_devices.terminal_pairing_receipts
         where receipt_id = any($1::uuid[])`,
-      [[replay.receiptId, malformed.receiptId]],
+      [[replay.receiptId, malformed.receiptId, nullScope.receiptId, hubAsTerminal.receiptId]],
     );
     expect(rows[0]?.n).toBe("0");
   });
