@@ -5,7 +5,7 @@
 | Date     | 2026-08-06 · Asia/Phnom_Penh                                                                             |
 | Base SHA | `d17ea9d` (owner ruling KLD-2026-08-06-WS11-REMAINING-TASKS-001, committed same day on top of `01e3c7a`) |
 | Package  | WS-11-T005 per the ruled task register; canonical card `00_AI_HANDOFF/tasks/WS-11-T005.md`               |
-| Status   | **WS-11-T005 PARTIAL — SUCCESSOR PACKAGE REQUIRED**                                                      |
+| Status   | **SUPERSEDED SAME DAY: WS-11-T005 COMPLETE — IMPLEMENTED-IN-DEV** (P02 delivered the reporter; see the P02 handoff). Original status: PARTIAL — SUCCESSOR PACKAGE REQUIRED                                                      |
 | Push     | NOT PUSHED (origin push URL remains `disabled://push-requires-owner-approval`)                           |
 
 ## 1. Authority split (the load-bearing model)

@@ -4,7 +4,9 @@
  * Source authority:
  *   - Suite RBAC Permission Registry v1.0.0
  *     (docs/source/security/kitluy-suite-rbac-permission-registry-v1.0.0.csv)
- *     — the 107-key canonical baseline reproduced verbatim below.
+ *     — the 107-key canonical baseline reproduced verbatim below, plus the
+ *     2 keys of Amendment 001 (docs/security/kitluy-suite-rbac-permission-
+ *     registry-amendment-001-device-containment-v1.0.0.md) = 109.
  *   - Owner decision KLD-2026-07-26-002 Group 3 (APPROVED, KL-DEC-001):
  *     lowercase dot-separated grammar, immutable released keys, unknown or
  *     deprecated keys fail closed, production wildcards prohibited.
@@ -111,10 +113,12 @@ export function isValidPermissionKey(key: string): boolean {
 }
 
 /**
- * The canonical 107-key permission registry (Suite RBAC Permission Registry
- * v1.0.0, column `permission`, verbatim and in registry order). Released keys
- * are immutable; additions and deprecations go through
- * `rbac.permission_registry_manage` (A4_OWNER_SECURITY).
+ * The canonical permission registry — 107 keys from the Suite RBAC Permission
+ * Registry v1.0.0 (column `permission`, verbatim and in registry order) plus
+ * the 2 keys of Amendment 001 (device containment, WS-11-T005-P02 owner
+ * package 2026-08-06) = 109. Released keys are immutable; additions and
+ * deprecations go through `rbac.permission_registry_manage`
+ * (A4_OWNER_SECURITY) — Amendment 001 is exactly such an owner ruling.
  *
  * NEUTRAL-CORE BOUNDARY (CLAUDE.md hard rule 2). Six registry rows are
  * vertical-namespaced (`laundry.*`, marked inline below). Only the canonical
@@ -169,6 +173,11 @@ export const CANONICAL_PERMISSION_KEYS: readonly PermissionKey[] = [
   "devices.identity_replace",
   "devices.remote_action.standard",
   "devices.remote_action.high_risk",
+  // Amendment 001 (WS-11-T005-P02 owner package, 2026-08-06): governed device
+  // containment. Owner identifiers recorded VERBATIM — singular `device.`
+  // prefix noted in the amendment record, not harmonized silently.
+  "device.containment.apply",
+  "device.containment.clear",
   "fleet.diagnostics.read",
   "fleet.logs.request",
   "fleet.sync.trigger",

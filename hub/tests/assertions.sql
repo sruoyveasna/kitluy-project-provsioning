@@ -245,6 +245,8 @@ declare
     'edge_identity.pairing_session', 'edge_identity.pairing_receipt',
     -- WS-11-T005 hub group 0035: local terminal health and containment.
     'edge_hardware.terminal_health_status', 'edge_identity.containment_directive',
+    -- WS-11-T005-P02 hub group 0036: append-only fleet report evidence.
+    'edge_hardware.terminal_health_report',
     'edge_hardware.peripheral_observation', 'edge_hardware.device_heartbeat',
     'edge_audit.audit_event', 'edge_audit.support_session'
   ];
@@ -2298,6 +2300,102 @@ end $$;
 rollback;
 
 -- ---------------------------------------------------------------------------
+-- 33. WS-11-T005-P02 — heartbeat sequencing and report evidence (group 0036).
+-- ---------------------------------------------------------------------------
+begin;
+set local role kitluy_hub_runtime;
+do $$
+declare
+  v_blocked int := 0;
+begin
+  insert into edge_hardware.terminal_health_status
+    (terminal_device_id, tenant_id, digital_store_id, location_id,
+     derived_state, last_heartbeat_at, heartbeat_count, derived_at, updated_at,
+     last_heartbeat_sequence, report_sequence)
+  values
+    ('e0000000-0000-4000-8000-000000000020',
+     'e0000000-0000-4000-8000-000000000001',
+     'e0000000-0000-4000-8000-000000000002',
+     'e0000000-0000-4000-8000-000000000003',
+     'healthy', now(), 1, now(), now(), 5, 2);
+
+  -- Neither sequence can move backwards, even for a privileged writer.
+  begin
+    update edge_hardware.terminal_health_status
+    set last_heartbeat_sequence = 4
+    where terminal_device_id = 'e0000000-0000-4000-8000-000000000020';
+    raise exception 'ASSERT FAIL: the heartbeat sequence moved backwards';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-EDGE-HEARTBEAT-SEQUENCE-BACKWARDS%' then
+      raise exception 'ASSERT FAIL: heartbeat-sequence refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+  begin
+    update edge_hardware.terminal_health_status
+    set report_sequence = 1
+    where terminal_device_id = 'e0000000-0000-4000-8000-000000000020';
+    raise exception 'ASSERT FAIL: the report sequence moved backwards';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-EDGE-REPORT-SEQUENCE-BACKWARDS%' then
+      raise exception 'ASSERT FAIL: report-sequence refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- Report evidence is append-only, and its per-terminal sequence collides
+  -- instead of duplicating.
+  insert into edge_hardware.terminal_health_report
+    (id, terminal_device_id, tenant_id, digital_store_id, location_id,
+     report_sequence, derived_state, from_state, material, observed_at,
+     containment_state, credential_eligible, correlation_id, created_at)
+  values
+    (gen_random_uuid(), 'e0000000-0000-4000-8000-000000000020',
+     'e0000000-0000-4000-8000-000000000001',
+     'e0000000-0000-4000-8000-000000000002',
+     'e0000000-0000-4000-8000-000000000003',
+     7, 'healthy', 'unknown', true, now(), 'none', true, gen_random_uuid(), now());
+  begin
+    insert into edge_hardware.terminal_health_report
+      (id, terminal_device_id, tenant_id, digital_store_id, location_id,
+       report_sequence, derived_state, material, observed_at,
+       containment_state, credential_eligible, correlation_id, created_at)
+    values
+      (gen_random_uuid(), 'e0000000-0000-4000-8000-000000000020',
+       'e0000000-0000-4000-8000-000000000001',
+       'e0000000-0000-4000-8000-000000000002',
+       'e0000000-0000-4000-8000-000000000003',
+       7, 'degraded', false, now(), 'none', true, gen_random_uuid(), now());
+    raise exception 'ASSERT FAIL: a duplicate report sequence was accepted';
+  exception
+    when unique_violation then
+      v_blocked := v_blocked + 1;
+    when others then
+      if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+      raise exception 'ASSERT FAIL: duplicate-report refusal was %', sqlerrm;
+  end;
+  begin
+    update edge_hardware.terminal_health_report set material = false
+    where terminal_device_id = 'e0000000-0000-4000-8000-000000000020';
+    raise exception 'ASSERT FAIL: report evidence was rewritten';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-EDGE-APPEND-ONLY%' and sqlerrm not like '%permission denied%' then
+      raise exception 'ASSERT FAIL: report rewrite refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  if v_blocked <> 4 then
+    raise exception 'ASSERT FAIL: expected 4 refused sequencing probes, got %', v_blocked;
+  end if;
+  raise notice 'PASS heartbeat-sequencing: heartbeat and report sequences only advance, report evidence is append-only, and a duplicated per-terminal report sequence collides instead of applying twice';
+end $$;
+rollback;
+
+-- ---------------------------------------------------------------------------
 -- 29. Final tally.
 -- ---------------------------------------------------------------------------
 do $$
@@ -2326,11 +2424,11 @@ begin
   -- EXACT in both directions -- it is how an unreviewed table gets noticed --
   -- so it is raised by exactly the additions that were reviewed and by
   -- nothing else.
-  if v_tables <> 65 then
+  if v_tables <> 66 then
     raise exception
-      'ASSERT FAIL: expected 65 relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11 + 3 G0027 revocation + 2 G0031 pairing + 1 G0033 credential projection + 2 G0035 health/containment), found %',
+      'ASSERT FAIL: expected 66 relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11 + 3 G0027 revocation + 2 G0031 pairing + 1 G0033 credential projection + 2 G0035 health/containment + 1 G0036 report evidence), found %',
       v_tables;
   end if;
-  raise notice 'PASS tally: % relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11 WS-10 + 3 G0027 revocation + 2 G0031 pairing + 1 G0033 credential projection + 2 G0035 health/containment), % indexes, % triggers',
+  raise notice 'PASS tally: % relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11 WS-10 + 3 G0027 revocation + 2 G0031 pairing + 1 G0033 credential projection + 2 G0035 health/containment + 1 G0036 report evidence), % indexes, % triggers',
     v_tables, v_indexes, v_triggers;
 end $$;

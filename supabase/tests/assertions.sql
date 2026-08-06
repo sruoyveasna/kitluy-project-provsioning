@@ -16988,11 +16988,22 @@ begin
   if v_r->>'outcome' <> 'OPENED' then
     raise exception 'ASSERT FAIL: a fully authorized C3 session was refused: %', v_r;
   end if;
-  -- The duration clamp held: 240 requested, the governed maximum granted.
-  if (v_r->>'granted_minutes')::integer <> 60 then
-    raise exception 'ASSERT FAIL: the session duration was not clamped to the governed maximum';
+  -- The PER-CLASS clamp held (0178 owner values): 240 requested, C3 cap 15.
+  if (v_r->>'granted_minutes')::integer <> 15 then
+    raise exception 'ASSERT FAIL: a C3 session was not clamped to the owner-locked 15 minutes (got %)', v_r->>'granted_minutes';
   end if;
   v_c3 := (v_r->>'session_id')::uuid;
+
+  -- C2 clamps to its own 30-minute cap.
+  v_r := kitluy_devices.open_support_access_session_v1(
+    v_tenant, v_store, v_location, null, 'SUP-OP-1', null,
+    'sensitive read', 'TICKET-1006', 'C2_SENSITIVE_READ', 'CONSENT-10',
+    'development', 999);
+  if v_r->>'outcome' <> 'OPENED' or (v_r->>'granted_minutes')::integer <> 30 then
+    raise exception 'ASSERT FAIL: a C2 session was not clamped to the owner-locked 30 minutes: %', v_r;
+  end if;
+  perform kitluy_devices.revoke_support_access_session_v1(
+    (v_r->>'session_id')::uuid, 'SUP-OP-1', 'probe cleanup');
 
   -- Missing reason and missing ticket fail.
   begin

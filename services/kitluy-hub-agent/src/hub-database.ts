@@ -346,6 +346,11 @@ export const HUB_MIGRATION_ORDER = [
   // containment directive log whose latest directive gates pairing_session and
   // terminal_session inserts locally — enforceable with the WAN down.
   "0035_terminal_health_and_containment.sql",
+  // WS-11-T005-P02: per-terminal heartbeat sequencing (monotonic-greater, a
+  // recorded divergence from accept_terminal_command's strict +1), the report
+  // counter the cloud stores as projection_version, and the append-only
+  // report evidence whose row id is the kh1 outbox identity.
+  "0036_terminal_heartbeat_and_reporter_state.sql",
 ] as const;
 
 /**

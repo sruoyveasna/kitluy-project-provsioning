@@ -421,7 +421,7 @@ export const HUB_CONFIRMED_BOUNDARIES = {
  * many. A count derived from the summary line must never be reported.
  */
 export const HUB_DB_ASSERTION_CONTRACT = {
-  expectedPassNotices: 37,
+  expectedPassNotices: 40, // 37 baseline + T005 sections 31/32 + P02 section 33
   countCommand: 'pnpm hub:db:test | grep -c "NOTICE:  PASS"',
   wrongCountCommand:
     "pnpm hub:db:test | grep -c PASS   // reports 38 — also matches the summary line",

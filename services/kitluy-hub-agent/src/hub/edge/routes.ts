@@ -52,6 +52,7 @@ import {
 } from "@kitluy/device-identity";
 
 import { withHubTransaction, HUB_RUNTIME_ROLE, type HubPool } from "../db.js";
+import { acceptTerminalHeartbeat, type TerminalHeartbeatBody } from "../terminal-health.js";
 import type {
   TerminalPairingComposition,
   PairingChallengeMaterial,
@@ -71,6 +72,9 @@ export const WELL_KNOWN_DISCOVERY_PATH = "/.well-known/kitluy-edge-discovery/v1"
 export const EDGE_ACTIVATION_CHALLENGES_PATH = "/edge/v1/terminal-activation/challenges";
 export const EDGE_ACTIVATION_COMPLETE_PATH = "/edge/v1/terminal-activation/complete";
 export const EDGE_PAIRING_SESSIONS_PATH = "/edge/v1/terminal-pairing/sessions";
+export const EDGE_TERMINAL_HEALTH_HEARTBEATS_PATH = "/edge/v1/terminal-health/heartbeats";
+/** Route-level bound per the Edge API policy: a heartbeat is small telemetry. */
+export const MAX_HEARTBEAT_BODY_BYTES = 4 * 1024;
 
 // ---------------------------------------------------------------------------
 // The cloud activation gateway port (§5)
@@ -164,6 +168,9 @@ const CANONICAL_ERROR: Readonly<Record<string, KitluyErrorCode>> = {
   INTERNAL_ERROR: "INTERNAL_ERROR",
   // route-level authorization
   TERMINAL_NOT_RECOGNIZED: "DEVICE_NOT_ASSIGNED",
+  // terminal-health heartbeats (WS-11-T005-P02)
+  HEARTBEAT_REPLAY_REJECTED: "RESOURCE_VERSION_CONFLICT",
+  HEARTBEAT_BODY_TOO_LARGE: "VALIDATION_FAILED",
   CREDENTIAL_NOT_CURRENT: "DEVICE_NOT_ASSIGNED",
   ACTIVATION_REQUIRED: "DEVICE_NOT_ASSIGNED",
   SESSION_NOT_OWNED: "SCOPE_PERMISSION_DENIED",
@@ -391,6 +398,8 @@ async function sessionOwnedBy(
 
 export interface EdgeTerminalRouterDeps {
   readonly pool: HubPool;
+  /** Hub environment for outbound fleet reports; development in local runs. */
+  readonly environment?: string;
   readonly pairing: TerminalPairingComposition;
   readonly activationGateway: CloudActivationGateway;
   readonly discovery: EdgeDiscoveryAuthority;
@@ -405,7 +414,11 @@ export const PAIRING_CHALLENGE_LIFETIME_SECONDS = 300 as const;
 type Matched =
   | {
       readonly route:
-        "discovery" | "activation-challenges" | "activation-complete" | "pairing-sessions";
+        | "discovery"
+        | "activation-challenges"
+        | "activation-complete"
+        | "pairing-sessions"
+        | "terminal-health-heartbeats";
     }
   | {
       readonly route: "pairing-proof" | "pairing-complete" | "pairing-receipt";
@@ -425,6 +438,9 @@ function matchRoute(method: string, path: string): Matched | "METHOD_NOT_ALLOWED
   }
   if (clean === EDGE_PAIRING_SESSIONS_PATH) {
     return method === "POST" ? { route: "pairing-sessions" } : "METHOD_NOT_ALLOWED";
+  }
+  if (clean === EDGE_TERMINAL_HEALTH_HEARTBEATS_PATH) {
+    return method === "POST" ? { route: "terminal-health-heartbeats" } : "METHOD_NOT_ALLOWED";
   }
   const sub =
     /^\/edge\/v1\/terminal-pairing\/sessions\/([^/]+)\/(terminal-proof|complete|receipt)$/.exec(
@@ -530,6 +546,12 @@ export function createEdgeTerminalRouter(deps: EdgeTerminalRouterDeps): EdgeRequ
             return finish(
               operation,
               await handleActivationComplete(deps, request, body, correlationId),
+              "HANDLED",
+            );
+          case "terminal-health-heartbeats":
+            return finish(
+              operation,
+              await handleTerminalHealthHeartbeat(deps, terminal, request, body, correlationId),
               "HANDLED",
             );
           case "pairing-sessions": {
@@ -953,5 +975,164 @@ async function handlePairingReceipt(
         pairedAt: state.pairedAt,
       },
     },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Terminal health heartbeats (WS-11-T005-P02).
+//
+// Scope is DERIVED from the authenticated certificate and Hub relational
+// authority; the body can neither supply nor override Tenant/Store/Location/
+// Hub/assignment/profile/credential identity - unknown fields are refused,
+// and none of the allowed fields name an identity. The terminal-observed
+// timestamp is diagnostic only; Hub receipt time is the liveness authority.
+// ---------------------------------------------------------------------------
+const HEARTBEAT_ALLOWED_FIELDS = [
+  "heartbeatSequence",
+  "uptimeSeconds",
+  "applicationVersion",
+  "releaseVersion",
+  "configSnapshotVersion",
+  "queueDepth",
+  "localDatabaseAvailable",
+  "peripheralSummary",
+  "diskFreeBytes",
+  "observedAt",
+  "reasonCodes",
+] as const;
+
+const PERIPHERAL_STATES = new Set([
+  "unknown",
+  "ready",
+  "busy",
+  "degraded",
+  "disconnected",
+  "misconfigured",
+  "unsupported",
+  "maintenance_required",
+]);
+
+const VERSION_TEXT = /^[A-Za-z0-9_.:+-]{1,64}$/;
+const REASON_CODE = /^[a-z0-9_]{1,48}$/;
+
+function boundedInt(value: unknown, min: number, max: number): number | null {
+  if (typeof value !== "number" || !Number.isSafeInteger(value)) return null;
+  if (value < min || value > max) return null;
+  return value;
+}
+
+async function handleTerminalHealthHeartbeat(
+  deps: EdgeTerminalRouterDeps,
+  terminal: AuthorizedTerminal,
+  request: EdgeRequest,
+  body: Record<string, unknown>,
+  correlationId: string,
+): Promise<EdgeResponse> {
+  if (Buffer.byteLength(request.rawBody, "utf8") > MAX_HEARTBEAT_BODY_BYTES) {
+    return refusal("HEARTBEAT_BODY_TOO_LARGE", correlationId);
+  }
+  const unknown = unknownFields(body, HEARTBEAT_ALLOWED_FIELDS);
+  if (unknown.length > 0) {
+    return invalid(correlationId, "unknown heartbeat fields are refused", unknown);
+  }
+  const heartbeatSequence = boundedInt(body["heartbeatSequence"], 1, Number.MAX_SAFE_INTEGER);
+  const uptimeSeconds = boundedInt(body["uptimeSeconds"], 0, Number.MAX_SAFE_INTEGER);
+  const configSnapshotVersion = boundedInt(
+    body["configSnapshotVersion"],
+    0,
+    Number.MAX_SAFE_INTEGER,
+  );
+  const applicationVersion = body["applicationVersion"];
+  if (
+    heartbeatSequence === null ||
+    uptimeSeconds === null ||
+    configSnapshotVersion === null ||
+    typeof applicationVersion !== "string" ||
+    !VERSION_TEXT.test(applicationVersion)
+  ) {
+    return invalid(
+      correlationId,
+      "heartbeatSequence, uptimeSeconds, configSnapshotVersion and applicationVersion are required and bounded",
+    );
+  }
+  const releaseVersion = body["releaseVersion"];
+  if (
+    releaseVersion !== undefined &&
+    (typeof releaseVersion !== "string" || !VERSION_TEXT.test(releaseVersion))
+  ) {
+    return invalid(correlationId, "releaseVersion is bounded text");
+  }
+  const queueDepth =
+    body["queueDepth"] === undefined ? undefined : boundedInt(body["queueDepth"], 0, 1_000_000);
+  if (body["queueDepth"] !== undefined && queueDepth === null) {
+    return invalid(correlationId, "queueDepth is a bounded integer");
+  }
+  const diskFreeBytes =
+    body["diskFreeBytes"] === undefined
+      ? undefined
+      : boundedInt(body["diskFreeBytes"], 0, Number.MAX_SAFE_INTEGER);
+  if (body["diskFreeBytes"] !== undefined && diskFreeBytes === null) {
+    return invalid(correlationId, "diskFreeBytes is a bounded integer");
+  }
+  const localDatabaseAvailable = body["localDatabaseAvailable"];
+  if (localDatabaseAvailable !== undefined && typeof localDatabaseAvailable !== "boolean") {
+    return invalid(correlationId, "localDatabaseAvailable is a boolean");
+  }
+  const peripheralSummary = body["peripheralSummary"];
+  if (
+    peripheralSummary !== undefined &&
+    (typeof peripheralSummary !== "string" || !PERIPHERAL_STATES.has(peripheralSummary))
+  ) {
+    return invalid(
+      correlationId,
+      "peripheralSummary is one of the eight canonical peripheral states",
+    );
+  }
+  const observedAt = body["observedAt"];
+  if (
+    observedAt !== undefined &&
+    (typeof observedAt !== "string" ||
+      observedAt.length > 40 ||
+      Number.isNaN(Date.parse(observedAt)))
+  ) {
+    return invalid(correlationId, "observedAt is an ISO timestamp (diagnostic only)");
+  }
+  const reasonCodes = body["reasonCodes"];
+  if (
+    reasonCodes !== undefined &&
+    (!Array.isArray(reasonCodes) ||
+      reasonCodes.length > 8 ||
+      reasonCodes.some((code) => typeof code !== "string" || !REASON_CODE.test(code)))
+  ) {
+    return invalid(correlationId, "reasonCodes is a bounded array of short codes");
+  }
+
+  const heartbeat: TerminalHeartbeatBody = {
+    heartbeatSequence,
+    uptimeSeconds,
+    applicationVersion,
+    configSnapshotVersion,
+    ...(releaseVersion !== undefined ? { releaseVersion } : {}),
+    ...(queueDepth !== undefined && queueDepth !== null ? { queueDepth } : {}),
+    ...(localDatabaseAvailable !== undefined ? { localDatabaseAvailable } : {}),
+    ...(peripheralSummary !== undefined ? { peripheralSummary } : {}),
+    ...(diskFreeBytes !== undefined && diskFreeBytes !== null ? { diskFreeBytes } : {}),
+    ...(observedAt !== undefined ? { observedAt } : {}),
+    ...(reasonCodes !== undefined ? { reasonCodes: reasonCodes as readonly string[] } : {}),
+  };
+
+  const outcome = await acceptTerminalHeartbeat(
+    deps.pool,
+    terminal.terminalDeviceId,
+    heartbeat,
+    deps.environment ?? "development",
+    deps.logger,
+  );
+  if (outcome.result === "HEARTBEAT_REPLAY_REJECTED") {
+    return refusal("HEARTBEAT_REPLAY_REJECTED", correlationId);
+  }
+  return {
+    status: 200,
+    body: { result: outcome.result, correlationId, heartbeat: outcome },
   };
 }
