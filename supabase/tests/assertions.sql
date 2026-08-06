@@ -17852,4 +17852,227 @@ end
 $section56$;
 
 
-select 'assertions complete: groups 0010-0153 structural contract holds (incl. WS-11-T003 Step 4 Phase C — RC-022 spendability census CLOSED; governed emergency 0150–0153; RevocationGateway ships in @kitluy/device-identity) + WS-11-T005 fleet health, support access and governed containment (0177) + WS-11-T006-P01 hub replacement authority (0179)' as result;
+-- ============================================================================
+-- SECTION 57 — signed release authority (migration 0180).
+--
+-- WS-11-T006-P03. Proved here: draft -> signed -> internal with the fixed
+-- promotion order (no skips), Pilot/Stable behind the BLK-005 gate,
+-- independent-approver promotions and revocation, signed-manifest
+-- immutability, revocation as a NEW fact, assignment scope/idempotency, and
+-- the privilege boundary.
+-- ============================================================================
+do $section57$
+declare
+  v_tenant_b uuid := '00000000-0000-4000-8000-000000000012';
+  v_store_b uuid := '00000000-0000-4000-8000-000000000017';
+  v_location_b uuid := '00000000-0000-4000-8000-000000000450';
+  v_hub_profile uuid;
+  v_hub uuid;
+  v_rel uuid;
+  v_r jsonb;
+  v_refused integer := 0;
+  v_sig text := 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==';
+begin
+  select id into v_hub_profile from kitluy_devices.hardware_profiles
+   where profile_key = 'WS11-T001-HUB-PROBE';
+  v_hub := kitluy_devices.enroll_device_v1(
+    'T006-REL-' || gen_random_uuid(), v_hub_profile, now(),
+    encode(sha256(convert_to('t6-rel-' || gen_random_uuid(), 'UTF8')), 'hex'),
+    'ed25519', 'software', 'STATION-T006', 'OP-T006',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'f7:01:' || substr(md5(random()::text),1,6)),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-t7-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-t7-' || gen_random_uuid())));
+  perform kitluy_devices.create_device_claim_v1(v_hub, v_tenant_b, v_store_b, v_location_b,
+    encode(sha256(convert_to('t7-tok', 'UTF8')), 'hex'),
+    encode(sha256(convert_to('t7-pay', 'UTF8')), 'hex'), 900, 'OP-T006');
+  perform kitluy_devices.redeem_device_claim_v1(
+    encode(sha256(convert_to('t7-tok', 'UTF8')), 'hex'),
+    encode(sha256(convert_to('t7-pay', 'UTF8')), 'hex'), v_hub, 'HUB-T006');
+
+  set local role kitluy_release_service;
+
+  v_r := kitluy_releases.create_release_draft_v1(
+    'kitluy-hub-agent', '1.4.0', 'build-9', 'arm64', 'pi5-hub', 'development',
+    'files/rel-140', repeat('c', 64), 2048, 30, 45, 0, null,
+    'REL-OP-1', gen_random_uuid());
+  v_rel := (v_r->>'release_id')::uuid;
+
+  -- A draft is not assignable and not promotable past the order.
+  begin
+    perform kitluy_releases.promote_release_v1(v_rel, 'internal', 'REL-OP-1', null);
+    raise exception 'ASSERT FAIL: an unsigned draft was promoted';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-RELEASE-PROMOTION-ORDER%' then
+      raise exception 'ASSERT FAIL: unsigned-promotion refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+  begin
+    perform kitluy_releases.sign_release_v1(v_rel, 'dev-key', 1, 'not-base64!', 'REL-OP-1');
+    raise exception 'ASSERT FAIL: a malformed signature was accepted';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-RELEASE-SIGNATURE-SHAPE%' then
+      raise exception 'ASSERT FAIL: signature-shape refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+  perform kitluy_releases.sign_release_v1(v_rel, 'dev-key', 1, v_sig, 'REL-OP-1');
+
+  -- Skipped promotion refused; the fixed order holds.
+  begin
+    perform kitluy_releases.promote_release_v1(v_rel, 'pilot', 'REL-OP-1', 'REL-APPROVER-2');
+    raise exception 'ASSERT FAIL: promotion skipped Internal';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-RELEASE-PROMOTION-ORDER%' then
+      raise exception 'ASSERT FAIL: skip refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+  v_r := kitluy_releases.promote_release_v1(v_rel, 'internal', 'REL-OP-1', null);
+  if v_r->>'outcome' <> 'PROMOTED' then
+    raise exception 'ASSERT FAIL: Internal promotion was refused: %', v_r;
+  end if;
+
+  -- Pilot: approver mandatory, self-approval refused, then the BLK-005 gate
+  -- fails closed (the 0120 owner gate names the missing PKI values).
+  begin
+    perform kitluy_releases.promote_release_v1(v_rel, 'pilot', 'REL-OP-1', null);
+    raise exception 'ASSERT FAIL: Pilot promoted without an approver';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-RELEASE-UNAPPROVED%' then
+      raise exception 'ASSERT FAIL: unapproved refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+  begin
+    perform kitluy_releases.promote_release_v1(v_rel, 'pilot', 'REL-OP-1', 'REL-OP-1');
+    raise exception 'ASSERT FAIL: a requester approved their own promotion';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-RELEASE-SELF-APPROVAL%' then
+      raise exception 'ASSERT FAIL: self-approval refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+  begin
+    perform kitluy_releases.promote_release_v1(v_rel, 'pilot', 'REL-OP-1', 'REL-APPROVER-2');
+    raise exception 'ASSERT FAIL: Pilot promoted while BLK-005 is open';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-DEVICE-PKI-UNCONFIGURED%' then
+      raise exception 'ASSERT FAIL: BLK-005 refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+
+  -- Assignment: eligible + scoped + idempotent.
+  v_r := kitluy_releases.assign_release_v1(
+    v_rel, v_tenant_b, v_store_b, v_location_b, 'development', v_hub,
+    'T006-ASSIGN-1', 'REL-OP-1');
+  if v_r->>'outcome' <> 'ASSIGNED' then
+    raise exception 'ASSERT FAIL: an eligible assignment was refused: %', v_r;
+  end if;
+  v_r := kitluy_releases.assign_release_v1(
+    v_rel, v_tenant_b, v_store_b, v_location_b, 'development', v_hub,
+    'T006-ASSIGN-1', 'REL-OP-1');
+  if v_r->>'outcome' <> 'EXISTING' then
+    raise exception 'ASSERT FAIL: a duplicate assignment was not idempotent: %', v_r;
+  end if;
+  begin
+    perform kitluy_releases.assign_release_v1(
+      v_rel, v_tenant_b, v_store_b, v_location_b, 'pilot', v_hub,
+      'T006-ASSIGN-2', 'REL-OP-1');
+    raise exception 'ASSERT FAIL: a wrong-environment assignment was accepted';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-RELEASE-WRONG-ENVIRONMENT%' then
+      raise exception 'ASSERT FAIL: wrong-environment refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+  begin
+    perform kitluy_releases.assign_release_v1(
+      v_rel, '00000000-0000-4000-8000-000000000011',
+      '00000000-0000-4000-8000-000000000015', v_location_b, 'development',
+      v_hub, 'T006-ASSIGN-3', 'REL-OP-1');
+    raise exception 'ASSERT FAIL: a wrong-Store assignment was accepted';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-RELEASE-WRONG-STORE%' then
+      raise exception 'ASSERT FAIL: wrong-Store refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+
+  -- Revocation: independent approver, a NEW fact, manifest untouched; a
+  -- revoked release is neither promotable nor assignable.
+  begin
+    perform kitluy_releases.revoke_release_v1(v_rel, 'REL-OP-1', 'REL-OP-1', 'tampered artifact');
+    raise exception 'ASSERT FAIL: a requester approved their own revocation';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-RELEASE-SELF-APPROVAL%' then
+      raise exception 'ASSERT FAIL: revocation self-approval refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+  perform kitluy_releases.revoke_release_v1(v_rel, 'REL-OP-1', 'REL-APPROVER-2', 'tampered artifact');
+  begin
+    perform kitluy_releases.assign_release_v1(
+      v_rel, v_tenant_b, v_store_b, v_location_b, 'development', v_hub,
+      'T006-ASSIGN-4', 'REL-OP-1');
+    raise exception 'ASSERT FAIL: a revoked release was assigned';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-RELEASE-NOT-ELIGIBLE%' then
+      raise exception 'ASSERT FAIL: revoked-assignment refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+  reset role;
+
+  -- The signed manifest is immutable even for the governor: revocation
+  -- changed lifecycle columns only.
+  if (select signature_b64 from kitluy_releases.release_artifacts where id = v_rel) <> v_sig
+     or (select version from kitluy_releases.release_artifacts where id = v_rel) <> '1.4.0' then
+    raise exception 'ASSERT FAIL: revocation rewrote the signed manifest';
+  end if;
+  execute format('grant kitluy_release_governor to %I', current_user);
+  set local role kitluy_release_governor;
+  begin
+    update kitluy_releases.release_artifacts set version = '9.9.9' where id = v_rel;
+    raise exception 'ASSERT FAIL: a signed manifest column was rewritten';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-RELEASE-MANIFEST-IMMUTABLE%' then
+      raise exception 'ASSERT FAIL: manifest immutability used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_refused := v_refused + 1;
+  end;
+  reset role;
+  execute format('revoke kitluy_release_governor from %I', current_user);
+
+  if (select count(*) from kitluy_releases.release_events where artifact_id = v_rel) < 5 then
+    raise exception 'ASSERT FAIL: the release lifecycle is missing audit events';
+  end if;
+  if v_refused <> 11 then
+    raise exception 'ASSERT FAIL: expected 11 refused release probes, got %', v_refused;
+  end if;
+  raise notice 'PASS ws11-t006-release-authority: draft -> signed -> internal with malformed signatures and skipped promotions refused; Pilot demands an independent approver and fails CLOSED on the BLK-005 gate; assignment is scoped and idempotent; revocation is an approved NEW fact that leaves the signed manifest byte-identical and immutable (0180)';
+exception when others then
+  begin
+    execute format('revoke kitluy_release_governor from %I', current_user);
+  exception when others then
+    null;
+  end;
+  raise;
+end
+$section57$;
+
+
+select 'assertions complete: groups 0010-0153 structural contract holds (incl. WS-11-T003 Step 4 Phase C — RC-022 spendability census CLOSED; governed emergency 0150–0153; RevocationGateway ships in @kitluy/device-identity) + WS-11-T005 fleet health, support access and governed containment (0177) + WS-11-T006-P01 hub replacement authority (0179) + WS-11-T006-P03 signed release authority (0180)' as result;

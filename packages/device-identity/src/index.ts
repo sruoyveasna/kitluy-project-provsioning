@@ -804,5 +804,6 @@ export * from "./pg-revocation-lookup.js";
 export * from "./key-destruction.js";
 export * from "./revocation-and-destruction-jobs.js";
 export * from "./snapshot-signing.js";
+export * from "./release-manifest.js";
 export * from "./edge-discovery.js";
 export * from "./credential-package.js";

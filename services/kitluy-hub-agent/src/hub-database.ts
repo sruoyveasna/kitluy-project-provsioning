@@ -356,6 +356,10 @@ export const HUB_MIGRATION_ORDER = [
   // a prepared, restored-quarantined or retired Hub from serving sessions
   // or pairing — locally, restart-safe.
   "0037_hub_replacement_local_state.sql",
+  // WS-11-T006-P03: trusted release-signing PUBLIC keys (0027 pattern) and
+  // the verified artifact cache (forward-only states, resumable downloads,
+  // rejected-is-final, signer FK so an unknown key cannot even stage).
+  "0038_release_trust_and_cache.sql",
 ] as const;
 
 /**

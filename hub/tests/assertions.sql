@@ -247,6 +247,8 @@ declare
     'edge_hardware.terminal_health_status', 'edge_identity.containment_directive',
     -- WS-11-T005-P02 hub group 0036: append-only fleet report evidence.
     'edge_hardware.terminal_health_report',
+    -- WS-11-T006-P03 hub group 0038: verified release artifact cache.
+    'edge_config.release_cache',
     'edge_hardware.peripheral_observation', 'edge_hardware.device_heartbeat',
     'edge_audit.audit_event', 'edge_audit.support_session'
   ];
@@ -2528,6 +2530,128 @@ end $$;
 rollback;
 
 -- ---------------------------------------------------------------------------
+-- 35. WS-11-T006-P03 — release trust and cache (group 0038).
+-- ---------------------------------------------------------------------------
+begin;
+set local role kitluy_hub_runtime;
+do $$
+declare
+  v_id uuid := gen_random_uuid();
+  v_blocked int := 0;
+begin
+  insert into edge_config.release_trust_key
+    (key_id, key_version, algorithm, public_key_pem, state, activated_at)
+  values ('t006-probe-key', 1, 'ed25519',
+          '-----BEGIN PUBLIC KEY-----probe-----END PUBLIC KEY-----', 'current', now());
+
+  -- An UNKNOWN signing key cannot even stage (FK), and a private key cannot
+  -- enter the registry (CHECK; also proven on apply by the 0038 guard).
+  begin
+    insert into edge_config.release_cache
+      (id, tenant_id, digital_store_id, location_id, product_key, version,
+       build_id, architecture, hardware_profile, environment, channel,
+       artifact_digest_sha256, artifact_size_bytes, manifest_version,
+       signing_key_id, signing_key_version, signature_b64,
+       min_schema_version, max_schema_version)
+    values
+      (gen_random_uuid(), 'e0000000-0000-4000-8000-000000000001',
+       'e0000000-0000-4000-8000-000000000002', 'e0000000-0000-4000-8000-000000000003',
+       'kitluy-hub-agent', '1.0.0', 'b1', 'arm64', 'pi5-hub', 'development',
+       'internal', repeat('a', 64), 100, 1, 'ghost-key', 9, repeat('QQQQ', 22),
+       30, 40);
+    raise exception 'ASSERT FAIL: an unknown signing key staged a release';
+  exception
+    when foreign_key_violation then
+      v_blocked := v_blocked + 1;
+    when others then
+      if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+      raise exception 'ASSERT FAIL: unknown-key staging refusal was %', sqlerrm;
+  end;
+
+  insert into edge_config.release_cache
+    (id, tenant_id, digital_store_id, location_id, product_key, version,
+     build_id, architecture, hardware_profile, environment, channel,
+     artifact_digest_sha256, artifact_size_bytes, manifest_version,
+     signing_key_id, signing_key_version, signature_b64,
+     min_schema_version, max_schema_version)
+  values
+    (v_id, 'e0000000-0000-4000-8000-000000000001',
+     'e0000000-0000-4000-8000-000000000002', 'e0000000-0000-4000-8000-000000000003',
+     'kitluy-hub-agent', '1.0.0', 'b1', 'arm64', 'pi5-hub', 'development',
+     'internal', repeat('a', 64), 100, 1, 't006-probe-key', 1, repeat('QQQQ', 22),
+     30, 40);
+  update edge_config.release_cache set state = 'verified', verified_at = now(), updated_at = now() where id = v_id;
+  update edge_config.release_cache set state = 'downloading', bytes_downloaded = 60, updated_at = now() where id = v_id;
+  update edge_config.release_cache set state = 'cached', bytes_downloaded = 100, cached_at = now(), updated_at = now() where id = v_id;
+
+  -- Forward-only: state and resumable download offsets never move backwards.
+  begin
+    update edge_config.release_cache set state = 'assigned' where id = v_id;
+    raise exception 'ASSERT FAIL: the cache state moved backwards';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-EDGE-RELEASE-STATE-BACKWARDS%' then
+      raise exception 'ASSERT FAIL: backwards-state refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+  begin
+    update edge_config.release_cache set bytes_downloaded = 10 where id = v_id;
+    raise exception 'ASSERT FAIL: the download offset moved backwards';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-EDGE-RELEASE-DOWNLOAD-BACKWARDS%' then
+      raise exception 'ASSERT FAIL: backwards-download refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+  begin
+    delete from edge_config.release_cache where id = v_id;
+    raise exception 'ASSERT FAIL: a cache row was deleted';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-EDGE-RELEASE-NO-DELETE%' and sqlerrm not like '%permission denied%' then
+      raise exception 'ASSERT FAIL: cache delete refusal used the wrong sentinel: %', sqlerrm;
+    end if;
+    v_blocked := v_blocked + 1;
+  end;
+
+  -- Rejected is FINAL: a rejected release never recovers.
+  declare v_rej uuid := gen_random_uuid();
+  begin
+    insert into edge_config.release_cache
+      (id, tenant_id, digital_store_id, location_id, product_key, version,
+       build_id, architecture, hardware_profile, environment, channel,
+       artifact_digest_sha256, artifact_size_bytes, manifest_version,
+       signing_key_id, signing_key_version, signature_b64,
+       min_schema_version, max_schema_version, state, refusal_code)
+    values
+      (v_rej, 'e0000000-0000-4000-8000-000000000001',
+       'e0000000-0000-4000-8000-000000000002', 'e0000000-0000-4000-8000-000000000003',
+       'kitluy-hub-agent', '1.0.1', 'b2', 'arm64', 'pi5-hub', 'development',
+       'internal', repeat('b', 64), 100, 1, 't006-probe-key', 1, repeat('QQQQ', 22),
+       30, 40, 'rejected', 'SIGNATURE_INVALID');
+    begin
+      update edge_config.release_cache
+      set state = 'cached', refusal_code = null, cached_at = now() where id = v_rej;
+      raise exception 'ASSERT FAIL: a rejected release recovered';
+    exception when others then
+      if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+      if sqlerrm not like '%KLUY-EDGE-RELEASE-REJECTED-FINAL%' then
+        raise exception 'ASSERT FAIL: rejected-final refusal used the wrong sentinel: %', sqlerrm;
+      end if;
+      v_blocked := v_blocked + 1;
+    end;
+  end;
+
+  if v_blocked <> 5 then
+    raise exception 'ASSERT FAIL: expected 5 refused cache probes, got %', v_blocked;
+  end if;
+  raise notice 'PASS release-trust-and-cache: only registered PUBLIC keys stage releases, cache states and download offsets only advance, rejected is final, and cache rows cannot be deleted';
+end $$;
+rollback;
+
+-- ---------------------------------------------------------------------------
 -- 29. Final tally.
 -- ---------------------------------------------------------------------------
 do $$
@@ -2556,11 +2680,11 @@ begin
   -- EXACT in both directions -- it is how an unreviewed table gets noticed --
   -- so it is raised by exactly the additions that were reviewed and by
   -- nothing else.
-  if v_tables <> 68 then
+  if v_tables <> 70 then
     raise exception
-      'ASSERT FAIL: expected 68 relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11 + 3 G0027 revocation + 2 G0031 pairing + 1 G0033 credential projection + 2 G0035 health/containment + 1 G0036 report evidence + 2 G0037 replacement state), found %',
+      'ASSERT FAIL: expected 70 relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11 + 3 G0027 revocation + 2 G0031 pairing + 1 G0033 credential projection + 2 G0035 health/containment + 1 G0036 report evidence + 2 G0037 replacement state + 2 G0038 release trust/cache), found %',
       v_tables;
   end if;
-  raise notice 'PASS tally: % relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11 WS-10 + 3 G0027 revocation + 2 G0031 pairing + 1 G0033 credential projection + 2 G0035 health/containment + 1 G0036 report evidence + 2 G0037 replacement state), % indexes, % triggers',
+  raise notice 'PASS tally: % relations (51 canonical §6 + 2 additive G3 + 2 G9 + 1 G10 + 1 G11 WS-10 + 3 G0027 revocation + 2 G0031 pairing + 1 G0033 credential projection + 2 G0035 health/containment + 1 G0036 report evidence + 2 G0037 replacement state + 2 G0038 release trust/cache), % indexes, % triggers',
     v_tables, v_indexes, v_triggers;
 end $$;
