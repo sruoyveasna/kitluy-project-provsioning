@@ -30,6 +30,7 @@ import { createRequire } from "node:module";
 import * as path from "node:path";
 
 import {
+  ConfigurationSnapshotStore,
   PairingReceiptStore,
   createSqliteDriver,
   osProtectedSecureKeyStore,
@@ -50,11 +51,13 @@ interface NodeSqliteModule {
  * the store is actually opened, with a message an operator can act on.
  */
 function loadNodeSqlite(): NodeSqliteModule {
-  return createRequire(__filename)("node:sqlite") as NodeSqliteModule;
+  return createRequire(import.meta.url)("node:sqlite") as NodeSqliteModule;
 }
 
 export interface OpenedTerminalStore {
   readonly receipts: PairingReceiptStore;
+  /** WS-12-T001: the last-valid signed-configuration cache, same custody. */
+  readonly configuration: ConfigurationSnapshotStore;
   readonly driver: TerminalSqlDriver;
   readonly databasePath: string;
 }
@@ -85,5 +88,10 @@ export function openTerminalPairingStore(
   const databasePath = path.join(directory, "terminal.sqlite");
   const { DatabaseSync } = loadNodeSqlite();
   const driver = createSqliteDriver(new DatabaseSync(databasePath));
-  return { receipts: new PairingReceiptStore(driver, keyStore), driver, databasePath };
+  return {
+    receipts: new PairingReceiptStore(driver, keyStore),
+    configuration: new ConfigurationSnapshotStore(driver, keyStore),
+    driver,
+    databasePath,
+  };
 }

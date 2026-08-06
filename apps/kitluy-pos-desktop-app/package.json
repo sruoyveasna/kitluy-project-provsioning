@@ -4,7 +4,7 @@
   "private": true,
   "description": "POS Desktop App — Electron/Linux ARM64 operational client implementing the owner-locked T1-T4 profiles through the Store Hub (POS spec v4.0.0).",
   "type": "module",
-  "main": "dist-electron/main.cjs",
+  "main": "dist-electron/electron/main.js",
   "scripts": {
     "dev": "vite",
     "build": "vite build && tsc -p tsconfig.electron.json",
@@ -14,6 +14,8 @@
   },
   "dependencies": {
     "@kitluy-verticals/phase1-laundry": "workspace:*",
+    "@kitluy/device-identity": "workspace:*",
+    "@kitluy/edge-contracts": "workspace:*",
     "@kitluy/feature-flags": "workspace:*",
     "@kitluy/localization": "workspace:*",
     "@kitluy/terminal-local-store": "workspace:*",
@@ -22,6 +24,7 @@
     "react-dom": "catalog:"
   },
   "devDependencies": {
+    "@types/node": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react": "catalog:",

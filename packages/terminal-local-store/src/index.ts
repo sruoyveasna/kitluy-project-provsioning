@@ -16,3 +16,4 @@ export * from "./driver.js";
 export * from "./sealing.js";
 export * from "./secure-key-store.js";
 export * from "./pairing-receipt-store.js";
+export * from "./configuration-snapshot-store.js";

@@ -1,13 +1,13 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "module": "CommonJS",
-    "moduleResolution": "Node10",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
     "outDir": "dist-electron",
-    "rootDir": "electron",
+    "rootDir": ".",
     "verbatimModuleSyntax": false,
     "declaration": false,
     "declarationMap": false
   },
-  "include": ["electron"]
+  "include": ["electron", "src/bootstrap"]
 }

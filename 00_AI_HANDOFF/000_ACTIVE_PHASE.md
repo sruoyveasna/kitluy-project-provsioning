@@ -98,6 +98,46 @@ A task that needs to cross this fence must stop and file a conflict/decision rec
 - options and recommendation;
 - owner decision required.
 
+## 11. Cycle-11 scope fence — WS-12 T1 Intake/Cashier (2026-08-06)
+
+**WS-12 task register RULED (KLD-2026-08-06-WS12-TASKS-001,
+`docs/decisions/kitluy-ws12-t1-intake-cashier-task-register-owner-decision-v1.0.0.md`).**
+Eight tasks, order and count locked: **T001 T1 Runtime, Device Session and
+Store Hub Bootstrap** · T002 Customer Identity, Consent and Booking Draft ·
+T003 Service, Garment, Evidence and Custody Intake · T004 Pricing, Capacity,
+Due-Time and Booking Confirmation · T005 Deposit, Payment, KHQR, Receipt and
+Tag Issuance · T006 Offline Queue, Synchronization, Printing and Peripheral
+Recovery · T007 T1 Workflow Integration, Localization and End-to-End
+Verification · T008 Independent Review, Rebuild Evidence and Closeout.
+
+**Composition rule (LOCKED):** every WS-12 task REUSES existing shared
+authorities. T1 is an operational client and composition surface, NOT a new
+source of Booking, payment, pricing, customer or audit truth. The Store Hub
+is never bypassed; terminals never write to Supabase; the installer and
+user can never select or override Tenant, Digital Store, Location, Hub,
+environment, terminal profile or assignment generation. BLK-005/BLK-006
+stay fail-closed; the T1–T4 model of §2 is unchanged.
+
+> **2026-08-06 (close) — WS-12-T001 PARTIAL — SUCCESSOR PACKAGE REQUIRED.**
+> Delivered in dev with executed evidence: the §5 thirteen-state bootstrap
+> machine and ten-step startup sequence, verified signed-discovery endpoint
+> resolution, pairing-receipt + eligibility composition (protocol §11),
+> signed-configuration verification with the NEW `@kitluy/terminal-local-store`
+> `ConfigurationSnapshotStore` offline cache (explicit `current` vs
+> `cached_offline` freshness), staff T1-profile authorization, the pinned
+> TLS 1.3 LAN client, the safeStorage-protected identity file and the
+> read-only renderer bridge — 16 acceptance tests covering all 14 required
+> scenarios, zero skips; terminal-local-store 20/20; affected
+> device-identity/hub-agent suites green; secret:scan 1412 clean. PARTIAL
+> because no APPROVED `/edge/v1` route serves terminal eligibility, Hub
+> time, configuration delivery or staff sessions (and the sessions
+> permission keys are `[REQUIRED:]` gaps) — owner additive route/permission
+> decisions are the successor's prerequisite; transport credentials and
+> trusted-time providers stay BLK-005 fail-closed. NO migration created.
+> T1 remains a composition surface: no Booking, pricing, payment, receipt
+> or printing code exists in it. NEXT: WS-12-T002 (Customer Identity,
+> Consent and Booking Draft) NOT STARTED.
+
 ## 10. Cycle-10 scope fence — WS-11 only (2026-07-28)
 
 > **2026-08-05 — WS-11-T004 CLOSED as IMPLEMENTED-IN-DEV.** The fence is unchanged: all work stayed inside WS-11 (`kitluy_devices` cloud groups 0162–0176, Hub groups 0031–0034, `@kitluy/device-identity`, `@kitluy/terminal-local-store`, the device-registry service and the Hub agent). No Laundry business surface, no production migration and no pilot/production claim was made; BLK-005 fail-closed behaviour was re-proven on a reset from zero. The next WS-11 task is read from the authoritative task register, not invented here.
