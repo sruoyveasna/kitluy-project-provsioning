@@ -36,6 +36,14 @@
  */
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import {
+  buildManifestV1,
+  decryptBackup,
+  encryptBackup,
+  manifestRefusal,
+  resolveDevBackupKey,
+  sha256Hex,
+} from "./backup-manifest.mjs";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 
@@ -522,23 +530,110 @@ function cmdBackup() {
     spawnSync("docker", ["exec", container, "rm", "-f", remote], { stdio: "ignore" });
   }
 
-  const bytes = readFileSync(localPath);
-  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  // -------------------------------------------------------------------
+  // WS-11-T006-P02: encrypt the dump (AES-256-GCM, KLBK1 container) and
+  // write the v1 manifest. The plaintext dump never remains on disk.
+  // -------------------------------------------------------------------
+  const createdAt = new Date().toISOString();
+  const plainBytes = readFileSync(localPath);
+  const sha256Plain = sha256Hex(plainBytes);
+  const key = resolveDevBackupKey(process.env);
+  const encContainer = encryptBackup(plainBytes, key);
+  writeFileSync(localPath, encContainer);
+  const sha256Enc = sha256Hex(encContainer);
+
+  // Relational context for the manifest — schema head, hub scope, config.
+  const headRes = runSql(
+    "select filename from edge_ops.migration_journal order by sequence_number desc limit 1;",
+    { capture: true },
+  );
+  const schemaHead = headRes.status === 0 ? headRes.stdout.trim() : "";
+  const scopeRes = runSql(
+    "select coalesce(json_build_object('tenant_id', tenant_id, 'digital_store_id', digital_store_id, 'location_id', location_id, 'hub_device_id', hub_device_id)::text, '') from edge_identity.hub_assignment where ended_at is null order by assignment_generation desc limit 1;",
+    { capture: true },
+  );
+  let scope = null;
+  try {
+    scope = scopeRes.status === 0 && scopeRes.stdout.trim() ? JSON.parse(scopeRes.stdout.trim()) : null;
+  } catch {
+    scope = null;
+  }
+  const cfgRes = runSql(
+    "select coalesce(max(snapshot_version), 0)::text from edge_config.configuration_snapshot where state = 'active';",
+    { capture: true },
+  );
+  const configurationVersion = cfgRes.status === 0 ? cfgRes.stdout.trim() : null;
+
+  // Governor-ownership map: pg_restore replays as --no-owner (the local
+  // 'postgres' role is not a superuser), so ownership of every
+  // governor-owned relation/function is recorded here and replayed
+  // deterministically after restore. Byte-honest: captured from the LIVE
+  // catalog, not from the migration files.
+  const ownRes = runSql(
+    "select coalesce(json_agg(json_build_object('kind', kind, 'identity', identity, 'owner', owner))::text, '[]') from ( " +
+      "select 'table' as kind, format('%I.%I', n.nspname, c.relname) as identity, pg_get_userbyid(c.relowner) as owner " +
+      "from pg_class c join pg_namespace n on n.oid = c.relnamespace " +
+      "where c.relkind in ('r','v') and n.nspname like 'edge\\_%' and pg_get_userbyid(c.relowner) like 'kitluy\\_%' " +
+      "union all " +
+      "select 'function', p.oid::regprocedure::text, pg_get_userbyid(p.proowner) " +
+      "from pg_proc p join pg_namespace n on n.oid = p.pronamespace " +
+      "where n.nspname like 'edge\\_%' and pg_get_userbyid(p.proowner) like 'kitluy\\_%') t;",
+    { capture: true },
+  );
+  let ownershipMap = [];
+  try {
+    ownershipMap = ownRes.status === 0 ? JSON.parse(ownRes.stdout.trim() || "[]") : [];
+  } catch {
+    ownershipMap = [];
+  }
+
+  // Verify the completed backup BEFORE declaring it valid: decrypt and
+  // re-hash. A backup is not valid until verification completes (§11).
+  const verifiedPlain = decryptBackup(readFileSync(localPath), key);
+  if (sha256Hex(verifiedPlain) !== sha256Plain) {
+    fail("backup verification failed: decrypted bytes do not match the recorded digest.");
+  }
+  const completedAt = new Date().toISOString();
+  const manifest = buildManifestV1({
+    database: target.database,
+    scope,
+    schemaHead,
+    configurationVersion: configurationVersion === "0" ? null : configurationVersion,
+    releaseVersion: null, // release state tracking arrives with T006-P04
+    createdAt,
+    completedAt,
+    sha256Plain,
+    sha256Encrypted: sha256Enc,
+    bytesPlain: plainBytes.length,
+    bytesEncrypted: encContainer.length,
+    fingerprintSha256: before.sha256,
+    status: "verified",
+    verification: { method: "decrypt+sha256", verified_at: completedAt },
+  });
+  manifest.ownership = ownershipMap;
+  writeFileSync(`${localPath}.manifest.json`, JSON.stringify(manifest, null, 2) + "\n", "utf8");
+
+  // Legacy sidecar kept for the WS-09-T005 round-trip contract; it now
+  // records the ENCRYPTED container's digest.
   writeFileSync(
     `${localPath}.sha256`,
     [
-      `${sha256}  ${name}`,
+      `${sha256Enc}  ${name}`,
       `database=${target.database}`,
-      `bytes=${bytes.length}`,
+      `bytes=${encContainer.length}`,
       `fingerprint_sha256=${before.sha256}`,
       "",
     ].join("\n"),
     "utf8",
   );
   console.log(`hub-db: backup written ${localPath}`);
-  console.log(`  bytes              ${bytes.length}`);
-  console.log(`  sha256             ${sha256}`);
+  console.log(`  backup_id          ${manifest.backup_id}`);
+  console.log(`  bytes (encrypted)  ${encContainer.length}`);
+  console.log(`  sha256 (encrypted) ${sha256Enc}`);
+  console.log(`  sha256 (plain)     ${sha256Plain}`);
+  console.log(`  schema_head        ${schemaHead}`);
   console.log(`  fingerprint_sha256 ${before.sha256}  (row counts across every edge_* relation)`);
+  console.log("  encryption         aes-256-gcm (KLBK1, development key custody — BLK-005)");
   return 0;
 }
 
@@ -548,23 +643,77 @@ function cmdRestore() {
   if (!name) fail(`no backup found in ${BACKUP_DIR}; run 'pnpm hub:db:backup' first.`);
   const localPath = join(BACKUP_DIR, name);
   if (!existsSync(localPath)) fail(`${localPath} does not exist.`);
-  const manifestPath = `${localPath}.sha256`;
-  if (!existsSync(manifestPath))
-    fail(`${manifestPath} is missing; the backup checksum is unverifiable.`);
-  const manifest = readFileSync(manifestPath, "utf8");
-  const recordedSha = manifest.split(/\s+/)[0];
-  const expectedFingerprint = /fingerprint_sha256=([0-9a-f]{64})/.exec(manifest)?.[1];
-  const actualSha = createHash("sha256").update(readFileSync(localPath)).digest("hex");
-  if (recordedSha !== actualSha) {
+  const legacySidecar = `${localPath}.sha256`;
+  if (!existsSync(legacySidecar))
+    fail(`${legacySidecar} is missing; the backup checksum is unverifiable.`);
+  const manifestJsonPath = `${localPath}.manifest.json`;
+  if (!existsSync(manifestJsonPath))
+    fail(`${manifestJsonPath} is missing; a v1 manifest is required to restore (WS-11-T006-P02).`);
+  let manifestV1;
+  try {
+    manifestV1 = JSON.parse(readFileSync(manifestJsonPath, "utf8"));
+  } catch {
+    fail("the backup manifest is not valid JSON. Refusing to restore.");
+  }
+  const shapeRefusal = manifestRefusal(manifestV1);
+  if (shapeRefusal) fail(`backup manifest refused (${shapeRefusal}). Refusing to restore.`);
+  if (manifestV1.database !== target.database) {
     fail(
-      `backup checksum mismatch: recorded ${recordedSha}, actual ${actualSha}. Refusing to restore.`,
+      `KLUY-RESTORE-WRONG-DATABASE: the backup is for '${manifestV1.database}', not '${target.database}'.`,
     );
   }
+  // Recovery-intent verification (owner decision §3): when the operator
+  // declares the expected scope, a mismatched backup is refused.
+  for (const [envName, field] of [
+    ["KITLUY_RESTORE_EXPECT_TENANT", "tenant_id"],
+    ["KITLUY_RESTORE_EXPECT_STORE", "digital_store_id"],
+    ["KITLUY_RESTORE_EXPECT_LOCATION", "location_id"],
+    ["KITLUY_RESTORE_EXPECT_HUB", "hub_device_id"],
+  ]) {
+    const expected = process.env[envName];
+    if (expected && expected !== (manifestV1.scope?.[field] ?? "")) {
+      fail(
+        `KLUY-RESTORE-WRONG-SCOPE: ${envName}=${expected} does not match the backup's ${field}=${manifestV1.scope?.[field] ?? "<absent>"}.`,
+      );
+    }
+  }
+  // Schema-lineage check: the backup's migration head must exist in the
+  // on-disk migration set; an unknown head is an unknown lineage.
+  const onDisk = migrationFiles().map((m) => m.file ?? m.filename ?? m.name ?? m);
+  if (!onDisk.some((f) => String(f) === manifestV1.schema_head)) {
+    fail(
+      `KLUY-RESTORE-INCOMPATIBLE-SCHEMA: backup head '${manifestV1.schema_head}' is not in the repository migration set.`,
+    );
+  }
+  const encBytes = readFileSync(localPath);
+  const actualEncSha = sha256Hex(encBytes);
+  if (manifestV1.sha256_encrypted !== actualEncSha) {
+    fail(
+      `backup checksum mismatch: recorded ${manifestV1.sha256_encrypted}, actual ${actualEncSha}. Refusing to restore.`,
+    );
+  }
+  const key = resolveDevBackupKey(process.env);
+  let plainBytes;
+  try {
+    plainBytes = decryptBackup(encBytes, key);
+  } catch (error) {
+    fail(`backup decryption failed (${error.message}). Refusing to restore.`);
+  }
+  if (sha256Hex(plainBytes) !== manifestV1.sha256_plain) {
+    fail("decrypted backup does not match the recorded plaintext digest. Refusing to restore.");
+  }
+  const expectedFingerprint = manifestV1.fingerprint_sha256;
   console.log(`hub-db: restoring ${localPath}`);
-  console.log(`  sha256 verified    ${actualSha}`);
+  console.log(`  backup_id          ${manifestV1.backup_id}`);
+  console.log(`  sha256 verified    ${actualEncSha} (encrypted) / ${manifestV1.sha256_plain} (plain)`);
+
+  // The decrypted dump is materialised ONLY for pg_restore and removed after.
+  const plainPath = `${localPath}.decrypted.tmp`;
+  writeFileSync(plainPath, plainBytes);
 
   dropDatabase();
   createDatabase();
+
 
   if (HOST_PGDUMP) {
     const status = spawnSync(
@@ -573,14 +722,15 @@ function cmdRestore() {
         "-d",
         `postgresql://${target.user}@${target.host}:${target.port}/${target.database}`,
         "--exit-on-error",
-        localPath,
+        "--no-owner",
+        plainPath,
       ],
       { stdio: "inherit", shell: true },
     ).status;
     if (status !== 0) fail("pg_restore failed.");
   } else {
     const remote = `/tmp/${name}`;
-    const copy = spawnSync("docker", ["cp", localPath, `${container}:${remote}`], {
+    const copy = spawnSync("docker", ["cp", plainPath, `${container}:${remote}`], {
       stdio: "inherit",
     });
     if ((copy.status ?? 1) !== 0) fail("docker cp of the dump failed.");
@@ -592,6 +742,7 @@ function cmdRestore() {
         "-d",
         target.database,
         "--exit-on-error",
+        "--no-owner",
         remote,
       ]) !== 0
     ) {
@@ -600,22 +751,121 @@ function cmdRestore() {
     spawnSync("docker", ["exec", container, "rm", "-f", remote], { stdio: "ignore" });
   }
 
+  try {
+    spawnSync(process.platform === "win32" ? "cmd" : "rm", process.platform === "win32" ? ["/c", "del", plainPath.replace(/\//g, "\\")] : ["-f", plainPath], { stdio: "ignore" });
+  } catch {
+    /* best effort */
+  }
+
+  // Ownership replay: --no-owner left everything owned by the restoring
+  // role; the manifest's live-captured map re-establishes every governor
+  // boundary. Memberships and schema CREATE are borrowed and handed back
+  // (KLRISK-HUB-001 quoted-grantee form).
+  const owners = Array.isArray(manifestV1.ownership) ? manifestV1.ownership : [];
+  if (owners.length > 0) {
+    const distinctOwners = [...new Set(owners.map((o) => o.owner))].filter((o) =>
+      /^kitluy_[a-z_]+$/.test(o),
+    );
+    const stmts = [];
+    stmts.push(
+      "do $$ declare r record; v_user text := current_user; begin for r in select rolname from pg_roles where rolname like 'kitluy\\_%' and not rolcanlogin loop execute format('grant %I to %I', r.rolname, v_user); end loop; end $$;",
+    );
+    for (const o of distinctOwners) {
+      stmts.push(
+        `do $$ declare s record; begin for s in select nspname from pg_namespace where nspname like 'edge\\_%' loop execute format('grant usage, create on schema %I to %I', s.nspname, '${o}'); end loop; end $$;`,
+      );
+    }
+    for (const entry of owners) {
+      if (!/^kitluy_[a-z_]+$/.test(entry.owner)) continue;
+      if (entry.kind === "table") {
+        stmts.push(`alter table ${entry.identity} owner to "${entry.owner}";`);
+      } else if (entry.kind === "function") {
+        stmts.push(`alter function ${entry.identity} owner to "${entry.owner}";`);
+      }
+    }
+    stmts.push(
+      "do $$ declare r record; v_user text := current_user; begin for r in select rolname from pg_roles where rolname like 'kitluy\\_%' and not rolcanlogin loop execute format('revoke %I from %I', r.rolname, v_user); end loop; end $$;",
+    );
+    const repair = runSql(stmts.join("\n"), { capture: true });
+    if (repair.status !== 0) {
+      console.error(`hub-db: ownership replay FAILED: ${repair.stderr.trim()}`);
+      console.error("hub-db: the Hub REMAINS unusable; do not activate.");
+      return 1;
+    }
+    console.log(`  ownership replayed ${owners.length} governor-owned object(s)`);
+  }
+
+  runSql(
+    "do $$ declare r record; v_user text := current_user; begin for r in select rolname from pg_roles where rolname like 'kitluy\_%' and not rolcanlogin loop execute format('revoke %I from %I', r.rolname, v_user); end loop; end $$;",
+    { database: "postgres", capture: true, quiet: true },
+  );
+
+
   const after = fingerprint();
   console.log(`  fingerprint_sha256 ${after.sha256}`);
   if (expectedFingerprint && expectedFingerprint !== after.sha256) {
+    runSql(
+      [
+        `do $$ declare v_user text := current_user; begin execute format('grant kitluy_hub_runtime to %I', v_user); end $$;`,
+        "set role kitluy_hub_runtime;",
+        `select edge_identity.set_hub_replacement_mode_v1('restored_quarantine', null, 'restore verification FAILED (backup ${manifestV1.backup_id})', 'hub-db-restore', gen_random_uuid());`,
+        "reset role;",
+      ].join("\n"),
+      { capture: true, quiet: true },
+    );
     console.error(
-      "hub-db: RESTORE VERIFICATION FAILED — the restored row counts differ from the backup.",
+      "hub-db: RESTORE VERIFICATION FAILED — the restored row counts differ from the backup. The Hub REMAINS IN restored_quarantine.",
     );
     console.error(after.body);
+    return 1;
+  }
+
+  // A restored Hub starts in QUARANTINE (owner decision §3 / group 0037):
+  // operational authority is refused until an operator explicitly activates
+  // it with 'hub:db:restore:activate' after validation.
+  const quarantine = runSql(
+    [
+      `do $$ declare v_user text := current_user; begin execute format('grant kitluy_hub_runtime to %I', v_user); end $$;`,
+      "set role kitluy_hub_runtime;",
+      `select edge_identity.set_hub_replacement_mode_v1('restored_quarantine', null, 'post-restore verification pending (backup ${manifestV1.backup_id})', 'hub-db-restore', gen_random_uuid());`,
+      "reset role;",
+    ].join("\n"),
+    { capture: true },
+  );
+  if (quarantine.status !== 0) {
+    console.error(`hub-db: could not enter restored_quarantine: ${quarantine.stderr.trim()}`);
     return 1;
   }
   console.log(
     "hub-db: restore verified — every edge_* relation has the row count recorded at backup time.",
   );
+  console.log(
+    "hub-db: the Hub is in restored_quarantine. Validate, then run 'node scripts/hub/hub-db.mjs restore:activate <reason>' to return to service.",
+  );
+  return 0;
+}
+
+function cmdRestoreActivate() {
+  requireTooling();
+  const reason = commandArg ?? "";
+  if (!reason.trim()) fail("restore:activate requires an explicit reason argument.");
+  const res = runSql(
+    [
+      `do $$ declare v_user text := current_user; begin execute format('grant kitluy_hub_runtime to %I', v_user); end $$;`,
+      "set role kitluy_hub_runtime;",
+      `select edge_identity.set_hub_replacement_mode_v1('normal', null, ${sqlLiteral(reason)}, 'hub-db-restore-activate', gen_random_uuid());`,
+      "reset role;",
+    ].join("\n"),
+    { capture: true },
+  );
+  if (res.status !== 0) fail(`activation failed: ${res.stderr.trim()}`);
+  console.log("hub-db: restored Hub explicitly activated (mode normal).");
   return 0;
 }
 
 switch (command) {
+  case "restore:activate":
+    process.exit(cmdRestoreActivate());
   case "reset":
     process.exit(cmdReset());
     break;

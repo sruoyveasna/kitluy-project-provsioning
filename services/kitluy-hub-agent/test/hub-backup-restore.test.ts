@@ -306,7 +306,19 @@ describe.skipIf(!available)("Hub development-grade backup and restore round trip
     for (const [relation, digest] of digestsBefore) {
       expect(digestsAfter.get(relation), `${relation} content digest`).toBe(digest);
     }
-    expect(shaAfter).toBe(shaBefore);
+    // WS-11-T006-P02: restore INTENTIONALLY writes the restored_quarantine
+    // mode change and its append-only event (owner decision §3), so the
+    // replacement-state relations are excluded from the equality — their
+    // delta is asserted exactly instead.
+    const stripReplacement = (sha: ReadonlyMap<string, number>): string =>
+      fingerprintSha(
+        new Map([...sha.entries()].filter(([r]) => !r.startsWith("edge_identity.hub_replacement"))),
+      );
+    expect(stripReplacement(countsAfter)).toBe(stripReplacement(countsBefore));
+    expect(
+      (countsAfter.get("edge_identity.hub_replacement_events") ?? 0) -
+        (countsBefore.get("edge_identity.hub_replacement_events") ?? 0),
+    ).toBe(1);
 
     // The restored Booking is byte-identical where it matters.
     const restored = await scratch.query<{ status: string; paid_minor: bigint }>(
