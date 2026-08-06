@@ -58,11 +58,39 @@
 - Destructive backup/restore round trip (`KITLUY_HUB_DESTRUCTIVE_TESTS=1`):
   **2/2**. The restore leaves the scenario state by design; the hub was
   rebuilt from zero afterwards and re-asserted at 43 PASS.
-- `secret:scan`: **passed, 1396 tracked files** — after amending the 0038
-  guard probe to the 0027 house style (PRIVATE marker without a contiguous
-  key-block header; the `public_only_ck` refusal proof is unchanged and the
-  rebuilt-from-zero run proves it). The Hub database replays from zero in
-  development, so the amendment is safe; recorded here for the trail.
+- `secret:scan`: **passed, 1396 tracked files** — at closeout time this was
+  achieved by amending the 0038 guard probe, WHICH WAS AN IMMUTABILITY
+  BREACH (see the reconciliation note below).
+
+## Migration-0038 immutability reconciliation (T007 Stage 0)
+
+The closeout commit `e3ec447` EDITED the already-committed Hub migration
+0038 (original commit `9310168`) to dodge a secret-scanner false positive
+on its intentional private-key REJECTION probe. Database behavior was
+unchanged, but editing a committed migration violates KitLuy migration
+immutability — reconciled forward in T007 Stage 0:
+
+- 0038 RESTORED byte-for-byte from `9310168`: git blob
+  `9e80c81fb9893833da6b0d38e1e3bd7e1e1ce128`, sha256
+  `3d571e17e226ded82ab8aaf1e55ad54efac3a959c9de1d45b4d23554b8a2ab78` — the
+  restored working file re-hashes to the SAME blob id, and a Hub reset from
+  zero re-applies it under the SAME journalled sha256 (measured), with
+  **43 PASS** and the release trust suites green (cache+agent 8/8,
+  manifest 5/5).
+- The scanner false positive is now handled by a PINNED rejection-fixture
+  exception in `secret-scan.mjs`: exact path + exact pattern name + exact
+  content checksum (sha256 over LF-normalized bytes). PROVEN narrow: scan
+  passes at the pinned bytes; a one-line mutation of 0038 re-enables the
+  finding; restoring byte-identity passes again. No directory, pattern or
+  new-file scanning is weakened.
+- No Hub migration 0040 was created — no database behavior defect exists
+  (the probe text never reaches the database as data; the guard's refusal
+  outcome is identical under both byte forms, proven by the 43-PASS runs
+  on each).
+
+T006 status after reconciliation: **WS-11-T006 COMPLETE — IMPLEMENTED-IN-DEV**
+(migration history immutable again; the breach recorded, not erased).
+
 - **T006-caused findings, reconciled in the closeout commit** (all inside
   T006's own surface, none swept under the rug):
   1. `pnpm verify`'s lint step failed on SEVEN errors in the two P02 scripts
