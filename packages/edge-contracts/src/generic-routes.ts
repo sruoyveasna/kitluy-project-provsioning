@@ -13,10 +13,6 @@ import {
   PERMISSION_GAP_EDGE_DISPLAY_CUSTOMER_ACTION,
   PERMISSION_GAP_EDGE_DISPLAY_MANAGE,
   PERMISSION_GAP_EDGE_DISPLAY_READ,
-  PERMISSION_GAP_EDGE_SESSION_CLOSE,
-  PERMISSION_GAP_EDGE_SESSION_OPEN,
-  PERMISSION_GAP_EDGE_SESSION_REFRESH,
-  PERMISSION_GAP_EDGE_SESSION_SWITCH,
 } from "./permissions.js";
 import {
   EDGE_ROUTE_DISPLAY_SESSION,
@@ -63,8 +59,8 @@ const SESSION_ROUTES: readonly EdgeRouteDefinition[] = [
     scopeStatus: "additive",
     riskClass: "A1_STANDARD_MUTATION",
     credentialClass: "device",
-    permission: PERMISSION_GAP_EDGE_SESSION_OPEN,
-    permissionStatus: "required",
+    permission: "staff.sessions.open",
+    permissionStatus: "registered",
     conditionalPermissions: [],
     allowedTerminalProfiles: [
       TERMINAL_PROFILE_T1_INTAKE_CASHIER,
@@ -90,8 +86,8 @@ const SESSION_ROUTES: readonly EdgeRouteDefinition[] = [
     scopeStatus: "additive",
     riskClass: "A1_STANDARD_MUTATION",
     credentialClass: "device",
-    permission: PERMISSION_GAP_EDGE_SESSION_REFRESH,
-    permissionStatus: "required",
+    permission: "staff.sessions.refresh",
+    permissionStatus: "registered",
     conditionalPermissions: [],
     allowedTerminalProfiles: [
       TERMINAL_PROFILE_T1_INTAKE_CASHIER,
@@ -117,9 +113,11 @@ const SESSION_ROUTES: readonly EdgeRouteDefinition[] = [
     scopeStatus: "additive",
     riskClass: "A1_STANDARD_MUTATION",
     credentialClass: "device_and_staff",
-    permission: PERMISSION_GAP_EDGE_SESSION_SWITCH,
-    permissionStatus: "required",
-    conditionalPermissions: [],
+    // Recorded interpretation (Amendment 002 §2): a switch closes the
+    // incumbent actor's session and opens the successor's.
+    permission: "staff.sessions.open",
+    permissionStatus: "registered",
+    conditionalPermissions: ["staff.sessions.close"],
     allowedTerminalProfiles: [
       TERMINAL_PROFILE_T1_INTAKE_CASHIER,
       TERMINAL_PROFILE_T3_READY_SCAN_IN,
@@ -143,8 +141,8 @@ const SESSION_ROUTES: readonly EdgeRouteDefinition[] = [
     scopeStatus: "additive",
     riskClass: "A1_STANDARD_MUTATION",
     credentialClass: "device",
-    permission: PERMISSION_GAP_EDGE_SESSION_CLOSE,
-    permissionStatus: "required",
+    permission: "staff.sessions.close",
+    permissionStatus: "registered",
     conditionalPermissions: [],
     allowedTerminalProfiles: [
       TERMINAL_PROFILE_T1_INTAKE_CASHIER,

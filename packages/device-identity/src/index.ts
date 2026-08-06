@@ -806,4 +806,5 @@ export * from "./revocation-and-destruction-jobs.js";
 export * from "./snapshot-signing.js";
 export * from "./release-manifest.js";
 export * from "./edge-discovery.js";
+export * from "./terminal-configuration-delivery.js";
 export * from "./credential-package.js";

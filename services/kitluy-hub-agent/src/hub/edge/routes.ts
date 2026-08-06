@@ -56,8 +56,17 @@ import { acceptTerminalHeartbeat, type TerminalHeartbeatBody } from "../terminal
 import type {
   TerminalPairingComposition,
   PairingChallengeMaterial,
+  PairingSigner,
   SafeLogger,
 } from "../pairing.js";
+import {
+  closeStaffSession,
+  openStaffSession,
+  readAuthorityTime,
+  readCurrentConfigurationDelivery,
+  readRuntimeEligibility,
+  refreshStaffSession,
+} from "./runtime-bootstrap.js";
 import type { EdgeDiscoveryAuthority } from "./discovery.js";
 import type { EdgeRequest, EdgeResponse, EdgeRequestHandler } from "./transport.js";
 
@@ -75,6 +84,18 @@ export const EDGE_PAIRING_SESSIONS_PATH = "/edge/v1/terminal-pairing/sessions";
 export const EDGE_TERMINAL_HEALTH_HEARTBEATS_PATH = "/edge/v1/terminal-health/heartbeats";
 /** Route-level bound per the Edge API policy: a heartbeat is small telemetry. */
 export const MAX_HEARTBEAT_BODY_BYTES = 4 * 1024;
+
+// T1 bootstrap reads (KLD-2026-08-06-WS12-T001-EDGE-BOOTSTRAP-001; canonical
+// literals mirrored in @kitluy/edge-contracts EDGE_RUNTIME_BOOTSTRAP_READ_PATHS).
+export const EDGE_RUNTIME_AUTHORITY_TIME_PATH = "/edge/v1/runtime/authority-time";
+export const EDGE_RUNTIME_ELIGIBILITY_PATH = "/edge/v1/runtime/eligibility";
+export const EDGE_CONFIGURATION_CURRENT_PATH = "/edge/v1/configuration/current";
+
+// Staff sessions (KLD-2026-07-26-002 Group 1 routes; permissions per
+// Amendment 002). `sessions/switch` remains contract-only — not served here.
+export const EDGE_SESSIONS_OPEN_PATH = "/edge/v1/sessions/open";
+export const EDGE_SESSIONS_REFRESH_PATH = "/edge/v1/sessions/refresh";
+export const EDGE_SESSIONS_CLOSE_PATH = "/edge/v1/sessions/close";
 
 // ---------------------------------------------------------------------------
 // The cloud activation gateway port (§5)
@@ -203,10 +224,35 @@ const CANONICAL_ERROR: Readonly<Record<string, KitluyErrorCode>> = {
   IDEMPOTENCY_CONFLICT: "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST",
   PKI_UNAVAILABLE: "DEPENDENCY_UNAVAILABLE",
   CLOUD_UNAVAILABLE: "HUB_UNREACHABLE",
+  // T1 runtime eligibility (WS-12-T001-P02 closed vocabulary)
+  HUB_NOT_OPERATIONAL: "DEPENDENCY_UNAVAILABLE",
+  HUB_RETIRED: "DEVICE_NOT_ASSIGNED",
+  HUB_REPLACEMENT_BLOCKED: "DEPENDENCY_UNAVAILABLE",
+  HUB_ASSIGNMENT_MISSING: "DEPENDENCY_UNAVAILABLE",
+  ASSIGNMENT_SCOPE_MISMATCH: "SCOPE_PERMISSION_DENIED",
+  ASSIGNMENT_GENERATION_STALE: "RESOURCE_VERSION_CONFLICT",
+  PAIRING_REQUIRED: "DEVICE_NOT_ASSIGNED",
+  PROFILE_NOT_GRANTED: "PROFILE_NOT_ALLOWED",
+  PROFILE_NOT_T1: "PROFILE_NOT_ALLOWED",
+  CONTAINMENT_PROHIBITS: "DEVICE_NOT_ASSIGNED",
+  CONFIGURATION_MISSING: "DEPENDENCY_UNAVAILABLE",
+  DELIVERY_SIGNER_UNAVAILABLE: "DEPENDENCY_UNAVAILABLE",
+  // staff sessions (WS-12-T001-P02 closed vocabulary)
+  STAFF_UNKNOWN: "AUTHENTICATION_REQUIRED",
+  STAFF_DISABLED: "AUTHENTICATION_REQUIRED",
+  STAFF_CREDENTIAL_INVALID: "AUTHENTICATION_REQUIRED",
+  STAFF_SCOPE_MISMATCH: "SCOPE_PERMISSION_DENIED",
+  STAFF_PROFILE_NOT_AUTHORIZED: "PROFILE_NOT_ALLOWED",
+  SESSION_PERMISSION_DENIED: "SCOPE_PERMISSION_DENIED",
+  SESSION_OCCUPIED: "RESOURCE_VERSION_CONFLICT",
+  SESSION_UNKNOWN: "RESOURCE_NOT_FOUND",
+  SESSION_EXPIRED: "AUTHENTICATION_REQUIRED",
+  SESSION_CLOSED: "RESOURCE_VERSION_CONFLICT",
 };
 
 const CANONICAL_MESSAGE: Readonly<Partial<Record<KitluyErrorCode, string>>> = {
   VALIDATION_FAILED: "the request is invalid",
+  AUTHENTICATION_REQUIRED: "staff authentication is required or the session is not usable",
   DEVICE_NOT_ASSIGNED: "the authenticated terminal is not eligible for this capability",
   PROFILE_NOT_ALLOWED: "the requested terminal profile is not granted",
   SCOPE_PERMISSION_DENIED: "the presented authority was refused",
@@ -403,6 +449,12 @@ export interface EdgeTerminalRouterDeps {
   readonly pairing: TerminalPairingComposition;
   readonly activationGateway: CloudActivationGateway;
   readonly discovery: EdgeDiscoveryAuthority;
+  /**
+   * Signs per-terminal configuration DELIVERIES with the Hub operational
+   * key (WS-12-T001-P02 §3). Absent → the configuration route fails closed
+   * with DELIVERY_SIGNER_UNAVAILABLE; nothing is delivered unsigned.
+   */
+  readonly deliverySigner?: PairingSigner;
   readonly logger?: SafeLogger;
 }
 
@@ -418,7 +470,13 @@ type Matched =
         | "activation-challenges"
         | "activation-complete"
         | "pairing-sessions"
-        | "terminal-health-heartbeats";
+        | "terminal-health-heartbeats"
+        | "runtime-authority-time"
+        | "runtime-eligibility"
+        | "configuration-current"
+        | "sessions-open"
+        | "sessions-refresh"
+        | "sessions-close";
     }
   | {
       readonly route: "pairing-proof" | "pairing-complete" | "pairing-receipt";
@@ -441,6 +499,24 @@ function matchRoute(method: string, path: string): Matched | "METHOD_NOT_ALLOWED
   }
   if (clean === EDGE_TERMINAL_HEALTH_HEARTBEATS_PATH) {
     return method === "POST" ? { route: "terminal-health-heartbeats" } : "METHOD_NOT_ALLOWED";
+  }
+  if (clean === EDGE_RUNTIME_AUTHORITY_TIME_PATH) {
+    return method === "GET" ? { route: "runtime-authority-time" } : "METHOD_NOT_ALLOWED";
+  }
+  if (clean === EDGE_RUNTIME_ELIGIBILITY_PATH) {
+    return method === "GET" ? { route: "runtime-eligibility" } : "METHOD_NOT_ALLOWED";
+  }
+  if (clean === EDGE_CONFIGURATION_CURRENT_PATH) {
+    return method === "GET" ? { route: "configuration-current" } : "METHOD_NOT_ALLOWED";
+  }
+  if (clean === EDGE_SESSIONS_OPEN_PATH) {
+    return method === "POST" ? { route: "sessions-open" } : "METHOD_NOT_ALLOWED";
+  }
+  if (clean === EDGE_SESSIONS_REFRESH_PATH) {
+    return method === "POST" ? { route: "sessions-refresh" } : "METHOD_NOT_ALLOWED";
+  }
+  if (clean === EDGE_SESSIONS_CLOSE_PATH) {
+    return method === "POST" ? { route: "sessions-close" } : "METHOD_NOT_ALLOWED";
   }
   const sub =
     /^\/edge\/v1\/terminal-pairing\/sessions\/([^/]+)\/(terminal-proof|complete|receipt)$/.exec(
@@ -534,8 +610,234 @@ export function createEdgeTerminalRouter(deps: EdgeTerminalRouterDeps): EdgeRequ
       }
       const terminal = gate.terminal;
 
+      // The bootstrap reads and session routes refuse query parameters
+      // outright — the unknown-fields discipline applied to the URL.
+      const queryString = request.path.split("?")[1] ?? "";
+      const environment = deps.environment ?? "development";
+
       try {
         switch (matched.route) {
+          case "runtime-authority-time": {
+            if (queryString !== "") {
+              return finish(
+                operation,
+                invalid(correlationId, "query parameters are not accepted"),
+                "REQUEST_INVALID",
+              );
+            }
+            const payload = await readAuthorityTime(deps.pool);
+            return finish(
+              operation,
+              { status: 200, body: { result: "AUTHORITY_TIME", correlationId, ...payload } },
+              "AUTHORITY_TIME",
+            );
+          }
+          case "runtime-eligibility": {
+            if (queryString !== "") {
+              return finish(
+                operation,
+                invalid(correlationId, "query parameters are not accepted"),
+                "REQUEST_INVALID",
+              );
+            }
+            if (!terminal.activated) {
+              return finish(
+                operation,
+                refusal("ACTIVATION_REQUIRED", correlationId),
+                "ACTIVATION_REQUIRED",
+              );
+            }
+            const eligibility = await readRuntimeEligibility(
+              deps.pool,
+              terminal.terminalDeviceId,
+              terminal.certificateSerial,
+              environment,
+            );
+            if (eligibility.outcome === "refused") {
+              return finish(
+                operation,
+                refusal(eligibility.refusal, correlationId),
+                eligibility.refusal,
+              );
+            }
+            return finish(
+              operation,
+              {
+                status: 200,
+                body: { result: "ELIGIBLE", correlationId, eligibility: eligibility.payload },
+              },
+              "ELIGIBLE",
+            );
+          }
+          case "configuration-current": {
+            if (queryString !== "") {
+              return finish(
+                operation,
+                invalid(correlationId, "query parameters are not accepted"),
+                "REQUEST_INVALID",
+              );
+            }
+            if (!terminal.activated) {
+              return finish(
+                operation,
+                refusal("ACTIVATION_REQUIRED", correlationId),
+                "ACTIVATION_REQUIRED",
+              );
+            }
+            if (deps.deliverySigner === undefined) {
+              return finish(
+                operation,
+                refusal("DELIVERY_SIGNER_UNAVAILABLE", correlationId),
+                "DELIVERY_SIGNER_UNAVAILABLE",
+              );
+            }
+            const delivery = await readCurrentConfigurationDelivery(
+              deps.pool,
+              terminal.terminalDeviceId,
+              terminal.certificateSerial,
+              environment,
+              deps.deliverySigner,
+              correlationId,
+            );
+            if (delivery.outcome === "refused") {
+              return finish(operation, refusal(delivery.refusal, correlationId), delivery.refusal);
+            }
+            return finish(
+              operation,
+              {
+                status: 200,
+                body: { result: "CONFIGURATION_DELIVERY", correlationId, ...delivery.body },
+              },
+              "CONFIGURATION_DELIVERY",
+            );
+          }
+          case "sessions-open": {
+            if (!terminal.activated) {
+              return finish(
+                operation,
+                refusal("ACTIVATION_REQUIRED", correlationId),
+                "ACTIVATION_REQUIRED",
+              );
+            }
+            const idempotencyKey = idempotencyKeyFrom(request.headers);
+            if (idempotencyKey === null) {
+              return finish(
+                operation,
+                invalid(correlationId, "an Idempotency-Key header is required"),
+                "REQUEST_INVALID",
+              );
+            }
+            const unknown = unknownFields(body, ["actorId", "passcode", "profileCode"]);
+            if (unknown.length > 0) {
+              return finish(
+                operation,
+                invalid(correlationId, "unknown fields", unknown),
+                "REQUEST_INVALID",
+              );
+            }
+            const actorId = requireShaped(body, "actorId", UUID);
+            const profileCode = requireShaped(body, "profileCode", PROFILE);
+            const passcode = typeof body["passcode"] === "string" ? body["passcode"] : null;
+            if (
+              actorId === null ||
+              profileCode === null ||
+              passcode === null ||
+              passcode.length < 4 ||
+              passcode.length > 128
+            ) {
+              return finish(
+                operation,
+                invalid(
+                  correlationId,
+                  "actorId, passcode and profileCode are required and bounded",
+                ),
+                "REQUEST_INVALID",
+              );
+            }
+            // The same eligibility family the bootstrap reads prove — a
+            // terminal that cannot operate cannot open a staff session.
+            const gateResult = await readRuntimeEligibility(
+              deps.pool,
+              terminal.terminalDeviceId,
+              terminal.certificateSerial,
+              environment,
+            );
+            if (gateResult.outcome === "refused") {
+              return finish(
+                operation,
+                refusal(gateResult.refusal, correlationId),
+                gateResult.refusal,
+              );
+            }
+            const opened = await openStaffSession(deps.pool, {
+              terminalDeviceId: terminal.terminalDeviceId,
+              actorId,
+              passcode,
+              profileCode,
+            });
+            if (opened.outcome === "refused") {
+              return finish(operation, refusal(opened.refusal, correlationId), opened.refusal);
+            }
+            return finish(
+              operation,
+              {
+                status: 200,
+                body: { result: opened.result, correlationId, session: opened.session },
+              },
+              opened.result,
+            );
+          }
+          case "sessions-refresh":
+          case "sessions-close": {
+            if (!terminal.activated) {
+              return finish(
+                operation,
+                refusal("ACTIVATION_REQUIRED", correlationId),
+                "ACTIVATION_REQUIRED",
+              );
+            }
+            const idempotencyKey = idempotencyKeyFrom(request.headers);
+            if (idempotencyKey === null) {
+              return finish(
+                operation,
+                invalid(correlationId, "an Idempotency-Key header is required"),
+                "REQUEST_INVALID",
+              );
+            }
+            const unknown = unknownFields(body, ["sessionId"]);
+            if (unknown.length > 0) {
+              return finish(
+                operation,
+                invalid(correlationId, "unknown fields", unknown),
+                "REQUEST_INVALID",
+              );
+            }
+            const sessionId = requireShaped(body, "sessionId", UUID);
+            if (sessionId === null) {
+              return finish(
+                operation,
+                invalid(correlationId, "sessionId is required"),
+                "REQUEST_INVALID",
+              );
+            }
+            const action =
+              matched.route === "sessions-refresh" ? refreshStaffSession : closeStaffSession;
+            const outcome = await action(deps.pool, {
+              terminalDeviceId: terminal.terminalDeviceId,
+              sessionId,
+            });
+            if (outcome.outcome === "refused") {
+              return finish(operation, refusal(outcome.refusal, correlationId), outcome.refusal);
+            }
+            return finish(
+              operation,
+              {
+                status: 200,
+                body: { result: outcome.result, correlationId, session: outcome.session },
+              },
+              outcome.result,
+            );
+          }
           case "activation-challenges":
             return finish(
               operation,

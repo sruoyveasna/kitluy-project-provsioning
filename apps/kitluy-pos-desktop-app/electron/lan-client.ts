@@ -64,7 +64,13 @@ export function pinnedHubRequest(input: {
   readonly port: number;
   readonly method: "GET" | "POST";
   readonly path: string;
-  readonly pinnedCertificateFingerprint: string;
+  /**
+   * SHA-256 of the exact server certificate to accept. Absent ONLY for the
+   * initial discovery fetch, which is still chain-validated against the
+   * provisioned Hub CA — the signed discovery record then names the
+   * fingerprint every subsequent connection pins.
+   */
+  readonly pinnedCertificateFingerprint?: string;
   readonly credentials: TransportCredentials;
   readonly body?: unknown;
   readonly headers?: Record<string, string>;
@@ -90,12 +96,15 @@ export function pinnedHubRequest(input: {
           : { "content-type": "application/json", "content-length": String(payload.length) }),
         ...input.headers,
       },
-      checkServerIdentity: (_host: string, certificate: PeerCertificate): Error | undefined =>
-        serverCertificateMatchesPin(certificate.raw, input.pinnedCertificateFingerprint)
+      checkServerIdentity: (_host: string, certificate: PeerCertificate): Error | undefined => {
+        const pin = input.pinnedCertificateFingerprint;
+        if (pin === undefined) return undefined; // chain validation still ran
+        return serverCertificateMatchesPin(certificate.raw, pin)
           ? undefined
           : new Error(
               "KLUY-TERMINAL-HUB-CERT-MISMATCH: the presented server certificate is not the pinned Hub certificate",
-            ),
+            );
+      },
     };
     const req = request(options, (response) => {
       const chunks: Buffer[] = [];

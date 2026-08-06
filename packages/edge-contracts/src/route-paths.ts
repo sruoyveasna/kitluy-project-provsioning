@@ -84,3 +84,28 @@ export const EDGE_INFRASTRUCTURE_READ_PATHS = [
   EDGE_ROUTE_IDENTITY,
   EDGE_ROUTE_SYNC_STATUS,
 ] as const;
+
+// ---------------------------------------------------------------------------
+// T1 runtime bootstrap reads
+//
+// OWNER-APPROVED by KLD-2026-08-06-WS12-T001-EDGE-BOOTSTRAP-001 (LOCKED).
+// Like the infrastructure reads above, these are held OUTSIDE `EDGE_ROUTES`
+// so the KLD-2026-07-26-002 Group 1 approved-route count stays exact: they
+// are device-credential-gated runtime reads with NO staff actor dimension
+// (a terminal has no actor before its staff session opens), so the
+// `EdgeRouteDefinition.permission` field does not apply to them. Their API
+// scopes are registered additively in `scopes.ts`
+// (`edge.runtime.time_read`, `edge.runtime.eligibility_read`,
+// `edge.configuration.read`).
+// ---------------------------------------------------------------------------
+
+export const EDGE_ROUTE_RUNTIME_AUTHORITY_TIME = "/edge/v1/runtime/authority-time";
+export const EDGE_ROUTE_RUNTIME_ELIGIBILITY = "/edge/v1/runtime/eligibility";
+export const EDGE_ROUTE_CONFIGURATION_CURRENT = "/edge/v1/configuration/current";
+
+/** The owner-approved T1 bootstrap read routes (bootstrap decision §1–§3). */
+export const EDGE_RUNTIME_BOOTSTRAP_READ_PATHS = [
+  EDGE_ROUTE_RUNTIME_AUTHORITY_TIME,
+  EDGE_ROUTE_RUNTIME_ELIGIBILITY,
+  EDGE_ROUTE_CONFIGURATION_CURRENT,
+] as const;

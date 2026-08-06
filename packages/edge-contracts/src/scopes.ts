@@ -72,9 +72,28 @@ export const ADDITIVE_EDGE_SCOPES = [
   "edge.display.customer_action",
   /** Record a Ready-session exception. Edge Ops API §9.4 has no exception scope. */
   "edge.ready.exception",
+  // KLD-2026-08-06-WS12-T001-EDGE-BOOTSTRAP-001: the three T1 bootstrap reads.
+  /** Read Hub-database authority time (§1 of the bootstrap decision). */
+  "edge.runtime.time_read",
+  /** Read this terminal's derived runtime eligibility (§2). */
+  "edge.runtime.eligibility_read",
+  /** Read the current signed configuration delivery for this terminal (§3). */
+  "edge.configuration.read",
 ] as const;
 
 export const EDGE_API_SCOPES = [...REGISTERED_EDGE_SCOPES, ...ADDITIVE_EDGE_SCOPES] as const;
+
+/**
+ * Scopes consumed by the owner-approved T1 bootstrap READ paths
+ * (`EDGE_RUNTIME_BOOTSTRAP_READ_PATHS`), which are held outside the Group 1
+ * route registry the way the infrastructure reads are. Listed here so the
+ * scope-reachability test can prove every additive scope is consumed.
+ */
+export const RUNTIME_BOOTSTRAP_READ_SCOPES = [
+  "edge.runtime.time_read",
+  "edge.runtime.eligibility_read",
+  "edge.configuration.read",
+] as const;
 
 export type EdgeApiScope = (typeof EDGE_API_SCOPES)[number];
 

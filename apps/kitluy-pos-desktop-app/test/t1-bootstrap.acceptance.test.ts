@@ -1,12 +1,15 @@
 /**
- * WS-12-T001 — T1 runtime, device session and Store Hub bootstrap:
- * the fourteen focused acceptance scenarios from the owner package §7.
+ * WS-12-T001 — T1 bootstrap acceptance, revised for the P02 Hub contract.
  *
- * Discipline: REAL Ed25519 keys (DevelopmentDeviceKeyProvider), the REAL
- * `@kitluy/device-identity` verifiers, and the REAL encrypted terminal-local
- * store over `node:sqlite` play their production roles; only the transports
- * (discovery fetch, mTLS session) are port fakes, because this suite proves
- * the bootstrap machine, not a socket. Zero skips.
+ * The original fourteen §7 scenarios plus the P02 §8 machine-level
+ * families: Hub authority time drives every validity judgement, the
+ * configuration path verifies the Hub's DELIVERY attestation, and step 9
+ * requires the registered `pos.t1.use` permission.
+ *
+ * Discipline unchanged: REAL Ed25519 keys, the REAL device-identity
+ * verifiers and the REAL encrypted terminal-local store; only transports
+ * are port fakes (the live-socket loop is the e2e integration suite).
+ * Zero skips.
  */
 import { createRequire } from "node:module";
 import { createHash, randomUUID } from "node:crypto";
@@ -23,12 +26,13 @@ import {
   edgeDiscoveryRecordBytes,
   pairingReceiptBytes,
   publicKeyFingerprint,
+  terminalConfigurationDeliveryBytes,
   type DeviceRecordId,
   type EdgeDiscoveryRecord,
   type PairingReceipt,
   type ReceiptExpectation,
+  type TerminalConfigurationDelivery,
   type TrustEnvironment,
-  type TrustedTimeEvaluation,
 } from "@kitluy/device-identity";
 import {
   ConfigurationSnapshotStore,
@@ -36,19 +40,17 @@ import {
   assertNoForbiddenMaterial,
   createSqliteDriver,
   inMemorySecureKeyStore,
-  type OperationalEligibility,
 } from "@kitluy/terminal-local-store";
 
 import { bootstrapT1 } from "../src/bootstrap/machine.js";
-import {
-  developmentConfigurationVerifier,
-  devTerminalConfigurationBytes,
-} from "../src/bootstrap/dev-configuration-verifier.js";
+import type { AuthorityTimeResponse } from "../src/bootstrap/hub-time.js";
 import type {
-  ConfigurationFetchResult,
-  DiscoveryFetchResult,
-  EdgeSessionResult,
+  ConfigurationDeliveryWire,
+  EdgeOperationsSession,
+  EdgeReadRefusal,
+  EndpointResolution,
   ProtectedTerminalIdentity,
+  RuntimeEligibilityWire,
   SignedDiscoveryWirePayload,
   SignedTerminalConfiguration,
   StaffSessionCandidate,
@@ -63,6 +65,7 @@ const { DatabaseSync } = nodeRequire("node:sqlite") as {
 const ENV: TrustEnvironment = "development";
 const T1 = "laundry.t1.intake_cashier";
 const NOW = new Date("2026-08-06T10:00:00.000Z");
+const APP_VERSION = "0.1.0";
 const keys = new DevelopmentDeviceKeyProvider();
 
 const temporaryDirectories: string[] = [];
@@ -82,44 +85,39 @@ interface CapturedLog {
   readonly fields: Record<string, string | number | boolean>;
 }
 
+function refusal(result: string, retryable = false): EdgeReadRefusal {
+  return { outcome: "refused", result, retryable, detail: `refused: ${result}` };
+}
+
 interface Harness {
   readonly ports: T1BootstrapPorts;
   readonly identity: ProtectedTerminalIdentity;
   readonly receipt: PairingReceipt;
   readonly hubReceiptSignatureBase64: string;
   readonly hubPem: string;
-  readonly configPem: string;
   readonly logs: CapturedLog[];
   readonly stores: {
     readonly receipts: PairingReceiptStore;
     readonly configuration: ConfigurationSnapshotStore;
   };
-  readonly makeConfiguration: (
-    over?: Partial<SignedTerminalConfiguration>,
-  ) => SignedTerminalConfiguration;
-  readonly eligibility: (over?: Partial<OperationalEligibility>) => OperationalEligibility;
+  readonly makeDelivery: (over?: Partial<SignedTerminalConfiguration>) => ConfigurationDeliveryWire;
+  readonly eligibilityWire: (over?: Partial<RuntimeEligibilityWire>) => RuntimeEligibilityWire;
   readonly staff: (over?: Partial<StaffSessionCandidate>) => StaffSessionCandidate;
   readonly discoveryPayload: (over?: Partial<EdgeDiscoveryRecord>) => SignedDiscoveryWirePayload;
   readonly overrides: {
-    discovery?: () => Promise<DiscoveryFetchResult>;
-    establish?: () => Promise<EdgeSessionResult>;
-    eligibility?: OperationalEligibility;
-    configurationFetch?: () => Promise<ConfigurationFetchResult>;
-    staffRestore?: () => Promise<StaffSessionCandidate | null>;
-    trustedTime?: TrustedTimeEvaluation;
+    resolve?: () => Promise<EndpointResolution>;
+    establish?: T1BootstrapPorts["edgeSession"]["establish"];
+    authorityTime?: () => Promise<AuthorityTimeResponse | EdgeReadRefusal>;
+    eligibility?: () => Promise<
+      { outcome: "eligible"; eligibility: RuntimeEligibilityWire } | EdgeReadRefusal
+    >;
+    configuration?: () => Promise<
+      { outcome: "delivery"; wire: ConfigurationDeliveryWire } | EdgeReadRefusal
+    >;
+    staffAcquire?: () => Promise<StaffSessionCandidate | null>;
   };
+  readonly monotonic: { value: number };
   readonly close: () => void;
-}
-
-function trustedTime(at: Date): TrustedTimeEvaluation {
-  return {
-    status: "trusted",
-    trustedTime: at,
-    source: "persisted_floor",
-    floorAdvanced: false,
-    anomalyType: null,
-    detail: "test trusted time",
-  };
 }
 
 function makeHarness(
@@ -141,9 +139,6 @@ function makeHarness(
   const terminalRef = `terminal-${randomUUID().slice(0, 8)}` as DeviceRecordId;
   void keys.generateDeviceKey(terminalRef, ENV);
   const terminalPem = keys.publicKeyPem(terminalRef) ?? "";
-  const configRef = `config-signer-${randomUUID().slice(0, 8)}` as DeviceRecordId;
-  void keys.generateDeviceKey(configRef, ENV);
-  const configPem = keys.publicKeyPem(configRef) ?? "";
 
   const scope = {
     hubDeviceId: randomUUID(),
@@ -211,7 +206,6 @@ function makeHarness(
     hubOperationalPublicKeyPem: hubPem,
     receiptExpectation: expectation,
     discoveryExpectation: {
-      hubDeviceId: scope.hubDeviceId,
       tenantId: scope.tenantId,
       digitalStoreId: scope.digitalStoreId,
       storeLocationId: scope.storeLocationId,
@@ -252,46 +246,111 @@ function makeHarness(
     };
   };
 
-  const makeConfiguration = (
+  const makeDelivery = (
     over: Partial<SignedTerminalConfiguration> = {},
-  ): SignedTerminalConfiguration => {
-    const payloadJson = JSON.stringify({ locale: "km-KH", pricingRef: "snapshot" });
-    const unsigned: Omit<SignedTerminalConfiguration, "signatureBase64"> = {
+  ): ConfigurationDeliveryWire => {
+    const payloadJson = JSON.stringify({ pricing: { currency: "KHR" } });
+    const base: Omit<SignedTerminalConfiguration, "deliverySignature"> = {
+      snapshotId: randomUUID(),
       configurationVersion: 7,
       schemaVersion: 1,
       environment: ENV,
       tenantId: scope.tenantId,
       digitalStoreId: scope.digitalStoreId,
       storeLocationId: scope.storeLocationId,
+      hubDeviceId: scope.hubDeviceId,
       deviceRecordId: scope.terminalDeviceId,
       assignmentGeneration: 1,
-      issuedAt: new Date(NOW.getTime() - 3_600_000).toISOString(),
+      terminalProfileCode: T1,
+      minimumApplicationVersion: "0.1.0",
+      maximumApplicationVersion: null,
+      issuedAt: new Date(NOW.getTime() - 7_200_000).toISOString(),
+      effectiveAt: new Date(NOW.getTime() - 3_600_000).toISOString(),
       validUntil: new Date(NOW.getTime() + 86_400_000).toISOString(),
+      manifestSha256: "1".repeat(64),
       payloadSha256: sha256Hex(payloadJson),
       payloadJson,
-      signerKeyId: "dev-config-signer-1",
+      signerKeyId: "demo-signing-key-1",
+      correlationId: randomUUID(),
       ...over,
     };
-    const signatureBase64 =
-      over.signatureBase64 ??
+    const deliveryFields: TerminalConfigurationDelivery = {
+      snapshotId: base.snapshotId,
+      configurationVersion: base.configurationVersion,
+      schemaVersion: base.schemaVersion,
+      tenantId: base.tenantId,
+      digitalStoreId: base.digitalStoreId,
+      storeLocationId: base.storeLocationId,
+      environment: base.environment as TrustEnvironment,
+      hubDeviceId: base.hubDeviceId,
+      terminalDeviceId: base.deviceRecordId,
+      assignmentGeneration: base.assignmentGeneration,
+      terminalProfileCode: base.terminalProfileCode,
+      minimumApplicationVersion: base.minimumApplicationVersion,
+      maximumApplicationVersion: base.maximumApplicationVersion,
+      issuedAt: new Date(base.issuedAt),
+      effectiveAt: new Date(base.effectiveAt),
+      validUntil: new Date(base.validUntil),
+      manifestSha256: base.manifestSha256,
+      payloadSha256: base.payloadSha256,
+      signingKeyId: base.signerKeyId,
+      correlationId: base.correlationId,
+    };
+    const deliverySignature =
+      over.deliverySignature ??
       Buffer.from(
-        keys.provePossession(
-          configRef,
-          devTerminalConfigurationBytes({ ...unsigned, signatureBase64: "" }),
-        ),
-      ).toString("base64");
-    return { ...unsigned, signatureBase64 };
+        keys.provePossession(hubRef, terminalConfigurationDeliveryBytes(deliveryFields)),
+      ).toString("base64url");
+    return {
+      delivery: {
+        snapshotId: deliveryFields.snapshotId,
+        configurationVersion: deliveryFields.configurationVersion,
+        schemaVersion: deliveryFields.schemaVersion,
+        tenantId: deliveryFields.tenantId,
+        digitalStoreId: deliveryFields.digitalStoreId,
+        storeLocationId: deliveryFields.storeLocationId,
+        environment: deliveryFields.environment,
+        hubDeviceId: deliveryFields.hubDeviceId,
+        terminalDeviceId: deliveryFields.terminalDeviceId,
+        assignmentGeneration: deliveryFields.assignmentGeneration,
+        terminalProfileCode: deliveryFields.terminalProfileCode,
+        minimumApplicationVersion: deliveryFields.minimumApplicationVersion,
+        maximumApplicationVersion: deliveryFields.maximumApplicationVersion,
+        issuedAt: deliveryFields.issuedAt.toISOString(),
+        effectiveAt: deliveryFields.effectiveAt.toISOString(),
+        validUntil: deliveryFields.validUntil.toISOString(),
+        manifestSha256: deliveryFields.manifestSha256,
+        payloadSha256: deliveryFields.payloadSha256,
+        signingKeyId: deliveryFields.signingKeyId,
+        correlationId: deliveryFields.correlationId,
+      },
+      payloadJson: base.payloadJson,
+      deliverySignature,
+      rollbackReference: null,
+    };
   };
 
-  const eligibility = (over: Partial<OperationalEligibility> = {}): OperationalEligibility => ({
+  const eligibilityWire = (over: Partial<RuntimeEligibilityWire> = {}): RuntimeEligibilityWire => ({
+    protocolVersion: "1.0",
+    tenantId: scope.tenantId,
+    digitalStoreId: scope.digitalStoreId,
+    storeLocationId: scope.storeLocationId,
+    environment: ENV,
     hubDeviceId: scope.hubDeviceId,
-    hubCertificateFingerprint: receipt.hubCertificateFingerprint,
-    terminalCertificateFingerprint: receipt.terminalCertificateFingerprint,
-    terminalAssignmentId: installationContext.terminalAssignmentId,
-    terminalAssignmentGeneration: 1,
-    terminalProfileKey: receipt.terminalProfileKey,
-    terminalCredentialStatus: "active",
-    hubCredentialStatus: "active",
+    terminalDeviceId: scope.terminalDeviceId,
+    assignmentId: installationContext.terminalAssignmentId,
+    assignmentGeneration: 1,
+    terminalProfileCode: receipt.terminalProfileKey,
+    credentialId: randomUUID(),
+    credentialGeneration: 1,
+    credentialEligibility: "eligible",
+    activationEligibility: "activated",
+    pairingEligibility: "paired",
+    pairedAt: receipt.pairedAt.toISOString(),
+    containmentState: "none",
+    hubReplacementState: "normal",
+    requiredConfigurationVersion: 7,
+    authorityTime: NOW.toISOString(),
     ...over,
   });
 
@@ -299,37 +358,63 @@ function makeHarness(
     actorId: randomUUID(),
     displayName: "Sokha",
     profileCodes: [T1],
+    effectivePermissions: ["staff.sessions.open", "pos.t1.use"],
     expiresAt: new Date(NOW.getTime() + 3_600_000).toISOString(),
     ...over,
   });
 
   const logs: CapturedLog[] = [];
   const overrides: Harness["overrides"] = {};
+  const monotonic = { value: 5_000 };
+
+  const authorityResponse = (): AuthorityTimeResponse => ({
+    protocolVersion: "1.0",
+    authorityTime: NOW.toISOString(),
+    authoritySource: "hub_database",
+    responseId: randomUUID(),
+    generatedAt: NOW.toISOString(),
+    maxCacheAgeSeconds: 30,
+    correlationId: randomUUID(),
+  });
+
+  const session: EdgeOperationsSession = {
+    fetchAuthorityTime: () =>
+      overrides.authorityTime !== undefined
+        ? overrides.authorityTime()
+        : Promise.resolve(authorityResponse()),
+    fetchEligibility: () =>
+      overrides.eligibility !== undefined
+        ? overrides.eligibility()
+        : Promise.resolve({ outcome: "eligible" as const, eligibility: eligibilityWire() }),
+    fetchConfigurationDelivery: () =>
+      overrides.configuration !== undefined
+        ? overrides.configuration()
+        : Promise.resolve({ outcome: "delivery" as const, wire: makeDelivery() }),
+    openStaffSession: () => Promise.resolve(refusal("SESSION_PERMISSION_DENIED")),
+    refreshStaffSession: () => Promise.resolve(refusal("SESSION_UNKNOWN")),
+    closeStaffSession: () => Promise.resolve(refusal("SESSION_UNKNOWN")),
+  };
 
   const ports: T1BootstrapPorts = {
     identity: { load: () => identity },
     receipts,
-    discovery: {
-      fetchSignedDiscovery: () =>
-        overrides.discovery !== undefined
-          ? overrides.discovery()
-          : Promise.resolve({ outcome: "payload", payload: discoveryPayload() }),
+    hubEndpoint: {
+      resolve: () =>
+        overrides.resolve !== undefined
+          ? overrides.resolve()
+          : Promise.resolve({
+              outcome: "reached" as const,
+              source: "assigned_hostname" as const,
+              hostname: "hub.store.lan",
+              port: EDGE_LAN_PORT,
+              payload: discoveryPayload(),
+            }),
     },
     edgeSession: {
-      establish: () =>
+      establish: (endpoint, terminalIdentity) =>
         overrides.establish !== undefined
-          ? overrides.establish()
-          : Promise.resolve({
-              outcome: "established",
-              session: {
-                hubTime: () => Promise.resolve(NOW),
-                describeEligibility: () => Promise.resolve(overrides.eligibility ?? eligibility()),
-                fetchConfigurationSnapshot: () =>
-                  overrides.configurationFetch !== undefined
-                    ? overrides.configurationFetch()
-                    : Promise.resolve({ outcome: "snapshot", snapshot: makeConfiguration() }),
-              },
-            }),
+          ? overrides.establish(endpoint, terminalIdentity)
+          : Promise.resolve({ outcome: "established" as const, session }),
     },
     configurationCache: {
       loadCurrent: () => configuration.loadCurrent(),
@@ -337,18 +422,16 @@ function makeHarness(
         configuration.persistValidated(record);
       },
     },
-    trustedTime: {
-      evaluate: () => Promise.resolve(overrides.trustedTime ?? trustedTime(NOW)),
-    },
     staffSession: {
-      restore: () =>
-        overrides.staffRestore !== undefined ? overrides.staffRestore() : Promise.resolve(staff()),
+      acquire: () =>
+        overrides.staffAcquire !== undefined ? overrides.staffAcquire() : Promise.resolve(staff()),
     },
     logger: {
       log: (event, fields) => {
         logs.push({ event, fields });
       },
     },
+    monotonicNow: () => monotonic.value,
   };
 
   return {
@@ -357,26 +440,24 @@ function makeHarness(
     receipt,
     hubReceiptSignatureBase64,
     hubPem,
-    configPem,
     logs,
     stores: { receipts, configuration },
-    makeConfiguration,
-    eligibility,
+    makeDelivery,
+    eligibilityWire,
     staff,
     discoveryPayload,
     overrides,
+    monotonic,
     close: () => driver.close(),
   };
 }
 
 function run(h: Harness) {
-  return bootstrapT1(h.ports, {
-    configurationSignatureVerifier: developmentConfigurationVerifier(h.configPem),
-  });
+  return bootstrapT1(h.ports, { applicationVersion: APP_VERSION });
 }
 
-describe("WS-12-T001 T1 bootstrap acceptance", () => {
-  it("1. first successful T1 startup walks §5 in order and enters the shell", async () => {
+describe("WS-12-T001 T1 bootstrap acceptance (P02 contract)", () => {
+  it("1. first successful T1 startup walks the sequence in order and enters the shell", async () => {
     const h = makeHarness();
     const report = await run(h);
     expect(report.state).toBe("ready");
@@ -392,14 +473,11 @@ describe("WS-12-T001 T1 bootstrap acceptance", () => {
       port: 7443,
     });
     expect(report.configuration?.freshness).toBe("current");
-    expect(report.configuration?.configurationVersion).toBe(7);
     expect(report.staff?.displayName).toBe("Sokha");
-    // The delivered snapshot is now durable local evidence.
     expect(h.stores.configuration.loadCurrent()?.snapshot.configurationVersion).toBe(7);
-    // Without a restorable staff session the same startup parks, fail
-    // closed, at interactive staff authentication.
+    // Without an acquired staff session the same startup parks fail-closed.
     const h2 = makeHarness();
-    h2.overrides.staffRestore = () => Promise.resolve(null);
+    h2.overrides.staffAcquire = () => Promise.resolve(null);
     const parked = await run(h2);
     expect(parked.state).toBe("staff_authentication_required");
     expect(parked.configuration?.freshness).toBe("current");
@@ -407,62 +485,59 @@ describe("WS-12-T001 T1 bootstrap acceptance", () => {
     h2.close();
   });
 
-  it("2. restart with WAN unavailable and Hub available starts normally — no cloud dependency exists", async () => {
-    // The port surface itself is the proof: T1BootstrapPorts carries no
-    // cloud, Supabase or WAN port, so cloud availability CANNOT be part of
-    // startup. This scenario drives a full startup where the only network
-    // peer is the Hub.
+  it("2. startup has no cloud dependency — the port surface is Hub-only", async () => {
     const h = makeHarness();
-    const report = await run(h);
-    expect(report.state).toBe("ready");
-    const portNames = Object.keys(h.ports);
-    expect(portNames.sort()).toEqual(
+    expect((await run(h)).state).toBe("ready");
+    expect(Object.keys(h.ports).sort()).toEqual(
       [
         "identity",
         "receipts",
-        "discovery",
+        "hubEndpoint",
         "edgeSession",
         "configurationCache",
-        "trustedTime",
         "staffSession",
         "logger",
+        "monotonicNow",
       ].sort(),
     );
     h.close();
   });
 
-  it("3. Hub discovery is verified: the signed record resolves the pinned endpoint", async () => {
+  it("3. the signed discovery record is verified under HUB time and pins the endpoint", async () => {
     const h = makeHarness();
-    const report = await run(h);
-    expect(report.state).toBe("ready");
-    // Tampering with the signed record must refuse resolution.
+    expect((await run(h)).state).toBe("ready");
     const tampered = h.discoveryPayload();
-    const forged = {
-      ...tampered,
-      record: { ...tampered.record, hostname: "attacker.lan" },
-    };
-    h.overrides.discovery = () => Promise.resolve({ outcome: "payload", payload: forged });
+    h.overrides.resolve = () =>
+      Promise.resolve({
+        outcome: "reached",
+        source: "assigned_hostname",
+        hostname: "hub.store.lan",
+        port: 7443,
+        payload: { ...tampered, record: { ...tampered.record, hostname: "attacker.lan" } },
+      });
     const refused = await run(h);
     expect(refused.state).toBe("hub_unavailable");
     expect(refused.refusalCode).toBe("DISCOVERY_SIGNATURE_INVALID");
     h.close();
   });
 
-  it("4. a record naming the wrong Hub is refused before any session exists", async () => {
+  it("4. a record naming the wrong Hub is refused", async () => {
     const h = makeHarness();
-    h.overrides.discovery = () =>
+    h.overrides.resolve = () =>
       Promise.resolve({
-        outcome: "payload",
+        outcome: "reached",
+        source: "assigned_hostname",
+        hostname: "hub.store.lan",
+        port: 7443,
         payload: h.discoveryPayload({ hubDeviceId: randomUUID() }),
       });
     const report = await run(h);
     expect(report.state).toBe("assignment_invalid");
     expect(report.refusalCode).toBe("DISCOVERY_WRONG_HUB");
-    expect(report.hub).toBeUndefined();
     h.close();
   });
 
-  it("5. a revoked or expired terminal credential is refused", async () => {
+  it("5. a revoked or expired terminal credential is refused at transport and at eligibility", async () => {
     const h = makeHarness();
     h.overrides.establish = () =>
       Promise.resolve({
@@ -472,77 +547,97 @@ describe("WS-12-T001 T1 bootstrap acceptance", () => {
       });
     const atTransport = await run(h);
     expect(atTransport.state).toBe("credential_invalid");
-    expect(atTransport.refusalCode).toBe("CREDENTIAL_NOT_CURRENT");
-    // The same refusal from CURRENT Hub eligibility (revoked after session).
     const h2 = makeHarness();
-    h2.overrides.eligibility = h2.eligibility({ terminalCredentialStatus: "revoked" });
-    const atEligibility = await run(h2);
-    expect(atEligibility.state).toBe("credential_invalid");
-    expect(atEligibility.refusalCode).toBe("PAIR_DEVICE_NOT_ELIGIBLE");
+    h2.overrides.eligibility = () => Promise.resolve(refusal("CREDENTIAL_NOT_CURRENT"));
+    const atRoute = await run(h2);
+    expect(atRoute.state).toBe("credential_invalid");
+    expect(atRoute.refusalCode).toBe("CREDENTIAL_NOT_CURRENT");
     h.close();
     h2.close();
   });
 
-  it("6. a stale assignment generation is refused", async () => {
+  it("6. a stale assignment generation is refused — route-level and receipt-level", async () => {
     const h = makeHarness();
-    h.overrides.eligibility = h.eligibility({ terminalAssignmentGeneration: 2 });
-    const report = await run(h);
-    expect(report.state).toBe("assignment_invalid");
-    expect(report.refusalCode).toBe("PAIR_ASSIGNMENT_MISMATCH");
+    h.overrides.eligibility = () => Promise.resolve(refusal("ASSIGNMENT_GENERATION_STALE"));
+    const atRoute = await run(h);
+    expect(atRoute.state).toBe("assignment_invalid");
+    const h2 = makeHarness();
+    h2.overrides.eligibility = () =>
+      Promise.resolve({
+        outcome: "eligible",
+        eligibility: h2.eligibilityWire({ assignmentGeneration: 2 }),
+      });
+    const atReceipt = await run(h2);
+    expect(atReceipt.state).toBe("assignment_invalid");
+    expect(atReceipt.refusalCode).toBe("PAIR_ASSIGNMENT_MISMATCH");
     h.close();
+    h2.close();
   });
 
   it("7. a non-T1 profile is refused, including retired identifiers", async () => {
     const h = makeHarness({ profile: "laundry.t2.customer_display" });
     const report = await run(h);
     expect(report.state).toBe("profile_not_authorized");
-    expect(report.refusalCode).toBe("PROFILE_NOT_T1");
-    // A retired pre-rename identifier is refused, never coerced.
     const h2 = makeHarness({ profile: "t2_scan_in" });
-    const retired = await run(h2);
-    expect(retired.state).toBe("profile_not_authorized");
+    expect((await run(h2)).state).toBe("profile_not_authorized");
     h.close();
     h2.close();
   });
 
-  it("8. an incompatible configuration is refused", async () => {
+  it("8. an incompatible configuration is refused: schema, application version, altered payload, altered signature", async () => {
     const h = makeHarness();
-    h.overrides.configurationFetch = () =>
+    h.overrides.configuration = () =>
+      Promise.resolve({ outcome: "delivery", wire: h.makeDelivery({ schemaVersion: 2 }) });
+    expect((await run(h)).refusalCode).toBe("CONFIG_SCHEMA_UNSUPPORTED");
+    h.overrides.configuration = () =>
       Promise.resolve({
-        outcome: "snapshot",
-        snapshot: h.makeConfiguration({ schemaVersion: 2 }),
+        outcome: "delivery",
+        wire: h.makeDelivery({ minimumApplicationVersion: "9.9.9" }),
       });
-    const report = await run(h);
-    expect(report.state).toBe("configuration_incompatible");
-    expect(report.refusalCode).toBe("CONFIG_SCHEMA_UNSUPPORTED");
-    // A bad signature is equally not activatable.
-    const h2 = makeHarness();
-    h2.overrides.configurationFetch = () =>
+    expect((await run(h)).refusalCode).toBe("CONFIG_APP_VERSION_INCOMPATIBLE");
+    h.overrides.configuration = () => {
+      const wire = h.makeDelivery();
+      return Promise.resolve({
+        outcome: "delivery",
+        wire: { ...wire, payloadJson: JSON.stringify({ pricing: { currency: "USD" } }) },
+      });
+    };
+    const alteredPayload = await run(h);
+    expect(alteredPayload.state).toBe("configuration_incompatible");
+    // The checksum gate catches an altered payload BEFORE signature
+    // verification (declared digest no longer matches the payload).
+    expect(alteredPayload.refusalCode).toBe("CONFIG_CHECKSUM_MISMATCH");
+    h.overrides.configuration = () =>
       Promise.resolve({
-        outcome: "snapshot",
-        snapshot: h2.makeConfiguration({
-          signatureBase64: Buffer.from("not a signature").toString("base64"),
+        outcome: "delivery",
+        wire: h.makeDelivery({
+          deliverySignature: Buffer.from("forged-signature-material").toString("base64url"),
         }),
       });
-    const badSignature = await run(h2);
-    expect(badSignature.state).toBe("configuration_incompatible");
-    expect(badSignature.refusalCode).toBe("CONFIG_SIGNATURE_INVALID");
+    const alteredSignature = await run(h);
+    expect(alteredSignature.state).toBe("configuration_incompatible");
+    expect(alteredSignature.refusalCode).toBe("CONFIG_SIGNATURE_INVALID");
     h.close();
-    h2.close();
   });
 
-  it("9. a valid cached configuration carries an explicit offline freshness label", async () => {
+  it("9. a valid cached configuration yields offline_ready with the explicit label; a LOWER delivery cannot replace it", async () => {
     const h = makeHarness();
-    // First startup caches the delivered snapshot.
     expect((await run(h)).state).toBe("ready");
-    // Now the Hub cannot deliver one; the cached snapshot is re-verified and
-    // labelled cached_offline — never presented as current.
-    h.overrides.configurationFetch = () =>
-      Promise.resolve({ outcome: "unavailable", detail: "no delivery route" });
-    const report = await run(h);
-    expect(report.state).toBe("offline_ready");
-    expect(report.configuration?.freshness).toBe("cached_offline");
-    expect(report.configuration?.configurationVersion).toBe(7);
+    h.overrides.configuration = () => Promise.resolve(refusal("CONFIGURATION_MISSING", true));
+    const cachedRun = await run(h);
+    expect(cachedRun.state).toBe("offline_ready");
+    expect(cachedRun.configuration?.freshness).toBe("cached_offline");
+    // A lower-version delivery is refused as rollback and never replaces
+    // the cache.
+    h.overrides.configuration = () =>
+      Promise.resolve({
+        outcome: "delivery",
+        wire: h.makeDelivery({ configurationVersion: 3 }),
+      });
+    const rollback = await run(h);
+    expect(rollback.state).toBe("configuration_incompatible");
+    expect(rollback.refusalCode).toBe("CONFIG_VERSION_ROLLBACK");
+    expect(h.stores.configuration.loadCurrent()?.snapshot.configurationVersion).toBe(7);
     h.close();
   });
 
@@ -552,7 +647,6 @@ describe("WS-12-T001 T1 bootstrap acceptance", () => {
     expect(noReceipt.state).toBe("recovery_required");
     expect(noReceipt.refusalCode).toBe("RECEIPT_MISSING");
     missing.close();
-    // Corrupt: a store opened with a DIFFERENT key cannot read its rows.
     const dir = mkdtempSync(join(tmpdir(), "kitluy-t1-corrupt-"));
     temporaryDirectories.push(dir);
     const file = join(dir, "terminal.sqlite");
@@ -572,22 +666,21 @@ describe("WS-12-T001 T1 bootstrap acceptance", () => {
     h.close();
   });
 
-  it("11. staff without T1 authorization is denied", async () => {
+  it("11. staff without T1 authorization is denied — profile, permission and expiry each fail closed", async () => {
     const h = makeHarness();
-    h.overrides.staffRestore = () =>
+    h.overrides.staffAcquire = () =>
       Promise.resolve(h.staff({ profileCodes: ["laundry.t3.ready_scan_in"] }));
-    const report = await run(h);
-    expect(report.state).toBe("staff_authentication_required");
-    expect(report.refusalCode).toBe("STAFF_PROFILE_NOT_AUTHORIZED");
-    // An expired staff session is equally unusable.
-    const h2 = makeHarness();
-    h2.overrides.staffRestore = () =>
-      Promise.resolve(h2.staff({ expiresAt: new Date(NOW.getTime() - 1000).toISOString() }));
-    const expired = await run(h2);
-    expect(expired.state).toBe("staff_authentication_required");
-    expect(expired.refusalCode).toBe("STAFF_SESSION_EXPIRED");
+    expect((await run(h)).refusalCode).toBe("STAFF_PROFILE_NOT_AUTHORIZED");
+    // Session membership alone never authorizes T1: pos.t1.use is REQUIRED.
+    h.overrides.staffAcquire = () =>
+      Promise.resolve(h.staff({ effectivePermissions: ["staff.sessions.open"] }));
+    const noPermission = await run(h);
+    expect(noPermission.state).toBe("staff_authentication_required");
+    expect(noPermission.refusalCode).toBe("STAFF_T1_PERMISSION_MISSING");
+    h.overrides.staffAcquire = () =>
+      Promise.resolve(h.staff({ expiresAt: new Date(NOW.getTime() - 1000).toISOString() }));
+    expect((await run(h)).refusalCode).toBe("STAFF_SESSION_EXPIRED");
     h.close();
-    h2.close();
   });
 
   it("12. a process restart restores only valid durable state", async () => {
@@ -597,35 +690,12 @@ describe("WS-12-T001 T1 bootstrap acceptance", () => {
     const first = makeHarness({ file });
     expect((await run(first)).state).toBe("ready");
     first.close();
-
-    // "Restart": fresh store instances over the same file, same custody.
     const database = new DatabaseSync(file);
     const driver = createSqliteDriver(database);
     const sameKey = inMemorySecureKeyStore(Buffer.from("t1-acceptance-seed"));
-    const receipts = new PairingReceiptStore(driver, sameKey);
-    const configuration = new ConfigurationSnapshotStore(driver, sameKey);
-    const h = makeHarness({ file: ":memory:", persistReceipt: false });
-    (h.ports as { receipts: unknown }).receipts = receipts;
-    (h.ports as { configurationCache: unknown }).configurationCache = {
-      loadCurrent: () => configuration.loadCurrent(),
-      persistValidated: (record: Parameters<ConfigurationSnapshotStore["persistValidated"]>[0]) =>
-        configuration.persistValidated(record),
-    };
-    // The identity in this harness names a DIFFERENT terminal than the file's
-    // receipt — restored durable state must be re-verified, not assumed.
-    const mismatched = await run(h);
-    expect(["recovery_required", "credential_invalid"]).toContain(mismatched.state);
-    h.close();
-
-    // With the ORIGINAL identity, the durable receipt and configuration are
-    // restored after re-verification; the Hub not delivering a snapshot now
-    // yields the cached label, and staff is NOT restored (fail closed).
-    const database2 = new DatabaseSync(file);
-    const driver2 = createSqliteDriver(database2);
-    const receipts2 = new PairingReceiptStore(driver2, sameKey);
-    const configuration2 = new ConfigurationSnapshotStore(driver2, sameKey);
-    const resumed = { ...first };
-    const ports: T1BootstrapPorts = {
+    const receipts2 = new PairingReceiptStore(driver, sameKey);
+    const configuration2 = new ConfigurationSnapshotStore(driver, sameKey);
+    const resumedPorts: T1BootstrapPorts = {
       ...first.ports,
       receipts: receipts2,
       configurationCache: {
@@ -634,43 +704,145 @@ describe("WS-12-T001 T1 bootstrap acceptance", () => {
           configuration2.persistValidated(record);
         },
       },
-      edgeSession: {
-        establish: () =>
-          Promise.resolve({
-            outcome: "established",
-            session: {
-              hubTime: () => Promise.resolve(NOW),
-              describeEligibility: () => Promise.resolve(resumed.eligibility()),
-              fetchConfigurationSnapshot: () =>
-                Promise.resolve({ outcome: "unavailable", detail: "no route" }),
-            },
-          }),
-      },
-      staffSession: { restore: () => Promise.resolve(null) },
+      staffSession: { acquire: () => Promise.resolve(null) },
     };
-    const report = await bootstrapT1(ports, {
-      configurationSignatureVerifier: developmentConfigurationVerifier(first.configPem),
-    });
-    expect(report.state).toBe("staff_authentication_required");
-    expect(report.configuration?.freshness).toBe("cached_offline");
+    first.overrides.configuration = () => Promise.resolve(refusal("CONFIGURATION_MISSING", true));
+    const resumed = await bootstrapT1(resumedPorts, { applicationVersion: APP_VERSION });
+    expect(resumed.state).toBe("staff_authentication_required");
+    expect(resumed.configuration?.freshness).toBe("cached_offline");
     driver.close();
-    driver2.close();
+  });
+
+  it("expired authority-time anchor fails closed and is REACQUIRED, never wall-clocked", async () => {
+    const h = makeHarness();
+    let calls = 0;
+    h.overrides.authorityTime = () => {
+      calls += 1;
+      return Promise.resolve({
+        protocolVersion: "1.0",
+        authorityTime: NOW.toISOString(),
+        authoritySource: "hub_database",
+        responseId: `r-${calls}`,
+        generatedAt: NOW.toISOString(),
+        maxCacheAgeSeconds: 30,
+        correlationId: `c-${calls}`,
+      });
+    };
+    // Advance the monotonic clock past the 30 s cache age between steps by
+    // wrapping eligibility to burn the anchor.
+    h.overrides.eligibility = () => {
+      h.monotonic.value += 31_000;
+      return Promise.resolve({ outcome: "eligible", eligibility: h.eligibilityWire() });
+    };
+    const report = await run(h);
+    expect(report.state).toBe("ready");
+    expect(calls).toBeGreaterThanOrEqual(2);
+    // And a Hub that stops serving time mid-flight is a named failure.
+    const h2 = makeHarness();
+    let first = true;
+    h2.overrides.authorityTime = () => {
+      if (first) {
+        first = false;
+        return Promise.resolve({
+          protocolVersion: "1.0",
+          authorityTime: NOW.toISOString(),
+          authoritySource: "hub_database",
+          responseId: "r-1",
+          generatedAt: NOW.toISOString(),
+          maxCacheAgeSeconds: 30,
+          correlationId: "c-1",
+        });
+      }
+      return Promise.reject(new Error("hub gone"));
+    };
+    h2.overrides.eligibility = () => {
+      h2.monotonic.value += 31_000;
+      return Promise.resolve({ outcome: "eligible", eligibility: h2.eligibilityWire() });
+    };
+    const lost = await bootstrapT1(h2.ports, { applicationVersion: APP_VERSION });
+    expect(lost.state).toBe("hub_unavailable");
+    h.close();
+    h2.close();
+  });
+
+  it("a malformed authority-time response has no wall-clock fallback", async () => {
+    const h = makeHarness();
+    h.overrides.authorityTime = () =>
+      Promise.resolve({
+        outcome: "refused",
+        result: "HTTP_500",
+        retryable: true,
+        detail: "broken",
+      } as EdgeReadRefusal);
+    const report = await run(h);
+    expect(report.state).toBe("recovery_required");
+    const h2 = makeHarness();
+    h2.overrides.authorityTime = () =>
+      Promise.resolve(
+        // authoritySource wrong → parse refuses → named failure, no fallback
+        {
+          protocolVersion: "1.0",
+          authorityTime: NOW.toISOString(),
+          authoritySource: "wall_clock",
+          responseId: "r",
+          generatedAt: NOW.toISOString(),
+          maxCacheAgeSeconds: 30,
+          correlationId: "c",
+        } as unknown as AuthorityTimeResponse,
+      );
+    const malformed = await run(h2);
+    expect(malformed.state).toBe("hub_unavailable");
+    expect(malformed.refusalCode).toBe("AUTHORITY_TIME_MALFORMED");
+    h.close();
+    h2.close();
+  });
+
+  it("containment and hub-replacement refusals land in named states", async () => {
+    const h = makeHarness();
+    h.overrides.eligibility = () => Promise.resolve(refusal("CONTAINMENT_PROHIBITS"));
+    expect((await run(h)).state).toBe("assignment_invalid");
+    h.overrides.eligibility = () => Promise.resolve(refusal("HUB_REPLACEMENT_BLOCKED", true));
+    expect((await run(h)).state).toBe("hub_unavailable");
+    h.overrides.eligibility = () => Promise.resolve(refusal("HUB_RETIRED"));
+    expect((await run(h)).state).toBe("assignment_invalid");
+    h.close();
   });
 
   it("stale configuration: an expired cached snapshot cannot begin operations", async () => {
     const h = makeHarness();
-    // Cache a snapshot whose window is already over, then make the Hub
-    // unable to deliver a fresh one.
-    const expired = h.makeConfiguration({
-      issuedAt: new Date(NOW.getTime() - 7_200_000).toISOString(),
+    const expired = h.makeDelivery({
+      issuedAt: new Date(NOW.getTime() - 10_800_000).toISOString(),
+      effectiveAt: new Date(NOW.getTime() - 7_200_000).toISOString(),
       validUntil: new Date(NOW.getTime() - 3_600_000).toISOString(),
     });
     h.stores.configuration.persistValidated({
-      snapshot: expired,
+      snapshot: {
+        snapshotId: expired.delivery.snapshotId,
+        configurationVersion: expired.delivery.configurationVersion,
+        schemaVersion: expired.delivery.schemaVersion,
+        environment: expired.delivery.environment,
+        tenantId: expired.delivery.tenantId,
+        digitalStoreId: expired.delivery.digitalStoreId,
+        storeLocationId: expired.delivery.storeLocationId,
+        hubDeviceId: expired.delivery.hubDeviceId,
+        deviceRecordId: expired.delivery.terminalDeviceId,
+        assignmentGeneration: expired.delivery.assignmentGeneration,
+        terminalProfileCode: expired.delivery.terminalProfileCode,
+        minimumApplicationVersion: expired.delivery.minimumApplicationVersion,
+        maximumApplicationVersion: expired.delivery.maximumApplicationVersion,
+        issuedAt: expired.delivery.issuedAt,
+        effectiveAt: expired.delivery.effectiveAt,
+        validUntil: expired.delivery.validUntil,
+        manifestSha256: expired.delivery.manifestSha256,
+        payloadSha256: expired.delivery.payloadSha256,
+        payloadJson: expired.payloadJson,
+        signerKeyId: expired.delivery.signingKeyId,
+        correlationId: expired.delivery.correlationId,
+        deliverySignature: expired.deliverySignature,
+      },
       verifiedAt: new Date(NOW.getTime() - 7_000_000).toISOString(),
     });
-    h.overrides.configurationFetch = () =>
-      Promise.resolve({ outcome: "unavailable", detail: "no delivery route" });
+    h.overrides.configuration = () => Promise.resolve(refusal("CONFIGURATION_MISSING", true));
     const report = await run(h);
     expect(report.state).toBe("stale_configuration");
     expect(report.refusalCode).toBe("CONFIG_EXPIRED");
@@ -679,8 +851,8 @@ describe("WS-12-T001 T1 bootstrap acceptance", () => {
 
   it("hub unavailable: an unreachable Hub means Store operations cannot begin", async () => {
     const h = makeHarness();
-    h.overrides.discovery = () =>
-      Promise.resolve({ outcome: "unreachable", detail: "no route to host" });
+    h.overrides.resolve = () =>
+      Promise.resolve({ outcome: "unreachable", detail: "no candidate answered" });
     const report = await run(h);
     expect(report.state).toBe("hub_unavailable");
     expect(report.refusalCode).toBe("HUB_DISCOVERY_UNREACHABLE");
@@ -690,9 +862,6 @@ describe("WS-12-T001 T1 bootstrap acceptance", () => {
   it("13. no terminal database or cloud service credential is exposed by the runtime surface", async () => {
     const h = makeHarness();
     const report = await run(h);
-    // The report and every logged line survive the forbidden-material rule
-    // that guards the terminal store: no connection string, no private key,
-    // no provisioning material can ride out through the runtime surface.
     expect(() => assertNoForbiddenMaterial(report, "bootstrap report")).not.toThrow();
     expect(() => assertNoForbiddenMaterial(h.logs, "bootstrap logs")).not.toThrow();
     const serialized = JSON.stringify(report) + JSON.stringify(h.logs);
@@ -709,14 +878,12 @@ describe("WS-12-T001 T1 bootstrap acceptance", () => {
     const logText = JSON.stringify(h.logs);
     const pemMarker = `${"-".repeat(5)}BEGIN`;
     expect(logText).not.toContain(pemMarker);
-    // Not even the PUBLIC key body: strip headers and check the base64 body.
     const pemBody = h.hubPem.replace(/-/g, "").replace(/\s/g, "").slice(20, 60);
     expect(pemBody.length).toBeGreaterThan(0);
     expect(logText.replace(/\s/g, "")).not.toContain(pemBody);
     expect(logText).not.toContain(h.hubReceiptSignatureBase64);
     expect(logText).not.toContain(h.hubReceiptSignatureBase64.slice(0, 24));
     expect(logText).not.toMatch(/bearer/i);
-    // Structured events only: every field value is a primitive.
     for (const line of h.logs) {
       for (const value of Object.values(line.fields)) {
         expect(["string", "number", "boolean"]).toContain(typeof value);

@@ -27,22 +27,38 @@ import { assertNoForbiddenMaterial } from "./pairing-receipt-store.js";
 
 const TABLE = "configuration_snapshots";
 
-/** A signed configuration snapshot exactly as delivered (ISO instants). */
+/**
+ * A signed configuration DELIVERY exactly as received (ISO instants) —
+ * the full P02 delivery envelope, retained byte-exact so the terminal can
+ * RE-VERIFY the Hub delivery signature on every load path. Field names
+ * mirror `TerminalConfigurationDelivery` in `@kitluy/device-identity`
+ * (`deviceRecordId` carries `terminalDeviceId`; `issuedAt` carries the
+ * snapshot's issue instant, `effectiveAt` its activation window start).
+ */
 export interface SignedTerminalConfigurationRecord {
+  readonly snapshotId: string;
   readonly configurationVersion: number;
   readonly schemaVersion: number;
   readonly environment: string;
   readonly tenantId: string;
   readonly digitalStoreId: string;
   readonly storeLocationId: string;
+  readonly hubDeviceId: string;
   readonly deviceRecordId: string;
   readonly assignmentGeneration: number;
+  readonly terminalProfileCode: string;
+  readonly minimumApplicationVersion: string;
+  readonly maximumApplicationVersion: string | null;
   readonly issuedAt: string;
+  readonly effectiveAt: string;
   readonly validUntil: string;
+  readonly manifestSha256: string;
   readonly payloadSha256: string;
   readonly payloadJson: string;
   readonly signerKeyId: string;
-  readonly signatureBase64: string;
+  readonly correlationId: string;
+  /** The Hub operational key's DELIVERY signature (unpadded base64url). */
+  readonly deliverySignature: string;
 }
 
 /** What is persisted: the snapshot plus when THIS terminal verified it. */

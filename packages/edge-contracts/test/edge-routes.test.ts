@@ -17,6 +17,7 @@ import {
   PERMISSION_KEY_PATTERN,
   REGISTERED_EDGE_SCOPES,
   REJECTED_ROUTE_SHAPES,
+  RUNTIME_BOOTSTRAP_READ_SCOPES,
   RETIRED_TERMINAL_PROFILE_IDS,
   SCOPE_NAME_RECONCILIATION,
   TERMINAL_PROFILE_PATTERN,
@@ -77,6 +78,36 @@ function rbacRegistryKeys(): ReadonlySet<string> {
   );
   const lines = readFileSync(csvUrl, "utf8").split(/\r?\n/).slice(1);
   return new Set(lines.map((line) => line.split(",")[0]?.trim() ?? "").filter((key) => key !== ""));
+}
+
+/**
+ * Keys added by additive registry AMENDMENTS under docs/security/ (the
+ * imported v1.0.0 CSV is never edited — Amendment-001 pattern). Each
+ * amendment's §1 table carries the same nine columns as the CSV; the first
+ * column of each data row is the key.
+ */
+function rbacAmendmentKeys(): ReadonlySet<string> {
+  const keys = new Set<string>();
+  for (const amendment of [
+    "kitluy-suite-rbac-permission-registry-amendment-001-device-containment-v1.0.0.md",
+    "kitluy-suite-rbac-permission-registry-amendment-002-t1-staff-sessions-v1.0.0.md",
+  ]) {
+    const url = new URL(`../../../docs/security/${amendment}`, import.meta.url);
+    // Only §1 "New keys" registers keys; later sections are reconciliations.
+    const newKeysSection = readFileSync(url, "utf8")
+      .split(/^## /m)
+      .find((s) => s.startsWith("1."));
+    for (const line of (newKeysSection ?? "").split(/\r?\n/)) {
+      const match = /^\|\s*`?([a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+)`?\s*\|/.exec(line);
+      if (match?.[1] !== undefined) keys.add(match[1]);
+    }
+  }
+  return keys;
+}
+
+/** The full canonical key set: the CSV baseline plus every amendment. */
+function canonicalKeys(): ReadonlySet<string> {
+  return new Set([...rbacRegistryKeys(), ...rbacAmendmentKeys()]);
 }
 
 // ---------------------------------------------------------------------------
@@ -237,9 +268,12 @@ describe("3. mutation metadata completeness", () => {
     }
   });
 
-  it("uses a permission that is either in the 107-key RBAC registry or an explicit gap marker", () => {
-    const registryKeys = rbacRegistryKeys();
-    expect(registryKeys.size).toBe(107);
+  it("uses a permission that is either in the canonical RBAC registry (CSV + amendments) or an explicit gap marker", () => {
+    expect(rbacRegistryKeys().size).toBe(107);
+    // Amendment 001 (device containment, 2 keys) + Amendment 002 (T1 staff
+    // sessions, 5 keys) — read from the amendment documents themselves.
+    expect(rbacAmendmentKeys().size).toBe(7);
+    const registryKeys = canonicalKeys();
     for (const route of EDGE_ROUTES) {
       const permissions = [route.permission, ...route.conditionalPermissions];
       for (const permission of permissions) {
@@ -253,8 +287,8 @@ describe("3. mutation metadata completeness", () => {
     }
   });
 
-  it("keeps every mirrored registered permission verbatim in the canonical CSV", () => {
-    const registryKeys = rbacRegistryKeys();
+  it("keeps every mirrored registered permission verbatim in the canonical registry", () => {
+    const registryKeys = canonicalKeys();
     for (const permission of EDGE_REGISTERED_PERMISSIONS) {
       expect(registryKeys.has(permission), permission).toBe(true);
     }
@@ -436,12 +470,19 @@ describe("6. scope and permission separation", () => {
     }
   });
 
-  it("uses only scopes that are reachable from a route", () => {
-    const used = new Set(EDGE_ROUTES.map((r) => r.scope));
+  it("uses only scopes that are reachable from a route or a bootstrap read", () => {
+    // The three T1 bootstrap reads (KLD-2026-08-06-WS12-T001-EDGE-
+    // BOOTSTRAP-001) are held OUTSIDE the Group 1 registry like the
+    // infrastructure reads; their scopes are consumed there.
+    const used = new Set<string>([
+      ...EDGE_ROUTES.map((r) => r.scope),
+      ...RUNTIME_BOOTSTRAP_READ_SCOPES,
+    ]);
     for (const scope of ADDITIVE_EDGE_SCOPES) {
-      expect(used.has(scope), `additive scope ${scope} must be required by an approved route`).toBe(
-        true,
-      );
+      expect(
+        used.has(scope),
+        `additive scope ${scope} must be consumed by an approved surface`,
+      ).toBe(true);
     }
   });
 });

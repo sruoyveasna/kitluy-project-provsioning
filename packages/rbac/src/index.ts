@@ -6,7 +6,10 @@
  *     (docs/source/security/kitluy-suite-rbac-permission-registry-v1.0.0.csv)
  *     — the 107-key canonical baseline reproduced verbatim below, plus the
  *     2 keys of Amendment 001 (docs/security/kitluy-suite-rbac-permission-
- *     registry-amendment-001-device-containment-v1.0.0.md) = 109.
+ *     registry-amendment-001-device-containment-v1.0.0.md) and the 5 keys
+ *     of Amendment 002 (docs/security/kitluy-suite-rbac-permission-
+ *     registry-amendment-002-t1-staff-sessions-v1.0.0.md,
+ *     KLD-2026-08-06-WS12-T001-EDGE-BOOTSTRAP-001 §4) = 114.
  *   - Owner decision KLD-2026-07-26-002 Group 3 (APPROVED, KL-DEC-001):
  *     lowercase dot-separated grammar, immutable released keys, unknown or
  *     deprecated keys fail closed, production wildcards prohibited.
@@ -85,8 +88,10 @@ const ENVIRONMENT_SEGMENTS: ReadonlySet<string> = new Set<string>(KITLUY_ENVIRON
  * resource is derived server-side and carried by `ResourceScope.resourceId`
  * (Resource Scope Model §7 step 4). Hyphenated UUIDs, ULIDs and nanoids are
  * already rejected by the character class; this catches the un-hyphenated hex
- * and numeric-suffix forms that would otherwise slip through. No canonical
- * registry key contains a digit.
+ * and numeric-suffix forms that would otherwise slip through. The only digits
+ * in the canonical registry are terminal-profile ORDINALS (`pos.t1.use`,
+ * Amendment 002) — the same `t[1-9]` grammar as the canonical terminal
+ * profiles, which a three-digit run can never resemble.
  */
 function segmentLooksLikeResourceId(segment: string): boolean {
   return /^[0-9a-f]{12,}$/.test(segment) || /[0-9]{3,}/.test(segment);
@@ -116,9 +121,11 @@ export function isValidPermissionKey(key: string): boolean {
  * The canonical permission registry — 107 keys from the Suite RBAC Permission
  * Registry v1.0.0 (column `permission`, verbatim and in registry order) plus
  * the 2 keys of Amendment 001 (device containment, WS-11-T005-P02 owner
- * package 2026-08-06) = 109. Released keys are immutable; additions and
- * deprecations go through `rbac.permission_registry_manage`
- * (A4_OWNER_SECURITY) — Amendment 001 is exactly such an owner ruling.
+ * package 2026-08-06) plus the 5 keys of Amendment 002 (T1 staff sessions,
+ * KLD-2026-08-06-WS12-T001-EDGE-BOOTSTRAP-001 §4) = 114. Released keys are
+ * immutable; additions and deprecations go through
+ * `rbac.permission_registry_manage` (A4_OWNER_SECURITY) — each amendment is
+ * exactly such an owner ruling.
  *
  * NEUTRAL-CORE BOUNDARY (CLAUDE.md hard rule 2). Six registry rows are
  * vertical-namespaced (`laundry.*`, marked inline below). Only the canonical
@@ -204,6 +211,16 @@ export const CANONICAL_PERMISSION_KEYS: readonly PermissionKey[] = [
   "billing.invoice_mark_paid",
   "billing.grace_change",
   "billing.policy_manage",
+  // Amendment 002 (KLD-2026-08-06-WS12-T001-EDGE-BOOTSTRAP-001 §4, WS-12-
+  // T001-P02, 2026-08-06): Edge terminal staff sessions and the T1 shell
+  // permission. Owner identifiers recorded VERBATIM. Opening or restoring a
+  // session never authorizes T1 by itself — `pos.t1.use` is evaluated
+  // separately (the six-dimension rule above).
+  "staff.sessions.open",
+  "staff.sessions.read",
+  "staff.sessions.refresh",
+  "staff.sessions.close",
+  "pos.t1.use",
   "support.ticket.manage",
   "support.evidence.read",
   "support.consent_session.start",

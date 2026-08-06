@@ -24,11 +24,16 @@
     "react-dom": "catalog:"
   },
   "devDependencies": {
+    "@kitluy-services/kitluy-hub-agent": "workspace:*",
     "@types/node": "catalog:",
+    "@types/node-forge": "catalog:",
+    "@types/pg": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react": "catalog:",
     "electron": "catalog:",
+    "node-forge": "catalog:",
+    "pg": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vitest": "catalog:"

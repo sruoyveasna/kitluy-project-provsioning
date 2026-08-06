@@ -1,24 +1,27 @@
 /**
- * T1 bootstrap ports — WS-12-T001.
+ * T1 bootstrap ports — WS-12-T001, revised by WS-12-T001-P02.
  *
  * Every effectful dependency of the bootstrap is a PORT, injected by the
- * composition root (the Electron main process in production, fixtures in the
- * acceptance suite). The machine itself performs no I/O, which is what makes
- * the required startup behaviour testable without launching Electron — the
- * same seam discipline as `electron/terminal-store.ts` (P04C2).
+ * composition root (the Electron main process in production, fixtures in
+ * the acceptance suite). The machine itself performs no I/O.
+ *
+ * P02 changes (KLD-2026-08-06-WS12-T001-EDGE-BOOTSTRAP-001): the session
+ * surface speaks the REAL Hub bootstrap routes — authority time (§1),
+ * runtime eligibility (§2), signed configuration delivery (§3) and staff
+ * sessions (§4) — and the terminal's local trusted-time port is REPLACED by
+ * the Hub authority-time anchor: no validity judgement compares a
+ * Hub-issued timestamp against the local wall clock.
  *
  * NOTHING in these ports lets an installer or user choose Tenant, Digital
  * Store, Location, Hub, environment, terminal profile or assignment
  * generation (owner package §5). Those values enter ONLY through the
- * protected terminal identity and the Hub-signed pairing receipt, both of
- * which are provisioning outcomes the runtime verifies rather than accepts.
+ * protected terminal identity and the Hub-signed pairing receipt.
  */
 
 import type {
   EdgeDiscoveryExpectation,
   ReceiptExpectation,
   TrustEnvironment,
-  TrustedTimeEvaluation,
 } from "@kitluy/device-identity";
 import type {
   OperationalEligibility,
@@ -27,6 +30,8 @@ import type {
   StoredConfigurationSnapshot,
   StoredPairingReceipt,
 } from "@kitluy/terminal-local-store";
+
+import type { AuthorityTimeResponse } from "./hub-time.js";
 
 // ---------------------------------------------------------------------------
 // Protected terminal identity
@@ -50,12 +55,17 @@ export interface ProtectedTerminalIdentity {
   /** What a signed discovery record must say (cloud-provisioned scope). */
   readonly discoveryExpectation: EdgeDiscoveryExpectation;
   /**
-   * Where the Hub was last reached (recorded at pairing time). A HINT for
-   * the discovery fetch only — the signed discovery record, not this value,
-   * establishes trust. The mDNS listener that would refresh it is a recorded
-   * successor gap (no multicast responder exists in the repository yet).
+   * Endpoint-order source 2 (assigned hostname). A HINT only — the signed
+   * discovery record, never this value, establishes trust.
    */
   readonly hubEndpointHint: { readonly hostname: string; readonly port: number };
+  /** Endpoint-order source 1 (assigned private IP), when provisioned. */
+  readonly assignedPrivateIp?: string | null;
+  /**
+   * Endpoint-order source 6 (manual recovery IP). Set only by a governed
+   * operator recovery flow in the MAIN process — never by the renderer.
+   */
+  readonly manualRecoveryIp?: string | null;
 }
 
 export interface TerminalIdentityPort {
@@ -81,7 +91,7 @@ export interface ReceiptStorePort {
 }
 
 // ---------------------------------------------------------------------------
-// Hub resolution and the mTLS Edge Operations session
+// Hub endpoint resolution (locked six-source order, decision §5)
 // ---------------------------------------------------------------------------
 
 /** A signed discovery payload exactly as it travels (P04B wire shape). */
@@ -105,18 +115,34 @@ export interface SignedDiscoveryWirePayload {
   readonly signatureAlgorithm: string;
 }
 
-export type DiscoveryFetchResult =
-  | { readonly outcome: "payload"; readonly payload: SignedDiscoveryWirePayload }
+/** The locked candidate order (decision §5). */
+export type EndpointSource =
+  | "assigned_private_ip"
+  | "assigned_hostname"
+  | "signed_mdns_discovery"
+  | "last_verified_endpoint"
+  | "cloud_reported_endpoint"
+  | "manual_recovery_ip";
+
+export type EndpointResolution =
+  | {
+      readonly outcome: "reached";
+      readonly source: EndpointSource;
+      readonly hostname: string;
+      readonly port: number;
+      readonly payload: SignedDiscoveryWirePayload;
+    }
   | { readonly outcome: "unreachable"; readonly detail: string };
 
-export interface HubDiscoveryPort {
+export interface HubEndpointPort {
   /**
-   * Fetch the current signed discovery payload from the assigned Hub's
-   * well-known endpoint. Transport trust for THIS fetch is pinned to the
-   * pairing receipt's `hubCertificateFingerprint`; the returned record is
-   * then verified independently against the Hub operational key.
+   * Walk the locked candidate order; for each candidate, fetch the signed
+   * discovery payload over TLS pinned to the provisioning-time Hub
+   * certificate fingerprint. The FIRST candidate that answers is returned —
+   * verification of the record itself is the machine's job, and a candidate
+   * that answers with an unverifiable record is a REFUSAL, not a fallback.
    */
-  fetchSignedDiscovery(): Promise<DiscoveryFetchResult>;
+  resolve(identity: ProtectedTerminalIdentity): Promise<EndpointResolution>;
 }
 
 export interface VerifiedHubEndpoint {
@@ -126,6 +152,10 @@ export interface VerifiedHubEndpoint {
   /** SHA-256 of the TLS server certificate the session MUST see. */
   readonly pinnedCertificateFingerprint: string;
 }
+
+// ---------------------------------------------------------------------------
+// The mTLS Edge Operations session and the bootstrap reads
+// ---------------------------------------------------------------------------
 
 /** Session refusals, already classified by the transport adapter. */
 export type EdgeSessionRefusalCode =
@@ -143,17 +173,112 @@ export type EdgeSessionResult =
       readonly detail: string;
     };
 
+/** A classified refusal from a bootstrap read (`details.result`). */
+export interface EdgeReadRefusal {
+  readonly outcome: "refused";
+  readonly result: string;
+  readonly retryable: boolean;
+  readonly detail: string;
+}
+
+/** The §2 eligibility payload as the route returns it. */
+export interface RuntimeEligibilityWire {
+  readonly protocolVersion: string;
+  readonly tenantId: string;
+  readonly digitalStoreId: string;
+  readonly storeLocationId: string;
+  readonly environment: string;
+  readonly hubDeviceId: string;
+  readonly terminalDeviceId: string;
+  readonly assignmentId: string;
+  readonly assignmentGeneration: number;
+  readonly terminalProfileCode: string;
+  readonly credentialId: string;
+  readonly credentialGeneration: number;
+  readonly credentialEligibility: string;
+  readonly activationEligibility: string;
+  readonly pairingEligibility: string;
+  readonly pairedAt: string;
+  readonly containmentState: string;
+  readonly hubReplacementState: string;
+  readonly requiredConfigurationVersion: number | null;
+  readonly authorityTime: string;
+}
+
+/** The §3 configuration delivery envelope exactly as the route returns it
+ * (the `TerminalConfigurationDelivery` field vocabulary, ISO instants). */
+export interface ConfigurationDeliveryEnvelopeWire {
+  readonly snapshotId: string;
+  readonly configurationVersion: number;
+  readonly schemaVersion: number;
+  readonly tenantId: string;
+  readonly digitalStoreId: string;
+  readonly storeLocationId: string;
+  readonly environment: string;
+  readonly hubDeviceId: string;
+  readonly terminalDeviceId: string;
+  readonly assignmentGeneration: number;
+  readonly terminalProfileCode: string;
+  readonly minimumApplicationVersion: string;
+  readonly maximumApplicationVersion: string | null;
+  readonly issuedAt: string;
+  readonly effectiveAt: string;
+  readonly validUntil: string;
+  readonly manifestSha256: string;
+  readonly payloadSha256: string;
+  readonly signingKeyId: string;
+  readonly correlationId: string;
+}
+
+export interface ConfigurationDeliveryWire {
+  readonly delivery: ConfigurationDeliveryEnvelopeWire;
+  readonly payloadJson: string;
+  readonly deliverySignature: string;
+  readonly rollbackReference: number | null;
+}
+
+export interface StaffSessionWire {
+  readonly sessionId: string;
+  readonly actorId: string;
+  readonly displayName: string;
+  readonly profileCode: string;
+  readonly openedAt: string;
+  readonly expiresAt: string;
+  readonly sessionGeneration: number;
+  readonly effectivePermissions: readonly string[];
+  readonly authorityTime: string;
+}
+
 /**
  * An established mutually-authenticated Edge Operations session (the P04A
- * TLS 1.3 transport on 7443). All reads below are Hub-authoritative.
+ * TLS 1.3 transport on 7443). All reads are Hub-authoritative; a transport
+ * failure THROWS, a governed refusal returns an `EdgeReadRefusal`.
  */
 export interface EdgeOperationsSession {
-  /** Hub-anchored instant — never the terminal host clock (CLOCK-001). */
-  hubTime(): Promise<Date>;
-  /** What CURRENT Hub records say about this terminal's eligibility. */
-  describeEligibility(): Promise<OperationalEligibility>;
-  /** The Hub's active signed configuration snapshot for this terminal. */
-  fetchConfigurationSnapshot(): Promise<ConfigurationFetchResult>;
+  /** §1 — Hub-database authority time. Never the host clock. */
+  fetchAuthorityTime(): Promise<AuthorityTimeResponse | EdgeReadRefusal>;
+  /** §2 — this terminal's derived runtime eligibility. */
+  fetchEligibility(): Promise<
+    { readonly outcome: "eligible"; readonly eligibility: RuntimeEligibilityWire } | EdgeReadRefusal
+  >;
+  /** §3 — the current signed configuration delivery. */
+  fetchConfigurationDelivery(): Promise<
+    { readonly outcome: "delivery"; readonly wire: ConfigurationDeliveryWire } | EdgeReadRefusal
+  >;
+  /** §4 — open a staff session (the interactive flow's transport). */
+  openStaffSession(input: {
+    readonly actorId: string;
+    readonly passcode: string;
+    readonly profileCode: string;
+  }): Promise<{ readonly outcome: "ok"; readonly session: StaffSessionWire } | EdgeReadRefusal>;
+  /** §4 — refresh an open staff session within governed policy. */
+  refreshStaffSession(
+    sessionId: string,
+  ): Promise<{ readonly outcome: "ok"; readonly session: StaffSessionWire } | EdgeReadRefusal>;
+  /** §4 — close a staff session. */
+  closeStaffSession(
+    sessionId: string,
+  ): Promise<{ readonly outcome: "ok"; readonly session: StaffSessionWire } | EdgeReadRefusal>;
 }
 
 export interface EdgeSessionPort {
@@ -164,24 +289,11 @@ export interface EdgeSessionPort {
 }
 
 // ---------------------------------------------------------------------------
-// Signed configuration
+// Signed configuration cache
 // ---------------------------------------------------------------------------
 
-/**
- * A signed configuration snapshot as delivered to the terminal. The wire and
- * cache shape is ONE type, owned by the terminal-local persistence authority
- * (`@kitluy/terminal-local-store`) so the two can never drift.
- * `schemaVersion` mirrors the Hub's
- * `edge_config.configuration_snapshot.schema_version` contract.
- */
 export type SignedTerminalConfiguration = SignedTerminalConfigurationRecord;
-
-/** The cached form: the snapshot plus when THIS terminal verified it. */
 export type CachedConfigurationRecord = StoredConfigurationSnapshot;
-
-export type ConfigurationFetchResult =
-  | { readonly outcome: "snapshot"; readonly snapshot: SignedTerminalConfiguration }
-  | { readonly outcome: "unavailable"; readonly detail: string };
 
 /** The terminal-local cache of the last VALID signed configuration. */
 export interface ConfigurationCachePort {
@@ -190,37 +302,28 @@ export interface ConfigurationCachePort {
 }
 
 // ---------------------------------------------------------------------------
-// Trusted time
-// ---------------------------------------------------------------------------
-
-export interface TrustedTimePort {
-  evaluate(): Promise<TrustedTimeEvaluation>;
-}
-
-// ---------------------------------------------------------------------------
-// Staff session
+// Staff session acquisition
 // ---------------------------------------------------------------------------
 
 /**
- * A restored or newly opened staff session. Carries evaluation inputs only:
- * profile authorizations and presented permission grants — never a
- * credential verifier, PIN, password or token.
+ * A staff session available to the bootstrap: a still-valid durable
+ * restoration, or an interactive login already completed through the
+ * PUBLIC session adapter. `null` parks the shell at
+ * `staff_authentication_required` — the fail-closed default after every
+ * process restart. Never carries a verifier, passcode or token.
  */
 export interface StaffSessionCandidate {
   readonly actorId: string;
   readonly displayName: string;
   /** Logical terminal profile codes this staff member may operate. */
   readonly profileCodes: readonly string[];
+  /** Registered permission keys held at this Location (Amendment 002). */
+  readonly effectivePermissions: readonly string[];
   readonly expiresAt: string;
 }
 
 export interface StaffSessionPort {
-  /**
-   * Restore a durable staff session ONLY if one exists and is still valid.
-   * `null` requires interactive staff authentication — the fail-closed
-   * default after every process restart.
-   */
-  restore(): Promise<StaffSessionCandidate | null>;
+  acquire(session: EdgeOperationsSession): Promise<StaffSessionCandidate | null>;
 }
 
 // ---------------------------------------------------------------------------
@@ -239,10 +342,11 @@ export interface BootstrapLogger {
 export interface T1BootstrapPorts {
   readonly identity: TerminalIdentityPort;
   readonly receipts: ReceiptStorePort;
-  readonly discovery: HubDiscoveryPort;
+  readonly hubEndpoint: HubEndpointPort;
   readonly edgeSession: EdgeSessionPort;
   readonly configurationCache: ConfigurationCachePort;
-  readonly trustedTime: TrustedTimePort;
   readonly staffSession: StaffSessionPort;
   readonly logger: BootstrapLogger;
+  /** Monotonic milliseconds for the Hub-time anchor (§1). */
+  readonly monotonicNow: () => number;
 }

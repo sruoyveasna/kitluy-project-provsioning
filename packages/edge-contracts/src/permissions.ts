@@ -37,6 +37,20 @@ export const EDGE_REGISTERED_PERMISSIONS = [
   "payments.capture.cash",
   /** "Create KHQR payment request through approved adapter" — terminal_role:T1|T4. */
   "payments.khqr.create",
+  // Amendment 002 (KLD-2026-08-06-WS12-T001-EDGE-BOOTSTRAP-001 §4): Edge
+  // terminal staff sessions and the T1 shell permission. Quoted from
+  // docs/security/kitluy-suite-rbac-permission-registry-amendment-002-
+  // t1-staff-sessions-v1.0.0.md (the imported v1.0.0 CSV is never edited).
+  /** "Open a Hub-issued Edge terminal staff session". */
+  "staff.sessions.open",
+  /** "Read the state of an Edge terminal staff session". */
+  "staff.sessions.read",
+  /** "Extend an open Edge terminal staff session within governed policy". */
+  "staff.sessions.refresh",
+  /** "Close an Edge terminal staff session and clear profile state". */
+  "staff.sessions.close",
+  /** "Operate the T1 POS Cashier / Intake shell" — session membership alone never grants it. */
+  "pos.t1.use",
 ] as const;
 
 export type EdgeRegisteredPermission = (typeof EDGE_REGISTERED_PERMISSIONS)[number];
@@ -60,19 +74,14 @@ export function isRequiredPermissionMarker(value: string): boolean {
 /**
  * Known permission gaps, one entry per distinct missing capability. Reported to
  * the owner for registration under `rbac.permission_registry_manage`.
+ *
+ * RESOLVED 2026-08-06 (KLD-2026-08-06-WS12-T001-EDGE-BOOTSTRAP-001 §4 /
+ * Amendment 002): the four former `PERMISSION_GAP_EDGE_SESSION_*` markers.
+ * Their capabilities are now the registered keys `staff.sessions.open`,
+ * `staff.sessions.refresh`, `staff.sessions.close` (and `staff.sessions.open`
+ * + conditional `staff.sessions.close` for `sessions-switch` — recorded
+ * interpretation, amendment §2), plus `staff.sessions.read` and `pos.t1.use`.
  */
-export const PERMISSION_GAP_EDGE_SESSION_OPEN =
-  "[REQUIRED: RBAC permission key for opening a Hub-issued Edge terminal session — no key in kitluy-suite-rbac-permission-registry-v1.0.0.csv covers it; identity.sessions.revoke is Management-surface session revocation, not Edge session issuance]";
-
-export const PERMISSION_GAP_EDGE_SESSION_REFRESH =
-  "[REQUIRED: RBAC permission key for rotating a short-lived Edge session token — absent from kitluy-suite-rbac-permission-registry-v1.0.0.csv]";
-
-export const PERMISSION_GAP_EDGE_SESSION_SWITCH =
-  "[REQUIRED: RBAC permission key for switching the staff actor bound to an open Edge session — absent from kitluy-suite-rbac-permission-registry-v1.0.0.csv]";
-
-export const PERMISSION_GAP_EDGE_SESSION_CLOSE =
-  "[REQUIRED: RBAC permission key for closing an Edge terminal session and clearing profile state — absent from kitluy-suite-rbac-permission-registry-v1.0.0.csv]";
-
 export const PERMISSION_GAP_EDGE_DISPLAY_MANAGE =
   "[REQUIRED: RBAC permission key for opening, updating and closing a T2 customer-display session from T1 — absent from kitluy-suite-rbac-permission-registry-v1.0.0.csv]";
 
@@ -84,10 +93,6 @@ export const PERMISSION_GAP_EDGE_DISPLAY_CUSTOMER_ACTION =
 
 /** All declared gaps, for reporting and for the completeness test. */
 export const EDGE_PERMISSION_GAPS = [
-  PERMISSION_GAP_EDGE_SESSION_OPEN,
-  PERMISSION_GAP_EDGE_SESSION_REFRESH,
-  PERMISSION_GAP_EDGE_SESSION_SWITCH,
-  PERMISSION_GAP_EDGE_SESSION_CLOSE,
   PERMISSION_GAP_EDGE_DISPLAY_MANAGE,
   PERMISSION_GAP_EDGE_DISPLAY_READ,
   PERMISSION_GAP_EDGE_DISPLAY_CUSTOMER_ACTION,

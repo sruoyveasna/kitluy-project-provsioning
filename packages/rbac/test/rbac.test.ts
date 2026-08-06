@@ -161,7 +161,11 @@ describe("@kitluy/rbac", () => {
     expect(isValidPermissionKey("digital_stores.ds_10394.read")).toBe(false);
     expect(isValidPermissionKey("locations.4821.read")).toBe(false);
     for (const key of CANONICAL_PERMISSION_KEYS) {
-      expect(key).not.toMatch(/[0-9]/);
+      // The one admitted digit form is a terminal-profile ORDINAL segment
+      // (`t1`..`t9` — Amendment 002's `pos.t1.use`), the same grammar as the
+      // canonical terminal profiles. Everything else stays digit-free.
+      const segments = key.split(".").filter((segment) => !/^t[1-9]$/.test(segment));
+      expect(segments.join(".")).not.toMatch(/[0-9]/);
     }
   });
 
@@ -198,11 +202,17 @@ describe("@kitluy/rbac", () => {
 
   it("reproduces the canonical registry exactly", () => {
     // 107 v1.0.0 keys + 2 from Amendment 001 (device containment,
-    // WS-11-T005-P02 owner package 2026-08-06).
-    expect(CANONICAL_PERMISSION_KEYS).toHaveLength(109);
-    expect(new Set(CANONICAL_PERMISSION_KEYS).size).toBe(109);
+    // WS-11-T005-P02 owner package 2026-08-06) + 5 from Amendment 002
+    // (T1 staff sessions, KLD-2026-08-06-WS12-T001-EDGE-BOOTSTRAP-001 §4).
+    expect(CANONICAL_PERMISSION_KEYS).toHaveLength(114);
+    expect(new Set(CANONICAL_PERMISSION_KEYS).size).toBe(114);
     expect(CANONICAL_PERMISSION_KEYS).toContain("device.containment.apply");
     expect(CANONICAL_PERMISSION_KEYS).toContain("device.containment.clear");
+    expect(CANONICAL_PERMISSION_KEYS).toContain("staff.sessions.open");
+    expect(CANONICAL_PERMISSION_KEYS).toContain("staff.sessions.read");
+    expect(CANONICAL_PERMISSION_KEYS).toContain("staff.sessions.refresh");
+    expect(CANONICAL_PERMISSION_KEYS).toContain("staff.sessions.close");
+    expect(CANONICAL_PERMISSION_KEYS).toContain("pos.t1.use");
     expect(KNOWN_PERMISSION_KEYS).toBe(CANONICAL_PERMISSION_KEYS);
     for (const retired of Object.keys(RETIRED_PERMISSION_KEYS)) {
       expect(isCanonicalPermissionKey(retired)).toBe(false);

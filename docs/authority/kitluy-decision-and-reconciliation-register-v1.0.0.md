@@ -2636,3 +2636,31 @@ commit count: git history shows exactly NINE T008 commits
 (`1dad4c8`, `27a7edd`, `b276166`, `99af1b5`, `09f93e9`, `6e7bf39`,
 `373cfc5`, `828e850`, `a6112a8`); the reported "ten" was a count error, not
 a missing commit. Full list: T008 final handoff §10.
+
+## KLD-2026-08-06-WS12-T001-EDGE-BOOTSTRAP-001 — T1 Hub bootstrap routes and session authorization (2026-08-06, WS-12-T001-P02)
+
+**Status: OWNER-APPROVED — LOCKED.** Full record:
+`docs/decisions/kitluy-t1-hub-bootstrap-route-and-session-owner-decision-v1.0.0.md`.
+
+Locks: three additive Edge routes — `GET /edge/v1/runtime/authority-time`
+(Hub DATABASE transaction time; 30-second maximum terminal monotonic-cache
+age; no wall-clock fallback; no lower-bound grace; `NOT_YET_VALID` stays
+retryable and non-consuming), `GET /edge/v1/runtime/eligibility` (all scope
+derived from the authenticated terminal credential and Hub relational
+authority, no overrides, fail-closed for wrong/inactive/retired Hub,
+restored quarantine, stale generation, revoked/superseded credential,
+missing pairing, non-T1 profile, prohibiting containment) and
+`GET /edge/v1/configuration/current` (the exact signed configuration
+envelope for the authenticated terminal; terminal-side independent
+verification; stale cache only under the explicit `offline_ready` label).
+Registers the canonical permission identifiers `staff.sessions.open`,
+`staff.sessions.read`, `staff.sessions.refresh`, `staff.sessions.close`
+and `pos.t1.use` (session open/restore alone never authorizes T1). Locks
+the six-step discovery endpoint order under `_kitluy-edge._tcp.local`
+(signed record + full identity verification for EVERY candidate; no
+candidate is trust) and the atomic post-provisioning protected-identity
+writer contract (main-process only, server-authoritative input, fsync +
+prior-file preservation, no private key in identity JSON, immutable local
+installation acknowledgment). BLK-005 custody gates unchanged. This
+decision resolves the WS-12-T001 PARTIAL prerequisites (route registration
+and permission keys).
