@@ -189,7 +189,14 @@ function migrationFiles() {
       filename: f,
       sequence: Number(NAME_PATTERN.exec(f)[1]),
       content,
-      checksum: createHash("sha256").update(content, "utf8").digest("hex"),
+      // WS-11-T008 F-1: hash LF-NORMALIZED bytes, matching hub-validate.mjs
+      // and secret-scan.mjs. Git checks these files out with CRLF on Windows
+      // (core.autocrlf), so hashing raw bytes made the immutability guard
+      // report drift on every unmodified migration in a fresh clone — the
+      // guard refused a healthy database and blocked the Rebuild Test.
+      // Journalled checksums are LF-based, so existing databases are
+      // unaffected.
+      checksum: createHash("sha256").update(content.replace(/\r\n/g, "\n"), "utf8").digest("hex"),
     };
   });
 }

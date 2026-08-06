@@ -15,6 +15,10 @@ const steps = [
   ["Build", "pnpm build"],
   ["OpenAPI validation", "pnpm contracts:validate"],
   ["Migration validation", "pnpm migrations:validate"],
+  // WS-11-T008 F-2: the Hub migration set was outside every routine gate,
+  // which is why an edit to an applied Hub migration reached a commit. This
+  // check is static (no database), same as the cloud one beside it.
+  ["Hub migration validation", "pnpm hub:db:validate"],
   ["Secret scan", "pnpm secret:scan"],
   ["Clock usage", "pnpm clock:check"],
   ["Docs link check", "pnpm docs:check"],

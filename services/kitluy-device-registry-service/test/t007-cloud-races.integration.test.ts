@@ -303,6 +303,10 @@ describe.skipIf(!live)("T007 cloud concurrency race families", () => {
       );
       const [a, b] = await Promise.all([settle(clear), settle(reapply)]);
       assertGoverned("F11", i, [a, b]);
+      // T008 F-4 (independent review): liveness. Without this the family
+      // would pass if BOTH containment doors always refused — a governed
+      // deadlock is still a broken system.
+      expect(a.ok || b.ok, `F11 iteration ${i}: neither containment arm succeeded`).toBe(true);
       const { rows } = await pool.query<{ state: string; cleared: string | null }>(
         `select containment_state::text as state, cleared_at::text as cleared
            from kitluy_devices.device_containment_states where device_id = $1::uuid`,
@@ -496,4 +500,71 @@ describe.skipIf(!live)("T007 cloud concurrency race families", () => {
       expect(Number(rows[0]?.n), `F15 iteration ${i}: duplicate assignment row`).toBe(1);
     }
   }, 180_000);
+
+  it("T008 F-5: an idempotency key identifies the WHOLE request — a same-key different-device assignment is REFUSED, never silently dropped", async () => {
+    // Independent-review finding F-5, fixed forward in migration 0182.
+    // BEFORE: the door compared only the artifact, so the second device
+    // returned EXISTING with the FIRST device's campaign and its
+    // installation vanished with no refusal and no evidence.
+    const deviceA = await enrollDevice("F5A");
+    const deviceB = await enrollDevice("F5B");
+    await claimAndRedeem(deviceA, "f5a");
+    await claimAndRedeem(deviceB, "f5b");
+    const draft = await door(
+      "kitluy_release_service",
+      `select kitluy_releases.create_release_draft_v1(
+         'kitluy-hub-agent', '4.0.0-${RUN}', 'b-f5-${RUN}', 'arm64', 'pi5-hub',
+         'development', 'file-ref-f5', repeat('f', 64), 1000, 30, 45, 0,
+         null, 'REL-OP-1', $1::uuid) as r`,
+      [randomUUID()],
+    );
+    const rel = String(((draft?.r ?? {}) as Record<string, unknown>).release_id);
+    await door(
+      "kitluy_release_service",
+      `select kitluy_releases.sign_release_v1($1::uuid, 'dev-key', 1, $2, 'REL-OP-1') as r`,
+      [rel, "T".repeat(88)],
+    );
+    await door(
+      "kitluy_release_service",
+      `select kitluy_releases.promote_release_v1($1::uuid, 'internal', 'REL-OP-1', 'REL-OP-2') as r`,
+      [rel],
+    );
+    const key = `T008-F5-${RUN}`;
+    const assign = (deviceId: string) =>
+      door(
+        "kitluy_release_service",
+        `select kitluy_releases.assign_release_v1(
+           $1::uuid, $2::uuid, $3::uuid, $4::uuid, 'development', $5::uuid, $6, 'REL-OP-1') as r`,
+        [rel, TENANT_B, STORE_B, LOCATION, deviceId, key],
+      );
+
+    const first = await assign(deviceA);
+    expect(String(((first?.r ?? {}) as Record<string, unknown>).outcome)).toBe("ASSIGNED");
+
+    // The SAME device replaying the SAME key still converges (idempotency
+    // is preserved, not traded away for strictness).
+    const replay = await assign(deviceA);
+    expect(String(((replay?.r ?? {}) as Record<string, unknown>).outcome)).toBe("EXISTING");
+    expect(((replay?.r ?? {}) as Record<string, unknown>).campaign_id).toBe(
+      ((first?.r ?? {}) as Record<string, unknown>).campaign_id,
+    );
+
+    // A DIFFERENT device under the same key is now a governed refusal.
+    const conflicting = await settle(assign(deviceB));
+    expect(conflicting.ok, "the same-key different-device assignment was not refused").toBe(false);
+    if (!conflicting.ok) {
+      expect(conflicting.error).toContain("KLUY-RELEASE-IDEMPOTENCY-CONFLICT");
+    }
+
+    // And device B has NO installation anywhere for this release — the
+    // refusal is total, not a partial write.
+    const { rows } = await pool.query<{ n: string }>(
+      `select count(*)::text as n
+         from kitluy_releases.device_installations i
+         join kitluy_releases.rollout_campaigns c on c.id = i.campaign_id
+        where c.artifact_id = $1::uuid and i.device_id = $2::uuid`,
+      [rel, deviceB],
+    );
+    expect(Number(rows[0]?.n)).toBe(0);
+  }, 60_000);
 });
