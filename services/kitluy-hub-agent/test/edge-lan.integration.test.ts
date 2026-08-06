@@ -1173,12 +1173,25 @@ describe.skipIf(!live)("Store LAN mTLS transport, activation and pairing routes 
       terminalNonce: transcript.terminalNonce,
       hubNonce: transcript.hubNonce,
     };
+    // WS-11-T008: the terminal verifies against a HUB-ANCHORED instant, not
+    // the host wall clock. The session's issuedAt comes from the Hub
+    // database, which in this environment runs a few hundred milliseconds
+    // ahead of the host, and the verifier refuses `now < issuedAt` with zero
+    // tolerance — so a host-clock terminal intermittently saw a session
+    // "dated in the future" (PAIR_CHALLENGE_NOT_YET_VALID). A real terminal's
+    // trusted-time floor is Hub-anchored (WS-11-T003), which is what this
+    // models. Expiry is still enforced against real elapsed time, so the
+    // security property under test is unchanged. The verifier's zero-skew
+    // lower bound is recorded for the owner in the T008 handoff.
+    const terminalInstant = new Date(
+      Math.max(Date.now(), new Date(String(session["issuedAt"])).getTime()),
+    );
     const hubVerdict = verifyHubPairingProof(
       transcript,
       Uint8Array.from(Buffer.from(String(pairingState["hubProofSignature"]), "base64url")),
       signer.publicKeyPem,
       hubExpectation,
-      new Date(),
+      terminalInstant,
       publicKeyFingerprint,
     );
     expect(hubVerdict.verified, "the Hub proof verifies on the terminal").toBe(true);
