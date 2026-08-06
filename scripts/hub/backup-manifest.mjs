@@ -17,6 +17,7 @@
  * not invented — hub-db.mjs already refuses to run against anything that is
  * not the local development database (KL-INF-P1-037).
  */
+import { Buffer } from "node:buffer";
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
 
 export const BACKUP_MANIFEST_VERSION = 1;

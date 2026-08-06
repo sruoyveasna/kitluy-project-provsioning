@@ -1487,17 +1487,24 @@ describe.skipIf(!live)(
       );
       expect(rows.length, "the revocation left no record").toBe(1);
       expect(rows[0]?.disposition).toBe("REPROVISION_REQUIRED");
-      // There is NO governed path that reinstates a revoked credential: no
-      // function in the schema can even be named for it.
-      const { rows: reinstate } = await keeperClient.query<{ name: string }>(
-        `select p.proname as name from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      // There is NO governed path that reinstates a revoked credential. The
+      // name census is pinned: the ONE match is WS-11-T006-P01's replacement
+      // door mark_replacement_restore_ready_v1, which records DATA-restore
+      // readiness on hub_replacement_operations during a four-eyes cutover.
+      // Its signature cannot even NAME a credential (proven below); the 0179
+      // suite separately proves replacement never carries identity and old
+      // credentials stay revoked. Any OTHER match fails this census.
+      const { rows: reinstate } = await keeperClient.query<{ name: string; args: string }>(
+        `select p.proname as name, pg_get_function_arguments(p.oid) as args
+         from pg_proc p join pg_namespace n on n.oid = p.pronamespace
         where n.nspname = 'kitluy_devices'
           and (p.proname like '%reinstate%' or p.proname like '%restore%' or p.proname like '%unrevoke%')`,
       );
       expect(
-        reinstate,
-        `a restore path exists: ${JSON.stringify(reinstate.map((r) => r.name))}`,
-      ).toEqual([]);
+        reinstate.map((r) => r.name),
+        `unexpected restore-path census: ${JSON.stringify(reinstate.map((r) => r.name))}`,
+      ).toEqual(["mark_replacement_restore_ready_v1"]);
+      expect(reinstate[0]?.args).not.toMatch(/credential/i);
       // And the disposition changed nothing about the terminal fact.
       const { rows: revokedRow } = await keeperClient.query<{ state: string }>(
         `select state::text as state from kitluy_devices.device_credentials

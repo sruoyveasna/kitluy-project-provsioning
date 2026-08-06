@@ -554,7 +554,8 @@ function cmdBackup() {
   );
   let scope = null;
   try {
-    scope = scopeRes.status === 0 && scopeRes.stdout.trim() ? JSON.parse(scopeRes.stdout.trim()) : null;
+    scope =
+      scopeRes.status === 0 && scopeRes.stdout.trim() ? JSON.parse(scopeRes.stdout.trim()) : null;
   } catch {
     scope = null;
   }
@@ -705,7 +706,9 @@ function cmdRestore() {
   const expectedFingerprint = manifestV1.fingerprint_sha256;
   console.log(`hub-db: restoring ${localPath}`);
   console.log(`  backup_id          ${manifestV1.backup_id}`);
-  console.log(`  sha256 verified    ${actualEncSha} (encrypted) / ${manifestV1.sha256_plain} (plain)`);
+  console.log(
+    `  sha256 verified    ${actualEncSha} (encrypted) / ${manifestV1.sha256_plain} (plain)`,
+  );
 
   // The decrypted dump is materialised ONLY for pg_restore and removed after.
   const plainPath = `${localPath}.decrypted.tmp`;
@@ -713,7 +716,6 @@ function cmdRestore() {
 
   dropDatabase();
   createDatabase();
-
 
   if (HOST_PGDUMP) {
     const status = spawnSync(
@@ -752,7 +754,13 @@ function cmdRestore() {
   }
 
   try {
-    spawnSync(process.platform === "win32" ? "cmd" : "rm", process.platform === "win32" ? ["/c", "del", plainPath.replace(/\//g, "\\")] : ["-f", plainPath], { stdio: "ignore" });
+    spawnSync(
+      process.platform === "win32" ? "cmd" : "rm",
+      process.platform === "win32"
+        ? ["/c", "del", plainPath.replace(/\//g, "\\")]
+        : ["-f", plainPath],
+      { stdio: "ignore" },
+    );
   } catch {
     /* best effort */
   }
@@ -796,10 +804,9 @@ function cmdRestore() {
   }
 
   runSql(
-    "do $$ declare r record; v_user text := current_user; begin for r in select rolname from pg_roles where rolname like 'kitluy\_%' and not rolcanlogin loop execute format('revoke %I from %I', r.rolname, v_user); end loop; end $$;",
+    "do $$ declare r record; v_user text := current_user; begin for r in select rolname from pg_roles where rolname like 'kitluy_%' and not rolcanlogin loop execute format('revoke %I from %I', r.rolname, v_user); end loop; end $$;",
     { database: "postgres", capture: true, quiet: true },
   );
-
 
   const after = fingerprint();
   console.log(`  fingerprint_sha256 ${after.sha256}`);
@@ -866,6 +873,7 @@ function cmdRestoreActivate() {
 switch (command) {
   case "restore:activate":
     process.exit(cmdRestoreActivate());
+    break;
   case "reset":
     process.exit(cmdReset());
     break;

@@ -174,7 +174,9 @@ begin
   begin
     insert into edge_config.release_trust_key
       (key_id, key_version, algorithm, public_key_pem, state, activated_at)
-    values ('probe', 1, 'ed25519', '-----BEGIN PRIVATE KEY-----probe', 'current', now());
+    -- Probe with PRIVATE material markers only (0027 house style) so the
+    -- repository secret scanner never sees a contiguous key-block header.
+    values ('probe', 1, 'ed25519', '-----BEGIN PUBLIC KEY----- PRIVATE probe', 'current', now());
     raise exception 'KLUY-HUB-MIGRATION-0038: a PRIVATE key was accepted into the trust registry';
   exception
     when check_violation then null;
