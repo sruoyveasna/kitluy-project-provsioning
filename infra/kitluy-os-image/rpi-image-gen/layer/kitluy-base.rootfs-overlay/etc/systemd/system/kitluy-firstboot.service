@@ -1,0 +1,31 @@
+[Unit]
+Description=KitLuy first-boot device identity
+Documentation=00_AI_HANDOFF/edge-platform/27_SYSTEMD_RUNTIME_RECONCILIATION.md
+# Identity must exist before anything can prove possession of it.
+Before=kitluy-enrollment-agent.service
+After=local-fs.target
+ConditionPathExists=/usr/lib/kitluy/firstboot-identity
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/kitluy/firstboot-identity
+User=root
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictRealtime=yes
+CapabilityBoundingSet=
+# The identity directory is the ONLY path this unit may write.
+ReadWritePaths=/var/lib/kitluy/identity
+StateDirectory=kitluy/identity
+StateDirectoryMode=0700
+
+[Install]
+WantedBy=multi-user.target

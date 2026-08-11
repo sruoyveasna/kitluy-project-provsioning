@@ -1,0 +1,9 @@
+#!/bin/sh
+# Minimal unassigned-terminal status surface (§13).
+#
+# Deliberately NOT a second POS shell. It reports device state and nothing
+# else: no Store pairing, no vertical, no Laundry workflow. Values come from
+# the bootstrap state file the agents write; absent values read as unknown
+# rather than being guessed.
+set -eu
+exec /usr/bin/node /usr/lib/kitluy/lib/firstboot-agent/bin/bootstrap-ui.js "$@"

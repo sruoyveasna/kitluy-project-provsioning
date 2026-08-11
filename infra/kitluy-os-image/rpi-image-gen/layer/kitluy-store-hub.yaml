@@ -1,0 +1,54 @@
+# METABEGIN
+# X-Env-Layer-Name: kitluy-store-hub
+# X-Env-Layer-Category: kitluy
+# X-Env-Layer-Desc: KitLuy Store Hub profile. Local PostgreSQL on NVMe, the Hub
+#  agent serving the LAN /edge/v1 API, sync services and mDNS advertisement.
+#  Headless — a Hub never runs a POS surface.
+# X-Env-Layer-Version: 0.1.0
+# X-Env-Layer-Requires: kitluy-base
+# METAEND
+---
+mmdebstrap:
+  packages:
+    # The Hub is the local operational authority for one Store Location and
+    # owns the local database. Major version matches the cloud contract.
+    - postgresql-15
+    - postgresql-client-15
+
+  customize-hooks:
+    - install -d "$1/var/lib/kitluy/hub"
+    - install -d -m 0700 "$1/var/lib/kitluy/hub/postgresql"
+    # Non-secret Hub runtime configuration.
+    #
+    # The local database DSN is deliberately ABSENT. It is created on the
+    # device at activation, because a DSN written here would be a credential
+    # baked into a golden image.
+    - |
+      cat > "$1/etc/kitluy/hub.env" <<'EOF'
+      KITLUY_LAN_BIND_HOST=0.0.0.0
+      KITLUY_LAN_PORT=8443
+      KITLUY_LAN_TLS_MIN_VERSION=1.3
+      KITLUY_MDNS_SERVICE=_kitluy-edge._tcp.local
+      KITLUY_LOCAL_DATABASE=postgresql
+      KITLUY_LOCAL_DATABASE_MAJOR_VERSION=15
+      KITLUY_NVME_REQUIRED=yes
+      EOF
+    # The Hub ADVERTISES; terminals listen. The service name is locked by the
+    # bootstrap contract (KLD-2026-08-06-WS12-T001-EDGE-BOOTSTRAP-001) and must
+    # not be renamed here.
+    - |
+      cat > "$1/etc/avahi/services/kitluy-edge.service" <<'EOF'
+      <?xml version="1.0" standalone='no'?>
+      <!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+      <service-group>
+        <name replace-wildcards="yes">KitLuy Store Hub on %h</name>
+        <service>
+          <type>_kitluy-edge._tcp</type>
+          <port>8443</port>
+        </service>
+      </service-group>
+      EOF
+    # A Hub does not become local Store authority by being imaged. It becomes
+    # authority only after cloud-governed assignment and activation, so nothing
+    # here enables the Hub agent's authority — only its ability to ask.
+    - install -d "$1/var/lib/kitluy/hub/outbox"

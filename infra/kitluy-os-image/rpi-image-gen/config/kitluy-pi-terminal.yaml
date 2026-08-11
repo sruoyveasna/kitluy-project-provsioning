@@ -1,0 +1,23 @@
+# KitLuy PI_TERMINAL development image.
+#
+#   rpi-image-gen build -S infra/kitluy-os-image/rpi-image-gen -c kitluy-pi-terminal.yaml
+#
+# Builder pinned by ../upstream.pin (rpi-image-gen v2.7.0).
+# One image serves T1–T4; the terminal profile arrives as governed
+# configuration after cloud-authorised assignment and is never baked in.
+device:
+  layer: rpi5
+
+layer:
+  custom: kitluy-pi-terminal
+
+image:
+  layer: image-rota
+  name: kitluy-pos-terminal-wayland-arm64
+  compression: zstd
+  boot_part_size: 128M
+  # Kiosk runtime only — no local database, so the system slot is smaller
+  # than the Hub's.
+  system_part_size: 3G
+  # Device identity, cached configuration and the offline operation queue.
+  data_part_size: 2G

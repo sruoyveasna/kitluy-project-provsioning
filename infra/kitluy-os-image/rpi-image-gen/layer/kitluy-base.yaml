@@ -1,0 +1,110 @@
+# METABEGIN
+# X-Env-Layer-Name: kitluy-base
+# X-Env-Layer-Category: kitluy
+# X-Env-Layer-Desc: KitLuy managed-device common base. Shared by the Store Hub
+#  and Pi terminal profiles: device identity bootstrap, firstboot, the cloud
+#  enrollment agent, health reporting, the update runtime, security hardening
+#  and persistent logging. Carries NO secret and NO assignment truth.
+# X-Env-Layer-Version: 0.1.0
+# X-Env-Layer-Requires: bookworm-minbase,
+#  openssh-server,
+#  systemd-timesyncd,
+#  fake-hwclock,
+#  ca-certificates
+# METAEND
+---
+# NOTE ON TRUSTED TIME
+# --------------------
+# systemd-timesyncd and fake-hwclock are both required, not either/or. The
+# owner-fixed trusted-time model takes the MAXIMUM of RTC time, authenticated
+# network time and a persisted floor, and never lets trusted time move
+# backwards. A device that cannot establish trusted time cannot prove a
+# certificate is currently valid, so this is a security dependency rather than
+# a convenience.
+mmdebstrap:
+  packages:
+    # Device agent runtime. Node is the runtime the KitLuy agents are written
+    # in; the agent code itself is delivered by the governed release system,
+    # not baked here (mission §27: OS image is not an application release).
+    - nodejs
+    # LAN discovery. The Hub advertises _kitluy-edge._tcp.local and the
+    # terminal listens for it; both sides need the resolver.
+    - avahi-daemon
+    - libnss-mdns
+    # Storage and integrity tooling for the A/B + encrypted-data layout.
+    - cryptsetup
+    - e2fsprogs
+    # Log persistence — a device that loses its logs on reboot cannot support
+    # an incident investigation.
+    - systemd-journal-remote
+
+  customize-hooks:
+    # Security hardening. Applied as a hook rather than as shipped files so the
+    # layer stays readable and the intent stays next to the change.
+    - |
+      cat > "$1/etc/ssh/sshd_config.d/60-kitluy-hardening.conf" <<'EOF'
+      PermitRootLogin no
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PermitEmptyPasswords no
+      X11Forwarding no
+      EOF
+    - |
+      cat > "$1/etc/sysctl.d/60-kitluy-hardening.conf" <<'EOF'
+      kernel.kptr_restrict=2
+      kernel.dmesg_restrict=1
+      net.ipv4.conf.all.rp_filter=1
+      net.ipv4.conf.all.accept_redirects=0
+      net.ipv6.conf.all.accept_redirects=0
+      net.ipv4.conf.all.accept_source_route=0
+      EOF
+    - |
+      install -d "$1/etc/systemd/journald.conf.d"
+      cat > "$1/etc/systemd/journald.conf.d/60-kitluy.conf" <<'EOF'
+      [Journal]
+      Storage=persistent
+      SystemMaxUse=256M
+      MaxRetentionSec=30day
+      EOF
+    # Device identity lives on the encrypted data partition and is created ON
+    # the device at firstboot. The directory is created empty and 0700; no key
+    # material is ever placed here by the build.
+    - install -d -m 0700 "$1/var/lib/kitluy/identity"
+    - install -d "$1/etc/kitluy" "$1/var/lib/kitluy" "$1/usr/lib/kitluy"
+    # /etc/kitluy/image.env — the identity every KitLuy unit loads via
+    # EnvironmentFile. It existed only on the staged path, so units on the REAL
+    # image referenced a file that was never created; systemd fails a unit whose
+    # EnvironmentFile is missing, which would have taken the whole bootstrap
+    # runtime down on first boot. Non-secret by construction.
+    - |
+      cat > "$1/etc/kitluy/image.env" <<'EOF'
+      KITLUY_IMAGE_NAME=kitluy-os
+      KITLUY_IMAGE_SCHEMA_VERSION=1
+      KITLUY_IMAGE_VERSION=0.2.0-dev
+      KITLUY_RELEASE_CHANNEL=internal
+      KITLUY_ENROLLMENT_BASE_URL=
+      KITLUY_DEFAULT_TIMEZONE=Asia/Phnom_Penh
+      KITLUY_DEFAULT_LOCALES=km-KH,en-US
+      KITLUY_BASE_PINNED=no
+      EOF
+    # CLONE HYGIENE (mission §15). A golden image must not carry a machine
+    # identity, or every device flashed from it enrolls as the same device.
+    # Truncating rather than deleting makes systemd regenerate a unique
+    # machine-id on first boot; deleting the file can leave it unset.
+    - |
+      : > "$1/etc/machine-id"
+      rm -f "$1/var/lib/dbus/machine-id"
+      ln -sf /etc/machine-id "$1/var/lib/dbus/machine-id"
+    # No pre-seeded SSH host keys — cloned host keys would let one device
+    # impersonate another on the LAN.
+    - rm -f "$1"/etc/ssh/ssh_host_*
+    # CLONE HYGIENE, second class of shared key. Debian's `ssl-cert` package
+    # generates /etc/ssl/private/ssl-cert-snakeoil.key at install time, so it is
+    # baked into the golden image and EVERY device flashed from it would share
+    # one private key. It is a self-signed placeholder rather than a KitLuy
+    # credential, and nothing in this image serves TLS with it — but a shared
+    # private key across a fleet is exactly the property clone hygiene exists to
+    # prevent, and it is removed for the same reason the SSH host keys are.
+    # Caught by scan-image-secrets.sh against the BUILT image, which is the
+    # check the staged-tree scan could not perform.
+    - rm -f "$1"/etc/ssl/private/ssl-cert-snakeoil.key "$1"/etc/ssl/certs/ssl-cert-snakeoil.pem

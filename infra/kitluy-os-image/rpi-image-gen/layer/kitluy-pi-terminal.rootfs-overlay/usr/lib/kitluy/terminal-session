@@ -1,0 +1,12 @@
+#!/bin/sh
+# KitLuy terminal graphical bootstrap session.
+#
+# Starts the Wayland compositor and, inside it, the minimal unassigned-terminal
+# status surface. This is the OS bootstrap experience, NOT the POS application:
+# it exists so an unassigned terminal shows a truthful status screen instead of
+# a black display or a restart loop.
+set -eu
+: "${XDG_RUNTIME_DIR:=/run/user/$(id -u)}"
+export XDG_RUNTIME_DIR
+mkdir -p "$XDG_RUNTIME_DIR" 2>/dev/null || true
+exec /usr/bin/labwc -s /usr/lib/kitluy/terminal-bootstrap-ui

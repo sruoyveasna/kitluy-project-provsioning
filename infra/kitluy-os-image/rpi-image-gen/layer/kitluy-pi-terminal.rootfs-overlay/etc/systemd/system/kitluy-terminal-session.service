@@ -1,0 +1,46 @@
+[Unit]
+Description=KitLuy terminal graphical bootstrap session (Wayland/labwc)
+# This is the OS/bootstrap graphical environment, NOT the POS application.
+# kitluy-terminal-client.service is the governed Electron POS release and is a
+# separate concept that must never be merged into this one.
+After=kitluy-firstboot.service seatd.service
+Wants=seatd.service
+Requires=kitluy-firstboot.service
+ConditionPathExists=/usr/lib/kitluy/terminal-session
+
+[Service]
+Type=simple
+# A REAL system user. The previous definition used `User=%i` in a non-template
+# unit, where the specifier expands to the empty string and User= is silently
+# unset — the process then ran as root with a graphical stack attached.
+User=kitluy-terminal
+Group=kitluy-terminal
+PAMName=login
+EnvironmentFile=/etc/kitluy/image.env
+EnvironmentFile=/etc/kitluy/terminal.env
+Environment=XDG_RUNTIME_DIR=/run/user/%U
+Environment=XDG_SESSION_TYPE=wayland
+ExecStart=/usr/lib/kitluy/terminal-session
+Restart=always
+RestartSec=10s
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+# RestrictRealtime is deliberately NOT set: a Wayland compositor legitimately
+# requests realtime scheduling for frame pacing, and denying it degrades the
+# session rather than hardening it. Recorded as an intentional exception.
+ReadWritePaths=/var/lib/kitluy/terminal /run/user
+# The compositor needs the DRM/input devices; nothing else.
+DeviceAllow=char-drm rw
+DeviceAllow=char-input rw
+SupplementaryGroups=video input render
+
+[Install]
+WantedBy=multi-user.target

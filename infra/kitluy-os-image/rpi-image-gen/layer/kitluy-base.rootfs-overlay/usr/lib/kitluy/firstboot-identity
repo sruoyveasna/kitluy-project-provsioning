@@ -1,0 +1,10 @@
+#!/bin/sh
+# KitLuy first-boot identity.
+#
+# A launcher, deliberately: the implementation is
+# services/kitluy-device-firstboot-agent (bootstrapIdentity + the file/key/
+# hardware adapters), compiled and installed under lib/. Re-implementing any
+# of it here would create a second identity model, which the owner decision
+# forbids.
+set -eu
+exec /usr/bin/node /usr/lib/kitluy/lib/firstboot-agent/bin/firstboot-identity.js "$@"

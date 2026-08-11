@@ -1,0 +1,24 @@
+# KitLuy STORE_HUB development image.
+#
+#   rpi-image-gen build -S infra/kitluy-os-image/rpi-image-gen -c kitluy-store-hub.yaml
+#
+# Builder pinned by ../upstream.pin (rpi-image-gen v2.7.0).
+# image-rota gives the A/B slot layout plus a separate userdata partition,
+# which is the layout the Hub needs: the system rolls back, the data does not.
+device:
+  layer: rpi5
+
+layer:
+  custom: kitluy-store-hub
+
+image:
+  layer: image-rota
+  name: kitluy-storehub-os-arm64
+  compression: zstd
+  boot_part_size: 128M
+  # The Hub carries local PostgreSQL and the Hub services, so its system slot
+  # is larger than the terminal's. Both A and B slots are this size.
+  system_part_size: 4G
+  # Local Store database and the transactional outbox. Sized for development;
+  # production sizing is an owner decision against real Store volumes.
+  data_part_size: 8G

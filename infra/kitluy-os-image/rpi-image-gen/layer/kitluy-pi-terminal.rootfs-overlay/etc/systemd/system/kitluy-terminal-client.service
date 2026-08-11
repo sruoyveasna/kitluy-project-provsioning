@@ -1,0 +1,46 @@
+[Unit]
+Description=KitLuy POS desktop client (Electron) — GOVERNED APPLICATION RELEASE
+# ===========================================================================
+# THIS UNIT IS INTENTIONALLY NOT ENABLED IN THE GOLDEN IMAGE.
+# ===========================================================================
+# The KitLuy POS Desktop application is a governed application release, not a
+# component of the golden OS image (owner decision DEC-1, bootstrap-hybrid).
+# The golden image therefore carries the unit DEFINITION so the release package
+# does not have to invent one, but creates no multi-user.target.wants symlink.
+#
+# Enabling it here would boot-loop a terminal every 10 seconds against an
+# executable the image deliberately does not contain — which is exactly the
+# defect image v2.7.0 shipped.
+#
+# The governed release package installs /usr/lib/kitluy/terminal-client and
+# runs `systemctl enable --now kitluy-terminal-client.service`. Until then this
+# unit is inert, and ConditionPathExists makes that explicit even if something
+# starts it by hand.
+After=kitluy-terminal-session.service
+Requires=kitluy-terminal-session.service
+ConditionPathExists=/usr/lib/kitluy/terminal-client
+
+[Service]
+Type=simple
+User=kitluy-terminal
+Group=kitluy-terminal
+EnvironmentFile=/etc/kitluy/image.env
+EnvironmentFile=/etc/kitluy/terminal.env
+Environment=XDG_RUNTIME_DIR=/run/user/%U
+ExecStart=/usr/lib/kitluy/terminal-client
+Restart=always
+RestartSec=10s
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+ReadWritePaths=/var/lib/kitluy/terminal
+
+[Install]
+WantedBy=graphical.target

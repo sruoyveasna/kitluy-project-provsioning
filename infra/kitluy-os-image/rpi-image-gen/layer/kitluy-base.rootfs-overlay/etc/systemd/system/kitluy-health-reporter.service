@@ -1,0 +1,30 @@
+[Unit]
+Description=KitLuy bootstrap health reporter
+After=kitluy-enrollment-agent.service network-online.target
+Wants=network-online.target
+Requires=kitluy-firstboot.service
+ConditionPathExists=/usr/lib/kitluy/health-reporter
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/kitluy/health-reporter
+User=root
+Restart=always
+RestartSec=60s
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictRealtime=yes
+CapabilityBoundingSet=
+ReadWritePaths=/var/lib/kitluy/health
+StateDirectory=kitluy
+StateDirectoryMode=0750
+
+[Install]
+WantedBy=multi-user.target

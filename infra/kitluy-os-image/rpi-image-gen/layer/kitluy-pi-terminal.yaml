@@ -1,0 +1,74 @@
+# METABEGIN
+# X-Env-Layer-Name: kitluy-pi-terminal
+# X-Env-Layer-Category: kitluy
+# X-Env-Layer-Desc: KitLuy POS terminal profile. Wayland/labwc kiosk session,
+#  Hub discovery and peripheral support. Operates through the Store Hub over the
+#  LAN and never writes to Supabase for normal Store operations.
+# X-Env-Layer-Version: 0.2.0
+# X-Env-Layer-Requires: kitluy-base,
+#  device-user-admin
+# METAEND
+---
+# THE TERMINAL PROFILE IS NOT BAKED IN
+# ------------------------------------
+# One image serves T1, T2, T3 and T4. The profile arrives as governed
+# configuration after cloud-authorised assignment. Baking a profile would make
+# the image a source of assignment truth, which the locked provisioning chain
+# forbids — and a spare terminal could then only replace the one role it was
+# flashed for.
+#
+# NOR IS THE VERTICAL. The POS Shell serves multiple governed vertical
+# templates; the Laundry template is assigned to a Store, not built into an
+# image. No Laundry concept may appear in this layer.
+#
+# WAYLAND, NOT X11
+# ----------------
+# Raspberry Pi OS Bookworm runs Wayland with labwc on Pi 5, and the kiosk
+# session follows the platform rather than carrying an X11 stack alongside it.
+# `device-user-admin` is reused from upstream for the unprivileged session user
+# instead of declaring a competing one.
+mmdebstrap:
+  packages:
+    # Wayland compositor stack. labwc is the Raspberry Pi OS Bookworm default
+    # on Pi 5; seatd//libinput carry the input foundation for touchscreens.
+    - labwc
+    - wlr-randr
+    - seatd
+    - libinput-tools
+    # Touchscreen calibration and input diagnostics for the setup/recovery shell.
+    - evtest
+    # Peripheral support. Actual peripheral presence is resolved from delivered
+    # configuration, never assumed by the image.
+    - cups
+    - libcups2
+
+  customize-hooks:
+    - install -d "$1/var/lib/kitluy/terminal"
+    # Non-secret terminal runtime configuration.
+    #
+    # NOTE what is absent: no terminal profile, no vertical template, no
+    # Tenant, no Digital Store, no Location, no Hub endpoint. A terminal that
+    # has not been assigned has none of them, and the image is byte-identical
+    # for every terminal in the fleet.
+    - |
+      cat > "$1/etc/kitluy/terminal.env" <<'EOF'
+      KITLUY_KIOSK_RUNTIME=wayland/labwc
+      KITLUY_KIOSK_COMPOSITOR=labwc
+      KITLUY_MDNS_SERVICE=_kitluy-edge._tcp.local
+      KITLUY_HUB_MANUAL_ENDPOINT_ALLOWED=fallback-only
+      KITLUY_PERIPHERAL_SUPPORT=printer scanner customer-display cash-drawer
+      EOF
+    # Units and bootstrap executables are NOT written here. They come from
+    # kitluy-pi-terminal.rootfs-overlay/, the single canonical source that the
+    # staged build path also consumes (scripts/lib/common.sh:kitluy_install_overlay).
+    # Defining a unit in this file as well is what produced the staged-vs-layer
+    # divergence recorded in 27_SYSTEMD_RUNTIME_RECONCILIATION.md.
+    - install -d "$1/var/lib/kitluy/terminal"
+    # CLONE HYGIENE (mission §15, rule 7): a golden terminal image must carry
+    # no cached Hub endpoint and no cached assignment. Both are per-device
+    # state, written only after enrollment and assignment succeed.
+    - |
+      rm -f "$1/var/lib/kitluy/terminal/hub-endpoint.json" \
+            "$1/var/lib/kitluy/terminal/assignment.json" \
+            "$1/var/lib/kitluy/terminal/configuration.json" \
+            "$1/var/lib/kitluy/terminal/vertical-template.json"
