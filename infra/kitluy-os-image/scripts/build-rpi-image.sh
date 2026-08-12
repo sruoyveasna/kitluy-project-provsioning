@@ -75,7 +75,7 @@ while [[ $# -gt 0 ]]; do
     # The address the flashed device will call to enroll. Exported so the
     # kitluy-base layer can bake it into /etc/kitluy/image.env, which is what
     # makes a card cloneable: every copy already knows where the fleet is.
-    --enrollment-url)  export KITLUY_ENROLLMENT_BASE_URL="${2:-}"; shift 2 ;;
+    --enrollment-url)  ENROLLMENT_URL="${2:-}"; shift 2 ;;
     --build-dir)       BUILD_DIR="${2:-}"; shift 2 ;;
     --filesystem-only) FILESYSTEM_ONLY="yes"; shift ;;
     --collect-only)    COLLECT_ONLY="yes"; shift ;;
@@ -162,6 +162,7 @@ mkdir -p "$BUILD_DIR"
 # to own, because silently baking an operator's identity into a fleet artifact
 # should be a decision, not a side effect.
 RIG_OVERRIDES=()
+ENROLLMENT_URL="${ENROLLMENT_URL:-${KITLUY_ENROLLMENT_BASE_URL:-}}"
 if [[ -n "${KITLUY_DEV_SSH_PUBKEY:-}" ]]; then
   [[ -f "$KITLUY_DEV_SSH_PUBKEY" ]] \
     || die "KITLUY_DEV_SSH_PUBKEY is not a readable file: ${KITLUY_DEV_SSH_PUBKEY}"
@@ -173,7 +174,12 @@ if [[ -n "${KITLUY_DEV_SSH_PUBKEY:-}" ]]; then
   fi
   grep -qE '^(ssh-(rsa|ed25519|dss)|ecdsa-sha2-|sk-(ssh|ecdsa))' "$KITLUY_DEV_SSH_PUBKEY" \
     || die "REFUSED: ${KITLUY_DEV_SSH_PUBKEY} does not look like an OpenSSH public key"
-  RIG_OVERRIDES+=("IGconf_ssh_pubkey_user1=${KITLUY_DEV_SSH_PUBKEY}")
+  # THE KEY, NOT THE PATH. rpi-image-gen documents
+  #   IGconf_ssh_pubkey_user1="$(< ~/.ssh/id_rsa.pub)"
+  # Passing a filename produced an image with NO authorized_keys at all: the
+  # build reported success and the device would have been unreachable, which is
+  # the exact outcome the refusal below exists to prevent.
+  RIG_OVERRIDES+=("IGconf_ssh_pubkey_user1=$(cat "$KITLUY_DEV_SSH_PUBKEY")")
   log "recovery access: public key from ${KITLUY_DEV_SSH_PUBKEY} -> /home/pi/.ssh/authorized_keys"
 elif [[ "$NO_INTERACTIVE_ACCESS" == "yes" ]]; then
   warn "--no-interactive-access: building an image with NO way in, deliberately."
@@ -203,6 +209,24 @@ fi
 
 RIG_ARGS=(build -S "$KITLUY_SRC" -c "$RIG_CONFIG" -B "$BUILD_DIR")
 [[ "$FILESYSTEM_ONLY" == "yes" ]] && RIG_ARGS+=(-f)
+# The endpoint a flashed device will call.
+#
+# Passed as an IGconf override rather than an exported shell variable: the
+# layer's customize steps run inside bdebstrap, which forwards ONLY what it is
+# given, so an exported KITLUY_ENROLLMENT_BASE_URL never crossed that boundary
+# and the first build with --enrollment-url still produced an EMPTY endpoint.
+#
+# It has to be right at build time. The rootfs is erofs — read-only — so this
+# cannot be corrected on the card afterwards.
+if [[ -n "$ENROLLMENT_URL" ]]; then
+  RIG_OVERRIDES+=("IGconf_kitluy_enrollment_url=${ENROLLMENT_URL}")
+  log "enrollment endpoint baked: ${ENROLLMENT_URL}"
+else
+  warn "no --enrollment-url given: the image will boot and report that no"
+  warn "  enrollment endpoint is configured. The rootfs is read-only, so this"
+  warn "  cannot be fixed on the card — rebuild with --enrollment-url."
+fi
+
 [[ ${#RIG_OVERRIDES[@]} -gt 0 ]] && RIG_ARGS+=(-- "${RIG_OVERRIDES[@]}")
 
 log "profile=${PROFILE} config=${RIG_CONFIG} channel=${KITLUY_RELEASE_CHANNEL}"

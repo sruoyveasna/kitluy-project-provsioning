@@ -100,12 +100,12 @@ mmdebstrap:
     # Still not a secret. It is a public address, and an image carrying it is
     # exactly as zero-secret as one without (KLSRC-0162 §34).
     - |
-      if [ -n "${KITLUY_ENROLLMENT_BASE_URL:-}" ]; then
-        sed -i "s|^KITLUY_ENROLLMENT_BASE_URL=.*|KITLUY_ENROLLMENT_BASE_URL=${KITLUY_ENROLLMENT_BASE_URL}|" \
+      if [ -n "${IGconf_kitluy_enrollment_url:-}" ]; then
+        sed -i "s|^KITLUY_ENROLLMENT_BASE_URL=.*|KITLUY_ENROLLMENT_BASE_URL=${IGconf_kitluy_enrollment_url}|" \
           "$1/etc/kitluy/image.env"
       fi
-      if [ -n "${KITLUY_ENVIRONMENT:-}" ]; then
-        sed -i "s|^KITLUY_ENVIRONMENT=.*|KITLUY_ENVIRONMENT=${KITLUY_ENVIRONMENT}|" \
+      if [ -n "${IGconf_kitluy_environment:-}" ]; then
+        sed -i "s|^KITLUY_ENVIRONMENT=.*|KITLUY_ENVIRONMENT=${IGconf_kitluy_environment}|" \
           "$1/etc/kitluy/image.env"
       fi
     # CLONE HYGIENE (mission §15). A golden image must not carry a machine
