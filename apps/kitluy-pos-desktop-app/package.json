@@ -2,7 +2,7 @@
   "name": "@kitluy-apps/kitluy-pos-desktop-app",
   "version": "0.1.0",
   "private": true,
-  "description": "POS Desktop App — Electron/Linux ARM64 operational client implementing the owner-locked T1-T4 profiles through the Store Hub (POS spec v4.0.0).",
+  "description": "POS Desktop App \u2014 Electron/Linux ARM64 operational client implementing the owner-locked T1-T4 profiles through the Store Hub (POS spec v4.0.0).",
   "type": "module",
   "main": "dist-electron/electron/main.js",
   "scripts": {
@@ -15,9 +15,11 @@
   "dependencies": {
     "@kitluy-verticals/phase1-laundry": "workspace:*",
     "@kitluy/device-identity": "workspace:*",
+    "@kitluy/digital-store-context": "workspace:*",
     "@kitluy/edge-contracts": "workspace:*",
     "@kitluy/feature-flags": "workspace:*",
     "@kitluy/localization": "workspace:*",
+    "@kitluy/shared-types": "workspace:*",
     "@kitluy/terminal-local-store": "workspace:*",
     "@kitluy/web-ui": "workspace:*",
     "react": "catalog:",
