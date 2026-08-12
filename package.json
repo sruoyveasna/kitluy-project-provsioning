@@ -2,7 +2,7 @@
   "name": "het-kitluy-project",
   "version": "0.1.0",
   "private": true,
-  "description": "KitLuy Suite monorepo \u2014 digital-first commerce platform for Cambodia. Phase 1: Laundry Stores and Shops.",
+  "description": "KitLuy Suite monorepo — digital-first commerce platform for Cambodia. Phase 1: Laundry Stores and Shops.",
   "license": "SEE LICENSE IN LICENSE",
   "packageManager": "pnpm@9.15.9",
   "engines": {
@@ -34,6 +34,8 @@
     "db:schema:check": "node scripts/database/db-schema-check.mjs",
     "db:reset": "node scripts/database/db-exec.mjs reset",
     "db:apply": "node scripts/database/db-exec.mjs apply",
+    "db:deploy:hosted-dev": "node scripts/database/db-deploy-hosted-dev.mjs",
+    "db:deploy:hosted-dev:check": "node scripts/database/hosted-dev-target.test.mjs",
     "db:seed": "node scripts/database/db-exec.mjs seed",
     "db:types": "node scripts/database/db-exec.mjs types",
     "db:test": "node scripts/database/db-exec.mjs test",

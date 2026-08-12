@@ -357,6 +357,23 @@ export const RULES = [
   ],
 ];
 
+// --- Batch 4 (2026-08-11, owner device-lifecycle workflow) ------------------
+export const BATCH4_RULES = [
+  [
+    /^kitluy-device-factory-enrollment-store-provisioning-and-pi-terminal-workflow-v1\.0\.0\.md$/,
+    {
+      dir: "owner-decisions",
+      authority_class: "OWNER-DECISION",
+      document_role:
+        "DEVICE-LIFECYCLE-WORKFLOW (factory enrollment -> store provisioning -> terminal activation)",
+      product_or_domain: "edge",
+      vertical: "laundry",
+      notes:
+        "Owner-aligned workflow. Defers to the canonical device/provisioning schema by its own §39 — conceptual names (store_hub_id, terminal_profile_code) are not a schema instruction. Narrows the open edge blockers DEC-1/DEC-2 without closing them (KLREC-2026-08-11-EDGE-001). Ingested copy normalizes transfer-encoding mojibake in the diagram glyphs (KLREC-2026-08-11-EDGE-003).",
+    },
+  ],
+];
+
 // --- Batch 3 (2026-07-26, KL-BUILD-000 ingestion) ---------------------------
 export const BATCH3_RULES = [
   [
@@ -471,7 +488,7 @@ export const BATCH2_RULES = [
 ];
 
 export function classify(name) {
-  for (const [re, fields] of [...BATCH3_RULES, ...BATCH2_RULES, ...RULES]) {
+  for (const [re, fields] of [...BATCH4_RULES, ...BATCH3_RULES, ...BATCH2_RULES, ...RULES]) {
     if (re.test(name)) return fields;
   }
   return {
