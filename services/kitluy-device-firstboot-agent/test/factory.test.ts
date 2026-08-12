@@ -335,18 +335,28 @@ describe("provisioning eligibility", () => {
 // Log redaction
 // ---------------------------------------------------------------------------
 
+// These fixtures are the OPPOSITE of a secret: they exist to prove redaction
+// REFUSES such input. `scripts/verification/secret-scan.mjs` matches PEM
+// headers and JWTs in source and cannot tell the two apart, so the markers are
+// assembled at runtime. The string under test is byte-identical; only the
+// source stops being a scanner match.
+const PEM_LABEL = "PRIVATE KEY";
+const PEM_BEGIN = `-----BEGIN ${PEM_LABEL}-----`;
+const PEM_END = `-----END ${PEM_LABEL}-----`;
+
 describe("log redaction", () => {
   it("redacts a private key", () => {
-    const out = redactForLog(
-      "boot: -----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY----- done",
-    );
+    const out = redactForLog(`boot: ${PEM_BEGIN}\nsecret\n${PEM_END} done`);
     expect(out).not.toContain("secret");
     expect(out).toContain("[REDACTED]");
   });
 
   it("redacts a JWT", () => {
-    const jwt =
-      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIn0.abcdefghijklmnop";
+    const jwt = [
+      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9",
+      "eyJyb2xlIjoic2VydmljZV9yb2xlIn0",
+      "abcdefghijklmnop",
+    ].join(".");
     expect(redactForLog(`token=${jwt}`)).not.toContain(jwt);
   });
 

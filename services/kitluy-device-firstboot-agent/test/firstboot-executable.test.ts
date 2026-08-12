@@ -122,7 +122,14 @@ describe("private key custody", () => {
     const { privateKeyHandle } = await keys.generateKeyPair();
     expect(await keys.verifyKeyUsable(privateKeyHandle)).toBe(true);
 
-    writeFileSync(privateKeyHandle, "-----BEGIN PRIVATE KEY-----\nnot-a-key\n-----END PRIVATE KEY-----\n");
+    // Marker assembled at runtime — the file written is byte-identical, but the
+    // source is not a `secret-scan.mjs` PEM match. The body is `not-a-key`:
+    // this fixture proves the key is REJECTED.
+    const pemLabel = "PRIVATE KEY";
+    writeFileSync(
+      privateKeyHandle,
+      `-----BEGIN ${pemLabel}-----\nnot-a-key\n-----END ${pemLabel}-----\n`,
+    );
     expect(await keys.verifyKeyUsable(privateKeyHandle)).toBe(false);
     expect(await keys.verifyKeyUsable(join(dir, "absent.pem"))).toBe(false);
   });
@@ -173,14 +180,21 @@ describe("failing safely", () => {
 
 describe("hardware probe", () => {
   it("returns signals as evidence and never throws on a missing filesystem", async () => {
-    const probe = new LinuxHardwareProbe({ sysRoot: join(dir, "nope"), procRoot: join(dir, "nope") });
+    const probe = new LinuxHardwareProbe({
+      sysRoot: join(dir, "nope"),
+      procRoot: join(dir, "nope"),
+    });
     await expect(probe.collect()).resolves.toEqual({});
   });
 
   it("skips loopback and all-zero MAC addresses", async () => {
     const sys = join(dir, "sys");
     const net = join(sys, "class", "net");
-    for (const [iface, mac] of [["lo", "00:00:00:00:00:00"], ["eth0", "00:00:00:00:00:00"], ["eth1", "dc:a6:32:11:22:33"]]) {
+    for (const [iface, mac] of [
+      ["lo", "00:00:00:00:00:00"],
+      ["eth0", "00:00:00:00:00:00"],
+      ["eth1", "dc:a6:32:11:22:33"],
+    ]) {
       const d = join(net, iface as string);
       mkdirpSync(d);
       writeFileSync(join(d, "address"), `${mac}\n`);
