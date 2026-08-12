@@ -804,6 +804,13 @@ begin
       'kitluy_issuance_service', 'kitluy_job_governor']
     loop
       if exists (select 1 from pg_roles where rolname = v_role) then
+        -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): PostgreSQL 16 removed
+        -- CREATEROLE's implicit power to SET ROLE to roles it created; recorded
+        -- membership is now required. Borrow it for the probe and return it
+        -- immediately, exactly as the rest of this chain borrows governors.
+        -- Membership does not change what the probe MEASURES: whether a role may
+        -- execute the approval gate is a function privilege of that role.
+        execute format('grant %I to %I', v_role, current_user);
         begin
           execute format('set role %I', v_role);
           begin
@@ -821,6 +828,8 @@ begin
           v_findings := v_findings ||
             format('control 10: the execute probe for %s did not complete: %s', v_role, v_probe_error);
         end;
+        -- Return the borrowed membership immediately.
+        execute format('revoke %I from %I', v_role, current_user);
       end if;
     end loop;
 

@@ -3360,7 +3360,10 @@ begin
     select 1 from pg_auth_members m
       join pg_roles r on r.oid = m.member
      where m.roleid = (select oid from pg_roles where rolname = 'kitluy_activation_governor')
-       and r.rolcanlogin) then
+       and r.rolcanlogin
+       -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): exclude the automatic,
+       -- un-removable membership PostgreSQL 16 grants the creating role.
+       and not (r.rolname = current_user and m.grantor <> m.member)) then
     raise exception 'FAIL WS11-N16: a login-capable role is a member of the governor owner';
   end if;
   raise notice 'PASS WS11-N16a: the recovery door is authenticated-only and the coarse bridge governor-only; no recovery lineage column exists; the issuance, evaluator, revocation and expiration boundaries stand; no runtime identity holds direct mutation; FORCE RLS holds; no login-capable governor membership';
@@ -3487,7 +3490,10 @@ begin
     select 1 from pg_auth_members m
       join pg_roles r on r.oid = m.member
      where m.roleid = (select oid from pg_roles where rolname = 'kitluy_activation_governor')
-       and r.rolcanlogin) then
+       and r.rolcanlogin
+       -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): exclude the automatic,
+       -- un-removable membership PostgreSQL 16 grants the creating role.
+       and not (r.rolname = current_user and m.grantor <> m.member)) then
     raise exception 'FAIL WS11-N17: a login-capable role is a member of the governor owner';
   end if;
   raise notice 'PASS WS11-N17a: the PoP challenge and attestation doors are harness-only; the challenge table is unreachable by every runtime identity with FORCE RLS and governor-only policies; no raw-code, private-key or stored-signature column exists; the 0162-0169 boundaries stand';
@@ -3595,7 +3601,10 @@ begin
     select 1 from pg_auth_members m
       join pg_roles r on r.oid = m.member
      where m.roleid = (select oid from pg_roles where rolname = 'kitluy_activation_governor')
-       and r.rolcanlogin) then
+       and r.rolcanlogin
+       -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): exclude the automatic,
+       -- un-removable membership PostgreSQL 16 grants the creating role.
+       and not (r.rolname = current_user and m.grantor <> m.member)) then
     raise exception 'FAIL WS11-N18: a login-capable role is a member of the governor owner';
   end if;
   raise notice 'PASS WS11-N18a: the redemption door is harness-only; the one-proof/one-code/one-credential rules stand; FORCE RLS holds on every redemption-path table; the 0162-0170 boundaries stand';
@@ -3731,10 +3740,15 @@ begin
     raise exception 'FAIL WS11-N19: the NOINHERIT gateway that enforces explicit entry is missing';
   end if;
   if exists (
-    select 1 from pg_auth_members
-     where roleid in (select oid from pg_roles
+    select 1 from pg_auth_members m
+     join pg_roles r on r.oid = m.member
+     where m.roleid in (select oid from pg_roles
                        where rolname in ('kitluy_provisioning_service','kitluy_provisioning_gateway'))
-       and admin_option) then
+       and m.admin_option
+       -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): the automatic creator
+       -- grant carries ADMIN OPTION and cannot be dropped. Exclude exactly that
+       -- row; re-delegation by any OTHER member is still refused.
+       and not (r.rolname = current_user and m.grantor <> m.member)) then
     raise exception 'FAIL WS11-N19: a member can re-delegate a composition role';
   end if;
   if has_function_privilege('authenticated', 'kitluy_devices.read_terminal_provisioning_pop_challenge_context_v1(uuid)', 'execute')

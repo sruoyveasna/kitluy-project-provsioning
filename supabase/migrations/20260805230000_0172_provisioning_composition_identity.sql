@@ -187,7 +187,10 @@ begin
     select 1 from pg_auth_members m
       join pg_roles r on r.oid = m.member
      where m.roleid = (select oid from pg_roles where rolname = 'kitluy_provisioning_service')
-       and r.rolname <> 'service_role') then
+       and r.rolname <> 'service_role'
+       -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): exclude the automatic,
+       -- un-removable creator membership. Any other holder is still a finding.
+       and not (r.rolname = current_user and m.grantor <> m.member)) then
     raise exception 'KLUY-MIGRATION-0172: an unexpected role holds the composition identity'
       using errcode = 'P0001';
   end if;
@@ -297,7 +300,11 @@ begin
     select 1 from pg_auth_members m
       join pg_roles r on r.oid = m.member
      where m.roleid = (select oid from pg_roles where rolname = 'kitluy_activation_governor')
-       and r.rolcanlogin)
+       and r.rolcanlogin
+       -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): exclude the automatic,
+       -- un-removable membership PostgreSQL 16 grants the creating role. Any
+       -- other login-capable member is still a finding.
+       and not (r.rolname = current_user and m.grantor <> m.member))
      or exists (
     select 1 from pg_auth_members m
      where m.member = (select oid from pg_roles where rolname = 'kitluy_provisioning_service')

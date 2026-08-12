@@ -364,7 +364,18 @@ declare
   v_worker_cannot_inspect boolean;
 begin
   -- 1. The current user is no longer a member of kitluy_job_governor.
-  select pg_has_role(current_user, 'kitluy_job_governor', 'MEMBER')
+  -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): pg_has_role() also reports
+  -- the automatic membership PostgreSQL 16 grants the creating role, which no
+  -- migration can revoke (its grantor is the bootstrap superuser). A leak this
+  -- chain caused has grantor = member and is still caught here.
+  select exists (
+    select 1
+      from pg_auth_members m
+      join pg_roles g on g.oid = m.roleid
+      join pg_roles u on u.oid = m.member
+     where g.rolname = 'kitluy_job_governor'
+       and u.rolname = current_user
+       and m.grantor = m.member)
     into v_still_member;
   if v_still_member then
     raise exception 'KLUY-MIGRATION-0160: current_user is still a member of kitluy_job_governor'

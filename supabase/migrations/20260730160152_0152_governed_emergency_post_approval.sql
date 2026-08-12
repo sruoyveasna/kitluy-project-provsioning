@@ -1041,7 +1041,12 @@ begin
              where g.rolname in ('kitluy_credential_issuer',
                                  'kitluy_credential_approval_reader',
                                  'kitluy_activation_governor')
-               and not r.rolsuper) then
+               and not r.rolsuper
+               -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): ignore the
+               -- un-removable membership PostgreSQL 16 auto-grants to the role
+               -- that created this one. A borrow this chain took itself has
+               -- grantor = member and is still a finding.
+               and not (r.rolname = current_user and m.grantor <> m.member)) then
     v_findings := v_findings || 'borrowed membership left behind'::text;
   end if;
 

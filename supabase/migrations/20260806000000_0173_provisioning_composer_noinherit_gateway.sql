@@ -188,7 +188,10 @@ begin
     select 1 from pg_auth_members m
       join pg_roles r on r.oid = m.member
      where m.roleid = (select oid from pg_roles where rolname = 'kitluy_provisioning_gateway')
-       and r.rolname <> 'service_role') then
+       and r.rolname <> 'service_role'
+       -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): the creating role's
+       -- automatic membership cannot be revoked; it is not an unexpected holder.
+       and not (r.rolname = current_user and m.grantor <> m.member)) then
     raise exception 'KLUY-MIGRATION-0173: an unexpected role holds the gateway'
       using errcode = 'P0001';
   end if;
@@ -197,7 +200,12 @@ begin
     select 1 from pg_auth_members m
      where m.roleid in (select oid from pg_roles
                          where rolname in ('kitluy_provisioning_gateway', 'kitluy_provisioning_service'))
-       and m.admin_option) then
+       and m.admin_option
+       -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): the automatic creator
+       -- grant carries ADMIN OPTION and cannot be dropped. Exclude exactly that
+       -- row; re-delegation by any OTHER member is still refused.
+       and not (m.member = (select oid from pg_roles where rolname = current_user)
+                and m.grantor <> m.member)) then
     raise exception 'KLUY-MIGRATION-0173: a member can re-delegate a composition role'
       using errcode = 'P0001';
   end if;
@@ -217,11 +225,16 @@ begin
   if exists (
     select 1 from pg_auth_members m
       join pg_roles r on r.oid = m.member
-     where m.roleid in (select oid from pg_roles
+     where not (r.rolname = current_user and m.grantor <> m.member)
+       and m.roleid in (select oid from pg_roles
                          where rolname in ('kitluy_activation_governor',
                                            'kitluy_provisioning_service',
                                            'kitluy_provisioning_gateway'))
-       and r.rolcanlogin) then
+       and r.rolcanlogin
+       -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): exclude the automatic,
+       -- un-removable membership PostgreSQL 16 grants the creating role. Any
+       -- other login-capable member is still a finding.
+       and not (r.rolname = current_user and m.grantor <> m.member)) then
     raise exception 'KLUY-MIGRATION-0173: a login-capable role belongs to a NOLOGIN authority'
       using errcode = 'P0001';
   end if;

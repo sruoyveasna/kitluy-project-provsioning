@@ -907,7 +907,11 @@ begin
                          where rolname in ('kitluy_activation_governor',
                                            'kitluy_provisioning_service',
                                            'kitluy_provisioning_gateway'))
-       and r.rolcanlogin) then
+       and r.rolcanlogin
+       -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): exclude the automatic,
+       -- un-removable membership PostgreSQL 16 grants the creating role. Any
+       -- other login-capable member is still a finding.
+       and not (r.rolname = current_user and m.grantor <> m.member)) then
     raise exception 'KLUY-MIGRATION-0174: a login-capable role belongs to a NOLOGIN authority'
       using errcode = 'P0001';
   end if;

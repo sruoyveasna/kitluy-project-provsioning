@@ -172,7 +172,12 @@ begin
               join pg_roles r on r.oid = m.member
               join pg_roles g on g.oid = m.roleid
              where g.rolname = 'kitluy_credential_issuer'
-               and not r.rolsuper) then
+               and not r.rolsuper
+               -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): ignore the
+               -- un-removable membership PostgreSQL 16 auto-grants to the role
+               -- that created this one. A borrow this chain took itself has
+               -- grantor = member and is still a finding.
+               and not (r.rolname = current_user and m.grantor <> m.member)) then
     v_findings := v_findings ||
       'a non-superuser still holds membership of the credential governor'::text;
   end if;
