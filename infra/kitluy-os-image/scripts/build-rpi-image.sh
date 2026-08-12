@@ -50,6 +50,10 @@ usage() {
   cat >&2 <<'EOF'
 Usage: build-rpi-image.sh --profile <store-hub|pi-terminal> [options]
 
+  --enrollment-url <url>  bake the fleet enrollment endpoint into the image,
+                          e.g. http://172.16.21.17:8787 . Without it the card
+                          boots and reports that no endpoint is configured.
+
 Options:
   --profile <name>     Image profile to build (required).
   --channel <name>     Release channel (default: config; only `internal` builds).
@@ -68,6 +72,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --profile)         PROFILE="${2:-}"; shift 2 ;;
     --channel)         CHANNEL_OVERRIDE="${2:-}"; shift 2 ;;
+    # The address the flashed device will call to enroll. Exported so the
+    # kitluy-base layer can bake it into /etc/kitluy/image.env, which is what
+    # makes a card cloneable: every copy already knows where the fleet is.
+    --enrollment-url)  export KITLUY_ENROLLMENT_BASE_URL="${2:-}"; shift 2 ;;
     --build-dir)       BUILD_DIR="${2:-}"; shift 2 ;;
     --filesystem-only) FILESYSTEM_ONLY="yes"; shift ;;
     --collect-only)    COLLECT_ONLY="yes"; shift ;;

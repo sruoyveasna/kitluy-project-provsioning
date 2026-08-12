@@ -88,6 +88,26 @@ mmdebstrap:
       KITLUY_DEFAULT_LOCALES=km-KH,en-US
       KITLUY_BASE_PINNED=no
       EOF
+    # THE ONE BUILD-TIME VALUE THIS PATH MAY INJECT.
+    #
+    # `build-image.sh` has carried an enrollment-URL override since it existed;
+    # this path — the one that produces the actual .img — did not, so every
+    # flashable card was built with an EMPTY endpoint and reported
+    # "no enrollment endpoint is configured" on first boot no matter how it was
+    # built. Baking it here is what makes a card CLONEABLE: copy the card and
+    # every copy already knows where the fleet service is.
+    #
+    # Still not a secret. It is a public address, and an image carrying it is
+    # exactly as zero-secret as one without (KLSRC-0162 §34).
+    - |
+      if [ -n "${KITLUY_ENROLLMENT_BASE_URL:-}" ]; then
+        sed -i "s|^KITLUY_ENROLLMENT_BASE_URL=.*|KITLUY_ENROLLMENT_BASE_URL=${KITLUY_ENROLLMENT_BASE_URL}|" \
+          "$1/etc/kitluy/image.env"
+      fi
+      if [ -n "${KITLUY_ENVIRONMENT:-}" ]; then
+        sed -i "s|^KITLUY_ENVIRONMENT=.*|KITLUY_ENVIRONMENT=${KITLUY_ENVIRONMENT}|" \
+          "$1/etc/kitluy/image.env"
+      fi
     # CLONE HYGIENE (mission §15). A golden image must not carry a machine
     # identity, or every device flashed from it enrolls as the same device.
     # Truncating rather than deleting makes systemd regenerate a unique
