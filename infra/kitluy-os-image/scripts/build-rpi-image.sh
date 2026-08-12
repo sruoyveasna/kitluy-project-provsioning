@@ -174,11 +174,15 @@ if [[ -n "${KITLUY_DEV_SSH_PUBKEY:-}" ]]; then
   fi
   grep -qE '^(ssh-(rsa|ed25519|dss)|ecdsa-sha2-|sk-(ssh|ecdsa))' "$KITLUY_DEV_SSH_PUBKEY" \
     || die "REFUSED: ${KITLUY_DEV_SSH_PUBKEY} does not look like an OpenSSH public key"
-  # THE KEY, NOT THE PATH. rpi-image-gen documents
-  #   IGconf_ssh_pubkey_user1="$(< ~/.ssh/id_rsa.pub)"
-  # Passing a filename produced an image with NO authorized_keys at all: the
-  # build reported success and the device would have been unreachable, which is
-  # the exact outcome the refusal below exists to prevent.
+  # Either form works: the upstream openssh-server layer tests `-f` on the
+  # value first and falls back to treating it as the key text, so a path and
+  # the contents are both accepted. The contents are passed because that is
+  # what rpi-image-gen's own documentation shows.
+  #
+  # The key lands on the PERSISTENT partition, not in the chroot — /home is
+  # moved into persistent.ext4 during image assembly. Verify it with
+  #   debugfs -R "cat /home/pi/.ssh/authorized_keys" persistent.ext4
+  # and NOT by looking at chroot-*/filesystem/home, which is empty by design.
   RIG_OVERRIDES+=("IGconf_ssh_pubkey_user1=$(cat "$KITLUY_DEV_SSH_PUBKEY")")
   log "recovery access: public key from ${KITLUY_DEV_SSH_PUBKEY} -> /home/pi/.ssh/authorized_keys"
 elif [[ "$NO_INTERACTIVE_ACCESS" == "yes" ]]; then
