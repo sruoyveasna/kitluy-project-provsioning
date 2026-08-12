@@ -18,8 +18,12 @@
  */
 import { createServer, type IncomingMessage } from "node:http";
 import { createLogger } from "@kitluy/observability";
-import { requireEnvironment, requirePort } from "@kitluy/shared-config";
+import { ConfigError, requireEnvironment, requirePort } from "@kitluy/shared-config";
+import type { TrustEnvironment } from "@kitluy/device-identity";
 import { resolveDeviceRevocationService } from "./composition.js";
+import { EnrollmentComposition } from "./enrollment-composition.js";
+import { createEnrollmentRouter, DEVICE_ENROLLMENT_PREFIX } from "./enrollment-routes.js";
+import { resolveEnrollmentTimeSigningKeyReference } from "./enrollment-time-signer.js";
 import { handleRequest } from "./http.js";
 import { createLapseWorkerLoop } from "./lapse-worker-runtime.js";
 import { TerminalProvisioningComposition } from "./provisioning-composition.js";
@@ -27,6 +31,7 @@ import {
   createTerminalProvisioningRouter,
   TERMINAL_PROVISIONING_PREFIX,
 } from "./provisioning-routes.js";
+import { createEd25519SnapshotSigner } from "./snapshot-signer.js";
 import { SERVICE_NAME, SERVICE_VERSION } from "./index.js";
 
 const log = createLogger(SERVICE_NAME);
@@ -47,6 +52,69 @@ const provisioningRouter = createTerminalProvisioningRouter({
     info: (fields) => log.info("terminal-provisioning", fields),
   }),
   logger: { info: (fields) => log.info("terminal-provisioning-route", fields) },
+});
+
+/**
+ * DEPLOYMENT ENVIRONMENT → TRUST ENVIRONMENT.
+ *
+ * `KITLUY_ENV` has six values; device trust has three. The mapping is explicit
+ * and fail-closed rather than defaulted, because the enrollment router's
+ * environment is what a redeemed challenge is judged against: silently falling
+ * back to `development` would let a staging or disaster-recovery deployment
+ * mint development-trust enrollments, which is precisely the direction that
+ * must never be guessed.
+ *
+ * `local` maps to `development` deliberately — the local stack carries the
+ * development `pki_trust_configuration` row (0122 §5), so they are the same
+ * trust environment wearing two deployment names.
+ */
+type DeploymentEnvironment = ReturnType<typeof requireEnvironment>;
+
+const TRUST_ENVIRONMENT_BY_DEPLOYMENT: Readonly<
+  Partial<Record<DeploymentEnvironment, TrustEnvironment>>
+> = {
+  local: "development",
+  development: "development",
+  pilot: "pilot",
+  production: "production",
+};
+
+const trustEnvironment = TRUST_ENVIRONMENT_BY_DEPLOYMENT[environment];
+if (trustEnvironment === undefined) {
+  // `staging` and `disaster_recovery` have no ruled device-trust equivalent.
+  // That is an owner decision, not a default this process may invent.
+  throw new ConfigError(
+    "KITLUY_ENV",
+    `KITLUY_ENV="${environment}" has no ruled device-trust environment; ` +
+      "device enrollment cannot be served from this deployment.",
+  );
+}
+
+/**
+ * THE FACTORY-ENROLLMENT SURFACE (DEC-2,
+ * KLD-2026-08-11-FRESH-DEVICE-ENROLLMENT-001).
+ *
+ * This is the first network step a factory-fresh device takes. It runs on the
+ * same pool as the bootstrap surface and, like it, holds no effective privilege
+ * of its own — every door call enters a governed NOLOGIN identity for exactly
+ * one transaction.
+ *
+ * The time-signing key is resolved HERE, at startup: a nonsense key version is
+ * refused before the socket opens. An ABSENT key is not a startup failure,
+ * because challenges remain serviceable without it — redemption then fails
+ * closed with `TIME_TOKEN_UNAVAILABLE`, and there is deliberately no unsigned
+ * fallback (`enrollment-time-signer.ts`).
+ */
+const enrollmentTimeKeyReference = resolveEnrollmentTimeSigningKeyReference(process.env);
+const enrollmentRouter = createEnrollmentRouter({
+  composition: new EnrollmentComposition({
+    source: revocation.pool,
+    signer: createEd25519SnapshotSigner({}),
+    timeKeyReference: enrollmentTimeKeyReference,
+    logger: { info: (fields) => log.info("device-enrollment", fields) },
+  }),
+  logger: { info: (fields) => log.info("device-enrollment-route", fields) },
+  environment: trustEnvironment,
 });
 
 /**
@@ -101,8 +169,13 @@ const server = createServer((req, res) => {
     }
     // The bootstrap surface owns its raw text (its 16 KiB gate and JSON-shape
     // refusals must COUNT toward its rate limit), so only the other routes
-    // are parsed here at the transport.
-    const isBootstrap = (req.url ?? "").startsWith(TERMINAL_PROVISIONING_PREFIX);
+    // are parsed here at the transport. Enrollment borrows those same
+    // conventions verbatim, so it owns its raw text for the same reason: a
+    // malformed body refused at the transport would never reach the limiter,
+    // and an attacker could probe indefinitely with garbage JSON.
+    const url = req.url ?? "";
+    const isBootstrap =
+      url.startsWith(TERMINAL_PROVISIONING_PREFIX) || url.startsWith(DEVICE_ENROLLMENT_PREFIX);
     let parsed: unknown;
     if (!isBootstrap && raw.text.length > 0) {
       try {
@@ -133,7 +206,12 @@ const server = createServer((req, res) => {
         // (KLD-2026-08-05-TERMINAL-TRANSPORT-001 §2).
         sourceIp: req.socket.remoteAddress ?? "",
       },
-      { ready, revocationRouter: revocation.revocationRouter, provisioningRouter },
+      {
+        ready,
+        revocationRouter: revocation.revocationRouter,
+        provisioningRouter,
+        enrollmentRouter,
+      },
     );
     res.writeHead(status, { "content-type": "application/json", ...(headers ?? {}) });
     res.end(JSON.stringify(payload));
@@ -158,7 +236,12 @@ server.listen(port, () => {
     // Recorded so a deployment can be seen to have the real wiring. No DSN, no
     // credential and no role name is logged.
     revocationWiring: "governed-database",
-    governedRoutes: "/v1/device-credentials/*, /v1/terminal-provisioning/*",
+    governedRoutes:
+      "/v1/device-credentials/*, /v1/terminal-provisioning/*, /v1/device-enrollment/*",
+    trustEnvironment,
+    // Whether this deployment can complete an enrollment, not merely start one.
+    // A key REFERENCE is a name, never key material — nothing secret is logged.
+    enrollmentTimeSigning: enrollmentTimeKeyReference === null ? "unconfigured" : "configured",
     lapseWorker: lapseWorker.identity.workerInstanceId,
   });
 });

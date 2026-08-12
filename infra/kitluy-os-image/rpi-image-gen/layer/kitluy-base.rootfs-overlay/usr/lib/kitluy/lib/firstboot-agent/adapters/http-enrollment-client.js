@@ -165,7 +165,11 @@ export function createHttpEnrollmentClient(options) {
             // The heartbeat route is not built yet. Reporting a retryable refusal is
             // the honest answer: it keeps the agent looping without inventing a
             // success it cannot observe.
-            return Promise.resolve({ kind: "refused", code: "HEARTBEAT_NOT_IMPLEMENTED", retryable: true });
+            return Promise.resolve({
+                kind: "refused",
+                code: "HEARTBEAT_NOT_IMPLEMENTED",
+                retryable: true,
+            });
         },
         pollAssignment() {
             // Assignment belongs to Store pairing, which is a later lifecycle stage.

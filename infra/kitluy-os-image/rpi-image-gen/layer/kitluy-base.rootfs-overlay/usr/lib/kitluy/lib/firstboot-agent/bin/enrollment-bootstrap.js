@@ -27,6 +27,7 @@
  * separate lifecycle stage with a separate credential (KLSRC-0162 §35).
  */
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { SERVICE_VERSION } from "../version.js";
 import { deviceLabelFromPublicKey, hasDefaultRoute, writeBootstrapState, } from "../bootstrap-state.js";
 import { DEFAULT_IDENTITY_DIR, FileIdentityStore } from "../adapters/device-identity-store.js";
@@ -50,7 +51,7 @@ export async function evaluateBootstrap(options) {
         identityError = error instanceof Error ? error.message : "unreadable identity";
     }
     const networkReady = hasDefaultRoute(options.procRoot);
-    const imageVersion = readImageVersion();
+    const imageVersion = readImageVersion(options.etcRoot);
     let phase;
     let detail;
     let enrolledDeviceRecordId;
@@ -74,7 +75,7 @@ export async function evaluateBootstrap(options) {
     }
     else {
         const ticket = readTicket(options.ticketPath ?? TICKET_PATH);
-        const baseUrl = options.baseUrl ?? readEnrollmentBaseUrl();
+        const baseUrl = options.baseUrl ?? readEnrollmentBaseUrl(options.etcRoot);
         if (ticket === null) {
             phase = "UNENROLLED";
             detail =
@@ -95,11 +96,11 @@ export async function evaluateBootstrap(options) {
                     signer: new FileKeyProvider({ directory: options.identityDir ?? DEFAULT_IDENTITY_DIR }),
                     ticketReference: ticket.reference,
                     ticketSecret: ticket.secret,
-                    environment: readEnvironment(),
+                    environment: readEnvironment(options.etcRoot),
                 });
             const outcome = await client.enroll({
                 publicKeyPem: identity.publicKeyPem,
-                deviceClass: readDeviceClass(),
+                deviceClass: readDeviceClass(options.etcRoot),
                 hardwareSignals: { ...(identity.hardwareSignals ?? {}) },
             });
             if (outcome.kind === "enrolled" || outcome.kind === "already_enrolled") {
@@ -124,12 +125,8 @@ export async function evaluateBootstrap(options) {
         agentVersion: SERVICE_VERSION,
         updatedAt: new Date().toISOString(),
         ...(imageVersion === undefined ? {} : { imageVersion }),
-        ...(enrolledDeviceRecordId === undefined
-            ? {}
-            : { deviceRecordId: enrolledDeviceRecordId }),
-        ...(identity === null
-            ? {}
-            : { deviceLabel: deviceLabelFromPublicKey(identity.publicKeyPem) }),
+        ...(enrolledDeviceRecordId === undefined ? {} : { deviceRecordId: enrolledDeviceRecordId }),
+        ...(identity === null ? {} : { deviceLabel: deviceLabelFromPublicKey(identity.publicKeyPem) }),
     };
     return { result: { phase, detail }, state };
 }
@@ -153,39 +150,67 @@ function readTicket(path) {
         return null;
     }
 }
-/** Where the fleet service lives. Config, never a compiled-in default. */
-function readEnrollmentBaseUrl() {
+/**
+ * THE FILE THE IMAGE ACTUALLY SHIPS.
+ *
+ * `build-image.sh` calls this "the only build-time value injection" and writes
+ * every non-secret device fact here; `config/image.conf` documents
+ * `KITLUY_ENROLLMENT_BASE_URL` as "the device-registry-service base URL the
+ * firstboot agent talks to".
+ *
+ * An earlier version of this module read `KITLUY_FLEET_BASE_URL` from
+ * `/etc/kitluy/fleet.env` — a variable nothing writes, in a file no build
+ * produces. The endpoint was therefore ALWAYS unresolved on a real device, and
+ * the agent reported "no enrollment endpoint is configured" no matter how the
+ * image was built. The names are reconciled here, on the reader, because the
+ * image side is the one with the build-time override plumbed through it.
+ */
+export const IMAGE_ENV_PATH = "/etc/kitluy/image.env";
+function imageEnvPath(etcRoot) {
+    return etcRoot === undefined ? IMAGE_ENV_PATH : join(etcRoot, "kitluy", "image.env");
+}
+/**
+ * One key from the generated image environment.
+ *
+ * An EMPTY value is `undefined`, not "": the build writes
+ * `KITLUY_ENROLLMENT_BASE_URL=` when no environment supplied one, and an empty
+ * string is the absence of an endpoint rather than an endpoint whose address is
+ * nothing. Comment lines are skipped — the generated file starts with two.
+ */
+function readImageEnv(key, etcRoot) {
+    let text;
     try {
-        const env = readFileSync("/etc/kitluy/fleet.env", "utf8");
-        return /^KITLUY_FLEET_BASE_URL=(.+)$/m.exec(env)?.[1]?.trim();
+        text = readFileSync(imageEnvPath(etcRoot), "utf8");
     }
     catch {
         return undefined;
     }
+    for (const line of text.split("\n")) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith("#"))
+            continue;
+        const separator = trimmed.indexOf("=");
+        if (separator === -1 || trimmed.slice(0, separator) !== key)
+            continue;
+        const value = trimmed.slice(separator + 1).trim();
+        return value.length === 0 ? undefined : value;
+    }
+    return undefined;
 }
-function readEnvironment() {
-    try {
-        const env = readFileSync("/etc/kitluy/fleet.env", "utf8");
-        return /^KITLUY_ENVIRONMENT=(.+)$/m.exec(env)?.[1]?.trim() ?? "development";
-    }
-    catch {
-        return "development";
-    }
+/** Where the fleet service lives. Config, never a compiled-in default. */
+function readEnrollmentBaseUrl(etcRoot) {
+    return readImageEnv("KITLUY_ENROLLMENT_BASE_URL", etcRoot);
+}
+function readEnvironment(etcRoot) {
+    return readImageEnv("KITLUY_ENVIRONMENT", etcRoot) ?? "development";
 }
 /**
  * Which device this image is. Read from image config rather than inferred:
  * a Store Hub that guessed it was a terminal would enrol into the wrong class
  * and the error would surface much later, during Store pairing.
  */
-function readDeviceClass() {
-    try {
-        const env = readFileSync("/etc/kitluy/image.env", "utf8");
-        const value = /^KITLUY_DEVICE_CLASS=(.+)$/m.exec(env)?.[1]?.trim();
-        return value === "store_hub" ? "store_hub" : "terminal";
-    }
-    catch {
-        return "terminal";
-    }
+function readDeviceClass(etcRoot) {
+    return readImageEnv("KITLUY_DEVICE_CLASS", etcRoot) === "store_hub" ? "store_hub" : "terminal";
 }
 function ticketPresent(path) {
     try {
@@ -195,14 +220,8 @@ function ticketPresent(path) {
         return false;
     }
 }
-function readImageVersion() {
-    try {
-        const env = readFileSync("/etc/kitluy/image.env", "utf8");
-        return /^KITLUY_IMAGE_VERSION=(.+)$/m.exec(env)?.[1]?.trim();
-    }
-    catch {
-        return undefined;
-    }
+function readImageVersion(etcRoot) {
+    return readImageEnv("KITLUY_IMAGE_VERSION", etcRoot);
 }
 function report(state) {
     process.stdout.write(`event=kitluy.enrollment.bootstrap phase=${state.phase} identity=${state.identityReady} network=${state.networkReady} detail=${JSON.stringify(state.detail ?? "")}\n`);

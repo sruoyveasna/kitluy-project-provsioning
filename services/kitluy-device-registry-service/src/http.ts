@@ -18,6 +18,7 @@ import {
   TERMINAL_PROVISIONING_PREFIX,
   type TerminalProvisioningRouter,
 } from "./provisioning-routes.js";
+import { DEVICE_ENROLLMENT_PREFIX, type EnrollmentRouter } from "./enrollment-routes.js";
 
 export interface KernelResponse {
   readonly status: number;
@@ -30,6 +31,7 @@ export interface KernelDeps {
   readonly ready: boolean;
   readonly revocationRouter?: RevocationRouter;
   readonly provisioningRouter?: TerminalProvisioningRouter;
+  readonly enrollmentRouter?: EnrollmentRouter;
 }
 
 /**
@@ -98,6 +100,33 @@ export async function handleRequest(
       };
     }
     const response = await deps.provisioningRouter.handle({
+      method: request.method,
+      path: request.path,
+      headers: request.headers,
+      sourceIp: request.sourceIp ?? "",
+      rawBody: request.rawBody ?? "",
+    });
+    return { status: response.status, body: response.body, headers: response.headers };
+  }
+
+  // Factory enrollment (DEC-2, KLD-2026-08-11-FRESH-DEVICE-ENROLLMENT-001).
+  // Matched before the generic delegation and fails CLOSED for the same reason
+  // as the bootstrap surface above — with the added weight that this is the
+  // FIRST network step a factory-fresh device takes, so an unconfigured
+  // instance answering 404 would read to the device as "no such capability"
+  // rather than "this deployment is not wired", and the device would give up
+  // on a fleet it is entitled to join.
+  if (path.startsWith(DEVICE_ENROLLMENT_PREFIX)) {
+    if (deps.enrollmentRouter === undefined) {
+      return {
+        status: 503,
+        body: errorEnvelope(
+          "DEPENDENCY_UNAVAILABLE",
+          "device-enrollment routes are not configured on this instance",
+        ),
+      };
+    }
+    const response = await deps.enrollmentRouter.handle({
       method: request.method,
       path: request.path,
       headers: request.headers,

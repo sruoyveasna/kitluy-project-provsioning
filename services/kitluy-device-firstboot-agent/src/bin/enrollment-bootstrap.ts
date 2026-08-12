@@ -27,6 +27,7 @@
  * separate lifecycle stage with a separate credential (KLSRC-0162 §35).
  */
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { SERVICE_VERSION } from "../version.js";
 import {
@@ -59,6 +60,8 @@ export async function evaluateBootstrap(options: {
   readonly identityDir?: string;
   readonly ticketPath?: string;
   readonly procRoot?: string;
+  /** Root standing in for `/etc`, so image configuration is testable off-device. */
+  readonly etcRoot?: string;
   /** Overrides the configured endpoint. Tests inject; the device reads config. */
   readonly baseUrl?: string;
   /** Injected by tests so the transport is not exercised over a real socket. */
@@ -75,7 +78,7 @@ export async function evaluateBootstrap(options: {
   }
 
   const networkReady = hasDefaultRoute(options.procRoot);
-  const imageVersion = readImageVersion();
+  const imageVersion = readImageVersion(options.etcRoot);
 
   let phase: BootstrapPhase;
   let detail: string;
@@ -97,7 +100,7 @@ export async function evaluateBootstrap(options: {
     detail = "FLEET_ENROLLMENT_REQUIRED: supply a one-time development enrollment ticket";
   } else {
     const ticket = readTicket(options.ticketPath ?? TICKET_PATH);
-    const baseUrl = options.baseUrl ?? readEnrollmentBaseUrl();
+    const baseUrl = options.baseUrl ?? readEnrollmentBaseUrl(options.etcRoot);
 
     if (ticket === null) {
       phase = "UNENROLLED";
@@ -118,12 +121,12 @@ export async function evaluateBootstrap(options: {
           signer: new FileKeyProvider({ directory: options.identityDir ?? DEFAULT_IDENTITY_DIR }),
           ticketReference: ticket.reference,
           ticketSecret: ticket.secret,
-          environment: readEnvironment(),
+          environment: readEnvironment(options.etcRoot),
         });
 
       const outcome = await client.enroll({
         publicKeyPem: identity.publicKeyPem,
-        deviceClass: readDeviceClass(),
+        deviceClass: readDeviceClass(options.etcRoot),
         hardwareSignals: { ...(identity.hardwareSignals ?? {}) },
       });
 
@@ -174,23 +177,60 @@ function readTicket(path: string): { reference: string; secret: string } | null 
   }
 }
 
-/** Where the fleet service lives. Config, never a compiled-in default. */
-function readEnrollmentBaseUrl(): string | undefined {
+/**
+ * THE FILE THE IMAGE ACTUALLY SHIPS.
+ *
+ * `build-image.sh` calls this "the only build-time value injection" and writes
+ * every non-secret device fact here; `config/image.conf` documents
+ * `KITLUY_ENROLLMENT_BASE_URL` as "the device-registry-service base URL the
+ * firstboot agent talks to".
+ *
+ * An earlier version of this module read `KITLUY_FLEET_BASE_URL` from
+ * `/etc/kitluy/fleet.env` — a variable nothing writes, in a file no build
+ * produces. The endpoint was therefore ALWAYS unresolved on a real device, and
+ * the agent reported "no enrollment endpoint is configured" no matter how the
+ * image was built. The names are reconciled here, on the reader, because the
+ * image side is the one with the build-time override plumbed through it.
+ */
+export const IMAGE_ENV_PATH = "/etc/kitluy/image.env";
+
+function imageEnvPath(etcRoot?: string): string {
+  return etcRoot === undefined ? IMAGE_ENV_PATH : join(etcRoot, "kitluy", "image.env");
+}
+
+/**
+ * One key from the generated image environment.
+ *
+ * An EMPTY value is `undefined`, not "": the build writes
+ * `KITLUY_ENROLLMENT_BASE_URL=` when no environment supplied one, and an empty
+ * string is the absence of an endpoint rather than an endpoint whose address is
+ * nothing. Comment lines are skipped — the generated file starts with two.
+ */
+function readImageEnv(key: string, etcRoot?: string): string | undefined {
+  let text: string;
   try {
-    const env = readFileSync("/etc/kitluy/fleet.env", "utf8");
-    return /^KITLUY_FLEET_BASE_URL=(.+)$/m.exec(env)?.[1]?.trim();
+    text = readFileSync(imageEnvPath(etcRoot), "utf8");
   } catch {
     return undefined;
   }
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("#")) continue;
+    const separator = trimmed.indexOf("=");
+    if (separator === -1 || trimmed.slice(0, separator) !== key) continue;
+    const value = trimmed.slice(separator + 1).trim();
+    return value.length === 0 ? undefined : value;
+  }
+  return undefined;
 }
 
-function readEnvironment(): string {
-  try {
-    const env = readFileSync("/etc/kitluy/fleet.env", "utf8");
-    return /^KITLUY_ENVIRONMENT=(.+)$/m.exec(env)?.[1]?.trim() ?? "development";
-  } catch {
-    return "development";
-  }
+/** Where the fleet service lives. Config, never a compiled-in default. */
+function readEnrollmentBaseUrl(etcRoot?: string): string | undefined {
+  return readImageEnv("KITLUY_ENROLLMENT_BASE_URL", etcRoot);
+}
+
+function readEnvironment(etcRoot?: string): string {
+  return readImageEnv("KITLUY_ENVIRONMENT", etcRoot) ?? "development";
 }
 
 /**
@@ -198,14 +238,8 @@ function readEnvironment(): string {
  * a Store Hub that guessed it was a terminal would enrol into the wrong class
  * and the error would surface much later, during Store pairing.
  */
-function readDeviceClass(): DeviceClass {
-  try {
-    const env = readFileSync("/etc/kitluy/image.env", "utf8");
-    const value = /^KITLUY_DEVICE_CLASS=(.+)$/m.exec(env)?.[1]?.trim();
-    return value === "store_hub" ? "store_hub" : "terminal";
-  } catch {
-    return "terminal";
-  }
+function readDeviceClass(etcRoot?: string): DeviceClass {
+  return readImageEnv("KITLUY_DEVICE_CLASS", etcRoot) === "store_hub" ? "store_hub" : "terminal";
 }
 
 function ticketPresent(path: string): boolean {
@@ -216,13 +250,8 @@ function ticketPresent(path: string): boolean {
   }
 }
 
-function readImageVersion(): string | undefined {
-  try {
-    const env = readFileSync("/etc/kitluy/image.env", "utf8");
-    return /^KITLUY_IMAGE_VERSION=(.+)$/m.exec(env)?.[1]?.trim();
-  } catch {
-    return undefined;
-  }
+function readImageVersion(etcRoot?: string): string | undefined {
+  return readImageEnv("KITLUY_IMAGE_VERSION", etcRoot);
 }
 
 function report(state: BootstrapState): void {
