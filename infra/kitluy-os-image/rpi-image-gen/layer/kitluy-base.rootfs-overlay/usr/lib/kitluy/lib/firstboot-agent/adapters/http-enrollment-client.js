@@ -74,7 +74,10 @@ function isRetryableStatus(status) {
 export function createHttpEnrollmentClient(options) {
     const doFetch = options.fetchImpl ?? fetch;
     const timeoutMs = options.timeoutMs ?? 15_000;
-    const ticketDigest = createHash("sha256").update(options.ticketSecret, "utf8").digest("hex");
+    const hasTicket = options.ticketReference.length > 0 && options.ticketSecret.length > 0;
+    const ticketDigest = hasTicket
+        ? createHash("sha256").update(options.ticketSecret, "utf8").digest("hex")
+        : "";
     async function post(path, body) {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -105,8 +108,12 @@ export function createHttpEnrollmentClient(options) {
             let challengeBody;
             try {
                 const { status, json } = await post("/v1/device-enrollment/challenges", {
-                    ticketReference: options.ticketReference,
-                    ticketDigest,
+                    // Omitted entirely when the card carries no ticket. Sending empty
+                    // strings would look like a malformed ticket rather than the absence
+                    // of one, and the server must be able to tell those apart.
+                    ...(hasTicket
+                        ? { ticketReference: options.ticketReference, ticketDigest }
+                        : { deviceClass: input.deviceClass }),
                     publicKeyFingerprint: fingerprint,
                     publicKeyPem: input.publicKeyPem,
                     publicKeyAlgorithm: "ed25519",

@@ -29,7 +29,7 @@
  * Location, Store Hub, terminal profile or vertical is created or returned,
  * because none exists at this stage (§35).
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 import {
   MANUFACTURING_ENROLLMENT_POP_PURPOSE,
@@ -127,6 +127,36 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const HEX64 = /^[0-9a-f]{64}$/;
 const NO_LOG: SafeLogger = { info: () => undefined };
 
+/**
+ * DEVELOPMENT OPEN ENROLLMENT (KLD-2026-08-12-DEV-OPEN-ENROLLMENT-001).
+ *
+ * The owner's development loop is: flash one card, copy it freely, boot every
+ * Pi, watch them come online. A per-card preparation step is the one thing that
+ * cannot survive being copied, so in DEVELOPMENT the service mints the ticket
+ * itself for a device that presents none.
+ *
+ * ===========================================================================
+ * WHAT THIS IS NOT
+ * ===========================================================================
+ * It is not a bypass. The device still proves possession of its own key, the
+ * ticket is still issued and redeemed through the same governed doors, and
+ * every §5 property still holds — per-device, single-use, expiring, revocable,
+ * auditable, digest-at-rest. The audit trail is identical to a station's.
+ *
+ * What changes is WHO MAY ASK: a prepared card, or anyone who can reach the
+ * endpoint. That is the whole of the accepted risk, and it is why this is
+ * refused outside `development`.
+ */
+export interface DevelopmentOpenEnrollment {
+  /** A REGISTERED, active station; an unregistered one quarantines the device. */
+  readonly stationKey: string;
+  readonly operatorRef: string;
+  /** Resolved at startup, so a misconfigured profile refuses at boot. */
+  readonly profileIdByDeviceClass: Readonly<Record<string, string>>;
+  /** Hours a self-minted ticket stays live. It is redeemed within seconds. */
+  readonly validForHours?: number;
+}
+
 export interface EnrollmentCompositionDeps {
   readonly source: ClientSource;
   readonly signer: SnapshotSigner;
@@ -134,6 +164,8 @@ export interface EnrollmentCompositionDeps {
   readonly logger?: SafeLogger;
   /** Injectable so tests measure policy rather than wall time. */
   readonly now?: () => Date;
+  /** Absent means OFF. A deployment that says nothing gets the ticket path. */
+  readonly openEnrollment?: DevelopmentOpenEnrollment;
 }
 
 export class EnrollmentComposition {
@@ -143,6 +175,132 @@ export class EnrollmentComposition {
   constructor(private readonly deps: EnrollmentCompositionDeps) {
     this.logger = deps.logger ?? NO_LOG;
     this.now = deps.now ?? (() => new Date());
+  }
+
+  /** Whether this deployment will mint a ticket for a device that has none. */
+  get openEnrollmentEnabled(): boolean {
+    return this.deps.openEnrollment !== undefined;
+  }
+
+  /**
+   * Step 1, development variant — a device with NO ticket.
+   *
+   * The service mints one and opens the challenge with it, in ONE transaction
+   * as the same governed role. If issuance is refused, nothing is opened: there
+   * is no path here that reaches a challenge without a real ticket behind it.
+   *
+   * The secret is generated, digested, and dropped inside this method. It is
+   * never returned, logged, or written anywhere — the device never sees it and
+   * never needs to, because it is not the device that proves the ticket here.
+   */
+  async openChallengeWithoutTicket(input: {
+    readonly deviceClass: string;
+    readonly publicKeyFingerprint: string;
+    readonly publicKeyPem: string;
+    readonly publicKeyAlgorithm: string;
+    readonly keyStorageClass: string;
+  }): Promise<EnrollmentCompositionResult<EnrollmentChallengeMaterial>> {
+    const correlationId = randomUUID();
+    const open = this.deps.openEnrollment;
+
+    if (open === undefined) {
+      // Not enabled. Reported as a ticket refusal so an enabled and a disabled
+      // deployment are indistinguishable to a caller probing for one.
+      return {
+        result: "TICKET_REFUSED",
+        correlationId,
+        auditDetail: "open enrollment is not enabled on this deployment",
+      };
+    }
+    if (
+      !HEX64.test(input.publicKeyFingerprint) ||
+      input.publicKeyPem.length === 0 ||
+      input.publicKeyPem.length > 4096
+    ) {
+      return { result: "REQUEST_INVALID", correlationId };
+    }
+
+    const profileId = open.profileIdByDeviceClass[input.deviceClass];
+    if (profileId === undefined) {
+      return {
+        result: "TICKET_REFUSED",
+        correlationId,
+        auditDetail: `no development profile configured for device class ${input.deviceClass}`,
+      };
+    }
+
+    // The reference names an automatically issued ticket, so the audit trail
+    // shows at a glance which enrollments came from an unattended front desk.
+    const reference = `KL-DEVOPEN-${randomUUID().replace(/-/g, "").slice(0, 12).toUpperCase()}`;
+    const secret = randomBytes(32).toString("base64url");
+    const digest = createHash("sha256").update(secret, "utf8").digest("hex");
+
+    try {
+      return await withServiceRole(this.deps.source, REGISTRY_ROLES.fleet, async (client) => {
+        const issued = await callDoor(
+          client,
+          `kitluy_devices.issue_manufacturing_enrollment_ticket_v1(
+             $1, $2, $3::uuid, $4, $5, $6, $7, $8, null)`,
+          [
+            reference,
+            digest,
+            profileId,
+            "development",
+            open.stationKey,
+            open.operatorRef,
+            open.operatorRef,
+            open.validForHours ?? 1,
+          ],
+        );
+        if (issued.outcome !== "ISSUED") {
+          return {
+            result: "TICKET_REFUSED" as const,
+            correlationId,
+            auditDetail: `open-enrollment issuance refused ${String(issued.refusal_code ?? "")}`,
+          };
+        }
+
+        const outcome = await callDoor(
+          client,
+          `kitluy_devices.open_manufacturing_enrollment_challenge_v1($1, $2, $3, $4, $5, $6)`,
+          [
+            reference,
+            digest,
+            input.publicKeyFingerprint,
+            input.publicKeyPem,
+            input.publicKeyAlgorithm,
+            input.keyStorageClass,
+          ],
+        );
+        if (outcome.outcome !== "CHALLENGE_ISSUED") {
+          const code = String(outcome.refusal_code ?? "");
+          return {
+            result: "TICKET_REFUSED" as const,
+            correlationId,
+            auditDetail: TICKET_REFUSALS[code] ?? `unmapped door refusal ${code}`,
+          };
+        }
+
+        return {
+          result: "CHALLENGE_ISSUED" as const,
+          correlationId,
+          data: {
+            challengeId: String(outcome.challenge_id),
+            nonce: String(outcome.challenge_nonce),
+            purpose: MANUFACTURING_ENROLLMENT_POP_PURPOSE,
+            environment: "development" as TrustEnvironment,
+            issuedAt: this.now(),
+            expiresAt: new Date(String(outcome.expires_at)),
+            signatureAlgorithm: "ed25519" as const,
+            signingPayloadEncoding: "base64url" as const,
+          },
+        };
+      });
+    } catch (error) {
+      this.logger.info({ event: "open_enrollment_challenge_failed", correlationId });
+      void error;
+      return { result: "INTERNAL_ERROR", correlationId };
+    }
   }
 
   /**

@@ -1,0 +1,59 @@
+
+AFTER   + member=postgres grantor=postgres admin=false inherit=true set=true
+        SET=true USAGE=true
+
+IMMEDIATE_GOVERNOR_ACCESS ........ NOT PRESENT   (Property A holds)
+ADMINISTRATIVE_SELF_ESCALATION ... PRESENT       (Property B violated)
+
+This supersedes my previous SECURITY-PROPERTY-SATISFIED classification â that was correct only under the narrow immediate-capability reading. One mitigating fact stated precisely: the escalation leaves a distinguishable second row (grantor=postgres, set=true) and requires an explicit GRANT. It's an auditable privileged action, not an ambient capability.
+
+Assertion now implemented as two properties, neither suppressed: Property A is a hard finding via pg_has_role(...,'SET'|'USAGE'); Property B is raised by name on every run. MEMBER is no longer used for either â since PG16 it answers neither question.
+
+DEC-5 for you: invariant 2 requires a superuser to re-issue every governor grant with ADMIN FALSE. That is not reachable on managed Supabase â supabase_admin isn't exposed through the pooler. It would need Supabase support.
+
+B. 0189 â authored, green, not deployed
+
+supabase/migrations/20260811090000_0189_factory_qa_definer_ownership_repair.sql
+
+Moves record_factory_qa_v1 to NOLOGIN, non-BYPASSRLS kitluy_fleet_governor (borrowing/returning membership per 0140, idempotent), then states the write path â select, insert plus one governor-scoped policy per table. No client policy; no update/delete (both tables are append-only). Seven self-assertions all passed, including "FORCE RLS is now backed by a policy" and "no client-facing policy introduced".
+
+Rollback is four statements, no data loss. Cloud delta: one function owner, two policies, two grants. No cloud write performed.
+
+C. Historical migrations â measured, not assumed
+
+Diffs preserved first at 00_AI_HANDOFF/edge-platform/preserved-diffs/ (301 + 313 + 617 lines).
+
+All 14 are category B â I counted added lines matching any DDL/DML pattern: zero across all 14. They alter predicates ithing else, so the deployed lineage and the repository still agree about what the database is. Kept as the from-zerolineage.
+
+0188 restored to its applied form. The previous continuation's in-place edit is removed (verified: 0 fleet_governor refow lives solely in 0189. Reverted by removing exactly the added lines â no destructive Git command.
+
+D/E. Pi firstboot and systemd
+
+Unchanged from my last report and still green: entrypoint + three adapters, 104 tests passing, and the new systemd-runtime.test.sh gate (36 pass / 17 fail, every failure a real defect).
+
+F/G. Not reached â stated plainly
+
+Â§9B bootstrap packaging, Â§9C canonical systemd source, Â§10 turning the gate green, Â§11 the new image, and Â§12 the enrollment ticket are not done. The security track consumed this session. No image was built; no hardware claim is made. The gate now defines precisely
+what "done" means for Â§9B/Â§10 â the 17 failures are the work list.
+
+The clean gate
+
+image        public.ecr.aws/supabase/postgres:17.6.1.155   (cloud's tag)
+role shape   postgres super=false createrole=true          (cloud's shape)
+
+MIGRATIONS   88 / 88 from zero      (87 historical + 0189)
+0189 self-assertion                  PASS
+ASSERTIONS   exit 0, 105 PASS        GREEN
+RLS TESTS    exit 0, 137 PASS        GREEN
+DEC-5        1 escalation notice     (reported, not suppressed)
+
+migrations:validate  88 files passed
+firstboot agent      104 tests passed
+
+Three container fidelity shims were needed (test environment only, never the repo): claims-aware auth.uid()/auth.role()uth.users columns (base image has 21, real stack 35). Each mattered â the auth.uid() shim alone moved RLS from 6 to 126PASS. Reporting those as chain defects would have been wrong.
+
+H. Git
+
+main, HEAD e9a7c39, 0 ahead / 0 behind. Commits = 0, pushes = 0. Tracked-modified still 42 (baseline unchanged â my edisertions.sql and rls-tests.sql). New: 0189, doc 32, three preserved-diff artifacts. Disposable containers removed; cloud credentials shredded. Cloud untouched â read-only throughout.
+
+Two decisions needed: DEC-5 (which invariant), and approval to apply 0189 to kitluy-project-pos.

@@ -59,7 +59,15 @@ export interface HttpEnrollmentClientOptions {
   /** Opaque handle the signer understands. Never key material. */
   readonly privateKeyHandle: string;
   readonly signer: DeviceSigner;
-  /** The one-time flash-time ticket, read from TICKET_PATH. */
+  /**
+   * The one-time flash-time ticket, read from TICKET_PATH.
+   *
+   * EMPTY when the card carries none — a copied SD card, which is the normal
+   * development case (KLD-2026-08-12-DEV-OPEN-ENROLLMENT-001). The ticket
+   * fields are then omitted from the request and the server decides: a
+   * development deployment with open enrollment mints one, any other refuses.
+   * The device does not know which, and must not behave as though it does.
+   */
   readonly ticketReference: string;
   readonly ticketSecret: string;
   readonly environment: string;
@@ -131,7 +139,10 @@ function isRetryableStatus(status: number): boolean {
 export function createHttpEnrollmentClient(options: HttpEnrollmentClientOptions): EnrollmentClient {
   const doFetch = options.fetchImpl ?? fetch;
   const timeoutMs = options.timeoutMs ?? 15_000;
-  const ticketDigest = createHash("sha256").update(options.ticketSecret, "utf8").digest("hex");
+  const hasTicket = options.ticketReference.length > 0 && options.ticketSecret.length > 0;
+  const ticketDigest = hasTicket
+    ? createHash("sha256").update(options.ticketSecret, "utf8").digest("hex")
+    : "";
 
   async function post(path: string, body: unknown): Promise<{ status: number; json: unknown }> {
     const controller = new AbortController();
@@ -167,8 +178,12 @@ export function createHttpEnrollmentClient(options: HttpEnrollmentClientOptions)
       let challengeBody: ChallengeResponse;
       try {
         const { status, json } = await post("/v1/device-enrollment/challenges", {
-          ticketReference: options.ticketReference,
-          ticketDigest,
+          // Omitted entirely when the card carries no ticket. Sending empty
+          // strings would look like a malformed ticket rather than the absence
+          // of one, and the server must be able to tell those apart.
+          ...(hasTicket
+            ? { ticketReference: options.ticketReference, ticketDigest }
+            : { deviceClass: input.deviceClass }),
           publicKeyFingerprint: fingerprint,
           publicKeyPem: input.publicKeyPem,
           publicKeyAlgorithm: "ed25519",

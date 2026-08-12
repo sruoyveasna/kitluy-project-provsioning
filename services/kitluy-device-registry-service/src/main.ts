@@ -21,7 +21,7 @@ import { createLogger } from "@kitluy/observability";
 import { ConfigError, requireEnvironment, requirePort } from "@kitluy/shared-config";
 import type { TrustEnvironment } from "@kitluy/device-identity";
 import { resolveDeviceRevocationService } from "./composition.js";
-import { EnrollmentComposition } from "./enrollment-composition.js";
+import { EnrollmentComposition, type DevelopmentOpenEnrollment } from "./enrollment-composition.js";
 import { createEnrollmentRouter, DEVICE_ENROLLMENT_PREFIX } from "./enrollment-routes.js";
 import { resolveEnrollmentTimeSigningKeyReference } from "./enrollment-time-signer.js";
 import { handleRequest } from "./http.js";
@@ -106,12 +106,77 @@ if (trustEnvironment === undefined) {
  * fallback (`enrollment-time-signer.ts`).
  */
 const enrollmentTimeKeyReference = resolveEnrollmentTimeSigningKeyReference(process.env);
+
+/**
+ * DEVELOPMENT OPEN ENROLLMENT (KLD-2026-08-12-DEV-OPEN-ENROLLMENT-001).
+ *
+ * OFF unless explicitly enabled, and REFUSED at startup outside `development` —
+ * a deployment cannot drift into it, and a misconfigured one does not start.
+ * The profile keys are resolved to ids here, before the socket opens, so a
+ * typo is a boot failure rather than a device that enrolls into nothing.
+ */
+const openEnrollmentRequested = (process.env.KITLUY_DEV_OPEN_ENROLLMENT ?? "") === "true";
+if (openEnrollmentRequested && trustEnvironment !== "development") {
+  throw new ConfigError(
+    "KITLUY_DEV_OPEN_ENROLLMENT",
+    "open enrollment is a DEVELOPMENT-only path and cannot be enabled in " +
+      `${trustEnvironment} (KLD-2026-08-12-DEV-OPEN-ENROLLMENT-001 §5).`,
+  );
+}
+
+async function resolveOpenEnrollment(): Promise<DevelopmentOpenEnrollment | undefined> {
+  if (!openEnrollmentRequested) return undefined;
+
+  const stationKey = process.env.KITLUY_DEV_ENROLLMENT_STATION ?? "";
+  const terminalProfile = process.env.KITLUY_DEV_ENROLLMENT_PROFILE_TERMINAL ?? "";
+  const hubProfile = process.env.KITLUY_DEV_ENROLLMENT_PROFILE_STORE_HUB ?? "";
+  if (stationKey === "" || terminalProfile === "") {
+    throw new ConfigError(
+      "KITLUY_DEV_ENROLLMENT_STATION",
+      "open enrollment needs KITLUY_DEV_ENROLLMENT_STATION and " +
+        "KITLUY_DEV_ENROLLMENT_PROFILE_TERMINAL. An unregistered station quarantines every device.",
+    );
+  }
+
+  // Read as the CONNECTING identity, before any governed role is assumed —
+  // `kitluy_fleet_service` holds no SELECT on the profile catalogue and must
+  // not be granted one to save a lookup.
+  const client = await revocation.pool.connect();
+  try {
+    const profileIdByDeviceClass: Record<string, string> = {};
+    for (const [deviceClass, key] of [
+      ["terminal", terminalProfile],
+      ["store_hub", hubProfile],
+    ] as const) {
+      if (key === "") continue;
+      const { rows } = await client.query<{ id: string }>(
+        `select id from kitluy_devices.hardware_profiles where profile_key = $1 and is_active`,
+        [key],
+      );
+      const id = rows[0]?.id;
+      if (id === undefined) {
+        throw new ConfigError(
+          "KITLUY_DEV_ENROLLMENT_PROFILE",
+          `no active hardware profile with key ${key}`,
+        );
+      }
+      profileIdByDeviceClass[deviceClass] = id;
+    }
+    return { stationKey, operatorRef: "operator/dev-open-enrollment", profileIdByDeviceClass };
+  } finally {
+    client.release();
+  }
+}
+
+const openEnrollment = await resolveOpenEnrollment();
+
 const enrollmentRouter = createEnrollmentRouter({
   composition: new EnrollmentComposition({
     source: revocation.pool,
     signer: createEd25519SnapshotSigner({}),
     timeKeyReference: enrollmentTimeKeyReference,
     logger: { info: (fields) => log.info("device-enrollment", fields) },
+    ...(openEnrollment === undefined ? {} : { openEnrollment }),
   }),
   logger: { info: (fields) => log.info("device-enrollment-route", fields) },
   environment: trustEnvironment,
@@ -242,6 +307,9 @@ server.listen(port, () => {
     // Whether this deployment can complete an enrollment, not merely start one.
     // A key REFERENCE is a name, never key material — nothing secret is logged.
     enrollmentTimeSigning: enrollmentTimeKeyReference === null ? "unconfigured" : "configured",
+    // Announced, per KLD-2026-08-12-DEV-OPEN-ENROLLMENT-001 §5.3: nobody
+    // may mistake an open deployment for a governed one.
+    openEnrollment: openEnrollment === undefined ? "off" : "ON (development only)",
     lapseWorker: lapseWorker.identity.workerInstanceId,
   });
 });

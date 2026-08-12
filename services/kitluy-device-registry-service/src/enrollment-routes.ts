@@ -227,6 +227,71 @@ export function createEnrollmentRouter(deps: EnrollmentRouterDeps): EnrollmentRo
         const ticketReference = stringField(body, "ticketReference", TICKET_REFERENCE);
         const ticketDigest = stringField(body, "ticketDigest", HEX64);
         const publicKeyFingerprintValue = stringField(body, "publicKeyFingerprint", HEX64);
+
+        // NO TICKET PRESENTED — the development open-enrollment path
+        // (KLD-2026-08-12-DEV-OPEN-ENROLLMENT-001). A copied SD card carries no
+        // ticket by design, so this is how a cloned card enrolls at all. When
+        // the deployment has it disabled the composition refuses with the same
+        // `TICKET_REFUSED` as a bad ticket, so an enabled and a disabled
+        // deployment are indistinguishable from outside.
+        if (ticketReference === null && ticketDigest === null) {
+          const publicKeyPem = typeof body.publicKeyPem === "string" ? body.publicKeyPem : "";
+          const publicKeyAlgorithm =
+            typeof body.publicKeyAlgorithm === "string" ? body.publicKeyAlgorithm : "";
+          const keyStorageClass =
+            typeof body.keyStorageClass === "string" ? body.keyStorageClass : "";
+          const deviceClass = typeof body.deviceClass === "string" ? body.deviceClass : "";
+
+          if (
+            publicKeyFingerprintValue === null ||
+            publicKeyPem.length === 0 ||
+            publicKeyPem.length > MAX_PUBLIC_KEY_PEM_CHARS ||
+            publicKeyAlgorithm.length === 0 ||
+            keyStorageClass.length === 0 ||
+            deviceClass.length === 0
+          ) {
+            return invalid(correlationId, "the request is missing or malformed required fields");
+          }
+
+          const openOutcome = await deps.composition.openChallengeWithoutTicket({
+            deviceClass,
+            publicKeyFingerprint: publicKeyFingerprintValue,
+            publicKeyPem,
+            publicKeyAlgorithm,
+            keyStorageClass,
+          });
+
+          if (openOutcome.auditDetail !== undefined) {
+            log?.info({
+              event: "open_enrollment_challenge_refused",
+              correlationId,
+              result: openOutcome.result,
+              detail: openOutcome.auditDetail,
+            });
+          }
+          if (openOutcome.result !== "CHALLENGE_ISSUED" || openOutcome.data === undefined) {
+            return refusal(openOutcome.result, correlationId);
+          }
+
+          const oc = openOutcome.data;
+          return {
+            status: 201,
+            body: {
+              challenge: {
+                challengeId: oc.challengeId,
+                purpose: oc.purpose,
+                environment: oc.environment,
+                presentedKeyFingerprint: publicKeyFingerprintValue,
+                nonce: oc.nonce,
+                issuedAt: oc.issuedAt.toISOString(),
+                expiresAt: oc.expiresAt.toISOString(),
+                signatureAlgorithm: oc.signatureAlgorithm,
+                signingPayloadEncoding: oc.signingPayloadEncoding,
+              },
+              correlationId,
+            },
+          };
+        }
         const publicKeyPem = typeof body.publicKeyPem === "string" ? body.publicKeyPem : "";
         const publicKeyAlgorithm =
           typeof body.publicKeyAlgorithm === "string" ? body.publicKeyAlgorithm : "";

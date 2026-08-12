@@ -69,12 +69,18 @@ export async function evaluateBootstrap(options) {
         phase = "NETWORK_WAIT";
         detail = "no default route; the device cannot reach the KitLuy fleet service";
     }
-    else if (!ticketPresent(options.ticketPath ?? TICKET_PATH)) {
-        phase = "UNENROLLED";
-        detail = "FLEET_ENROLLMENT_REQUIRED: supply a one-time development enrollment ticket";
-    }
     else {
-        const ticket = readTicket(options.ticketPath ?? TICKET_PATH);
+        // A card with NO ticket is the normal development case: an SD card copied
+        // from a golden one carries none, by design (KLSRC-0162 §34 — the image is
+        // secret-free, which is exactly what makes it copyable). The device tries
+        // anyway and lets the SERVER decide: a development deployment with open
+        // enrollment mints a ticket for it, and every other deployment refuses.
+        //
+        // Absent is not the same as MALFORMED. A ticket file that exists but cannot
+        // be parsed is an operator error and still stops here, because silently
+        // falling back to open enrollment would hide a mis-prepared card.
+        const ticketFilePath = options.ticketPath ?? TICKET_PATH;
+        const ticket = ticketPresent(ticketFilePath) ? readTicket(ticketFilePath) : "NO_TICKET";
         const baseUrl = options.baseUrl ?? readEnrollmentBaseUrl(options.etcRoot);
         if (ticket === null) {
             phase = "UNENROLLED";
@@ -94,8 +100,10 @@ export async function evaluateBootstrap(options) {
                     baseUrl,
                     privateKeyHandle: identity.privateKeyHandle,
                     signer: new FileKeyProvider({ directory: options.identityDir ?? DEFAULT_IDENTITY_DIR }),
-                    ticketReference: ticket.reference,
-                    ticketSecret: ticket.secret,
+                    // Empty when the card carries no ticket; the client then omits the
+                    // ticket fields rather than sending blanks.
+                    ticketReference: ticket === "NO_TICKET" ? "" : ticket.reference,
+                    ticketSecret: ticket === "NO_TICKET" ? "" : ticket.secret,
                     environment: readEnvironment(options.etcRoot),
                 });
             const outcome = await client.enroll({
