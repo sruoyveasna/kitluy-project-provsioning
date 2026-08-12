@@ -39,6 +39,7 @@ import {
   enrollmentPopChallengeBytes,
   type EnrollmentPopChallengeFields,
 } from "../enrollment-pop-bytes.js";
+import type { HardwareSignals } from "../identity.js";
 import type {
   AssignmentPollResult,
   DeviceClass,
@@ -85,6 +86,28 @@ interface RedemptionResponse {
   readonly storeAssignment: string;
   readonly trustedTimeToken?: unknown;
 }
+
+/**
+ * DEVICE VOCABULARY → THE GOVERNED ENUM.
+ *
+ * `HardwareSignals` is camelCase because it is a TypeScript interface;
+ * `kitluy_devices.hardware_signal_type` is snake_case because it is a
+ * PostgreSQL enum. Sending the interface's key names put `"macAddress"` on the
+ * wire, and the governed door refused the WHOLE redemption with
+ * `invalid input value for enum hardware_signal_type`. Every real device failed
+ * at this exact point; the integration test did not, because it hand-wrote
+ * canonical signal names and so never exercised the device's own vocabulary.
+ *
+ * This map is the only place the two vocabularies meet. `signal-vocabulary`
+ * test proves it stays exhaustive over `HardwareSignals`.
+ */
+const CANONICAL_SIGNAL_TYPE: Readonly<Record<keyof HardwareSignals, string>> = {
+  macAddress: "mac_address",
+  boardSerial: "board_serial",
+  socSerial: "soc_serial",
+  storageSerial: "storage_serial",
+  storageModel: "storage_model",
+};
 
 /** SHA-256 of the SPKI DER, matching what the server records. */
 export function fingerprintFromPem(publicKeyPem: string): string {
@@ -194,9 +217,18 @@ export function createHttpEnrollmentClient(options: HttpEnrollmentClientOptions)
       }
 
       // --- 3. Redeem ----------------------------------------------------
+      // A signal whose name has no canonical form is DROPPED rather than sent:
+      // an unrepresentable name would refuse the entire enrollment, whereas a
+      // missing one leaves the hardware profile's `required_signal_types` to
+      // refuse — which puts the sufficiency decision in the database, where it
+      // belongs, instead of in this transport.
       const signals = Object.entries(input.hardwareSignals)
         .filter(([, value]) => typeof value === "string" && value.length > 0)
-        .map(([signal_type, signal_value]) => ({ signal_type, signal_value }));
+        .map(([key, signal_value]) => ({
+          signal_type: CANONICAL_SIGNAL_TYPE[key as keyof HardwareSignals],
+          signal_value,
+        }))
+        .filter((signal) => signal.signal_type !== undefined);
 
       try {
         const { status, json } = await post("/v1/device-enrollment/redemptions", {
