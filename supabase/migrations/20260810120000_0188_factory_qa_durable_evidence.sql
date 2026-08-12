@@ -1,0 +1,562 @@
+-- kitluy:group:0188
+-- ===========================================================================
+-- M1 — DURABLE FACTORY QA EVIDENCE
+--
+-- WHY THIS GROUP EXISTS. Factory QA already runs (`runFactoryQa` in
+-- `services/kitluy-device-firstboot-agent/src/factory.ts`) and its result
+-- already gates provisioning eligibility — but the result existed ONLY in the
+-- agent's memory. A process restart erased it, so "this device passed QA" was
+-- a claim no one could re-check, and eligibility silently depended on a value
+-- that no longer existed anywhere. That is the gap this group closes.
+--
+-- WHY A NEW TABLE WAS NECESSARY (§6 proof, all three limbs)
+-- ---------------------------------------------------------
+--   1. No existing relation can hold it authoritatively. All 64 tables in
+--      kitluy_devices were enumerated. `manufacturing_enrollments` records the
+--      SEALING of identity evidence and has no QA column; its enrollment_state
+--      enum is (sealed, superseded, revoked) — none of which means "tested".
+--      `device_hardware_observations` is runtime hardware attestation, not QA.
+--      `device_trust_incidents` records failures of trust, not test execution.
+--      `device_lifecycle_events` is a lifecycle-transition audit, and QA is
+--      deliberately NOT a lifecycle transition (factory.ts: "QA is not a
+--      lifecycle transition"). Storing QA in its `detail jsonb` would make the
+--      authoritative record a JSON blob inside an audit row for a transition
+--      that did not happen.
+--   2. No unapplied migration owns the structure: 86 files on disk, 86 applied,
+--      and no CREATE TABLE anywhere matches a QA relation.
+--   3. It therefore cannot be implemented safely on existing schema.
+--
+-- WHAT THIS GROUP DELIBERATELY DOES NOT DO
+-- ----------------------------------------
+-- It does not add a stored `is_provisioning_eligible` boolean. Eligibility
+-- stays DERIVED (`evaluate_provisioning_eligibility_v1`). A stored flag is a
+-- second copy of the truth and the copy is what goes stale: a device revoked
+-- after being marked eligible would still read eligible.
+--
+-- It does not touch `production_eligible`. That column answers a different
+-- question — whether the hardware SKU is certified for PRODUCTION under
+-- KLD-2026-07-28-002 §4 — and remains fail-closed false. Passing factory QA
+-- does not certify hardware, and this group must not blur the two.
+--
+-- It adds no operator bypass. There is no "force eligible" argument anywhere.
+-- ===========================================================================
+
+begin;
+
+-- ---------------------------------------------------------------------------
+-- Enums
+-- ---------------------------------------------------------------------------
+do $$
+begin
+  if not exists (select 1 from pg_type t join pg_namespace n on n.oid = t.typnamespace
+                  where n.nspname = 'kitluy_devices' and t.typname = 'factory_qa_result') then
+    create type kitluy_devices.factory_qa_result as enum ('passed', 'failed');
+  end if;
+  if not exists (select 1 from pg_type t join pg_namespace n on n.oid = t.typnamespace
+                  where n.nspname = 'kitluy_devices' and t.typname = 'factory_qa_check_outcome') then
+    create type kitluy_devices.factory_qa_check_outcome as enum ('pass', 'fail', 'not_evaluated');
+  end if;
+end $$;
+
+comment on type kitluy_devices.factory_qa_result is
+  'Overall verdict of one factory QA execution. Only `passed` and `failed` exist: an execution that did not finish is not recorded at all, because a half-written QA row that reads as "in progress" is indistinguishable from a stalled one and would have to be interpreted rather than trusted.';
+
+-- ---------------------------------------------------------------------------
+-- kitluy_devices.factory_qa_executions — one row per QA run.
+-- ---------------------------------------------------------------------------
+-- Bound to the MANUFACTURING ENROLLMENT, not merely to the device. Re-
+-- enrollment after repair or quarantine clearance seals a new enrollment and
+-- captures new hardware evidence; QA performed against the previous hardware
+-- state says nothing about the repaired device. Binding to the enrollment
+-- makes stale QA structurally unusable instead of relying on a convention.
+-- ---------------------------------------------------------------------------
+create table if not exists kitluy_devices.factory_qa_executions (
+  id uuid primary key default gen_random_uuid(),
+  device_id uuid not null references kitluy_devices.devices (id),
+  manufacturing_enrollment_id uuid not null
+    references kitluy_devices.manufacturing_enrollments (id),
+  -- Station/agent-supplied idempotency key. A retry after a network failure
+  -- must not create a second execution record for one physical test run.
+  execution_ref text not null,
+  qa_profile_key text not null,
+  qa_profile_version text not null,
+  result kitluy_devices.factory_qa_result not null,
+  -- Required when, and only when, the run failed. A failed QA with no reason
+  -- cannot be actioned on a factory floor.
+  failure_reason_code text,
+  checks_total integer not null,
+  checks_passed integer not null,
+  checks_failed integer not null,
+  checks_not_evaluated integer not null,
+  station_id text not null,
+  operator_ref text not null,
+  agent_version text,
+  os_image_version text,
+  release_channel text,
+  -- Immutable digest over the ordered check set. Lets a stored result be
+  -- re-verified from the row alone, and makes an idempotent retry provably
+  -- the same run rather than assumed to be.
+  evidence_sha256 text not null,
+  started_at timestamptz not null,
+  completed_at timestamptz not null,
+  created_at timestamptz not null default now(),
+  constraint factory_qa_executions_ref_unique unique (device_id, execution_ref),
+  constraint factory_qa_executions_evidence_format_chk
+    check (evidence_sha256 ~ '^[0-9a-f]{64}$'),
+  constraint factory_qa_executions_window_chk
+    check (completed_at >= started_at),
+  constraint factory_qa_executions_counts_chk
+    check (checks_total = checks_passed + checks_failed + checks_not_evaluated
+           and checks_total > 0
+           and checks_passed >= 0 and checks_failed >= 0 and checks_not_evaluated >= 0),
+  -- A run with a failed check cannot be `passed`, and a `failed` run must say
+  -- why. Both directions are asserted so neither can be written by mistake.
+  constraint factory_qa_executions_result_consistency_chk
+    check ((result = 'failed') = (failure_reason_code is not null)),
+  constraint factory_qa_executions_passed_has_no_failures_chk
+    check (result = 'failed' or checks_failed = 0)
+);
+
+comment on table kitluy_devices.factory_qa_executions is
+  'Owner: Fleet. Append-only authoritative record of one factory QA execution (M1 durable QA evidence). Bound to the manufacturing enrollment so that re-enrollment after repair invalidates prior QA structurally. Never a lifecycle transition and never a hardware certification. MC: A/O.';
+comment on column kitluy_devices.factory_qa_executions.execution_ref is
+  'Station/agent idempotency key. UNIQUE per device: a retried submission of one physical run returns the existing execution instead of recording a second one.';
+comment on column kitluy_devices.factory_qa_executions.evidence_sha256 is
+  'SHA-256 over the ordered check set. Enables re-verification from the row alone and lets an idempotent retry be proven identical rather than assumed identical.';
+
+create index if not exists factory_qa_executions_device_idx
+  on kitluy_devices.factory_qa_executions (device_id, completed_at desc);
+create index if not exists factory_qa_executions_enrollment_idx
+  on kitluy_devices.factory_qa_executions (manufacturing_enrollment_id);
+
+-- ---------------------------------------------------------------------------
+-- kitluy_devices.factory_qa_check_results — the individual checks.
+-- ---------------------------------------------------------------------------
+-- Relational, one row per check, because the check set IS the evidence. A
+-- jsonb column would make "which check failed" a parsing problem and could not
+-- be constrained — and the single most important QA rule in this system is a
+-- per-check constraint (see factory_qa_check_results_hil_never_pass_chk).
+-- ---------------------------------------------------------------------------
+create table if not exists kitluy_devices.factory_qa_check_results (
+  id uuid primary key default gen_random_uuid(),
+  execution_id uuid not null
+    references kitluy_devices.factory_qa_executions (id) on delete restrict,
+  ordinal integer not null,
+  check_name text not null,
+  outcome kitluy_devices.factory_qa_check_outcome not null,
+  hardware_in_loop boolean not null default false,
+  detail text not null,
+  created_at timestamptz not null default now(),
+  constraint factory_qa_check_results_unique unique (execution_id, check_name),
+  constraint factory_qa_check_results_ordinal_chk check (ordinal >= 0),
+  -- THE RULE THIS TABLE EXISTS TO ENFORCE.
+  -- A hardware-in-the-loop check (touchscreen, NVMe, thermal, peripherals)
+  -- can only be settled on real hardware. A simulated or cross-built factory
+  -- run must never be able to record one as passed — that is precisely how an
+  -- untested device would acquire a certificate of testing. The agent already
+  -- refuses this in TypeScript; the database refuses it too, because the agent
+  -- is not the only thing that can write here.
+  constraint factory_qa_check_results_hil_never_pass_chk
+    check (not (hardware_in_loop and outcome = 'pass'))
+);
+
+comment on table kitluy_devices.factory_qa_check_results is
+  'Owner: Fleet. Append-only per-check evidence for one factory QA execution. Relational rather than jsonb because the check set is the evidence and the hardware-in-the-loop rule is a database constraint, not a convention. MC: A/O.';
+comment on constraint factory_qa_check_results_hil_never_pass_chk on kitluy_devices.factory_qa_check_results is
+  'A hardware-in-the-loop check may never be recorded as passed. Only physical hardware can settle it; permitting `pass` here would let a simulation issue a certificate of hardware testing.';
+
+create index if not exists factory_qa_check_results_execution_idx
+  on kitluy_devices.factory_qa_check_results (execution_id, ordinal);
+
+-- ---------------------------------------------------------------------------
+-- Append-only guards (reusing kitluy_auth.enforce_append_only, group 0070).
+-- ---------------------------------------------------------------------------
+drop trigger if exists trg_append_only_factory_qa_executions
+  on kitluy_devices.factory_qa_executions;
+create trigger trg_append_only_factory_qa_executions
+  before update or delete on kitluy_devices.factory_qa_executions
+  for each row execute function kitluy_auth.enforce_append_only();
+
+drop trigger if exists trg_append_only_factory_qa_check_results
+  on kitluy_devices.factory_qa_check_results;
+create trigger trg_append_only_factory_qa_check_results
+  before update or delete on kitluy_devices.factory_qa_check_results
+  for each row execute function kitluy_auth.enforce_append_only();
+
+-- ===========================================================================
+-- Functions
+-- ===========================================================================
+
+-- ---------------------------------------------------------------------------
+-- record_factory_qa_v1 — the one governed door for QA evidence.
+-- ---------------------------------------------------------------------------
+-- Idempotent by (device_id, execution_ref). A retry returns the existing
+-- execution; a retry that carries DIFFERENT evidence under the same ref is
+-- refused rather than silently ignored, because two different results for one
+-- execution reference means one of them is wrong and picking either is worse
+-- than stopping.
+-- ---------------------------------------------------------------------------
+create or replace function kitluy_devices.record_factory_qa_v1(
+  p_device_id uuid,
+  p_execution_ref text,
+  p_qa_profile_key text,
+  p_qa_profile_version text,
+  p_station_id text,
+  p_operator_ref text,
+  p_checks jsonb,
+  p_started_at timestamptz,
+  p_completed_at timestamptz,
+  p_failure_reason_code text default null,
+  p_agent_version text default null,
+  p_os_image_version text default null,
+  p_release_channel text default null
+) returns uuid
+language plpgsql
+security definer
+set search_path = pg_catalog, kitluy_devices, extensions
+as $$
+declare
+  v_enrollment_id uuid;
+  v_existing kitluy_devices.factory_qa_executions;
+  v_execution_id uuid;
+  v_total integer;
+  v_passed integer;
+  v_failed integer;
+  v_not_eval integer;
+  v_result kitluy_devices.factory_qa_result;
+  v_evidence_sha256 text;
+  v_canonical text;
+  v_reason text;
+begin
+  if p_checks is null or jsonb_typeof(p_checks) <> 'array' or jsonb_array_length(p_checks) = 0 then
+    raise exception
+      'KLUY-DEVICE-QA-EMPTY: factory QA requires at least one check; an empty check set is not a passing run'
+      using errcode = 'P0001';
+  end if;
+
+  -- The device must exist and must currently be enrolled with a sealed
+  -- enrollment. QA against a device with no sealed identity evidence has
+  -- nothing to bind to.
+  select e.id into v_enrollment_id
+  from kitluy_devices.devices d
+  join kitluy_devices.manufacturing_enrollments e on e.id = d.current_enrollment_id
+  where d.id = p_device_id
+    and e.state = 'sealed';
+
+  if v_enrollment_id is null then
+    raise exception
+      'KLUY-DEVICE-QA-NO-SEALED-ENROLLMENT: device % has no sealed manufacturing enrollment; QA cannot be bound to identity evidence', p_device_id
+      using errcode = 'P0001';
+  end if;
+
+  -- Canonical evidence digest over the ORDERED check set.
+  select
+    count(*)::integer,
+    count(*) filter (where c->>'outcome' = 'pass')::integer,
+    count(*) filter (where c->>'outcome' = 'fail')::integer,
+    count(*) filter (where c->>'outcome' = 'not_evaluated')::integer,
+    string_agg(
+      coalesce(c->>'name', '') || '|' ||
+      coalesce(c->>'outcome', '') || '|' ||
+      coalesce(c->>'hardware_in_loop', 'false'),
+      E'\n' order by ord)
+  into v_total, v_passed, v_failed, v_not_eval, v_canonical
+  from jsonb_array_elements(p_checks) with ordinality as t(c, ord);
+
+  if v_total <> v_passed + v_failed + v_not_eval then
+    raise exception
+      'KLUY-DEVICE-QA-UNKNOWN-OUTCOME: a check carries an outcome outside (pass, fail, not_evaluated)'
+      using errcode = 'P0001';
+  end if;
+
+  v_evidence_sha256 := encode(extensions.digest(v_canonical, 'sha256'), 'hex');
+  v_result := case when v_failed > 0 then 'failed' else 'passed' end::kitluy_devices.factory_qa_result;
+  v_reason := p_failure_reason_code;
+  if v_result = 'failed' and v_reason is null then
+    v_reason := 'KLUY-DEVICE-QA-CHECK-FAILED';
+  end if;
+  if v_result = 'passed' then
+    v_reason := null;
+  end if;
+
+  -- Idempotency.
+  select * into v_existing
+  from kitluy_devices.factory_qa_executions
+  where device_id = p_device_id and execution_ref = p_execution_ref;
+
+  if found then
+    if v_existing.evidence_sha256 <> v_evidence_sha256 then
+      raise exception
+        'KLUY-DEVICE-QA-EVIDENCE-CONFLICT: execution_ref % already recorded for device % with different evidence; a reference identifies one run and one result', p_execution_ref, p_device_id
+        using errcode = 'P0001',
+              hint = 'Submit a new execution_ref for a new run. An existing run is never overwritten (append-only).';
+    end if;
+    return v_existing.id;
+  end if;
+
+  insert into kitluy_devices.factory_qa_executions (
+    device_id, manufacturing_enrollment_id, execution_ref,
+    qa_profile_key, qa_profile_version, result, failure_reason_code,
+    checks_total, checks_passed, checks_failed, checks_not_evaluated,
+    station_id, operator_ref, agent_version, os_image_version, release_channel,
+    evidence_sha256, started_at, completed_at
+  ) values (
+    p_device_id, v_enrollment_id, p_execution_ref,
+    p_qa_profile_key, p_qa_profile_version, v_result, v_reason,
+    v_total, v_passed, v_failed, v_not_eval,
+    p_station_id, p_operator_ref, p_agent_version, p_os_image_version, p_release_channel,
+    v_evidence_sha256, p_started_at, p_completed_at
+  )
+  returning id into v_execution_id;
+
+  insert into kitluy_devices.factory_qa_check_results (
+    execution_id, ordinal, check_name, outcome, hardware_in_loop, detail
+  )
+  select
+    v_execution_id,
+    (ord - 1)::integer,
+    c->>'name',
+    (c->>'outcome')::kitluy_devices.factory_qa_check_outcome,
+    coalesce((c->>'hardware_in_loop')::boolean, false),
+    coalesce(c->>'detail', '')
+  from jsonb_array_elements(p_checks) with ordinality as t(c, ord);
+
+  return v_execution_id;
+end;
+$$;
+
+comment on function kitluy_devices.record_factory_qa_v1(uuid, text, text, text, text, text, jsonb, timestamptz, timestamptz, text, text, text, text) is
+  'The one governed door for durable factory QA evidence. Idempotent by (device_id, execution_ref); a same-ref submission carrying different evidence is REFUSED rather than ignored. Derives the overall result from the checks — the caller cannot assert `passed` while submitting a failed check.';
+
+-- ---------------------------------------------------------------------------
+-- current_factory_qa_v1 — the QA record that currently counts.
+-- ---------------------------------------------------------------------------
+-- The latest execution AGAINST THE CURRENT SEALED ENROLLMENT. QA attached to a
+-- superseded enrollment is history, not evidence about the device as it is now.
+-- ---------------------------------------------------------------------------
+create or replace function kitluy_devices.current_factory_qa_v1(p_device_id uuid)
+returns kitluy_devices.factory_qa_executions
+language sql
+stable
+as $$
+  select qa.*
+  from kitluy_devices.factory_qa_executions qa
+  join kitluy_devices.devices d on d.id = qa.device_id
+  where qa.device_id = p_device_id
+    and qa.manufacturing_enrollment_id = d.current_enrollment_id
+  order by qa.completed_at desc, qa.created_at desc
+  limit 1;
+$$;
+
+comment on function kitluy_devices.current_factory_qa_v1(uuid) is
+  'The latest QA execution bound to the device''s CURRENT sealed enrollment. Returns no row when the device has never been tested since its current enrollment — which is a denial input, never a pass.';
+
+-- ---------------------------------------------------------------------------
+-- evaluate_provisioning_eligibility_v1 — DERIVED, fail-closed.
+-- ---------------------------------------------------------------------------
+-- Answers only: may this device ENTER Store provisioning? It is never
+-- permission to skip a step of the governed chain, and it is not activation.
+-- Every limb must clear; the reasons are returned so an operator sees WHY.
+-- ---------------------------------------------------------------------------
+create or replace function kitluy_devices.evaluate_provisioning_eligibility_v1(
+  p_device_id uuid
+) returns table (eligible boolean, reasons text[])
+language plpgsql
+stable
+as $$
+declare
+  v_reasons text[] := '{}';
+  v_device kitluy_devices.devices;
+  v_qa kitluy_devices.factory_qa_executions;
+  v_manifest_sealed boolean;
+  v_active_assignments integer;
+  v_open_incidents integer;
+  v_collisions integer;
+  v_containment text;
+begin
+  select * into v_device from kitluy_devices.devices where id = p_device_id;
+  if not found then
+    return query select false, array['device record does not exist'];
+    return;
+  end if;
+
+  -- Claimable lifecycles are taken from `create_device_claim_v1`, which admits
+  -- `enrolled` AND `awaiting_trust`. They must agree: a device that the claim
+  -- function would accept but this function calls ineligible would show an
+  -- operator a disabled control for an action the server would have allowed,
+  -- and the reverse would promise an action the server then refuses.
+  -- `awaiting_trust` is where a device sits after an activation attempt that
+  -- has not yet established trusted time — still factory inventory, still
+  -- claimable, not yet active.
+  if v_device.lifecycle_state not in ('enrolled', 'awaiting_trust') then
+    v_reasons := v_reasons || format(
+      'lifecycle is ''%s''; only an ''enrolled'' or ''awaiting_trust'' device may enter provisioning',
+      v_device.lifecycle_state);
+  end if;
+
+  select count(*)::integer into v_active_assignments
+  from kitluy_devices.device_assignments
+  where device_id = p_device_id and state in ('pending_trust', 'active');
+  if v_active_assignments > 0 then
+    v_reasons := v_reasons || 'device already holds an active assignment; it is not factory inventory'::text;
+  end if;
+
+  select exists (
+    select 1
+    from kitluy_devices.manufacturing_enrollments e
+    join kitluy_devices.hardware_manifests m on m.id = e.hardware_manifest_id
+    where e.id = v_device.current_enrollment_id and e.state = 'sealed'
+  ) into v_manifest_sealed;
+  if not coalesce(v_manifest_sealed, false) then
+    v_reasons := v_reasons || 'hardware manifest is not sealed'::text;
+  end if;
+
+  -- The limb this whole group exists to make real: QA read from durable
+  -- storage rather than from a process that may no longer be running.
+  select * into v_qa from kitluy_devices.current_factory_qa_v1(p_device_id);
+  if v_qa.id is null then
+    v_reasons := v_reasons || 'no factory QA execution is recorded for the current enrollment'::text;
+  elsif v_qa.result <> 'passed' then
+    v_reasons := v_reasons || format('factory QA failed (%s)', coalesce(v_qa.failure_reason_code, 'unspecified'));
+  end if;
+
+  select count(*)::integer into v_open_incidents
+  from kitluy_devices.device_trust_incidents
+  where device_id = p_device_id
+    and cleared_at is null
+    and incident_type <> 'activation_blocked';
+  if v_open_incidents > 0 then
+    v_reasons := v_reasons || format('%s open trust incident(s)', v_open_incidents);
+  end if;
+
+  select count(*)::integer into v_collisions
+  from kitluy_devices.colliding_evidence_device_ids(p_device_id);
+  if v_collisions > 0 then
+    v_reasons := v_reasons || 'hardware evidence collides with another device record'::text;
+  end if;
+
+  select containment_state::text into v_containment
+  from kitluy_devices.device_containment_states
+  where device_id = p_device_id and cleared_at is null
+  limit 1;
+  if v_containment is not null then
+    v_reasons := v_reasons || format('device is under containment (%s)', v_containment);
+  end if;
+
+  return query select (array_length(v_reasons, 1) is null), v_reasons;
+end;
+$$;
+
+comment on function kitluy_devices.evaluate_provisioning_eligibility_v1(uuid) is
+  'DERIVED provisioning eligibility — never stored. Fail-closed: enrolled, unassigned, sealed manifest, PASSED durable factory QA for the current enrollment, no open trust incident, no evidence collision, no containment. There is no bypass argument, by design.';
+
+-- ---------------------------------------------------------------------------
+-- device_provisioning_readiness — the Admin read model.
+-- ---------------------------------------------------------------------------
+create or replace view kitluy_devices.device_provisioning_readiness as
+select
+  d.id as device_record_id,
+  d.asset_tag,
+  d.device_class,
+  d.lifecycle_state,
+  qa.id as qa_execution_id,
+  qa.result as qa_result,
+  qa.qa_profile_key,
+  qa.qa_profile_version,
+  qa.completed_at as qa_completed_at,
+  qa.checks_total,
+  qa.checks_not_evaluated as qa_hardware_deferred,
+  el.eligible as provisioning_eligible,
+  el.reasons as provisioning_blockers
+from kitluy_devices.devices d
+left join lateral kitluy_devices.current_factory_qa_v1(d.id) qa on true
+left join lateral kitluy_devices.evaluate_provisioning_eligibility_v1(d.id) el on true;
+
+comment on view kitluy_devices.device_provisioning_readiness is
+  'Admin read model for provisioning readiness. `provisioning_eligible` is computed on read by evaluate_provisioning_eligibility_v1 — it is never a stored column, so it cannot go stale relative to lifecycle, QA, containment or evidence.';
+
+-- ---------------------------------------------------------------------------
+-- RLS: ENABLE + FORCE, fail-closed. No anon policy, no client write.
+-- ---------------------------------------------------------------------------
+alter table kitluy_devices.factory_qa_executions enable row level security;
+alter table kitluy_devices.factory_qa_executions force row level security;
+alter table kitluy_devices.factory_qa_check_results enable row level security;
+alter table kitluy_devices.factory_qa_check_results force row level security;
+
+grant select, insert on kitluy_devices.factory_qa_executions to service_role;
+grant select, insert on kitluy_devices.factory_qa_check_results to service_role;
+grant select on kitluy_devices.device_provisioning_readiness to service_role;
+
+-- ---------------------------------------------------------------------------
+-- PUBLIC EXECUTE revocation for everything this group created.
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  r record;
+begin
+  for r in
+    select p.oid::regprocedure as signature
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'kitluy_devices'
+      and p.proname in ('record_factory_qa_v1',
+                        'current_factory_qa_v1',
+                        'evaluate_provisioning_eligibility_v1')
+  loop
+    execute format('revoke all on function %s from public', r.signature);
+    execute format('grant execute on function %s to service_role', r.signature);
+  end loop;
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- Assertions — the migration proves its own intent.
+-- ---------------------------------------------------------------------------
+do $guard$
+declare
+  v_ok boolean;
+begin
+  if not exists (
+    select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = 'kitluy_devices' and c.relname = 'factory_qa_executions'
+       and c.relrowsecurity and c.relforcerowsecurity
+  ) then
+    raise exception 'KLUY-MIGRATION-0188: factory_qa_executions is not FORCE-RLS';
+  end if;
+
+  if not exists (
+    select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = 'kitluy_devices' and c.relname = 'factory_qa_check_results'
+       and c.relrowsecurity and c.relforcerowsecurity
+  ) then
+    raise exception 'KLUY-MIGRATION-0188: factory_qa_check_results is not FORCE-RLS';
+  end if;
+
+  if has_function_privilege('public',
+      'kitluy_devices.record_factory_qa_v1(uuid,text,text,text,text,text,jsonb,timestamptz,timestamptz,text,text,text,text)'::regprocedure,
+      'execute') then
+    raise exception 'KLUY-MIGRATION-0188: PUBLIC can execute the QA door';
+  end if;
+
+  -- No stored eligibility flag may have been introduced.
+  if exists (
+    select 1 from information_schema.columns
+     where table_schema = 'kitluy_devices' and table_name = 'devices'
+       and column_name in ('is_provisioning_eligible', 'provisioning_eligible', 'factory_qa_passed')
+  ) then
+    raise exception 'KLUY-MIGRATION-0188: a stored provisioning-eligibility flag was introduced; eligibility must stay derived';
+  end if;
+
+  -- The hardware-in-the-loop rule must be a real constraint, not a comment.
+  select exists (
+    select 1 from pg_constraint
+     where conrelid = 'kitluy_devices.factory_qa_check_results'::regclass
+       and conname = 'factory_qa_check_results_hil_never_pass_chk'
+  ) into v_ok;
+  if not v_ok then
+    raise exception 'KLUY-MIGRATION-0188: the hardware-in-the-loop rule is not enforced by a constraint';
+  end if;
+
+  raise notice 'KLUY-MIGRATION-0188: durable factory QA evidence installed (append-only, enrollment-bound, HIL-never-pass enforced, eligibility derived not stored)';
+end $guard$;
+
+commit;
