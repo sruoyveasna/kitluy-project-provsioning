@@ -30,6 +30,26 @@ door.
 work. `secret:scan` clean (1695). **`0190` is still NOT deployed to the cloud
 and no hardware has booted**; BLK-005 unchanged.
 
+**Later the same day the owner changed the development requirement** — one card,
+copied freely, every Pi online by itself, no per-device step
+(`KLD-2026-08-12-DEV-OPEN-ENROLLMENT-001`, amending DEC-2 with its own Option D
+for development while Option B stays the pilot/production mechanism). Built and
+proven: one golden card copied three times, **3 of 3 Pis enrolled**. Open
+enrollment lives in the SERVICE, not the database — no migration changed, no
+grant widened; the ticket is still minted and redeemed through the same governed
+doors, so the audit trail is a station's.
+
+Also: `pnpm dev:fleet` (one command with preflight to run the fleet service for a
+hardware test — it immediately caught the development station QUARANTINED after
+this session's own duplicate-evidence testing, which would have blocked every
+Pi), and `--enrollment-url` for the `.img` build, which previously hard-coded an
+empty endpoint so no flashable card could ever have known where to call.
+
+**Cloud measured, not deployed**: 89 files on disk, 88 applied to
+`kitluy-project-pos`, exactly `0190` outstanding. Owner deferred the deployment
+and **selected a Supabase Edge Function** as the next milestone so devices stop
+depending on a workstation.
+
 Record: `shared/2026-08-12__SHARED__DEC2-ENROLLMENT__ENDPOINT-WIRING-SIGNAL-VOCABULARY-AND-FLASH-TIME-STATION-TOOL__AI-HANDOFF.md`
 
 ---

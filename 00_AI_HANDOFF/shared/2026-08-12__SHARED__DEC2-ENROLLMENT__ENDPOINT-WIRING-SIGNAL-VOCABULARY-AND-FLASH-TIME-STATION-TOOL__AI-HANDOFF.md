@@ -173,3 +173,94 @@ activation, and no hardware has booted.
 3. **Rule the station-registration door** and the `staging`/`disaster_recovery`
    trust mapping.
 4. **Deploy `0190`** to `kitluy-project-pos` via `pnpm db:deploy:hosted-dev`.
+
+---
+
+# Session continued — open enrollment, the dev runner, and the first image build
+
+The owner reviewed the flash-time ticket working end to end and stated a
+different development requirement, recorded verbatim in
+`KLD-2026-08-12-DEV-OPEN-ENROLLMENT-001`:
+
+> In development I want to flash one SD card, copy that card as many times as I
+> like, put each copy in a Raspberry Pi, and have every Pi come online in the
+> cloud by itself. No per-device preparation step.
+
+## What changed
+
+| Commit    | Change                                                                                                                                                                                                                                                        |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `2e6e02a` | Development open enrollment — a card with NO ticket enrolls; the SERVICE mints and redeems one through the same governed doors, so every §5 property and the audit trail survive. OFF by default, REFUSED outside `development`, announced in the startup log |
+| `d388a68` | `--enrollment-url` for the `.img` build path. It previously hard-coded an EMPTY endpoint with no override, so every flashable card ever built would have reported "no enrollment endpoint is configured"                                                      |
+| `0caba3d` | `pnpm dev:fleet` — one command, with preflight, to run the fleet service for a hardware test                                                                                                                                                                  |
+
+**Evidence:** one golden card, flashed once, copied three times, all three Pis
+enrolled (`3 of 3`), each landing `enrolled` once given distinct hardware
+addresses as real Pis have.
+
+## Findings from running it for real
+
+1. **The development station had quarantined itself.** After 7 duplicate-evidence
+   submissions against a signed threshold of 2, `STATION-WORKSHOP-1` went
+   `quarantined` and NO device could have enrolled. Cause: this session
+   simulating many devices on one laptop, so one MAC address was submitted
+   repeatedly — which is exactly what a cloned device looks like. The control is
+   correct. `pnpm dev:fleet` now detects it in the preflight and clearing it
+   requires its own explicit flag.
+2. **LAN reachability proven**: `http://172.16.21.17:8789/health/live` → HTTP 200
+   from the workstation's own LAN address (`eno1`). `ufw` is inactive; the
+   service binds all interfaces. A Pi on the same network can reach it.
+3. **WiFi cannot work on this image.** `wpa_supplicant` is not installed, so the
+   `02-wlan0.network` DHCP config can never authenticate to a protected network.
+   **Ethernet works** (`01-eth0.network`, `DHCP=yes`). Recorded, not fixed.
+4. **The image build cannot fetch `syft`.** The SBOM step failed on a malformed
+   upstream URL (`/releases/v1.44.0`, missing `/tag/`) returning HTTP 000, while
+   GitHub itself is reachable (HTTP 200). Worked around by reusing the
+   `syft 1.44.0` binary already present from an earlier build. **This will recur
+   on a clean machine** and deserves a permanent fix.
+5. **`sudo` survives the hardening purge.** `raspinfo` depends on it, so
+   `dpkg --purge sudo` fails non-fatally and the terminal image ships with sudo
+   present despite the intent to remove it. Recorded, untouched.
+6. **The local migration ledger disagrees with the local database.** The ledger's
+   last entry is `20260807040000` (0187, 86 rows) but `0188`/`0189`/`0190`
+   objects EXIST — they were applied directly, bypassing the ledger. Nothing is
+   broken today, but any tool trusting the ledger is wrong about this stack.
+
+## Cloud state, measured 2026-08-12 (read-only `--dry-run`)
+
+```text
+target kitluy-project-pos (gjgbnkhuwlwhngbtrgts) · env=development
+migration files on disk: 89
+live state: remote-applied migrations=88
+--dry-run: would apply 1 migration(s)      <- exactly 0190
+```
+
+**Not deployed. The owner deferred the deployment to the next session.**
+
+## Owner decision for the next session: cloud enrollment via Edge Function
+
+The owner does not want devices depending on a workstation. Presented two
+options and **selected Option A — a Supabase Edge Function**, so a Pi anywhere
+with internet enrolls without a laptop or a rented server, and the database
+credentials stay inside Supabase rather than on the SD card.
+
+Sequence agreed:
+
+1. Deploy `0190` to `kitluy-project-pos` (owner approval required at the time).
+2. Port the enrollment composition to `supabase/functions/device-enrollment/`.
+   It depends only on `node:crypto`, the pure-TypeScript PoP verifier and a
+   Postgres connection. **Validate FIRST**: Ed25519 verification under Deno, and
+   whether an Edge Function can hold `set local role kitluy_fleet_service` in a
+   transaction. Those are the two real unknowns; everything else is mechanical.
+3. Rebuild the image with the Supabase function URL.
+4. Flash, boot, and a Pi joins from anywhere.
+
+`supabase/functions/` currently contains only a README, and NO service in the
+repository has any deployment manifest — nothing is hosted anywhere today.
+
+## Still true, and worth not forgetting
+
+**A device will read `enrolled`, never `ONLINE`.** The liveness badge requires a
+heartbeat within 90 seconds (OD-EDGE-LIVENESS-001) and the device's `heartbeat()`
+returns `HEARTBEAT_NOT_IMPLEMENTED`. Moving to the cloud does not change this —
+heartbeats are separate, unbuilt work in both topologies.
