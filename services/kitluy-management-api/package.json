@@ -2,7 +2,7 @@
   "name": "@kitluy-services/kitluy-management-api",
   "version": "0.1.0",
   "private": true,
-  "description": "Governed Management API — Admin, Chain and Partner back-office contracts and approved private integrations (RB v4 §10.1)",
+  "description": "Governed Management API \u2014 Admin, Chain and Partner back-office contracts and approved private integrations (RB v4 \u00a710.1)",
   "type": "module",
   "main": "./dist/main.js",
   "scripts": {
@@ -15,11 +15,13 @@
   "dependencies": {
     "@kitluy/api-errors": "workspace:*",
     "@kitluy/observability": "workspace:*",
-    "@kitluy/shared-config": "workspace:*"
+    "@kitluy/shared-config": "workspace:*",
+    "pg": "catalog:"
   },
   "devDependencies": {
-    "typescript": "catalog:",
     "@types/node": "catalog:",
+    "@types/pg": "catalog:",
+    "typescript": "catalog:",
     "vitest": "catalog:",
     "yaml": "^2.6.1"
   }

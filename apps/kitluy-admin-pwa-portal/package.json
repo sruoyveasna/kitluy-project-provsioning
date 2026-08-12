@@ -14,6 +14,7 @@
   "dependencies": {
     "@kitluy/feature-flags": "workspace:*",
     "@kitluy/localization": "workspace:*",
+    "@kitluy/supabase-client": "workspace:*",
     "@kitluy/web-ui": "workspace:*",
     "react": "catalog:",
     "react-dom": "catalog:"

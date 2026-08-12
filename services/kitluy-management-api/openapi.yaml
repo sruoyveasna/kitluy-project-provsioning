@@ -9,7 +9,10 @@ info:
     provider-specific infrastructure details.
   x-kitluy-status: SCAFFOLDED
 servers:
-  - url: "https://[REQUIRED-production-domain]/management/v1"
+  # Origin root, not the versioned prefix: health and version probes are served
+  # at the origin while business routes carry `/management/v1` in the path, so
+  # every path below is absolute and unambiguous.
+  - url: "https://[REQUIRED-production-domain]"
     description: "[REQUIRED: production domain — owner decision pending]"
 x-kitluy-governance:
   authentication: "Supabase Auth JWT bearer; explicit permission grants + resource/environment scope; approval classes A0-A4 for sensitive mutations"
@@ -55,7 +58,122 @@ paths:
       responses:
         "200":
           description: Service name and version
+  /management/v1/me:
+    get:
+      operationId: getCurrentAdmin
+      summary: The calling Admin's canonical authority
+      description: >-
+        Resolves the caller's identity and the permission keys currently in
+        force. No specific permission is required, but the caller must be an
+        active Admin. Permission keys are evaluated by the canonical database
+        evaluator for the caller, never taken from the request.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: The caller is an active Admin
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [userId, permissions]
+                properties:
+                  userId: { type: string, format: uuid }
+                  permissions:
+                    type: array
+                    items: { type: string }
+                  dataAsOf: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+  /management/v1/devices:
+    get:
+      operationId: listFleetDevices
+      summary: Governed device fleet read model
+      description: >-
+        Requires the `fleet.read` permission. Device relations are closed to
+        browsers (OD-ADMIN-FLEET-001); this route is the only read path. The
+        response is an explicit DTO and never carries device-identity evidence
+        such as key fingerprints, manifest digests or enrollment sequence.
+        Cursor pagination is not implemented in this slice: `truncated` reports
+        honestly when the page cap was reached.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: The authorized fleet page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [devices, count, limit, truncated]
+                properties:
+                  devices:
+                    type: array
+                    items: { $ref: "#/components/schemas/FleetDevice" }
+                  count: { type: integer }
+                  limit: { type: integer }
+                  truncated: { type: boolean }
+                  freshnessPolicyRuled:
+                    type: boolean
+                    description: >-
+                      false while the liveness threshold is an unruled owner
+                      value; every device with a heartbeat then reports UNKNOWN.
+                  dataAsOf: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+  /management/v1/devices/{deviceId}:
+    get:
+      operationId: getFleetDevice
+      summary: One governed device with derived provisioning readiness
+      description: >-
+        Requires the `fleet.read` permission. Provisioning readiness is DERIVED
+        from canonical facts — there is no stored eligibility flag — and is a
+        presentation gate only; the governed issuance path revalidates
+        server-side.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: deviceId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The authorized device
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [device, provisioning]
+                properties:
+                  device: { $ref: "#/components/schemas/FleetDevice" }
+                  provisioning: { $ref: "#/components/schemas/ProvisioningReadiness" }
+                  freshnessPolicyRuled: { type: boolean }
+                  dataAsOf: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404":
+          description: No such device, or an identifier that cannot name one
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
 components:
+  responses:
+    Unauthenticated:
+      description: >-
+        No bearer token, or a token the auth server did not accept. Fails
+        closed: an unreachable auth server is also a refusal.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    Denied:
+      description: >-
+        Authenticated, but not permitted. `error.details.reason` distinguishes
+        no-Admin-profile, disabled, inactive and missing-access so a portal can
+        show the right message; the missing permission key is never named.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
   securitySchemes:
     bearerAuth:
       type: http
@@ -79,3 +197,49 @@ components:
               type: string
             details:
               type: object
+    FleetDevice:
+      type: object
+      description: >-
+        Non-secret fleet summary. Device-identity evidence (key fingerprint,
+        manifest digest, enrollment sequence) is deliberately absent: it is
+        selected explicitly, never spread from the read-model row.
+      required: [deviceId, deviceReference, deviceClass, lifecycle, freshness, requiresAttention]
+      properties:
+        deviceId: { type: string, format: uuid }
+        deviceReference: { type: string }
+        deviceClass: { type: string }
+        hardwareProfile: { type: [string, "null"] }
+        lifecycle:
+          type: string
+          description: >-
+            Canonical lifecycle state. `quarantined` and
+            `restricted_investigation` are abnormal and are presented as such.
+        trustLevel: { type: [string, "null"] }
+        certificateStatus: { type: [string, "null"] }
+        assignmentState: { type: [string, "null"] }
+        tenantReference: { type: [string, "null"] }
+        digitalStoreReference: { type: [string, "null"] }
+        locationReference: { type: [string, "null"] }
+        terminalAssignmentCount: { type: integer }
+        openIncidentCount: { type: integer }
+        lastSeenAt: { type: [string, "null"], format: date-time }
+        fleetStatus: { type: [string, "null"] }
+        freshness:
+          type: string
+          enum: [ONLINE, STALE, OFFLINE, NEVER_SEEN, UNKNOWN]
+          description: >-
+            Derived, never stored. While the liveness threshold is an unruled
+            owner value, a device with a heartbeat reports UNKNOWN — never a
+            guessed ONLINE. NEVER_SEEN is a fact, not a threshold.
+        requiresAttention: { type: boolean }
+    ProvisioningReadiness:
+      type: object
+      description: >-
+        Derived presentation gate, not the security boundary. No stored
+        eligibility flag exists and none is created.
+      required: [eligible, reasons]
+      properties:
+        eligible: { type: boolean }
+        reasons:
+          type: array
+          items: { type: string }
