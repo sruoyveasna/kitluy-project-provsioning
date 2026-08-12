@@ -4,6 +4,36 @@ Read the newest relevant handoff before starting work. Naming:
 `YYYY-MM-DD__<AREA>__<TASK-ID>__<SLUG>__AI-HANDOFF.md` under the matching
 subfolder (repository/ shared/ apps/ services/ data/ infrastructure/ reviews/).
 
+## A fresh device enrolls itself, end to end (2026-08-12)
+
+**DEVWF-B05 and DEVWF-B06 move ABSENT/BLOCKED → IMPLEMENTED-IN-DEV.** The
+2026-08-11 audit recorded that a field Pi could not enroll at all. It can now,
+proven against a real PostgreSQL 17.6 database over a real socket with the real
+firstboot code and the real agent: ticket issued at flash time → device
+generates its own identity → `ENROLLED_UNASSIGNED`, and a byte-copy of the same
+card is refused (`§5` single-use holds against a clone).
+
+Three defects stood between "built" and "works", none of which any existing test
+could see: the enrollment router was **mounted by nothing**; the agent read
+`KITLUY_FLEET_BASE_URL` from `/etc/kitluy/fleet.env`, a variable and a file **no
+build has ever produced**; and the transport sent camelCase signal names where
+the governed enum requires snake_case, so **every real device would have been
+refused**. The last was found only by driving a real device through the real
+service — the integration test hand-writes canonical names and so proved the
+server, never the device's vocabulary.
+
+New: `pnpm device:prepare`, the flash-time station tool — the last missing piece
+of the DEC-2 chain, which until now was performed by hand against the governed
+door.
+
+`pnpm verify` **9 PASS / 4 FAIL**, every failure attributed and none from this
+work. `secret:scan` clean (1695). **`0190` is still NOT deployed to the cloud
+and no hardware has booted**; BLK-005 unchanged.
+
+Record: `shared/2026-08-12__SHARED__DEC2-ENROLLMENT__ENDPOINT-WIRING-SIGNAL-VOCABULARY-AND-FLASH-TIME-STATION-TOOL__AI-HANDOFF.md`
+
+---
+
 ## Owner device-lifecycle workflow registered as authority (2026-08-11)
 
 The owner workflow document (factory enrollment → Admin fleet visibility →
