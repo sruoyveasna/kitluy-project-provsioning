@@ -1,5 +1,108 @@
 # CLAUDE.md — instructions for AI build agents in the KitLuy repository
 
+## Repository location
+
+```text
+/home/veasna/Development/HET_VEASNA_WORKSPACE/repos/het-kitluy-project
+```
+
+## Canonical naming and architecture (owner decision, 2026-08-07)
+
+| Kind                           | Value                                                         |
+| ------------------------------ | ------------------------------------------------------------- |
+| Technical project identifier   | `het-kitluy-project`                                          |
+| Canonical Git repository       | `~/Development/HET_VEASNA_WORKSPACE/repos/het-kitluy-project` |
+| Human-readable project name    | **HET KitLuy Project**                                        |
+| Product name                   | **KitLuy Suite**                                              |
+| Portfolio / architectural term | **KitLuy Ecosystem** (still valid — not replaced)             |
+
+**This repository IS `repos/het-kitluy-project`.** It is simultaneously the
+development root, documentation root, AI-handoff root, infrastructure root and
+Supabase root. It is **not** contained inside another KitLuy directory, and
+neither of these exists or may be created:
+
+```text
+repos/het-kitluy-project/HET-KITLUY-PROJECT/     <- removed 2026-08-07
+repos/het-kitluy-project/het-kitluy-project/     <- never create
+```
+
+Use lowercase kebab-case for directory names, identifiers, configuration,
+scripts and path references. The remote is still named
+`Soenghak3301/HET-KITLUY-PROJECT` — that is the GitHub repository name and was
+not changed.
+
+### The six standalone repositories
+
+They live **outside** this repository, at
+`repos/het-kitluy-standalone-repos/`, classified
+**`STANDALONE-MIGRATION-SOURCE`**. They are preserved reference and migration
+sources — not deleted, not migrated, not obsolete.
+
+**Do not modify them as part of monorepo work**, and do not copy code, merge
+migrations, rewrite imports or merge history between them and this repository.
+Mapping and next actions:
+`docs/authority/STANDALONE_REPOSITORY_RECONCILIATION.md`.
+
+## LOCAL-FIRST KNOWLEDGE POLICY (KL-DOCS-002, 2026-08-07)
+
+**Develop from local documentation. Do not search Google Drive to start work.**
+
+1. Read `PROJECT_HOME.md`.
+2. Read `docs/authority/kitluy-source-of-truth-index-v1.0.0.md`.
+3. Resolve the active product/feature documentation **locally** — use
+   `docs/authority/LOCAL_DOCUMENTATION_MAP.md` to find it.
+4. Read the relevant current handoff in `00_AI_HANDOFF/`.
+5. Inspect live code, migrations and tests.
+6. Use Google Drive **only** when one of these holds:
+   - the local manifest says a required source is missing;
+   - the owner explicitly requests a refresh;
+   - a source conflict requires upstream verification;
+   - the local source is known to be stale;
+   - a new approved document is known to exist;
+   - exact source provenance is required.
+
+**Never re-scan all of Google Drive at the start of a task.** An authorized
+query fetches identified documents by `drive_file_id` from
+`exported-drive-docs/kitluy/DRIVE_SOURCE_MANIFEST.json` — it does not enumerate
+folders or sweep by title. Full rules: `docs/authority/DRIVE_SYNC_POLICY.md`.
+
+> **The repository outranks Drive.** Local canonical authority is rebuild bible
+> **v4.0.0** and business bible **v2.0.0** (`docs/source/canonical/`). Drive's
+> newest are v3.0.0 and v1.0.0 — both **superseded**. Do not use Drive material
+> to "correct" local canonical documents without explicit owner authority.
+
+## Cloud environment — READ BEFORE ANY CLAIM ABOUT "THE CLOUD"
+
+The canonical cloud **development** Supabase project is:
+
+```text
+kitluy-project-pos   ref gjgbnkhuwlwhngbtrgts   PostgreSQL 17.6
+```
+
+`het-kitluy-dev` (`gkfcxxtryqmjnhujlkdr`) is **superseded and empty** — never
+deploy to it. Authority: `KLD-2026-08-10-CLOUD-TARGET-001` in
+`docs/authority/kitluy-decision-and-reconciliation-register-v1.0.0.md`.
+
+Identifiers and credentials live OUTSIDE this repository at
+`../../local-config/het-kitluy-project/supabase.env.local`. **Read the
+non-secret identifiers there (`KITLUY_SUPABASE_PROJECT_REF`) before asserting
+anything about hosted state.** Never print or commit the secret values.
+
+Two facts that have each cost a session already:
+
+1. **Project enumeration through one channel is not an inventory.** The
+   `supabase` CLI and the claude.ai Supabase MCP connector on this workstation
+   are authenticated to _different accounts_ and return disjoint project lists.
+   Check both before declaring a project absent.
+2. **Connect via the IPv4 session-mode pooler**
+   (`aws-0-ap-southeast-1.pooler.supabase.com:5432`). `db.<ref>.supabase.co` is
+   IPv6-only and the workstation has no IPv6 route; transaction mode (6543)
+   cannot run DDL.
+
+Deployment goes through `pnpm db:deploy:hosted-dev` only — an exact-project
+allowlist, forward-only, destructive operations refused. `db:apply`/`db:reset`/
+`db:seed` remain local-only (KL-INF-P1-037).
+
 ## Before any work
 
 1. Read `PROJECT_HOME.md`.

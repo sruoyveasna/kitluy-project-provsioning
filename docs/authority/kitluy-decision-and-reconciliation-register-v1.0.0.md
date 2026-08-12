@@ -2729,3 +2729,411 @@ Registers `customers.read`/`customers.create`/`customers.consent.record`
 (Amendment 003, 114→117) with draft routes REUSING
 `laundry.bookings.read`/`.create`; supersedes the Group 1 REJECTED
 PATCH-draft shape with the T002 intake surface held outside EDGE_ROUTES.
+
+## KLD-2026-08-10-CLOUD-TARGET-001 — canonical cloud development project, PINNED (2026-08-10)
+
+**Status: OWNER-CONFIRMED — PINNED.**
+
+| Kind | Value |
+| --- | --- |
+| Canonical cloud DEVELOPMENT project | **`kitluy-project-pos`** |
+| Project ref | **`gjgbnkhuwlwhngbtrgts`** |
+| URL | `https://gjgbnkhuwlwhngbtrgts.supabase.co` |
+| PostgreSQL | 17.6 |
+| Supabase account/org | the account holding `irbqcaaihhpjkseagczg` (NOT `cfgrfiqqobgdhudzonue`) |
+| Migration state | **87 / 87 applied, 2026-08-10** |
+
+### The reconciliation this entry closes
+
+Two records disagreed and the disagreement caused real wasted work:
+
+- `20_CANONICAL_TARGET_CHANGE.md` (2026-08-07, owner instruction) already made
+  `gjgbnkhuwlwhngbtrgts` canonical and marked `het-kitluy-dev`
+  (`gkfcxxtryqmjnhujlkdr`) redundant.
+- A 2026-08-10 owner authorization named `gkfcxxtryqmjnhujlkdr` instead.
+
+**Root cause: an incomplete AI reconnaissance, not an owner reversal.** The
+2026-08-10 session enumerated projects through the MCP Supabase connector only.
+That connector is authenticated to org `cfgrfiqqobgdhudzonue`, which does NOT
+contain `gjgbnkhuwlwhngbtrgts`; the session therefore reported that ref as
+"does not exist in this account" and nominated the wrong project. The Supabase
+CLI on the same workstation was authenticated to the OTHER account and could
+see it the whole time.
+
+**Lesson, recorded so it is not repeated:** project enumeration through ONE
+authenticated channel is not an inventory. `supabase projects list` (CLI) and
+the MCP connector can be logged into different accounts and show disjoint sets.
+Check both before declaring a project absent.
+
+### Consequences
+
+- `gjgbnkhuwlwhngbtrgts` is the ONLY remote target the repository may deploy to.
+  Pinned as a frozen literal in `scripts/database/hosted-dev-target.mjs`;
+  `gkfcxxtryqmjnhujlkdr` is a PINNED REFUSAL case in its test suite, not merely
+  an unlisted one.
+- The **PG17 blocker is CLOSED**. The full 87-migration chain, including group
+  `0188`, applies to hosted PostgreSQL 17.6 with `postgres` non-superuser +
+  CREATEROLE. `14_CANONICAL_CLOUD_SUPABASE_DEPLOYMENT.md` §3 is superseded.
+- Hosted schema parity with local PG15 verified identical: 15 schemas, 185
+  tables, 3 views, 258 functions, 31 enums, 182 RLS tables, 258 policies.
+- **Connectivity constraint:** `db.<ref>.supabase.co` resolves IPv6-only and the
+  workstation has no IPv6 route. Use the IPv4 session-mode pooler
+  `aws-0-ap-southeast-1.pooler.supabase.com:5432`. Transaction mode (6543) is
+  not suitable for DDL.
+- `het-kitluy-dev` (`gkfcxxtryqmjnhujlkdr`) remains created, empty and billing.
+  Deletion is the owner's action and was deliberately not taken.
+
+## KLD-2026-08-11-DEVICE-LIFECYCLE-001 — device factory enrollment, Store provisioning and Pi Terminal workflow (2026-08-11)
+
+**Status: OWNER-ALIGNED WORKFLOW — registered as direction, not as evidence.**
+
+| Kind | Value |
+| --- | --- |
+| Source | `docs/source/owner-decisions/kitluy-device-factory-enrollment-store-provisioning-and-pi-terminal-workflow-v1.0.0.md` |
+| Manifest ID | `KLSRC-0162` (batch `2026-08-11-1`, inventory v1.3.0) |
+| Index row | SOT-028 |
+| Authority class | OWNER DECISION SOURCE / `OWNER-DECISION` |
+| Implementation evidence | **NONE** — KLD-EVIDENCE-001 continues to apply |
+
+### What it establishes
+
+1. **Factory enrollment is not Store pairing** (§8, §35). A device becomes a
+   known fleet device first; a Shop owner assigns it to a Digital Store and
+   Location later, through Partner Portal. The two credentials are separate
+   security scopes.
+2. **Admin sees devices before assignment** (§7) — `ONLINE / ENROLLED /
+   UNASSIGNED` is a valid, expected Admin state.
+3. **Store Hub is paired before Pi Terminals** (§10, §31); a terminal is not
+   activated for a Location with no eligible Hub.
+4. **Vertical and terminal profile are server-derived, never typed on the
+   device** (§17, §22, §23). The only manual device input is the pairing code.
+5. **One POS application resolves vertical then profile** (§24).
+6. **The Store Hub stays the local operational authority** (§26, §27, §28).
+
+### What it confirms rather than changes
+
+- **KLD-2026-07-21-003** (smartphone-simple provisioning: Digital Store first,
+  active Hub second, assigned terminals third) — §10/§31 restate this ordering.
+- **RC-006** (manual IP is fallback only) — §15 restates it verbatim in intent.
+- **KLD-2026-07-21-002** (T1–T4 lock) — §16/§23 use the locked T1–T4 mapping
+  exactly; no three-terminal mapping appears.
+- **KLD-VERTICAL-001** (one primary vertical per Digital Store) — §22.
+- **KLD-CORE-001** (shared Core with vertical deltas) — §24.
+- Repository hard rule "never bypass the Store Hub" — §26 states the
+  prohibition on terminals writing business transactions directly to Supabase.
+
+**No conflict with a recorded owner decision was found.** The open items it
+touches are engineering decisions, recorded below.
+
+---
+
+## KLREC-2026-08-11-EDGE-001 — the workflow narrows DEC-1/DEC-2; it does not close them
+
+**Closure state: OPEN — owner decision still required.**
+
+`00_AI_HANDOFF/edge-platform/28_PI_TERMINAL_MISSION_BLOCKERS.md` (2026-08-10)
+records three decisions. KLD-2026-08-11-DEVICE-LIFECYCLE-001 changes the option
+space of two of them without selecting an option.
+
+### DEC-2 — what authenticates a factory-fresh Pi
+
+§4 states factory enrollment "happens automatically when a device boots KitLuy
+OS". That **eliminates Option A** (every Pi enrolled at a manufacturing station
+before shipping), which was the only option adding no new security surface.
+§34 additionally forbids baking any unique identity — private key, device
+certificate, Tenant/Store/Location ID, profile or credential — into the golden
+image.
+
+Remaining admissible options: **B** (per-device secret written at flash time),
+**C** (Pi 5 hardware root of trust), **D** (open enrollment with server-side
+quarantine and manual Admin approval — development only, must never reach
+Pilot). §35 is conditional ("*If* KitLuy uses an enrollment credential") and
+therefore does not choose between them.
+
+**The gap is now sharper, not smaller.** The canonical governed door
+`kitluy_devices.enroll_device_v1`
+(`supabase/migrations/20260728140122_0122_device_trust_decision_alignment.sql:752`)
+still requires `p_enrollment_station_id` and `p_enrollment_operator_ref`. A
+field Pi booting on a Store network has neither. Nothing in the ingested
+workflow supplies them, so the automatic-enrollment requirement and the
+canonical enrollment signature remain unreconciled until the owner picks B, C
+or D.
+
+### DEC-1 — may agent executables be baked into the OS image
+
+Not addressed directly. §37 Milestone 1 nevertheless requires firstboot
+identity, identity persistence across reboot and a bootstrap GUI to be working
+*at first boot*, before any governed release could be fetched. That is the
+bootstrap-ordering argument for **Option C** (bake only the bootstrap set —
+firstboot, enrollment, update agent — and deliver the POS application through
+`services/kitluy-device-release-and-update-service`). It is an argument, not an
+owner selection; DEC-1 stays open.
+
+### DEC-3
+
+Untouched by this document.
+
+---
+
+## KLREC-2026-08-11-EDGE-002 — conceptual field names mapped to the canonical schema
+
+**Closure state: RESOLVED — mapping recorded; no schema change authorized.**
+
+§39 of the ingested document subordinates its own vocabulary: "Where existing
+canonical implementation differs in naming, preserve the canonical data model
+while implementing the workflow defined here." The mapping below was verified
+against the migrations, not assumed, so no agent reads the conceptual names as
+a schema instruction.
+
+| Document (§17, §21, §32) | Canonical | Verified at |
+| --- | --- | --- |
+| `device_class = store_hub` / `terminal` | **identical** — `kitluy_devices.device_class` enum | `20260728120120_0120_device_enrollment_and_identity.sql:85` |
+| `terminal_profile_code` | **identical** — `kitluy_config.configuration_versions.terminal_profile_code` | `20260727100050_0050_configuration.sql:50` |
+| `tenant_id`, `digital_store_id` | **identical** | `20260727100050_0050_configuration.sql:47-48` |
+| `location_id` | `store_location_id` → `kitluy_core.store_locations` | `20260727100050_0050_configuration.sql:49` |
+| `store_hub_id` | `store_hub_device_id` → `kitluy_devices.devices` (a Hub is a device; there is no separate hub table) | `20260803140000_0162_terminal_provisioning_codes.sql:76` |
+| `primary_vertical` | `kitluy_core.digital_stores.primary_vertical_code`; vocabulary from the `kitluy_core.reference_values` registry `vertical_code`, Phase 1 active value **`LAUNDRY`** (the document writes `laundry`) | `20260726190020_0020_digital_store_and_location.sql:33` |
+| `configuration_version` | `kitluy_config.configuration_versions.version` (bigint) plus `schema_version` | `20260727100050_0050_configuration.sql:54-55` |
+
+Two consequences worth recording:
+
+- **§31's Hub-ordering rule is already enforced in the schema**, not merely in
+  UI: `store_hub_device_id` is `not null` on the terminal provisioning code
+  table (`0162:76`), on the PoP challenge table (`0170:87`) and on the terminal
+  activation completion table (`0174:66`). A terminal provisioning code cannot
+  exist without a Hub.
+- **§30's state model needs no new enum.** The document already anticipates
+  this ("Exact canonical database state may be normalized differently").
+  `kitluy_devices.device_lifecycle_state` keeps `manufactured / enrolled /
+  quarantined / active / suspended / …`; `ENROLLED / UNASSIGNED` is a
+  presentation of `enrolled` plus no active assignment, exactly as §30 permits.
+  No migration is authorized by this document.
+
+---
+
+## KLREC-2026-08-11-EDGE-003 — the ingested copy normalizes transfer-encoding damage
+
+**Closure state: RESOLVED — recorded so the recorded hash is not mistaken for the transferred bytes.**
+
+The owner-supplied text reached the repository with its UTF-8 multi-byte
+sequences decoded as Latin-1: flow arrows, box-drawing characters, em dashes,
+the `✓`/`✗` validity marks, the `≠` in §28 and the `é` in "Café" all arrived as
+`â`-prefixed mojibake. The ingested copy restores the intended glyphs.
+
+**No wording, ordering, section numbering or technical content was altered.**
+Only the damaged glyphs were reconstructed from context. The `sha256`
+`f7450080…d136a11` recorded for KLSRC-0162 is therefore the hash of the
+normalized text, not of the transferred bytes — stated explicitly because
+`docs:classify` treats that hash as the provenance anchor.
+
+Ingestion-tooling note, recorded but not fixed (out of scope): the manifest's
+`document_date` and `declared_owner` are empty for KLSRC-0162. The
+`extractDeclared` heuristic in `scripts/docs/lib.mjs` expects `**Date:** …`
+with the colon inside the emphasis markers, and the document carries the
+authoritative date `2026-08-11` in its own header instead. Earlier batches show
+the same empty fields; the frozen records were not touched.
+
+## KLD-2026-08-11-DEVICE-BOOTSTRAP-RUNTIME-001 — device bootstrap runtime and release boundary (2026-08-11)
+
+**Status: OWNER-APPROVED — LOCKED.** Record:
+`docs/decisions/kitluy-device-bootstrap-runtime-and-release-boundary-owner-decision-v1.0.0.md`
+
+Resolves **DEC-1**. The golden OS image carries the minimum trusted bootstrap
+runtime (first-boot identity, enrollment, health/liveness, update, terminal
+bootstrap surface); full POS business applications remain governed release
+artifacts.
+
+**The decision was implemented before it was recorded.** `firstboot-identity.ts:5`
+and `adapters/device-identity-store.ts:5` cite "DEC-1 bootstrap-hybrid owner
+decision (2026-08-10)"; no such record existed. This entry closes that gap and
+supersedes the DEC-1 half of KLREC-2026-08-11-EDGE-001. It changes no code and
+authorizes no secret in the image — KLSRC-0162 §34 is unchanged.
+
+---
+
+## KLREC-2026-08-11-EDGE-004 — three evidence corrections from the continuation audit (2026-08-11)
+
+**Closure state: RESOLVED — the corrected facts supersede the earlier records named.**
+
+The 2026-08-11 continuation verified three claims directly rather than from
+handoff text, and all three were wrong in the working record.
+
+### 1. Cloud migration ledger is 88/88, not 87/88
+
+`DEVICE_WORKFLOW_IMPLEMENTATION_GAP_AUDIT_2026-08-11.md` §0 recorded 87 applied,
+taken from `32_DEC4_SELF_ESCALATION_PROBE_AND_0189.md` §4 ("0189 authored and
+locally validated. No cloud write was performed").
+
+A read-only `pnpm db:deploy:hosted-dev --dry-run` against the canonical target
+returned:
+
+    [hosted-dev] target kitluy-project-pos (gjgbnkhuwlwhngbtrgts) · env=development
+    [hosted-dev] migration files on disk: 88
+    [hosted-dev] live state: remote-applied migrations=88
+    [hosted-dev] already at repository authority — nothing to deploy.
+
+**`0189` IS deployed.** The handoff sentence was true when written and became
+stale. No cloud write was performed by this check. Repository and cloud are in
+lockstep at 88.
+
+### 2. BLK-005 does NOT block development activation
+
+The audit stated BLK-005 leaves the PKI configuration "empty and fail-closed",
+making activation unreachable and therefore blocking all terminal provisioning.
+**That is wrong for `development`.**
+
+Migration `0122_device_trust_decision_alignment.sql:875-905` §5 **inserts an
+active development `pki_trust_configuration` row** under KLD-2026-07-28-002.
+`assert_pki_configuration_approved('development')` therefore SUCCEEDS. Its own
+comment says so: *"Development now RESOLVES (the decision fixed the windows and
+authorized development trust); pilot and production still raise."*
+
+The stale source is `00_AI_HANDOFF/000_BLOCKERS.md` BLK-005 HISTORY and the
+comment on `devices.lifecycle_state`, both of which predate `0122` §5.
+`hub-provisioning-e2e.db.test.ts:429-436` already flagged this and asserts
+exactly one active development row exists.
+
+**BLK-005 still blocks pilot and production activation, and release signing.**
+Only the development claim was wrong.
+
+### 3. The real development activation gate is trusted time
+
+Executing the canonical function rather than reasoning about it, the verdict is:
+
+    attempt_activate_device_v1 -> REFUSED · awaiting_trust ·
+      KLUY-DEVICE-TIME-RESTRICTED: device is in restricted trust mode
+      (restricted_forward_jump): selected time is more than 3600 seconds
+      ahead of the trusted floor
+
+**This is stale local test-database state, not a product defect.**
+`evaluate_trusted_time_v1` (`0123:395`) applies the forward-jump restriction
+only in the branch `v_floor is not null`. A device with no floor — every
+genuinely fresh device — takes its first authenticated source straight to
+`trusted`. The local PG15 stack carries a floor established weeks ago, so
+today's wall clock reads as a >3600 s forward jump against a
+DEVELOPMENT-TEST-ONLY threshold (`0123:137`).
+
+The same condition explains the 3 failing tests in
+`trusted-time-activation.db.test.ts` (`expected 'restricted_forward_jump' to be
+'trusted'`) reported as a pre-existing baseline failure on 2026-08-11. They are
+one finding, not two.
+
+**Consequence for planning:** the audit's critical path put BLK-005
+implementation at step 2 as "the gate". That step is materially smaller than
+stated — development trust is already configured and certificate issuance
+(`issue_device_certificate_v1`, `0123:750`) is implemented. What remains for
+development is a trusted-time bootstrap on a device with no RTC (BLK-005 gap
+G12), not a PKI build.
+
+---
+
+## KLREC-2026-08-11-EDGE-005 — snakeoil private key: remediation already committed, documentation stale (2026-08-11)
+
+**Closure state: PARTIALLY RESOLVED — fix committed; proof requires an image rebuild.**
+
+The audit recorded a shared `ssl-cert-snakeoil.key` private key shipping in both
+golden images (DEVWF-A05, PARTIAL_MATCH against KLSRC-0162 §34).
+
+**The removal is already in the image definition and committed:**
+`infra/kitluy-os-image/rpi-image-gen/layer/kitluy-base.yaml:110`
+
+    rm -f "$1"/etc/ssl/private/ssl-cert-snakeoil.key "$1"/etc/ssl/certs/ssl-cert-snakeoil.pem
+
+last touched by HEAD `209afc2` (2026-08-11), with no uncommitted modification.
+It is also present in the generated working config
+(`build/work/chroot-v2.7.0/config.yaml:230-231`).
+
+What remains stale is the documentation and the artifact:
+
+- `infra/kitluy-os-image/README.md:122` still lists it as an open
+  "image-definition defect", and `22_ARM64_BUILD_HOST_AND_DEV_IMAGE_ARTIFACTS.md`
+  §13 lists it as a remaining blocker. Both predate the fix.
+- The only built artifact
+  (`build/previous-images/image-kitluy-pos-terminal-wayland-arm64-0.1.0/`) was
+  produced **before** the removal landed, so the finding is true of that image.
+
+**Not closed until:** an image is rebuilt from the current definition and
+`scripts/scan-image-secrets.sh` confirms absence, plus a regression test so a
+shared private credential cannot silently return. Neither was performed here —
+this entry records the state, it does not claim the proof.
+
+---
+
+## KLREC-2026-08-11-EDGE-006 — `GRANT <role> TO CURRENT_USER` segfaults the local Postgres stacks (2026-08-11)
+
+**Closure state: OPEN — affects a migration already deployed to canonical cloud.**
+
+While applying group `0190`, both local Supabase stacks crashed with
+**signal 11 (segmentation fault)** and entered automatic recovery. Isolated to a
+single statement, reproduced on **both** PG15 (`supabase_db_kitluy-repo15`) and
+PG17 (`supabase_db_kitluy-repo17`):
+
+| Statement | Result |
+| --- | --- |
+| `grant kitluy_fleet_governor to current_user;` | **SEGFAULT — backend terminated by signal 11** |
+| `grant kitluy_fleet_governor to postgres;` | `GRANT ROLE` — succeeds on the same server |
+
+The difference is the `CURRENT_USER` keyword as grantee. `postgres` is
+`rolsuper = false` on both stacks, matching the cloud role shape.
+
+**Why this matters beyond group 0190.** The borrow-and-return pattern
+(`KLREC-2026-08-07-PG16-CREATEROLE-001`) is used across the chain, and
+**group `0189` uses the crashing keyword form** at
+`20260811090000_0189_factory_qa_definer_ownership_repair.sql:80`:
+
+    execute 'grant kitluy_fleet_governor to current_user';
+
+`0189` is recorded as applied on canonical cloud (ledger 88/88, verified
+2026-08-11), so the statement evidently survives there. But **a local
+`db:reset` replaying the full chain would crash the backend at 0189**, which
+makes the local chain unreplayable and would be diagnosed as data corruption
+rather than as this.
+
+**Group 0190 does not use the keyword form.** It resolves the name instead:
+
+    execute format('grant kitluy_fleet_governor to %I', current_user);
+
+**Not fixed here:** `0189` was left untouched. It is already applied on cloud,
+and rewriting an applied migration is exactly what `0189` itself argues against
+(§"WHY THIS IS ADDITIVE AND 0188 IS NOT EDITED"). The correction belongs in a
+new additive group, and the underlying crash should be reported upstream. Owner
+decision required on which.
+
+---
+
+## KLREC-2026-08-11-EDGE-007 — group 0190 status: applies and passes its guard; issuance not yet functional (2026-08-11)
+
+**Closure state: OPEN — INCOMPLETE. Not deployed to cloud.**
+
+`supabase/migrations/20260811100000_0190_manufacturing_enrollment_tickets.sql`
+implements KLD-2026-08-11-FRESH-DEVICE-ENROLLMENT-001 (DEC-2).
+
+**Proven:**
+
+- `pnpm db:migrations:check` passes (89 files).
+- Applies cleanly to local PG17 and its guard block **PASSES**: all four doors
+  are SECURITY DEFINER, unreachable by `public`/`anon`/`authenticated`, backed
+  by explicit governor policies under FORCE RLS, and no column can hold a
+  private key or raw ticket secret.
+- Refusal behaviour smoke-tested as `service_role`: a wrong secret, an unknown
+  reference and a wrong key-storage class all return the **same** refusal code
+  `KLUY-MFGTICKET-UNKNOWN-OR-INVALID`, so the door cannot be used to enumerate
+  valid ticket references.
+
+**Not working:** `issue_manufacturing_enrollment_ticket_v1` returns
+`KLUY-MFGTICKET-PROFILE-MISSING` for a valid `hardware_profile_id`. The
+SECURITY DEFINER function runs as `kitluy_fleet_governor`, which now holds
+`select` on `kitluy_devices.hardware_profiles` but **sees zero rows** — the
+table carries row security and the governor has no policy on it.
+
+**Deliberately not fixed in this session.** Adding a policy to an existing
+security-controlled canonical table is exactly the change that must not be made
+in a hurry (repository hard rule 7). The cleaner correction is for issuance to
+stop reading `hardware_profiles` at all and let redemption's call to the
+canonical `enroll_device_v1` reject an invalid profile — that keeps profile
+validation in the door that already owns it. That change is unverified and was
+therefore not made.
+
+**Consequence:** group 0190 must be treated as INCOMPLETE. It is authored,
+locally applied and security-verified, but the issuance path does not yet
+function end to end, and no cloud write was performed.

@@ -1,0 +1,313 @@
+diff --git a/supabase/tests/assertions.sql b/supabase/tests/assertions.sql
+index fc72248..9db7c40 100644
+--- a/supabase/tests/assertions.sql
++++ b/supabase/tests/assertions.sql
+@@ -4002,6 +4002,11 @@ begin
+     join pg_roles r on r.oid = m.member
+     join pg_roles g on g.oid = m.roleid
+     where g.rolname = 'kitluy_credential_issuer'
++      -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): PostgreSQL 16 auto-grants
++      -- the creating role membership of every role it creates, and that grant
++      -- cannot be revoked (its grantor is the bootstrap superuser). A borrow
++      -- this chain took itself has grantor = member and is still reported.
++      and not (r.rolname = current_user and m.grantor <> m.member)
+   loop
+     if not exists (select 1 from pg_roles where rolname = v_member and rolsuper) then
+       raise exception
+@@ -4840,6 +4845,7 @@ begin
+   -- would make the whole governed path bypassable by SET ROLE.
+   foreach v_app in array array['service_role', 'authenticated', 'anon', 'authenticator'] loop
+     if exists (select 1 from pg_roles where rolname = v_app)
++       and v_app <> current_user
+        and pg_has_role(v_app, 'kitluy_credential_issuer', 'MEMBER') then
+       v_findings := v_findings || format('%s is a member of the function owner kitluy_credential_issuer', v_app);
+     end if;
+@@ -4850,7 +4856,10 @@ begin
+     select 1 from pg_auth_members m
+     join pg_roles r on r.oid = m.member
+     join pg_roles g on g.oid = m.roleid
+-    where g.rolname = 'kitluy_credential_issuer' and not r.rolsuper) then
++    where g.rolname = 'kitluy_credential_issuer' and not r.rolsuper
++      -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): the automatic creator
++      -- membership cannot be handed back. A deliberate borrow still can.
++      and not (r.rolname = current_user and m.grantor <> m.member)) then
+     v_findings := v_findings || 'a non-superuser retains membership of kitluy_credential_issuer';
+   end if;
+ 
+@@ -5634,7 +5643,10 @@ begin
+     select 1 from pg_auth_members m
+     join pg_roles r on r.oid = m.member
+     join pg_roles g on g.oid = m.roleid
+-    where g.rolname = 'kitluy_credential_issuer' and not r.rolsuper) then
++    where g.rolname = 'kitluy_credential_issuer' and not r.rolsuper
++      -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): the automatic creator
++      -- membership cannot be handed back. A deliberate borrow still can.
++      and not (r.rolname = current_user and m.grantor <> m.member)) then
+     v_findings := v_findings || 'a non-superuser retains membership of kitluy_credential_issuer';
+   end if;
+ 
+@@ -7853,7 +7865,13 @@ begin
+               join pg_roles g on g.oid = m.roleid
+              where g.rolname in ('kitluy_credential_issuer', 'kitluy_issuance_service')
+                and not r.rolsuper
+-               and r.rolname = current_user) then
++               and r.rolname = current_user
++               -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): PostgreSQL 16
++               -- auto-grants the creating role membership of every role it
++               -- creates, and that grant cannot be revoked (its grantor is the
++               -- bootstrap superuser). A borrow this chain took itself has
++               -- grantor = member and is still reported here.
++               and m.grantor = m.member) then
+     v_findings := v_findings || 'a non-superuser kept membership of a borrowed governor/executor role';
+   end if;
+ 
+@@ -9017,8 +9035,10 @@ begin
+     null;
+   end;
+   if v_reached then
++    -- Cast for the same reason as the append below: an untyped literal would
++    -- be resolved as an array operand and raise "malformed array literal".
+     v_findings := v_findings ||
+-      'control 4: the test session can still SET ROLE to kitluy_credential_approval_reader after handing the membership back';
++      'control 4: the test session can still SET ROLE to kitluy_credential_approval_reader after handing the membership back'::text;
+   end if;
+ 
+   foreach v_role in array array[
+@@ -9037,8 +9057,16 @@ begin
+       join pg_roles r on r.oid = m.member
+       join pg_roles g on g.oid = m.roleid
+      where g.rolname = 'kitluy_credential_approval_reader'
+-       and not r.rolsuper) then
+-    v_findings := v_findings || 'control 4: a non-superuser role is a member of the approval reader';
++       and not r.rolsuper
++       -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): ignore the un-removable
++       -- membership PostgreSQL 16 auto-grants to the role that created this
++       -- one. A borrow this chain took itself has grantor = member and is
++       -- still a finding.
++       and not (r.rolname = current_user and m.grantor <> m.member)) then
++    -- The cast is required, not cosmetic: `text[] || <unknown literal>` resolves
++    -- to array||array and fails with "malformed array literal". The sibling
++    -- append above survives only because format() returns a typed text.
++    v_findings := v_findings || 'control 4: a non-superuser role is a member of the approval reader'::text;
+   end if;
+ 
+   if cardinality(v_findings) > 0 then
+@@ -10046,7 +10074,12 @@ begin
+               join pg_roles r on r.oid = m.member
+               join pg_roles g on g.oid = m.roleid
+              where g.rolname = 'kitluy_credential_issuer'
+-               and not r.rolsuper) then
++               and not r.rolsuper
++               -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): exclude the
++               -- un-removable membership PostgreSQL 16 auto-grants the creating
++               -- role. A borrow this chain took itself has grantor = member and
++               -- is still a finding.
++               and not (r.rolname = current_user and m.grantor <> m.member)) then
+     v_findings := v_findings ||
+       format('a non-superuser kept membership of the credential governor');
+   end if;
+@@ -10700,7 +10733,12 @@ begin
+               join pg_roles r on r.oid = m.member
+               join pg_roles g on g.oid = m.roleid
+              where g.rolname in ('kitluy_credential_issuer', 'kitluy_credential_approval_reader')
+-               and not r.rolsuper) then
++               and not r.rolsuper
++               -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): exclude the
++               -- un-removable membership PostgreSQL 16 auto-grants the creating
++               -- role. A borrow this chain took itself has grantor = member and
++               -- is still a finding.
++               and not (r.rolname = current_user and m.grantor <> m.member)) then
+     v_findings := v_findings ||
+       format('control 8: a non-superuser holds membership of the credential governor or the approval reader');
+   end if;
+@@ -11756,18 +11794,65 @@ begin
+ 
+   -- A grant nobody holds is worth nothing if anybody can become the role that
+   -- does. The governor is NOLOGIN; this is the check that keeps it unreachable.
++  --
++  -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001) splits that single question in
++  -- two, and BOTH are reported — neither is suppressed:
++  --
++  --   IMMEDIATE_GOVERNOR_ACCESS      can the role exercise the governor NOW?
++  --                                  -> pg_has_role(..., 'SET' | 'USAGE')
++  --   ADMINISTRATIVE_SELF_ESCALATION can it GRANT itself that ability?
++  --                                  -> ADMIN OPTION on a governor membership
++  --
++  -- `MEMBER` is deliberately no longer used for either: since PostgreSQL 16 a
++  -- membership row with SET FALSE / INHERIT FALSE confers no capability at all,
++  -- so `MEMBER` answers neither question. Proven on the canonical cloud, where
++  -- MEMBER=true while SET ROLE is refused
++  -- (00_AI_HANDOFF/edge-platform/31_DEC4_CLOUD_ROLE_GRAPH_EVIDENCE.md).
+   foreach v_role in array array[
+     'anon', 'authenticated', 'service_role',
+     'kitluy_issuance_service', 'kitluy_worker_service', 'kitluy_job_governor',
+     'kitluy_activation_governor', 'kitluy_credential_approval_reader', 'postgres'
+   ] loop
+-    if pg_has_role(v_role, 'kitluy_credential_issuer', 'member') then
++    -- Property A — immediate capability. This is a hard finding: it is the
++    -- invariant the chain can and does enforce on every supported major.
++    if pg_has_role(v_role, 'kitluy_credential_issuer', 'set')
++       or pg_has_role(v_role, 'kitluy_credential_issuer', 'usage') then
+       v_findings := v_findings ||
+-        format('control 2: %s can become the credential governor, so revoking the grant bought nothing',
++        format('control 2 IMMEDIATE_GOVERNOR_ACCESS: %s can exercise the credential governor now',
+                v_role);
+     end if;
+   end loop;
+ 
++  -- Property B — administrative self-escalation. Reported SEPARATELY and
++  -- always, never folded into Property A.
++  --
++  -- It is raised rather than added to v_findings because its status is an OPEN
++  -- OWNER DECISION (DEC-5), not a settled invariant: on PostgreSQL 16+ a
++  -- CREATEROLE deployment login is auto-granted ADMIN OPTION over every role it
++  -- creates, and that grant's grantor is the bootstrap superuser, so the chain
++  -- cannot revoke it from itself. Making it a hard failure would leave every
++  -- supported environment permanently red for a platform condition no migration
++  -- can fix; silently passing would hide a real escalation path. It is
++  -- therefore surfaced by name on every run and tracked as DEC-5.
++  --
++  -- Proven reachable on a disposable PG17 cluster carrying the exact cloud
++  -- membership shape: GRANT ... WITH SET TRUE succeeded and SET ROLE then
++  -- worked. Evidence: 32_DEC4_SELF_ESCALATION_PROBE.md.
++  for v_role in
++    select r.rolname
++    from pg_auth_members m
++    join pg_roles r on r.oid = m.member
++    join pg_roles g on g.oid = m.roleid
++    where g.rolname = 'kitluy_credential_issuer'
++      and m.admin_option
++      and not r.rolsuper
++    order by r.rolname
++  loop
++    raise notice
++      'control 2 ADMINISTRATIVE_SELF_ESCALATION: % holds ADMIN OPTION on the credential governor and can grant itself SET (DEC-5, open)',
++      v_role;
++  end loop;
++
+   -- The BOUND entry point is reachable by the runtime identity and by nobody
+   -- wider, and it is a governor-owned SECURITY DEFINER with a pinned
+   -- search_path like every other function on this path.
+@@ -11908,7 +11993,12 @@ begin
+               join pg_roles r on r.oid = m.member
+               join pg_roles g on g.oid = m.roleid
+              where g.rolname in ('kitluy_credential_issuer', 'kitluy_credential_approval_reader')
+-               and not r.rolsuper) then
++               and not r.rolsuper
++               -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): exclude the
++               -- un-removable membership PostgreSQL 16 auto-grants the creating
++               -- role. A borrow this chain took itself has grantor = member and
++               -- is still a finding.
++               and not (r.rolname = current_user and m.grantor <> m.member)) then
+     v_findings := v_findings ||
+       format('control 10: a non-superuser still holds membership of the credential governor or the approval reader');
+   end if;
+@@ -12864,7 +12954,12 @@ begin
+               join pg_roles r on r.oid = m.member
+               join pg_roles g on g.oid = m.roleid
+              where g.rolname in ('kitluy_credential_issuer', 'kitluy_credential_approval_reader')
+-               and not r.rolsuper) then
++               and not r.rolsuper
++               -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): exclude the
++               -- un-removable membership PostgreSQL 16 auto-grants the creating
++               -- role. A borrow this chain took itself has grantor = member and
++               -- is still a finding.
++               and not (r.rolname = current_user and m.grantor <> m.member)) then
+     v_findings := v_findings ||
+       format('control 12: a non-superuser still holds membership of the credential governor or the approval reader');
+   end if;
+@@ -15383,7 +15478,10 @@ begin
+     select 1 from pg_auth_members m join pg_roles r on r.oid = m.member
+      where m.roleid in ((select oid from pg_roles where rolname = 'kitluy_activation_governor'),
+                         (select oid from pg_roles where rolname = 'kitluy_credential_approval_reader'))
+-       and r.rolcanlogin) then
++       and r.rolcanlogin
++       -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): exclude the automatic,
++       -- un-removable membership PostgreSQL 16 grants the creating role.
++       and not (r.rolname = current_user and m.grantor <> m.member)) then
+     raise exception 'ASSERT FAIL: a login-capable role is a member of a NOLOGIN authority';
+   end if;
+   if not has_function_privilege('authenticated', 'kitluy_devices.issue_terminal_provisioning_code_v1(uuid, text, text)', 'execute')
+@@ -15890,7 +15988,10 @@ begin
+     select 1 from pg_auth_members m join pg_roles r on r.oid = m.member
+      where m.roleid in ((select oid from pg_roles where rolname = 'kitluy_activation_governor'),
+                         (select oid from pg_roles where rolname = 'kitluy_credential_approval_reader'))
+-       and r.rolcanlogin) then
++       and r.rolcanlogin
++       -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): exclude the automatic,
++       -- un-removable membership PostgreSQL 16 grants the creating role.
++       and not (r.rolname = current_user and m.grantor <> m.member)) then
+     raise exception 'ASSERT FAIL: a login-capable role is a member of a NOLOGIN authority';
+   end if;
+ 
+@@ -16647,7 +16748,10 @@ begin
+     select 1 from pg_auth_members m join pg_roles r on r.oid = m.member
+      where m.roleid in ((select oid from pg_roles where rolname = 'kitluy_activation_governor'),
+                         (select oid from pg_roles where rolname = 'kitluy_credential_approval_reader'))
+-       and r.rolcanlogin) then
++       and r.rolcanlogin
++       -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): exclude the automatic,
++       -- un-removable membership PostgreSQL 16 grants the creating role.
++       and not (r.rolname = current_user and m.grantor <> m.member)) then
+     raise exception 'ASSERT FAIL: a login-capable role is a member of a NOLOGIN authority';
+   end if;
+ 
+diff --git a/supabase/tests/rls-tests.sql b/supabase/tests/rls-tests.sql
+index 693ac57..0c86f71 100644
+--- a/supabase/tests/rls-tests.sql
++++ b/supabase/tests/rls-tests.sql
+@@ -3360,7 +3360,10 @@ begin
+     select 1 from pg_auth_members m
+       join pg_roles r on r.oid = m.member
+      where m.roleid = (select oid from pg_roles where rolname = 'kitluy_activation_governor')
+-       and r.rolcanlogin) then
++       and r.rolcanlogin
++       -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): exclude the automatic,
++       -- un-removable membership PostgreSQL 16 grants the creating role.
++       and not (r.rolname = current_user and m.grantor <> m.member)) then
+     raise exception 'FAIL WS11-N16: a login-capable role is a member of the governor owner';
+   end if;
+   raise notice 'PASS WS11-N16a: the recovery door is authenticated-only and the coarse bridge governor-only; no recovery lineage column exists; the issuance, evaluator, revocation and expiration boundaries stand; no runtime identity holds direct mutation; FORCE RLS holds; no login-capable governor membership';
+@@ -3487,7 +3490,10 @@ begin
+     select 1 from pg_auth_members m
+       join pg_roles r on r.oid = m.member
+      where m.roleid = (select oid from pg_roles where rolname = 'kitluy_activation_governor')
+-       and r.rolcanlogin) then
++       and r.rolcanlogin
++       -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): exclude the automatic,
++       -- un-removable membership PostgreSQL 16 grants the creating role.
++       and not (r.rolname = current_user and m.grantor <> m.member)) then
+     raise exception 'FAIL WS11-N17: a login-capable role is a member of the governor owner';
+   end if;
+   raise notice 'PASS WS11-N17a: the PoP challenge and attestation doors are harness-only; the challenge table is unreachable by every runtime identity with FORCE RLS and governor-only policies; no raw-code, private-key or stored-signature column exists; the 0162-0169 boundaries stand';
+@@ -3595,7 +3601,10 @@ begin
+     select 1 from pg_auth_members m
+       join pg_roles r on r.oid = m.member
+      where m.roleid = (select oid from pg_roles where rolname = 'kitluy_activation_governor')
+-       and r.rolcanlogin) then
++       and r.rolcanlogin
++       -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): exclude the automatic,
++       -- un-removable membership PostgreSQL 16 grants the creating role.
++       and not (r.rolname = current_user and m.grantor <> m.member)) then
+     raise exception 'FAIL WS11-N18: a login-capable role is a member of the governor owner';
+   end if;
+   raise notice 'PASS WS11-N18a: the redemption door is harness-only; the one-proof/one-code/one-credential rules stand; FORCE RLS holds on every redemption-path table; the 0162-0170 boundaries stand';
+@@ -3731,10 +3740,15 @@ begin
+     raise exception 'FAIL WS11-N19: the NOINHERIT gateway that enforces explicit entry is missing';
+   end if;
+   if exists (
+-    select 1 from pg_auth_members
+-     where roleid in (select oid from pg_roles
++    select 1 from pg_auth_members m
++     join pg_roles r on r.oid = m.member
++     where m.roleid in (select oid from pg_roles
+                        where rolname in ('kitluy_provisioning_service','kitluy_provisioning_gateway'))
+-       and admin_option) then
++       and m.admin_option
++       -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): the automatic creator
++       -- grant carries ADMIN OPTION and cannot be dropped. Exclude exactly that
++       -- row; re-delegation by any OTHER member is still refused.
++       and not (r.rolname = current_user and m.grantor <> m.member)) then
+     raise exception 'FAIL WS11-N19: a member can re-delegate a composition role';
+   end if;
+   if has_function_privilege('authenticated', 'kitluy_devices.read_terminal_provisioning_pop_challenge_context_v1(uuid)', 'execute')

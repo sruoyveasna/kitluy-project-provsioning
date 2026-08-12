@@ -1,7 +1,7 @@
 # KitLuy Source Document Manifest — v1.0.0
 
 Complete manifest of the owner-supplied corpus (task KL-DOCS-001, ingested
-2026-07-26T17:30:00+07:00). 161 sources. Source IDs are stable and never
+2026-08-11T14:00:00+07:00). 162 sources. Source IDs are stable and never
 reassigned. Originals: `docs/source/inbox/` (immutable). CSV/JSON forms of
 this manifest are authoritative for tooling; this file is the human view.
 
@@ -132,6 +132,12 @@ as an open item (see coverage matrix and reconciliation register).
 | KLSRC-0078 | kitluy-storehub-recovery-and-replacement-runbook-v1.0.0.md | 1.0.0 | CANONICAL-SHARED-CONTRACT | STORE-HUB-OFFLINE-PROTOCOL | CANONICAL-CURRENT |
 | KLSRC-0096 | kitluy-sync-conflict-resolution-policy-v1.0.0.md | 1.0.0 | CANONICAL-SHARED-CONTRACT | STORE-HUB-OFFLINE-PROTOCOL | CANONICAL-CURRENT |
 | KLSRC-0097 | kitluy-terminal-profile-contract-t1-t4-v1.0.0.md | 1.0.0 | CANONICAL-SHARED-CONTRACT | TERMINAL-PROFILE-CONTRACT | CANONICAL-CURRENT |
+
+## owner-decisions/ (1)
+
+| ID | File | Version | Authority class | Role | Status |
+| --- | --- | --- | --- | --- | --- |
+| KLSRC-0162 | kitluy-device-factory-enrollment-store-provisioning-and-pi-terminal-workflow-v1.0.0.md | 1.0.0 | OWNER-DECISION | DEVICE-LIFECYCLE-WORKFLOW (factory enrollment -> | CANONICAL-CURRENT |
 
 ## owner-instructions/ (18)
 

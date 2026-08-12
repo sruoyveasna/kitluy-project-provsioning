@@ -1,0 +1,28 @@
+{
+  "inventory_version": "1.3.0",
+  "generated_for_task": "KL-DOCS-001",
+  "inbox_path": "docs/source/inbox",
+  "file_count": 1,
+  "excluded_system_files": [
+    ".DS_Store",
+    ".gitkeep"
+  ],
+  "files": [
+    {
+      "relative_path": "docs/source/inbox/kitluy-device-factory-enrollment-store-provisioning-and-pi-terminal-workflow-v1.0.0.md",
+      "physical_filename": "kitluy-device-factory-enrollment-store-provisioning-and-pi-terminal-workflow-v1.0.0.md",
+      "sha256": "f74500802dd2a636d3ca26e5c8027f930b76e0d6dfec8121a944b94b2d136a11",
+      "file_size": 23299,
+      "file_type": "text/markdown",
+      "declared_title": "KitLuy Device Factory Enrollment, Store Provisioning, and Pi Terminal Workflow",
+      "declared_filename": "",
+      "declared_version": "1.0.0",
+      "declared_date": "",
+      "declared_owner": "",
+      "declared_status": "Owner-aligned workflow",
+      "duplicate_of": "",
+      "filename_mismatch": ""
+    }
+  ],
+  "pack_manifest_discrepancies": []
+}

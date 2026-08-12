@@ -136,3 +136,56 @@ STOP CONDITIONS: <blockers and overlap conditions>
 - Parallel migrations that compete for the same numbering or schema ownership.
 - Mass autonomous production changes.
 - Treating clone documents or competitor recommendations as KitLuy authority.
+
+---
+
+# Addendum KL-DOCS-002 — Local-First Knowledge Policy (2026-08-07)
+
+> **Not part of the owner original.** Appended during the workspace preparation
+> mission. Inherits from `AGENTS.md` Addendum KL-DOCS-002 and grants no
+> authority beyond the parent contract.
+
+## A.1 Repository location
+
+```text
+/home/veasna/Development/HET_VEASNA_WORKSPACE/repos/het-kitluy-project
+```
+
+Canonical repository/project name: **`HET-KITLUY-PROJECT`**.
+
+## A.2 Orchestrator duty — resolve knowledge locally before dispatch
+
+The orchestrator must **not** dispatch a coding worker to search Google Drive.
+A work package is admissible only when its source references resolve to **local
+paths**. Resolve them in this order:
+
+1. `PROJECT_HOME.md`
+2. `docs/authority/kitluy-source-of-truth-index-v1.0.0.md`
+3. Active product/feature documentation — via `docs/authority/LOCAL_DOCUMENTATION_MAP.md`
+4. The relevant current handoff in `00_AI_HANDOFF/`
+5. Live code, migrations and tests
+
+If a required source is genuinely missing locally, the **orchestrator** — not a
+worker — retrieves that one document under `docs/authority/DRIVE_SYNC_POLICY.md`
+§5, records it in the manifest, and only then dispatches.
+
+## A.3 Prohibited swarm patterns (extending §9)
+
+Add to the prohibited list:
+
+- Dispatching a worker whose task requires a general Google Drive search.
+- Multiple workers independently querying Google Drive for the same source.
+- Re-scanning all of Google Drive at task start.
+- Editing a Level A mirror (`exported-drive-docs/kitluy/`) or a `docs/source/`
+  classified copy to resolve a contradiction — conflicts go in the decision
+  register, never into evidence files.
+- Treating a Drive document as canonical. Drive holds **no** CANONICAL-class
+  KitLuy document; local `docs/source/canonical/` outranks it.
+- Copying code between the six legacy KitLuy repositories and this monorepo —
+  no migration is authorized.
+
+## A.4 Review-agent duty
+
+An independent reviewer must reject work whose source citations point at Google
+Drive when an equivalent local canonical source exists, and must confirm that no
+`[REQUIRED: …]` value was guessed and no status was advanced without evidence.

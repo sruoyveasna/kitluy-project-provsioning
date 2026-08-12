@@ -1,0 +1,301 @@
+diff --git a/supabase/migrations/20260729200140_0140_revocation_approval_reader.sql b/supabase/migrations/20260729200140_0140_revocation_approval_reader.sql
+index 4de493a..62810a2 100644
+--- a/supabase/migrations/20260729200140_0140_revocation_approval_reader.sql
++++ b/supabase/migrations/20260729200140_0140_revocation_approval_reader.sql
+@@ -804,6 +804,13 @@ begin
+       'kitluy_issuance_service', 'kitluy_job_governor']
+     loop
+       if exists (select 1 from pg_roles where rolname = v_role) then
++        -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): PostgreSQL 16 removed
++        -- CREATEROLE's implicit power to SET ROLE to roles it created; recorded
++        -- membership is now required. Borrow it for the probe and return it
++        -- immediately, exactly as the rest of this chain borrows governors.
++        -- Membership does not change what the probe MEASURES: whether a role may
++        -- execute the approval gate is a function privilege of that role.
++        execute format('grant %I to %I', v_role, current_user);
+         begin
+           execute format('set role %I', v_role);
+           begin
+@@ -821,6 +828,8 @@ begin
+           v_findings := v_findings ||
+             format('control 10: the execute probe for %s did not complete: %s', v_role, v_probe_error);
+         end;
++        -- Return the borrowed membership immediately.
++        execute format('revoke %I from %I', v_role, current_user);
+       end if;
+     end loop;
+ 
+diff --git a/supabase/migrations/20260730160151_0151_enforce_governed_emergency_revocation.sql b/supabase/migrations/20260730160151_0151_enforce_governed_emergency_revocation.sql
+index 8fca70e..8f16da7 100644
+--- a/supabase/migrations/20260730160151_0151_enforce_governed_emergency_revocation.sql
++++ b/supabase/migrations/20260730160151_0151_enforce_governed_emergency_revocation.sql
+@@ -172,7 +172,12 @@ begin
+               join pg_roles r on r.oid = m.member
+               join pg_roles g on g.oid = m.roleid
+              where g.rolname = 'kitluy_credential_issuer'
+-               and not r.rolsuper) then
++               and not r.rolsuper
++               -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): ignore the
++               -- un-removable membership PostgreSQL 16 auto-grants to the role
++               -- that created this one. A borrow this chain took itself has
++               -- grantor = member and is still a finding.
++               and not (r.rolname = current_user and m.grantor <> m.member)) then
+     v_findings := v_findings ||
+       'a non-superuser still holds membership of the credential governor'::text;
+   end if;
+diff --git a/supabase/migrations/20260730160152_0152_governed_emergency_post_approval.sql b/supabase/migrations/20260730160152_0152_governed_emergency_post_approval.sql
+index fcd9844..5eb158c 100644
+--- a/supabase/migrations/20260730160152_0152_governed_emergency_post_approval.sql
++++ b/supabase/migrations/20260730160152_0152_governed_emergency_post_approval.sql
+@@ -1041,7 +1041,12 @@ begin
+              where g.rolname in ('kitluy_credential_issuer',
+                                  'kitluy_credential_approval_reader',
+                                  'kitluy_activation_governor')
+-               and not r.rolsuper) then
++               and not r.rolsuper
++               -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): ignore the
++               -- un-removable membership PostgreSQL 16 auto-grants to the role
++               -- that created this one. A borrow this chain took itself has
++               -- grantor = member and is still a finding.
++               and not (r.rolname = current_user and m.grantor <> m.member)) then
+     v_findings := v_findings || 'borrowed membership left behind'::text;
+   end if;
+ 
+diff --git a/supabase/migrations/20260731220000_0160_repair_job_governor_membership_leak.sql b/supabase/migrations/20260731220000_0160_repair_job_governor_membership_leak.sql
+index 8536bcd..a95c014 100644
+--- a/supabase/migrations/20260731220000_0160_repair_job_governor_membership_leak.sql
++++ b/supabase/migrations/20260731220000_0160_repair_job_governor_membership_leak.sql
+@@ -364,7 +364,18 @@ declare
+   v_worker_cannot_inspect boolean;
+ begin
+   -- 1. The current user is no longer a member of kitluy_job_governor.
+-  select pg_has_role(current_user, 'kitluy_job_governor', 'MEMBER')
++  -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): pg_has_role() also reports
++  -- the automatic membership PostgreSQL 16 grants the creating role, which no
++  -- migration can revoke (its grantor is the bootstrap superuser). A leak this
++  -- chain caused has grantor = member and is still caught here.
++  select exists (
++    select 1
++      from pg_auth_members m
++      join pg_roles g on g.oid = m.roleid
++      join pg_roles u on u.oid = m.member
++     where g.rolname = 'kitluy_job_governor'
++       and u.rolname = current_user
++       and m.grantor = m.member)
+     into v_still_member;
+   if v_still_member then
+     raise exception 'KLUY-MIGRATION-0160: current_user is still a member of kitluy_job_governor'
+diff --git a/supabase/migrations/20260804120000_0165_governed_terminal_provisioning_code_revocation.sql b/supabase/migrations/20260804120000_0165_governed_terminal_provisioning_code_revocation.sql
+index 288377b..f24e612 100644
+--- a/supabase/migrations/20260804120000_0165_governed_terminal_provisioning_code_revocation.sql
++++ b/supabase/migrations/20260804120000_0165_governed_terminal_provisioning_code_revocation.sql
+@@ -555,7 +555,11 @@ begin
+     select 1 from pg_auth_members m
+       join pg_roles r on r.oid = m.member
+      where m.roleid = (select oid from pg_roles where rolname = 'kitluy_activation_governor')
+-       and r.rolcanlogin) then
++       and r.rolcanlogin
++       -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): exclude the automatic,
++       -- un-removable membership PostgreSQL 16 grants the creating role. Any
++       -- other login-capable member is still a finding.
++       and not (r.rolname = current_user and m.grantor <> m.member)) then
+     raise exception 'KLUY-MIGRATION-0165: a login-capable role is a member of the governor'
+       using errcode = 'P0001';
+   end if;
+diff --git a/supabase/migrations/20260804140000_0166_canonical_terminal_code_expiration.sql b/supabase/migrations/20260804140000_0166_canonical_terminal_code_expiration.sql
+index 3e33f35..4de3ec3 100644
+--- a/supabase/migrations/20260804140000_0166_canonical_terminal_code_expiration.sql
++++ b/supabase/migrations/20260804140000_0166_canonical_terminal_code_expiration.sql
+@@ -579,7 +579,11 @@ begin
+     select 1 from pg_auth_members m
+       join pg_roles r on r.oid = m.member
+      where m.roleid = (select oid from pg_roles where rolname = 'kitluy_activation_governor')
+-       and r.rolcanlogin) then
++       and r.rolcanlogin
++       -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): exclude the automatic,
++       -- un-removable membership PostgreSQL 16 grants the creating role. Any
++       -- other login-capable member is still a finding.
++       and not (r.rolname = current_user and m.grantor <> m.member)) then
+     raise exception 'KLUY-MIGRATION-0166: a login-capable role is a member of the governor'
+       using errcode = 'P0001';
+   end if;
+diff --git a/supabase/migrations/20260805100000_0167_expired_terminal_code_replacement_issuance.sql b/supabase/migrations/20260805100000_0167_expired_terminal_code_replacement_issuance.sql
+index 250cc48..c9a3219 100644
+--- a/supabase/migrations/20260805100000_0167_expired_terminal_code_replacement_issuance.sql
++++ b/supabase/migrations/20260805100000_0167_expired_terminal_code_replacement_issuance.sql
+@@ -714,7 +714,11 @@ begin
+     select 1 from pg_auth_members m
+       join pg_roles r on r.oid = m.member
+      where m.roleid = (select oid from pg_roles where rolname = 'kitluy_activation_governor')
+-       and r.rolcanlogin) then
++       and r.rolcanlogin
++       -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): exclude the automatic,
++       -- un-removable membership PostgreSQL 16 grants the creating role. Any
++       -- other login-capable member is still a finding.
++       and not (r.rolname = current_user and m.grantor <> m.member)) then
+     raise exception 'KLUY-MIGRATION-0167: a login-capable role is a member of the governor'
+       using errcode = 'P0001';
+   end if;
+diff --git a/supabase/migrations/20260805140000_0168_ambiguous_issuance_replay_reconciliation.sql b/supabase/migrations/20260805140000_0168_ambiguous_issuance_replay_reconciliation.sql
+index b8671df..089745d 100644
+--- a/supabase/migrations/20260805140000_0168_ambiguous_issuance_replay_reconciliation.sql
++++ b/supabase/migrations/20260805140000_0168_ambiguous_issuance_replay_reconciliation.sql
+@@ -535,7 +535,11 @@ begin
+     select 1 from pg_auth_members m
+       join pg_roles r on r.oid = m.member
+      where m.roleid = (select oid from pg_roles where rolname = 'kitluy_activation_governor')
+-       and r.rolcanlogin) then
++       and r.rolcanlogin
++       -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): exclude the automatic,
++       -- un-removable membership PostgreSQL 16 grants the creating role. Any
++       -- other login-capable member is still a finding.
++       and not (r.rolname = current_user and m.grantor <> m.member)) then
+     raise exception 'KLUY-MIGRATION-0168: a login-capable role is a member of the governor'
+       using errcode = 'P0001';
+   end if;
+diff --git a/supabase/migrations/20260805170000_0169_atomic_terminal_code_recovery.sql b/supabase/migrations/20260805170000_0169_atomic_terminal_code_recovery.sql
+index e714add..3ecdd26 100644
+--- a/supabase/migrations/20260805170000_0169_atomic_terminal_code_recovery.sql
++++ b/supabase/migrations/20260805170000_0169_atomic_terminal_code_recovery.sql
+@@ -817,7 +817,11 @@ begin
+     select 1 from pg_auth_members m
+       join pg_roles r on r.oid = m.member
+      where m.roleid = (select oid from pg_roles where rolname = 'kitluy_activation_governor')
+-       and r.rolcanlogin) then
++       and r.rolcanlogin
++       -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): exclude the automatic,
++       -- un-removable membership PostgreSQL 16 grants the creating role. Any
++       -- other login-capable member is still a finding.
++       and not (r.rolname = current_user and m.grantor <> m.member)) then
+     raise exception 'KLUY-MIGRATION-0169: a login-capable role is a member of the governor'
+       using errcode = 'P0001';
+   end if;
+diff --git a/supabase/migrations/20260805200000_0170_terminal_provisioning_pop_challenges.sql b/supabase/migrations/20260805200000_0170_terminal_provisioning_pop_challenges.sql
+index ee847de..bfb8848 100644
+--- a/supabase/migrations/20260805200000_0170_terminal_provisioning_pop_challenges.sql
++++ b/supabase/migrations/20260805200000_0170_terminal_provisioning_pop_challenges.sql
+@@ -845,7 +845,11 @@ begin
+     select 1 from pg_auth_members m
+       join pg_roles r on r.oid = m.member
+      where m.roleid = (select oid from pg_roles where rolname = 'kitluy_activation_governor')
+-       and r.rolcanlogin) then
++       and r.rolcanlogin
++       -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): exclude the automatic,
++       -- un-removable membership PostgreSQL 16 grants the creating role. Any
++       -- other login-capable member is still a finding.
++       and not (r.rolname = current_user and m.grantor <> m.member)) then
+     raise exception 'KLUY-MIGRATION-0170: a login-capable role is a member of the governor'
+       using errcode = 'P0001';
+   end if;
+diff --git a/supabase/migrations/20260805220000_0171_atomic_pop_bound_redemption.sql b/supabase/migrations/20260805220000_0171_atomic_pop_bound_redemption.sql
+index f551dc4..2168e1e 100644
+--- a/supabase/migrations/20260805220000_0171_atomic_pop_bound_redemption.sql
++++ b/supabase/migrations/20260805220000_0171_atomic_pop_bound_redemption.sql
+@@ -784,7 +784,11 @@ begin
+     select 1 from pg_auth_members m
+       join pg_roles r on r.oid = m.member
+      where m.roleid = (select oid from pg_roles where rolname = 'kitluy_activation_governor')
+-       and r.rolcanlogin) then
++       and r.rolcanlogin
++       -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): exclude the automatic,
++       -- un-removable membership PostgreSQL 16 grants the creating role. Any
++       -- other login-capable member is still a finding.
++       and not (r.rolname = current_user and m.grantor <> m.member)) then
+     raise exception 'KLUY-MIGRATION-0171: a login-capable role is a member of the governor'
+       using errcode = 'P0001';
+   end if;
+diff --git a/supabase/migrations/20260805230000_0172_provisioning_composition_identity.sql b/supabase/migrations/20260805230000_0172_provisioning_composition_identity.sql
+index f21cfb6..adece7c 100644
+--- a/supabase/migrations/20260805230000_0172_provisioning_composition_identity.sql
++++ b/supabase/migrations/20260805230000_0172_provisioning_composition_identity.sql
+@@ -187,7 +187,10 @@ begin
+     select 1 from pg_auth_members m
+       join pg_roles r on r.oid = m.member
+      where m.roleid = (select oid from pg_roles where rolname = 'kitluy_provisioning_service')
+-       and r.rolname <> 'service_role') then
++       and r.rolname <> 'service_role'
++       -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): exclude the automatic,
++       -- un-removable creator membership. Any other holder is still a finding.
++       and not (r.rolname = current_user and m.grantor <> m.member)) then
+     raise exception 'KLUY-MIGRATION-0172: an unexpected role holds the composition identity'
+       using errcode = 'P0001';
+   end if;
+@@ -297,7 +300,11 @@ begin
+     select 1 from pg_auth_members m
+       join pg_roles r on r.oid = m.member
+      where m.roleid = (select oid from pg_roles where rolname = 'kitluy_activation_governor')
+-       and r.rolcanlogin)
++       and r.rolcanlogin
++       -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): exclude the automatic,
++       -- un-removable membership PostgreSQL 16 grants the creating role. Any
++       -- other login-capable member is still a finding.
++       and not (r.rolname = current_user and m.grantor <> m.member))
+      or exists (
+     select 1 from pg_auth_members m
+      where m.member = (select oid from pg_roles where rolname = 'kitluy_provisioning_service')
+diff --git a/supabase/migrations/20260806000000_0173_provisioning_composer_noinherit_gateway.sql b/supabase/migrations/20260806000000_0173_provisioning_composer_noinherit_gateway.sql
+index 2eccbf5..a3bb40e 100644
+--- a/supabase/migrations/20260806000000_0173_provisioning_composer_noinherit_gateway.sql
++++ b/supabase/migrations/20260806000000_0173_provisioning_composer_noinherit_gateway.sql
+@@ -188,7 +188,10 @@ begin
+     select 1 from pg_auth_members m
+       join pg_roles r on r.oid = m.member
+      where m.roleid = (select oid from pg_roles where rolname = 'kitluy_provisioning_gateway')
+-       and r.rolname <> 'service_role') then
++       and r.rolname <> 'service_role'
++       -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): the creating role's
++       -- automatic membership cannot be revoked; it is not an unexpected holder.
++       and not (r.rolname = current_user and m.grantor <> m.member)) then
+     raise exception 'KLUY-MIGRATION-0173: an unexpected role holds the gateway'
+       using errcode = 'P0001';
+   end if;
+@@ -197,7 +200,12 @@ begin
+     select 1 from pg_auth_members m
+      where m.roleid in (select oid from pg_roles
+                          where rolname in ('kitluy_provisioning_gateway', 'kitluy_provisioning_service'))
+-       and m.admin_option) then
++       and m.admin_option
++       -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): the automatic creator
++       -- grant carries ADMIN OPTION and cannot be dropped. Exclude exactly that
++       -- row; re-delegation by any OTHER member is still refused.
++       and not (m.member = (select oid from pg_roles where rolname = current_user)
++                and m.grantor <> m.member)) then
+     raise exception 'KLUY-MIGRATION-0173: a member can re-delegate a composition role'
+       using errcode = 'P0001';
+   end if;
+@@ -217,11 +225,16 @@ begin
+   if exists (
+     select 1 from pg_auth_members m
+       join pg_roles r on r.oid = m.member
+-     where m.roleid in (select oid from pg_roles
++     where not (r.rolname = current_user and m.grantor <> m.member)
++       and m.roleid in (select oid from pg_roles
+                          where rolname in ('kitluy_activation_governor',
+                                            'kitluy_provisioning_service',
+                                            'kitluy_provisioning_gateway'))
+-       and r.rolcanlogin) then
++       and r.rolcanlogin
++       -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): exclude the automatic,
++       -- un-removable membership PostgreSQL 16 grants the creating role. Any
++       -- other login-capable member is still a finding.
++       and not (r.rolname = current_user and m.grantor <> m.member)) then
+     raise exception 'KLUY-MIGRATION-0173: a login-capable role belongs to a NOLOGIN authority'
+       using errcode = 'P0001';
+   end if;
+diff --git a/supabase/migrations/20260806020000_0174_terminal_activation_completion.sql b/supabase/migrations/20260806020000_0174_terminal_activation_completion.sql
+index df2c5a1..8e56a6a 100644
+--- a/supabase/migrations/20260806020000_0174_terminal_activation_completion.sql
++++ b/supabase/migrations/20260806020000_0174_terminal_activation_completion.sql
+@@ -907,7 +907,11 @@ begin
+                          where rolname in ('kitluy_activation_governor',
+                                            'kitluy_provisioning_service',
+                                            'kitluy_provisioning_gateway'))
+-       and r.rolcanlogin) then
++       and r.rolcanlogin
++       -- PG16+ (KLREC-2026-08-07-PG16-CREATEROLE-001): exclude the automatic,
++       -- un-removable membership PostgreSQL 16 grants the creating role. Any
++       -- other login-capable member is still a finding.
++       and not (r.rolname = current_user and m.grantor <> m.member)) then
+     raise exception 'KLUY-MIGRATION-0174: a login-capable role belongs to a NOLOGIN authority'
+       using errcode = 'P0001';
+   end if;

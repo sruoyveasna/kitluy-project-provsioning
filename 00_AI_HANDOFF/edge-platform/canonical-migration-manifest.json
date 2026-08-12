@@ -1,0 +1,1173 @@
+{
+  "schemaVersion": 1,
+  "generatedBy": "migration-manifest.mjs",
+  "migrationsDirectory": "supabase/migrations",
+  "migrationCount": 86,
+  "firstVersion": "20260726180000",
+  "lastVersion": "20260807040000",
+  "chainDigest": "78aba154b6a3831ddb6d7f807e09ea4acaaf7c8fc131c130614ba26880941acb",
+  "migrations": [
+    {
+      "version": "20260726180000",
+      "group": "0000",
+      "name": "extensions_and_migration_controls",
+      "filename": "20260726180000_0000_extensions_and_migration_controls.sql",
+      "sha256": "d1c9efd6f1a94b0e9a49e96c18a01ef7d54454fabf444895d4806754af85aef5",
+      "schemaDomains": [
+        "kitluy_ops"
+      ]
+    },
+    {
+      "version": "20260726190010",
+      "group": "0010",
+      "name": "identity_and_tenancy",
+      "filename": "20260726190010_0010_identity_and_tenancy.sql",
+      "sha256": "d30b982a5553ed3e609bda1fc087b43b13f63673e1365fd0cf8767960c939570",
+      "schemaDomains": [
+        "kitluy_core"
+      ]
+    },
+    {
+      "version": "20260726190020",
+      "group": "0020",
+      "name": "digital_store_and_location",
+      "filename": "20260726190020_0020_digital_store_and_location.sql",
+      "sha256": "9e73504f680de533dae3e2a5afc5e58db15db79d9c3600d288003b0b0a84bc5e",
+      "schemaDomains": [
+        "kitluy_core"
+      ]
+    },
+    {
+      "version": "20260726190030",
+      "group": "0030",
+      "name": "authorization_and_audit",
+      "filename": "20260726190030_0030_authorization_and_audit.sql",
+      "sha256": "80c2fea56b813a7ed1d1ac0e416c0205dc99a0d2426abd2b484394dd68680a66",
+      "schemaDomains": [
+        "kitluy_admin",
+        "kitluy_audit",
+        "kitluy_auth",
+        "kitluy_core",
+        "kitluy_devices",
+        "kitluy_files"
+      ]
+    },
+    {
+      "version": "20260726190035",
+      "group": "0035",
+      "name": "rls_helpers_and_policies",
+      "filename": "20260726190035_0035_rls_helpers_and_policies.sql",
+      "sha256": "33b4702eed0814391853b002c4f494a90f1dbf6d3fdd8affa502e794e12a788f",
+      "schemaDomains": [
+        "kitluy_admin",
+        "kitluy_audit",
+        "kitluy_auth",
+        "kitluy_core"
+      ]
+    },
+    {
+      "version": "20260727100040",
+      "group": "0040",
+      "name": "catalog",
+      "filename": "20260727100040_0040_catalog.sql",
+      "sha256": "d15ec988a56cabde524d6e7a8028f03da47ff3e77215b16500aab15711c3676c",
+      "schemaDomains": [
+        "kitluy_core",
+        "kitluy_laundry"
+      ]
+    },
+    {
+      "version": "20260727100045",
+      "group": "0045",
+      "name": "pricing",
+      "filename": "20260727100045_0045_pricing.sql",
+      "sha256": "cb5007c0e72bdab5ab7460e41e02156690e85ea4216d2b20cc51111b109c0227",
+      "schemaDomains": [
+        "kitluy_core",
+        "kitluy_laundry"
+      ]
+    },
+    {
+      "version": "20260727100050",
+      "group": "0050",
+      "name": "configuration",
+      "filename": "20260727100050_0050_configuration.sql",
+      "sha256": "741c04708ac2a8f46fa6dbb74c5914c16cc2b7bfa5a648e46e9c4ccda88d6bc3",
+      "schemaDomains": [
+        "kitluy_auth",
+        "kitluy_config",
+        "kitluy_core",
+        "kitluy_devices"
+      ]
+    },
+    {
+      "version": "20260727100060",
+      "group": "0060",
+      "name": "customer_identity",
+      "filename": "20260727100060_0060_customer_identity.sql",
+      "sha256": "dd1741b888adc043b46b4b986d9e9f8ba6ee182a9c9ba979cb7850f21e6e4192",
+      "schemaDomains": [
+        "kitluy_core",
+        "kitluy_storefront"
+      ]
+    },
+    {
+      "version": "20260727100065",
+      "group": "0065",
+      "name": "consent_and_privacy",
+      "filename": "20260727100065_0065_consent_and_privacy.sql",
+      "sha256": "ad38ee2b0f19ef76abd329d3cc8a19ff21567cdfa171cf72b8f0f0c1a4fad21d",
+      "schemaDomains": [
+        "kitluy_core",
+        "kitluy_notifications"
+      ]
+    },
+    {
+      "version": "20260727100070",
+      "group": "0070",
+      "name": "ws05_ws06_rls",
+      "filename": "20260727100070_0070_ws05_ws06_rls.sql",
+      "sha256": "2cd26ec4b6f17d326dd033eb0e7545e9215ad981c0d61adb50f3c406fc283436",
+      "schemaDomains": [
+        "kitluy_auth",
+        "kitluy_config",
+        "kitluy_core",
+        "kitluy_laundry",
+        "kitluy_notifications",
+        "kitluy_storefront"
+      ]
+    },
+    {
+      "version": "20260727110075",
+      "group": "0075",
+      "name": "booking_aggregate",
+      "filename": "20260727110075_0075_booking_aggregate.sql",
+      "sha256": "365482919c2961547f7a4ca035a02e53792fdc527f0f0ee234f667796ee6a3cc",
+      "schemaDomains": [
+        "kitluy_auth",
+        "kitluy_core",
+        "kitluy_laundry",
+        "kitluy_orders"
+      ]
+    },
+    {
+      "version": "20260727110080",
+      "group": "0080",
+      "name": "garment_custody",
+      "filename": "20260727110080_0080_garment_custody.sql",
+      "sha256": "86abff3c610d6c6886e851af7350d3b2939e5ebeea4628a413d7d204e45e3190",
+      "schemaDomains": [
+        "kitluy_auth",
+        "kitluy_core",
+        "kitluy_laundry",
+        "kitluy_orders"
+      ]
+    },
+    {
+      "version": "20260727110085",
+      "group": "0085",
+      "name": "payments",
+      "filename": "20260727110085_0085_payments.sql",
+      "sha256": "14863779e5a9bcfe8ce46d9e7baac23e6acea7866ea134dd3933f0fc3d26bd5d",
+      "schemaDomains": [
+        "kitluy_auth",
+        "kitluy_core",
+        "kitluy_orders",
+        "kitluy_payments",
+        "kitluy_pos"
+      ]
+    },
+    {
+      "version": "20260727110090",
+      "group": "0090",
+      "name": "finance_subledger",
+      "filename": "20260727110090_0090_finance_subledger.sql",
+      "sha256": "d67879a813ecc231e68d0d6c165cfc7e4d3018193333bb7d7ef06f460bfa6b4a",
+      "schemaDomains": [
+        "kitluy_auth",
+        "kitluy_core",
+        "kitluy_devices",
+        "kitluy_finance",
+        "kitluy_payments",
+        "kitluy_pos"
+      ]
+    },
+    {
+      "version": "20260727110095",
+      "group": "0095",
+      "name": "ws07_ws08_rls",
+      "filename": "20260727110095_0095_ws07_ws08_rls.sql",
+      "sha256": "83a5a93fed38b897d5dcb74ec7ebd23c14d55a7315d569e81f982ad89caf8ddf",
+      "schemaDomains": [
+        "kitluy_auth",
+        "kitluy_finance",
+        "kitluy_laundry",
+        "kitluy_orders",
+        "kitluy_payments"
+      ]
+    },
+    {
+      "version": "20260727120100",
+      "group": "0100",
+      "name": "terminal_profile_identifiers",
+      "filename": "20260727120100_0100_terminal_profile_identifiers.sql",
+      "sha256": "3068d2878ad41f1bb38a5ea154e810c165042e40ec363de3d2a841bb9d2fff1f",
+      "schemaDomains": [
+        "kitluy_auth",
+        "kitluy_config",
+        "kitluy_laundry"
+      ]
+    },
+    {
+      "version": "20260728100110",
+      "group": "0110",
+      "name": "sync_ingestion",
+      "filename": "20260728100110_0110_sync_ingestion.sql",
+      "sha256": "fd0119911b8096ea505e1994528c63b6f51c4ed798573b8f2a79550f488ecc82",
+      "schemaDomains": [
+        "kitluy_audit",
+        "kitluy_auth",
+        "kitluy_core",
+        "kitluy_devices",
+        "kitluy_sync"
+      ]
+    },
+    {
+      "version": "20260728120120",
+      "group": "0120",
+      "name": "device_enrollment_and_identity",
+      "filename": "20260728120120_0120_device_enrollment_and_identity.sql",
+      "sha256": "3db976618b434ae27093101b0a59b2933c19da675a0dbac622c2c4b728fd113b",
+      "schemaDomains": [
+        "kitluy_auth",
+        "kitluy_devices"
+      ]
+    },
+    {
+      "version": "20260728130121",
+      "group": "0121",
+      "name": "device_claim_and_assignment",
+      "filename": "20260728130121_0121_device_claim_and_assignment.sql",
+      "sha256": "f9c32b09052cfb15494845280877952459de6c0989ce1471123c44c6ffc39d2e",
+      "schemaDomains": [
+        "kitluy_auth",
+        "kitluy_core",
+        "kitluy_devices"
+      ]
+    },
+    {
+      "version": "20260728140122",
+      "group": "0122",
+      "name": "device_trust_decision_alignment",
+      "filename": "20260728140122_0122_device_trust_decision_alignment.sql",
+      "sha256": "2179bbc0423c939db2e9b1bc5b16dacfc9f514e4e90a39d9a35b797d3c6bac12",
+      "schemaDomains": [
+        "kitluy_devices"
+      ]
+    },
+    {
+      "version": "20260728150123",
+      "group": "0123",
+      "name": "trusted_time",
+      "filename": "20260728150123_0123_trusted_time.sql",
+      "sha256": "84fdb9c22f4e28902b876fe7a0ff6420049c131ed9a455c6d7eecb445ab2f5ae",
+      "schemaDomains": [
+        "kitluy_auth",
+        "kitluy_devices"
+      ]
+    },
+    {
+      "version": "20260728160124",
+      "group": "0124",
+      "name": "time_correction_approval",
+      "filename": "20260728160124_0124_time_correction_approval.sql",
+      "sha256": "8088dac6ee71d44bfd9ae4cebb52892b5613f1116ab731ed6f363c583a76b312",
+      "schemaDomains": [
+        "kitluy_auth",
+        "kitluy_devices"
+      ]
+    },
+    {
+      "version": "20260728170125",
+      "group": "0125",
+      "name": "device_credential_persistence",
+      "filename": "20260728170125_0125_device_credential_persistence.sql",
+      "sha256": "f7f2d8d12765eda17fd94f2a3dda0a23575371ec3f7ae5b8c887ca03593594d5",
+      "schemaDomains": [
+        "kitluy_auth",
+        "kitluy_credential_issuer",
+        "kitluy_devices"
+      ]
+    },
+    {
+      "version": "20260728180126",
+      "group": "0126",
+      "name": "definer_ownership_hardening",
+      "filename": "20260728180126_0126_definer_ownership_hardening.sql",
+      "sha256": "840bb90b5354fcccf6a651c728e380ef33175a43a8249752b2cb83f22936ee87",
+      "schemaDomains": [
+        "kitluy_activation_governor",
+        "kitluy_credential_issuer",
+        "kitluy_devices"
+      ]
+    },
+    {
+      "version": "20260728190127",
+      "group": "0127",
+      "name": "governed_issuance_functions",
+      "filename": "20260728190127_0127_governed_issuance_functions.sql",
+      "sha256": "1ee4cda565155f9851ec5339cfe7b984d376ccfce2b55e51a0851aaca63293ec",
+      "schemaDomains": [
+        "kitluy_credential_issuer",
+        "kitluy_devices",
+        "kitluy_issuance_service"
+      ]
+    },
+    {
+      "version": "20260728200128",
+      "group": "0128",
+      "name": "renewal_key_lifecycle",
+      "filename": "20260728200128_0128_renewal_key_lifecycle.sql",
+      "sha256": "a8c7186117fbe564ef6b6bd0ef50b898b07bd5988905463d03efca453db90524",
+      "schemaDomains": [
+        "kitluy_credential_issuer",
+        "kitluy_devices",
+        "kitluy_issuance_service"
+      ]
+    },
+    {
+      "version": "20260729090129",
+      "group": "0129",
+      "name": "renewal_mode_policy",
+      "filename": "20260729090129_0129_renewal_mode_policy.sql",
+      "sha256": "b30af18009834b749357ed3b2ea70ee632d492134455e75c003d68e4cef1256e",
+      "schemaDomains": [
+        "kitluy_credential_issuer",
+        "kitluy_devices",
+        "kitluy_issuance_service"
+      ]
+    },
+    {
+      "version": "20260729100130",
+      "group": "0130",
+      "name": "renewal_reservation_and_activation",
+      "filename": "20260729100130_0130_renewal_reservation_and_activation.sql",
+      "sha256": "45dbe2864e8e54610cebcb265321b15e78a6ec14e6b6b3f99ddaf011501de49c",
+      "schemaDomains": [
+        "kitluy_credential_issuer",
+        "kitluy_devices",
+        "kitluy_issuance_service"
+      ]
+    },
+    {
+      "version": "20260729110131",
+      "group": "0131",
+      "name": "issuance_service_schema_usage",
+      "filename": "20260729110131_0131_issuance_service_schema_usage.sql",
+      "sha256": "d3563fc1c4718faf8e3d5f3d36030cf79a74579c5c7b57133eb530dd02e130b0",
+      "schemaDomains": [
+        "kitluy_activation_governor",
+        "kitluy_credential_issuer",
+        "kitluy_devices",
+        "kitluy_issuance_service"
+      ]
+    },
+    {
+      "version": "20260729120132",
+      "group": "0132",
+      "name": "renewal_finalization_corrections",
+      "filename": "20260729120132_0132_renewal_finalization_corrections.sql",
+      "sha256": "57a8e2c9586727c3d363aa8a10ec914d33fd3705bd67ea1c26febca96a0fd481",
+      "schemaDomains": [
+        "kitluy_credential_issuer",
+        "kitluy_devices",
+        "kitluy_issuance_service"
+      ]
+    },
+    {
+      "version": "20260729130133",
+      "group": "0133",
+      "name": "renewal_reconciliation_audit",
+      "filename": "20260729130133_0133_renewal_reconciliation_audit.sql",
+      "sha256": "9e2e557946f3ac07c2b5022cf9a9e70a3eb2cf6ad30cbe639d1aaecbe21e6335",
+      "schemaDomains": [
+        "kitluy_auth",
+        "kitluy_credential_issuer",
+        "kitluy_devices",
+        "kitluy_issuance_service"
+      ]
+    },
+    {
+      "version": "20260729140134",
+      "group": "0134",
+      "name": "credential_overlap_lifecycle",
+      "filename": "20260729140134_0134_credential_overlap_lifecycle.sql",
+      "sha256": "2e384a5aa3342ac823c8cf58559916f0dd740d1d4ffa5c0cf1261d84b37ddd32",
+      "schemaDomains": [
+        "kitluy_auth",
+        "kitluy_credential_issuer",
+        "kitluy_devices",
+        "kitluy_issuance_service"
+      ]
+    },
+    {
+      "version": "20260729150135",
+      "group": "0135",
+      "name": "durable_job_runtime",
+      "filename": "20260729150135_0135_durable_job_runtime.sql",
+      "sha256": "4e5e9fabadbbf0927213c495e285e67ff5c93d33fdba0ea4a08a7b6aae60d954",
+      "schemaDomains": [
+        "kitluy_auth",
+        "kitluy_devices",
+        "kitluy_hub_local",
+        "kitluy_issuance_service",
+        "kitluy_job_governor",
+        "kitluy_jobs",
+        "kitluy_ops",
+        "kitluy_worker_service"
+      ]
+    },
+    {
+      "version": "20260729160136",
+      "group": "0136",
+      "name": "credential_revocation_and_recovery",
+      "filename": "20260729160136_0136_credential_revocation_and_recovery.sql",
+      "sha256": "f06b11c59fc429e7f290b0e0ffe6c39bfd893fb5f72772cad5dc819776545e72",
+      "schemaDomains": [
+        "kitluy_auth",
+        "kitluy_credential_issuer",
+        "kitluy_devices",
+        "kitluy_issuance_service"
+      ]
+    },
+    {
+      "version": "20260729170137",
+      "group": "0137",
+      "name": "device_key_destruction_workflow",
+      "filename": "20260729170137_0137_device_key_destruction_workflow.sql",
+      "sha256": "aeb32f97a441513e0fa7607928bec6358f839e39873660747f67c256f438f10f",
+      "schemaDomains": [
+        "kitluy_auth",
+        "kitluy_credential_issuer",
+        "kitluy_devices",
+        "kitluy_issuance_service"
+      ]
+    },
+    {
+      "version": "20260729180138",
+      "group": "0138",
+      "name": "emergency_revocation_and_scope",
+      "filename": "20260729180138_0138_emergency_revocation_and_scope.sql",
+      "sha256": "cf9dc1db71b82afd195b62735f8f644a008ea8821b93ac99187ae054d454eab5",
+      "schemaDomains": [
+        "kitluy_auth",
+        "kitluy_credential_issuer",
+        "kitluy_devices",
+        "kitluy_issuance_service",
+        "kitluy_worker_service"
+      ]
+    },
+    {
+      "version": "20260729190139",
+      "group": "0139",
+      "name": "revocation_execution_fix",
+      "filename": "20260729190139_0139_revocation_execution_fix.sql",
+      "sha256": "8e9b544b0b96e88af0727b264782093de8a40d82874819f129e0182e0bc1b75d",
+      "schemaDomains": [
+        "kitluy_admin",
+        "kitluy_audit",
+        "kitluy_auth",
+        "kitluy_core",
+        "kitluy_credential_issuer",
+        "kitluy_devices"
+      ]
+    },
+    {
+      "version": "20260729200140",
+      "group": "0140",
+      "name": "revocation_approval_reader",
+      "filename": "20260729200140_0140_revocation_approval_reader.sql",
+      "sha256": "97f51c02d37564a9eb97d74fdc541dacb49ffa8994a71611bec6b553932d932d",
+      "schemaDomains": [
+        "kitluy_activation_governor",
+        "kitluy_admin",
+        "kitluy_audit",
+        "kitluy_auth",
+        "kitluy_core",
+        "kitluy_credential_approval_reader",
+        "kitluy_credential_issuer",
+        "kitluy_devices",
+        "kitluy_issuance_service",
+        "kitluy_job_governor",
+        "kitluy_worker_service"
+      ]
+    },
+    {
+      "version": "20260729210141",
+      "group": "0141",
+      "name": "revocation_scope_binding",
+      "filename": "20260729210141_0141_revocation_scope_binding.sql",
+      "sha256": "cb120604e17a47527e396e76fe31e381ef4e617eb6304522c2d8402a9d69b15a",
+      "schemaDomains": [
+        "kitluy_auth",
+        "kitluy_credential_approval_reader",
+        "kitluy_credential_issuer",
+        "kitluy_devices"
+      ]
+    },
+    {
+      "version": "20260729220142",
+      "group": "0142",
+      "name": "scope_bound_revocation",
+      "filename": "20260729220142_0142_scope_bound_revocation.sql",
+      "sha256": "58ac86627917777a709a4047e5b5d98b7ba1deb6d4319b1a41b738bcdcb26618",
+      "schemaDomains": [
+        "kitluy_credential_issuer",
+        "kitluy_devices",
+        "kitluy_issuance_service"
+      ]
+    },
+    {
+      "version": "20260730080143",
+      "group": "0143",
+      "name": "destruction_eligibility_blocker_fix",
+      "filename": "20260730080143_0143_destruction_eligibility_blocker_fix.sql",
+      "sha256": "9dc1d6d6e36ca35f9c252bf0df221655a064d3d7e8c22b13b15af493e51fb6ea",
+      "schemaDomains": [
+        "kitluy_credential_issuer",
+        "kitluy_devices",
+        "kitluy_issuance_service"
+      ]
+    },
+    {
+      "version": "20260730090144",
+      "group": "0144",
+      "name": "destruction_confirmation_null_safety",
+      "filename": "20260730090144_0144_destruction_confirmation_null_safety.sql",
+      "sha256": "3deedfeb6376eb311648a0fec7811eac7e4c709713c5d761ce5b6079023f6db0",
+      "schemaDomains": [
+        "kitluy_credential_issuer",
+        "kitluy_devices",
+        "kitluy_issuance_service"
+      ]
+    },
+    {
+      "version": "20260730100145",
+      "group": "0145",
+      "name": "single_governed_revocation_entry",
+      "filename": "20260730100145_0145_single_governed_revocation_entry.sql",
+      "sha256": "b92063f677519f0e2b1c11da40ea7e18a77574704fd24b7ac29bcd2bafcc79a9",
+      "schemaDomains": [
+        "kitluy_activation_governor",
+        "kitluy_credential_approval_reader",
+        "kitluy_credential_issuer",
+        "kitluy_devices",
+        "kitluy_issuance_service",
+        "kitluy_job_governor",
+        "kitluy_worker_service"
+      ]
+    },
+    {
+      "version": "20260730110146",
+      "group": "0146",
+      "name": "authoritative_revocation_scope",
+      "filename": "20260730110146_0146_authoritative_revocation_scope.sql",
+      "sha256": "0c8a78ec1ea75f04724ed5d5732f819914b70f65c3ec726a3d3c42030090c3d5",
+      "schemaDomains": [
+        "kitluy_credential_issuer",
+        "kitluy_devices",
+        "kitluy_issuance_service",
+        "kitluy_worker_service"
+      ]
+    },
+    {
+      "version": "20260730120147",
+      "group": "0147",
+      "name": "enforce_bound_revocation",
+      "filename": "20260730120147_0147_enforce_bound_revocation.sql",
+      "sha256": "f2c7ba76651f2b59f361aea49e2108187df7802187e942e02dabf48e7698332f",
+      "schemaDomains": [
+        "kitluy_activation_governor",
+        "kitluy_credential_approval_reader",
+        "kitluy_credential_issuer",
+        "kitluy_devices",
+        "kitluy_issuance_service",
+        "kitluy_job_governor",
+        "kitluy_worker_service"
+      ]
+    },
+    {
+      "version": "20260730130148",
+      "group": "0148",
+      "name": "emergency_revocation_permissions",
+      "filename": "20260730130148_0148_emergency_revocation_permissions.sql",
+      "sha256": "8f0d0f3e375f533677132112a9e53533f83f8afe44d3097af3ebb60d33902815",
+      "schemaDomains": [
+        "kitluy_auth",
+        "kitluy_issuance_service"
+      ]
+    },
+    {
+      "version": "20260730140149",
+      "group": "0149",
+      "name": "emergency_reauthentication_evidence",
+      "filename": "20260730140149_0149_emergency_reauthentication_evidence.sql",
+      "sha256": "efb40f605c5868a7e56d5f3c862c28bf8bccd3ffece83f62806f312969bb0d74",
+      "schemaDomains": [
+        "kitluy_auth"
+      ]
+    },
+    {
+      "version": "20260730150150",
+      "group": "0150",
+      "name": "governed_emergency_revocation",
+      "filename": "20260730150150_0150_governed_emergency_revocation.sql",
+      "sha256": "dc485a1a9f30324c49da415e83995fd42ac3cfcfec25f58452d246f4c0828bdd",
+      "schemaDomains": [
+        "kitluy_admin",
+        "kitluy_audit",
+        "kitluy_auth",
+        "kitluy_core",
+        "kitluy_credential_approval_reader",
+        "kitluy_credential_issuer",
+        "kitluy_devices",
+        "kitluy_issuance_service",
+        "kitluy_worker_service"
+      ]
+    },
+    {
+      "version": "20260730160151",
+      "group": "0151",
+      "name": "enforce_governed_emergency_revocation",
+      "filename": "20260730160151_0151_enforce_governed_emergency_revocation.sql",
+      "sha256": "d60c73dce5255b532b8357b1442746bf917c7da14117cc1622d356dc827f9126",
+      "schemaDomains": [
+        "kitluy_activation_governor",
+        "kitluy_auth",
+        "kitluy_credential_approval_reader",
+        "kitluy_credential_issuer",
+        "kitluy_devices",
+        "kitluy_issuance_service",
+        "kitluy_job_governor",
+        "kitluy_worker_service"
+      ]
+    },
+    {
+      "version": "20260730160152",
+      "group": "0152",
+      "name": "governed_emergency_post_approval",
+      "filename": "20260730160152_0152_governed_emergency_post_approval.sql",
+      "sha256": "412b585fa220f9b3d18fe40f2033e5daa0681ec30b1545668881c4ab0e42d556",
+      "schemaDomains": [
+        "kitluy_activation_governor",
+        "kitluy_auth",
+        "kitluy_credential_approval_reader",
+        "kitluy_credential_issuer",
+        "kitluy_devices",
+        "kitluy_issuance_service",
+        "kitluy_worker_service"
+      ]
+    },
+    {
+      "version": "20260730170153",
+      "group": "0153",
+      "name": "rc022_approval_liveness",
+      "filename": "20260730170153_0153_rc022_approval_liveness.sql",
+      "sha256": "6f1ddc04f7773b256e57009173dc2418ea73f504dabaa7403db37f1a319fe281",
+      "schemaDomains": [
+        "kitluy_auth",
+        "kitluy_credential_approval_reader",
+        "kitluy_credential_issuer",
+        "kitluy_devices"
+      ]
+    },
+    {
+      "version": "20260730180154",
+      "group": "0154",
+      "name": "lapse_sweeper_worker_reachability",
+      "filename": "20260730180154_0154_lapse_sweeper_worker_reachability.sql",
+      "sha256": "ca4f62f20f5926a8380ad648c03e1f68f4e6f064299427231a3c2e0292232f7b",
+      "schemaDomains": [
+        "kitluy_credential_issuer",
+        "kitluy_devices",
+        "kitluy_issuance_service",
+        "kitluy_ops",
+        "kitluy_worker_service"
+      ]
+    },
+    {
+      "version": "20260730190155",
+      "group": "0155",
+      "name": "production_revocation_composition",
+      "filename": "20260730190155_0155_production_revocation_composition.sql",
+      "sha256": "0ece61c6b0c72d94d513d42025520f21f937dc4c9dce4815fbf247efcf530cfb",
+      "schemaDomains": [
+        "kitluy_activation_governor",
+        "kitluy_credential_approval_reader",
+        "kitluy_credential_issuer",
+        "kitluy_devices",
+        "kitluy_issuance_service",
+        "kitluy_worker_service"
+      ]
+    },
+    {
+      "version": "20260731090156",
+      "group": "0156",
+      "name": "scoped_hub_revocation_snapshot",
+      "filename": "20260731090156_0156_scoped_hub_revocation_snapshot.sql",
+      "sha256": "7d62eb7bbc442808ad5159cee24f02c5e2e3cffa7ba595c62db000b1c5b80b55",
+      "schemaDomains": [
+        "kitluy_activation_governor",
+        "kitluy_credential_issuer",
+        "kitluy_devices",
+        "kitluy_issuance_service",
+        "kitluy_worker_service"
+      ]
+    },
+    {
+      "version": "20260731140157",
+      "group": "0157",
+      "name": "sanctioned_test_clock",
+      "filename": "20260731140157_0157_sanctioned_test_clock.sql",
+      "sha256": "b3904751e030995d7b7c629429a81f8e08a2753420786517a0e52212aeb964a3",
+      "schemaDomains": [
+        "kitluy_activation_governor",
+        "kitluy_credential_issuer",
+        "kitluy_devices",
+        "kitluy_issuance_service",
+        "kitluy_job_governor",
+        "kitluy_ops",
+        "kitluy_test_clock_authority",
+        "kitluy_test_harness",
+        "kitluy_worker_service"
+      ]
+    },
+    {
+      "version": "20260731170158",
+      "group": "0158",
+      "name": "reauth_expiry_authoritative_time",
+      "filename": "20260731170158_0158_reauth_expiry_authoritative_time.sql",
+      "sha256": "5c5ac80d0a68e44e4549acce64ee3e72faf6b8e0d6af1aed2abcddfef2166814",
+      "schemaDomains": [
+        "kitluy_auth",
+        "kitluy_credential_approval_reader",
+        "kitluy_ops"
+      ]
+    },
+    {
+      "version": "20260731210159",
+      "group": "0159",
+      "name": "close_environment_wide_revocation_read",
+      "filename": "20260731210159_0159_close_environment_wide_revocation_read.sql",
+      "sha256": "a7829b67928667fa0a4dc84402150c8a8cd7b6c65cc9dd9e6dd56beda8967937",
+      "schemaDomains": [
+        "kitluy_credential_issuer",
+        "kitluy_devices",
+        "kitluy_issuance_service"
+      ]
+    },
+    {
+      "version": "20260731220000",
+      "group": "0160",
+      "name": "repair_job_governor_membership_leak",
+      "filename": "20260731220000_0160_repair_job_governor_membership_leak.sql",
+      "sha256": "ae8825a012e24ce6d4627b05a755b75e3419222eb462b57602fa37a3a17a087a",
+      "schemaDomains": [
+        "kitluy_job_governor",
+        "kitluy_ops",
+        "kitluy_test_harness",
+        "kitluy_worker_service"
+      ]
+    },
+    {
+      "version": "20260803100000",
+      "group": "0161",
+      "name": "repair_abandoned_key_destruction_confirm",
+      "filename": "20260803100000_0161_repair_abandoned_key_destruction_confirm.sql",
+      "sha256": "4c0fb0fd8e9d6b452c7c4080644912a752c56838aad5a1089f25c0b8082b5fca",
+      "schemaDomains": [
+        "kitluy_credential_issuer",
+        "kitluy_devices"
+      ]
+    },
+    {
+      "version": "20260803140000",
+      "group": "0162",
+      "name": "terminal_provisioning_codes",
+      "filename": "20260803140000_0162_terminal_provisioning_codes.sql",
+      "sha256": "1fbf0c1069c9f1270f77adea98e6b9fa0d901de35004e387025e7e128ec5301f",
+      "schemaDomains": [
+        "kitluy_activation_governor",
+        "kitluy_core",
+        "kitluy_devices"
+      ]
+    },
+    {
+      "version": "20260803160000",
+      "group": "0163",
+      "name": "governed_terminal_provisioning_code_issuance",
+      "filename": "20260803160000_0163_governed_terminal_provisioning_code_issuance.sql",
+      "sha256": "3df6b8aa2092d02cc6602aa346d0bb0d1762b7d10257907fc60c48aff5977281",
+      "schemaDomains": [
+        "kitluy_activation_governor",
+        "kitluy_auth",
+        "kitluy_credential_approval_reader",
+        "kitluy_credential_issuer",
+        "kitluy_devices",
+        "kitluy_ops"
+      ]
+    },
+    {
+      "version": "20260804100000",
+      "group": "0164",
+      "name": "terminal_code_presentation_attempts_lockout",
+      "filename": "20260804100000_0164_terminal_code_presentation_attempts_lockout.sql",
+      "sha256": "fc705153b0107e2c8ae4af93e4d90cc4ca2d344f07ffe5c71c3f2b103ff2d362",
+      "schemaDomains": [
+        "kitluy_activation_governor",
+        "kitluy_auth",
+        "kitluy_devices",
+        "kitluy_ops",
+        "kitluy_test_harness"
+      ]
+    },
+    {
+      "version": "20260804120000",
+      "group": "0165",
+      "name": "governed_terminal_provisioning_code_revocation",
+      "filename": "20260804120000_0165_governed_terminal_provisioning_code_revocation.sql",
+      "sha256": "cc775256b1be30d8ef9f4354d0b43674dbac3e7b10afb66a374d01e26e4c20bf",
+      "schemaDomains": [
+        "kitluy_activation_governor",
+        "kitluy_auth",
+        "kitluy_credential_approval_reader",
+        "kitluy_devices",
+        "kitluy_ops",
+        "kitluy_test_harness"
+      ]
+    },
+    {
+      "version": "20260804140000",
+      "group": "0166",
+      "name": "canonical_terminal_code_expiration",
+      "filename": "20260804140000_0166_canonical_terminal_code_expiration.sql",
+      "sha256": "4941f8422b74a48e59dc19aa0e26d706c6f79cea8715b3eb7f3cf36f0a5426d0",
+      "schemaDomains": [
+        "kitluy_activation_governor",
+        "kitluy_auth",
+        "kitluy_devices",
+        "kitluy_issuance_service",
+        "kitluy_ops",
+        "kitluy_test_harness",
+        "kitluy_worker_service"
+      ]
+    },
+    {
+      "version": "20260805100000",
+      "group": "0167",
+      "name": "expired_terminal_code_replacement_issuance",
+      "filename": "20260805100000_0167_expired_terminal_code_replacement_issuance.sql",
+      "sha256": "4fb2228fe0973a3f45e16c31d7652112c218264ee238b4162bb5dc0e36099fbc",
+      "schemaDomains": [
+        "kitluy_activation_governor",
+        "kitluy_auth",
+        "kitluy_devices",
+        "kitluy_ops",
+        "kitluy_test_harness",
+        "kitluy_worker_service"
+      ]
+    },
+    {
+      "version": "20260805140000",
+      "group": "0168",
+      "name": "ambiguous_issuance_replay_reconciliation",
+      "filename": "20260805140000_0168_ambiguous_issuance_replay_reconciliation.sql",
+      "sha256": "f9501416e77b6f67900d4d48becbb46cabd464fbca4e9f64a5c9c9ed0f10c809",
+      "schemaDomains": [
+        "kitluy_activation_governor",
+        "kitluy_auth",
+        "kitluy_devices",
+        "kitluy_ops",
+        "kitluy_test_harness",
+        "kitluy_worker_service"
+      ]
+    },
+    {
+      "version": "20260805170000",
+      "group": "0169",
+      "name": "atomic_terminal_code_recovery",
+      "filename": "20260805170000_0169_atomic_terminal_code_recovery.sql",
+      "sha256": "55ffc5ca59e8a8e3ffe69385e057245a529df3483829c9cb914ffc4477358fa0",
+      "schemaDomains": [
+        "kitluy_activation_governor",
+        "kitluy_auth",
+        "kitluy_credential_approval_reader",
+        "kitluy_devices",
+        "kitluy_ops",
+        "kitluy_test_harness",
+        "kitluy_worker_service"
+      ]
+    },
+    {
+      "version": "20260805200000",
+      "group": "0170",
+      "name": "terminal_provisioning_pop_challenges",
+      "filename": "20260805200000_0170_terminal_provisioning_pop_challenges.sql",
+      "sha256": "aac92f01861e9c685ca39c23f3ff6d76c640f0157f73ba86be1b88c63e323e85",
+      "schemaDomains": [
+        "kitluy_activation_governor",
+        "kitluy_devices",
+        "kitluy_ops",
+        "kitluy_test_harness",
+        "kitluy_worker_service"
+      ]
+    },
+    {
+      "version": "20260805220000",
+      "group": "0171",
+      "name": "atomic_pop_bound_redemption",
+      "filename": "20260805220000_0171_atomic_pop_bound_redemption.sql",
+      "sha256": "7794260b7201945ccde8ce6dd751404846b6e50cfc6b9006e7ffeefb2e882325",
+      "schemaDomains": [
+        "kitluy_activation_governor",
+        "kitluy_devices",
+        "kitluy_ops",
+        "kitluy_test_harness",
+        "kitluy_worker_service"
+      ]
+    },
+    {
+      "version": "20260805230000",
+      "group": "0172",
+      "name": "provisioning_composition_identity",
+      "filename": "20260805230000_0172_provisioning_composition_identity.sql",
+      "sha256": "511fc6c8e358f444dfce3411f7da730efdd9288d66b84dcbe352980b466cea63",
+      "schemaDomains": [
+        "kitluy_activation_governor",
+        "kitluy_credential_approval_reader",
+        "kitluy_credential_issuer",
+        "kitluy_devices",
+        "kitluy_issuance_service",
+        "kitluy_ops",
+        "kitluy_provisioning_service",
+        "kitluy_test_harness",
+        "kitluy_worker_service"
+      ]
+    },
+    {
+      "version": "20260806000000",
+      "group": "0173",
+      "name": "provisioning_composer_noinherit_gateway",
+      "filename": "20260806000000_0173_provisioning_composer_noinherit_gateway.sql",
+      "sha256": "5c76891fe20d77d35d4a4b6d1d917dfbedd9d5643f6d759caacd7ef31cc6c258",
+      "schemaDomains": [
+        "kitluy_activation_governor",
+        "kitluy_devices",
+        "kitluy_issuance_service",
+        "kitluy_provisioning_gateway",
+        "kitluy_provisioning_service",
+        "kitluy_worker_service"
+      ]
+    },
+    {
+      "version": "20260806020000",
+      "group": "0174",
+      "name": "terminal_activation_completion",
+      "filename": "20260806020000_0174_terminal_activation_completion.sql",
+      "sha256": "c5661d13c02eb4dcd7a5eb55e22a10c7af4e47102e72ebede629c23b5ff6b13a",
+      "schemaDomains": [
+        "kitluy_activation_governor",
+        "kitluy_devices",
+        "kitluy_ops",
+        "kitluy_provisioning_gateway",
+        "kitluy_provisioning_service",
+        "kitluy_test_harness",
+        "kitluy_worker_service"
+      ]
+    },
+    {
+      "version": "20260806040000",
+      "group": "0175",
+      "name": "pop_challenge_issuance_reconciliation",
+      "filename": "20260806040000_0175_pop_challenge_issuance_reconciliation.sql",
+      "sha256": "2cff8f756ae0a4fc1743140683adc4ed73b3a57dbd933049802e5bdd90706895",
+      "schemaDomains": [
+        "kitluy_activation_governor",
+        "kitluy_devices",
+        "kitluy_ops",
+        "kitluy_provisioning_service",
+        "kitluy_test_harness"
+      ]
+    },
+    {
+      "version": "20260806060000",
+      "group": "0176",
+      "name": "terminal_pairing_receipt_ingestion",
+      "filename": "20260806060000_0176_terminal_pairing_receipt_ingestion.sql",
+      "sha256": "86f0ff2cfa550d4daf37ccea77f303717a8b19bdf7d2966bb02a51f57476fb21",
+      "schemaDomains": [
+        "kitluy_devices",
+        "kitluy_edge_sync_gateway",
+        "kitluy_edge_sync_service",
+        "kitluy_ops",
+        "kitluy_pairing_receipt_governor",
+        "kitluy_provisioning_service",
+        "kitluy_test_harness",
+        "kitluy_worker_service"
+      ]
+    },
+    {
+      "version": "20260806080000",
+      "group": "0177",
+      "name": "fleet_health_support_and_containment",
+      "filename": "20260806080000_0177_fleet_health_support_and_containment.sql",
+      "sha256": "be2fdaefea03c2841e64a2520c1c4cd0b61d827ac4ece9260b141a28d12205c8",
+      "schemaDomains": [
+        "kitluy_devices",
+        "kitluy_edge_sync_service",
+        "kitluy_fleet_gateway",
+        "kitluy_fleet_governor",
+        "kitluy_fleet_service",
+        "kitluy_ops",
+        "kitluy_test_harness",
+        "kitluy_worker_service"
+      ]
+    },
+    {
+      "version": "20260806100000",
+      "group": "0178",
+      "name": "fleet_policy_owner_values",
+      "filename": "20260806100000_0178_fleet_policy_owner_values.sql",
+      "sha256": "19fb3f527646b4754800d9bc9d27ca67c8794813aacfe9c374a089a7f9f29c1e",
+      "schemaDomains": [
+        "kitluy_devices",
+        "kitluy_fleet_governor",
+        "kitluy_fleet_service",
+        "kitluy_ops",
+        "kitluy_test_harness"
+      ]
+    },
+    {
+      "version": "20260806120000",
+      "group": "0179",
+      "name": "hub_replacement_authority",
+      "filename": "20260806120000_0179_hub_replacement_authority.sql",
+      "sha256": "c3cb729ae5f879f678b4937b3e0f89aaeda550860c4ca825e60d50246f89c442",
+      "schemaDomains": [
+        "kitluy_devices",
+        "kitluy_fleet_governor",
+        "kitluy_fleet_service",
+        "kitluy_test_harness"
+      ]
+    },
+    {
+      "version": "20260806140000",
+      "group": "0180",
+      "name": "release_authority",
+      "filename": "20260806140000_0180_release_authority.sql",
+      "sha256": "39ee9fbcf5b573df835c2781ad40941ddd6df2d36ade0b95135dd07033778d71",
+      "schemaDomains": [
+        "kitluy_devices",
+        "kitluy_release_gateway",
+        "kitluy_release_governor",
+        "kitluy_release_service",
+        "kitluy_releases",
+        "kitluy_test_harness"
+      ]
+    },
+    {
+      "version": "20260806160000",
+      "group": "0181",
+      "name": "t007_concurrency_corrections",
+      "filename": "20260806160000_0181_t007_concurrency_corrections.sql",
+      "sha256": "b5291c9c921098927110fe4bf1cf3be94496e65dad66392783953a3b93183279",
+      "schemaDomains": [
+        "kitluy_devices",
+        "kitluy_fleet_governor",
+        "kitluy_ops",
+        "kitluy_release_governor",
+        "kitluy_releases"
+      ]
+    },
+    {
+      "version": "20260806180000",
+      "group": "0182",
+      "name": "t008_assignment_identity",
+      "filename": "20260806180000_0182_t008_assignment_identity.sql",
+      "sha256": "2a818ec0749208f31255f08543ac6814ce6b64b3dd60bec2fd484d43d4148887",
+      "schemaDomains": [
+        "kitluy_devices",
+        "kitluy_release_governor",
+        "kitluy_releases"
+      ]
+    },
+    {
+      "version": "20260806200000",
+      "group": "0183",
+      "name": "t008_receipt_ingestion_authority",
+      "filename": "20260806200000_0183_t008_receipt_ingestion_authority.sql",
+      "sha256": "f92ef12133ed40aa1293da9862fbce8ea46cfdd717970961291315c94f3ba956",
+      "schemaDomains": [
+        "kitluy_devices",
+        "kitluy_fleet_governor",
+        "kitluy_ops",
+        "kitluy_pairing_receipt_governor"
+      ]
+    },
+    {
+      "version": "20260806220000",
+      "group": "0184",
+      "name": "t008_receipt_null_and_class_guards",
+      "filename": "20260806220000_0184_t008_receipt_null_and_class_guards.sql",
+      "sha256": "3d3343ed9cac4843b85ae6486ea6921abe4ca78c7765d2b2f1043549e630df9b",
+      "schemaDomains": [
+        "kitluy_devices",
+        "kitluy_ops",
+        "kitluy_pairing_receipt_governor"
+      ]
+    },
+    {
+      "version": "20260807000000",
+      "group": "0185",
+      "name": "t008_receipt_presence_gate_complete",
+      "filename": "20260807000000_0185_t008_receipt_presence_gate_complete.sql",
+      "sha256": "080a4c33d99ab9fcdbc88d4c46054de6fc2b1f7464a89f9f66bad0293967e041",
+      "schemaDomains": [
+        "kitluy_devices",
+        "kitluy_ops",
+        "kitluy_pairing_receipt_governor"
+      ]
+    },
+    {
+      "version": "20260807020000",
+      "group": "0186",
+      "name": "t1_customer_and_consent_ingestion",
+      "filename": "20260807020000_0186_t1_customer_and_consent_ingestion.sql",
+      "sha256": "7b02b96cdfea021d5a5f63bcb204f5d93d948da18e6cb2f3ca43901285122f3e",
+      "schemaDomains": [
+        "kitluy_auth",
+        "kitluy_core",
+        "kitluy_customer_ingestion_governor",
+        "kitluy_edge_sync_service",
+        "kitluy_test_harness"
+      ]
+    },
+    {
+      "version": "20260807040000",
+      "group": "0187",
+      "name": "booking_draft_projection",
+      "filename": "20260807040000_0187_booking_draft_projection.sql",
+      "sha256": "1edcf13a5795f5cbb8925151194b5ce5b2f436285b34e61753ce46f2dbbc379c",
+      "schemaDomains": [
+        "kitluy_auth",
+        "kitluy_core",
+        "kitluy_customer_ingestion_governor",
+        "kitluy_devices",
+        "kitluy_draft_projection_governor",
+        "kitluy_edge_sync_service",
+        "kitluy_laundry",
+        "kitluy_test_harness"
+      ]
+    }
+  ]
+}

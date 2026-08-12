@@ -222,3 +222,77 @@ Use these templates:
 - `EVIDENCE_TEMPLATE.md` for tests and deployments.
 
 Keep `00_AI_HANDOFF/000_INDEX.md` current. Unindexed work is not an approved part of the swarm operating record.
+
+---
+
+# Addendum KL-DOCS-002 — Local-First Knowledge Policy (2026-08-07)
+
+> **Not part of the owner original.** This addendum was appended during the
+> workspace preparation mission. It adds a knowledge-sourcing rule and grants no
+> authority beyond the contract above. The owner text is unchanged.
+
+## A.1 Repository location and canonical name
+
+```text
+/home/veasna/Development/HET_VEASNA_WORKSPACE/repos/het-kitluy-project
+```
+
+Repository/project: **`HET-KITLUY-PROJECT`**. Product: **KitLuy Suite**.
+Ecosystem category: **`kitluy-ecosystem`**. Names such as
+`kitluy-eco-systen`, `kitluy-eco-system`, `kitluy ecosystem project` and
+`KITLUY-SUITE-REPO (MAIN)`, where they refer to _this consolidated project_, are
+superseded by `HET-KITLUY-PROJECT`.
+
+Product identifiers are **not** renamed: `kitluy-admin-portal`,
+`kitluy-partner-portal`, `kitluy-chain-portal`, `kitluy-hub-agent` keep their
+names, and "KitLuy Ecosystem" as a _product/organizational concept_ is unchanged.
+
+## A.2 Knowledge sourcing order
+
+Every agent resolves knowledge locally, in this order:
+
+1. `PROJECT_HOME.md`
+2. `docs/authority/kitluy-source-of-truth-index-v1.0.0.md`
+3. Active product/feature documentation — locate via
+   `docs/authority/LOCAL_DOCUMENTATION_MAP.md`
+4. The relevant current handoff in `00_AI_HANDOFF/`
+5. Live code, migrations and tests
+
+## A.3 Google Drive is upstream only
+
+Query Google Drive **only** when:
+
+- the local manifest says a required source is missing;
+- the owner explicitly requests a refresh;
+- a source conflict requires upstream verification;
+- the local source is known to be stale;
+- a new approved document is known to exist;
+- exact source provenance is required.
+
+**Never re-scan all of Google Drive at the start of a task.** An authorized
+query fetches identified documents by `drive_file_id` from
+`exported-drive-docs/kitluy/DRIVE_SOURCE_MANIFEST.json`; it does not enumerate
+folders or sweep by title.
+
+Governing policy: `docs/authority/DRIVE_SYNC_POLICY.md`.
+
+## A.4 The repository outranks Drive
+
+Local canonical authority is **rebuild bible v4.0.0** and **business bible
+v2.0.0** at `docs/source/canonical/`. Google Drive's newest copies are v3.0.0
+and v1.0.0 — both **SUPERSEDED**. Drive holds **no** CANONICAL-class KitLuy
+document. Never use Drive material to override a local canonical document
+without explicit owner authority; record the conflict instead.
+
+## A.5 Never develop from a Drive source-code copy
+
+Drive holds `HET-KITLUY-PROJECT.zip` and several `.bundle` Git archives. These
+are backups. The live Git repository is the only authoritative source of code,
+history, migrations, tests and CI configuration.
+
+## A.6 Legacy repositories
+
+The six standalone KitLuy repositories under `repos/het-kitluy-project/` are
+**migration/consolidation candidates only**. No migration has occurred. Do not
+copy code between them and this monorepo, merge histories, or retire them.
+See `docs/authority/LEGACY_REPOSITORY_TO_MONOREPO_MAP.md`.

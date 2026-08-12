@@ -24,3 +24,107 @@
 | BLK-006 | Production values: domains, DNS provider, Supabase/DO project refs, KHQR + notification providers, credentials, SLO/RPO/RTO.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | WS-24 real infra; WS-22 providers; WS-26                                   | Supply values / credentials                                                                                                                                                                                                       | OPEN                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | BLK-007 | Two canonical security test plans (KLREC-017/KLREQ-011); `kitluy-testing-and-evidence-system-v1.0.0` missing (KLREQ-008).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | WS-25 finalization; 41 registry cases                                      | §3 consolidation DONE (CONTRACT-APPROVED); remaining: KLREQ-008 missing testing-and-evidence-system doc                                                                                                                           | OPEN                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | BLK-008 | Owner-depth decisions: KLMF-CUS-006 (consent depth), KLMF-TAX-001 (tax), exchange-rate + KHR cash-rounding policy (payment vectors defer: EXACT_INTEGER_RESULT_UNTIL_OWNER_POLICY_APPROVED).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | WS-06 depth; tax/FX features                                               | Owner decisions                                                                                                                                                                                                                   | OPEN (engine implements the deferral faithfully)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+
+---
+
+## Conflicts surfaced by workspace preparation (2026-08-07, KL-DOCS-002)
+
+Full detail: `00_AI_HANDOFF/preparation/DOCUMENT_RECONCILIATION_REPORT.md`.
+**None of these was resolved by the preparation mission — each needs an owner
+decision.**
+
+### KLDRV-CONF-001 — Order/Service/Service Item vs T1 Booking vocabulary
+
+Owner decision `KLDRV-0001` (Drive, OWNER-LOCKED, 2026-07-18) mandates
+**Order → Service → Service Item** for `kitluy-laundry-pos-desk-app`. The
+monorepo's owner-locked T1 model uses **Laundry Booking**. Both are owner
+authority at the same level, scoped to different repositories; neither document
+states which governs the monorepo.
+
+**Blocks:** any POS-desktop consolidation work.
+**Decide:** does `KLDRV-0001` apply only to the legacy repository, stand
+superseded by the monorepo T1 decisions, or require reconciliation?
+
+### KLDRV-CONF-003 — POS desktop base application
+
+`kitluy-laundry-pos-desk-app` and `kitluy-suite-pos-desk-app` both map to
+`apps/kitluy-pos-desktop-app/`, with divergent toolchains (React 18.3.1/Vite 6
+vs React 19.2.6/Vite 8). **Base not decided.**
+
+**Blocks:** POS consolidation.
+
+### KLDRV-CONF-004 — Supabase migration lineage
+
+`kitluy-suite-supabase` has **21** migrations; the monorepo has **87**. Whether
+the 21 are ancestors, a parallel lineage, or superseded is unrecorded. Merging
+without analysis risks schema divergence or data loss.
+
+**Blocks:** any Supabase consolidation. Requires per-environment applied-migration
+comparison and explicit owner approval. Never auto-apply production migrations
+(`KL-INF-P1-037`).
+
+### Non-blocking, recorded
+
+- **Node engines vs system Node** — repo requires `>=22.12 <23`; system default is
+  v24.14.1. Mitigated: `nvm use 22.23.0 && corepack enable`.
+- **Local Supabase belongs to `e-menu-platform`** — KitLuy integration tests
+  cannot pass until a KitLuy stack is started and migrated.
+- **50 pre-existing prettier failures** — needs a dedicated formatting task.
+- **4 cosmetic broken links** in the 2026-07-30 WS-11-T003 Phase-E handoff
+  (bare-UUID targets; referenced documents exist).
+
+---
+
+## RESOLVED 2026-08-07 — KLDRV-CONF-001 (Order/Service vs Booking)
+
+**Resolved by `KLD-2026-08-07-BOOKING-SEMANTICS-001`** —
+`docs/decisions/kitluy-laundry-booking-catalog-and-commercial-record-semantics-owner-decision-v1.0.0.md`.
+
+The conflict is settled by **separating three layers**: catalog **Service** →
+vertical operational aggregate (**Laundry Booking** for Phase 1) → shared
+vertical-neutral **Transaction** (payment, refund, void, inventory, finance,
+audit). A Service is not a Booking; a Transaction does not replace a Booking.
+Booking lines snapshot the Service and the pricing effective at creation —
+mutable live catalog pricing is never historical Booking truth.
+
+`Booking` is **not** universal: future verticals use Check/Order/Sale as
+appropriate, and Laundry Booking terminology stays out of neutral Core.
+
+Legacy `Order` naming is **not** renamed on sight — each use is classified
+first (`CORE-COMMERCIAL-TRANSACTION` / `LAUNDRY-BOOKING-COMPATIBILITY` /
+`FUTURE-VERTICAL-ORDER` / `LEGACY-NAMING` / `SUPERSEDED` /
+`OWNER-REVIEW-REQUIRED`) and changes are additive.
+
+**Also resolved earlier the same day:** KLDRV-CONF-003 (canonical
+`apps/kitluy-pos-desktop-app` is the base; standalone apps are donors) and
+BLOCKER-1 (WS-12 lock — consolidation proceeds as `MIGRATED-NOT-YET-ACCEPTED`).
+
+### New open item — KLREQ-VERTICAL-ENVELOPE-001
+
+The Hub configuration/assignment envelope carries **no explicit vertical
+field**, so the vertical is derived from the Hub-signed `terminalProfileCode`
+prefix. That derivation is accepted as a **`TEMPORARY-COMPATIBILITY-DERIVATION`**
+only — the profile prefix must not become the permanent source of
+business-vertical truth. A governed contract change must deliver
+`Digital Store.primary_vertical` through the envelope, executed by the task
+that **owns** that signed contract.
+
+Fail-closed behaviour is retained and must not be weakened: explicit vertical
+
+- derived vertical + disagreement → **REFUSE**.
+
+### Still open
+
+**KLDRV-CONF-004** (21 vs 86 Supabase migration lineage) · shift/cash-drawer
+authority · toolchain reconciliation · donor data-boundary rewrite ·
+KLREQ-001 · KLREC-2026-07-26-001 · KLREQ-007 · KLREC-2026-07-26-009..013.
+
+### BLOCKING T003 EXECUTION
+
+**No `WS-12-T003` owner package exists.** T001 and T002 each have a LOCKED
+per-task owner decision (`kitluy-t1-hub-bootstrap-route-and-session-…`,
+`KLD-2026-08-06-WS12-T002-001`) plus a task file. T003 has **neither** — the
+task register gives only its title, _Service, Garment, Evidence and Custody
+Intake_, the composition rule and the boundaries. Objective, owned files,
+explicit out-of-scope, truth model, status gate, rollback and status ceiling
+are undefined. See the T003 readiness report.

@@ -142,6 +142,29 @@ and classified under `docs/source/`. Missing pack members:
 above the pack by all 10 members; not shipped). Full status:
 `docs/source/processed/reconciliation/kitluy-required-document-coverage-matrix-v1.0.0.md`.
 
+### Batch 4 ingestion — owner device-lifecycle workflow (2026-08-11)
+
+One owner-supplied source, inventory `kitluy-inbox-inventory-v1.3.0.*`,
+manifest entry `KLSRC-0162`. First occupant of the previously reserved
+`docs/source/owner-decisions/` taxonomy directory, and the first source
+carrying the `OWNER-DECISION` authority class (the manifest counterpart of the
+`OWNER DECISION SOURCE` class already used by rows SOT-020..SOT-026 above).
+
+| ID      | Document                                                                            | Version | Date       | Owner                            | Class                 | State                 | Scope                                                                            | Superseded / governing note                                                                                                          |
+| ------- | ----------------------------------------------------------------------------------- | ------- | ---------- | -------------------------------- | --------------------- | --------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| SOT-028 | kitluy-device-factory-enrollment-store-provisioning-and-pi-terminal-workflow-v1.0.0.md | v1.0.0  | 2026-08-11 | HET / KitLuy Suite Project Owner | OWNER DECISION SOURCE | Active                | Device lifecycle: factory enrollment, Admin fleet visibility, Partner Portal Store pairing, Hub-then-terminal ordering, terminal activation | Confirms KLD-2026-07-21-003 and RC-006. Defers to the canonical data model by its own §39 — conceptual field names are not schema instructions. |
+
+Authority limits recorded at ingestion, so the document is not over-read:
+
+- It is **workflow direction, not implementation evidence**
+  (`implementation_evidence: NONE`). KLD-EVIDENCE-001 continues to apply.
+- Its §39 explicitly subordinates its own conceptual names to the canonical
+  device/provisioning schema. Mapping recorded as KLREC-2026-08-11-EDGE-002.
+- It **narrows but does not close** the two open edge decisions in
+  `00_AI_HANDOFF/edge-platform/28_PI_TERMINAL_MISSION_BLOCKERS.md`
+  (DEC-1, DEC-2). Recorded as KLREC-2026-08-11-EDGE-001; the decisions remain
+  owner-required.
+
 ### Prior code (evidence source only, never authority)
 
 `KITLUY-SUITE-REPO (MAIN)` (Synology Drive, ~2026-07-01/05) and the March

@@ -232,3 +232,93 @@ production (KL-INF-P1-037). Handoffs: template in `00_AI_HANDOFF/000_INDEX.md`.
 > control-pack siblings by bundle-relative filename; link _paths_ were
 > adjusted to `docs/authority/…` so they resolve in this repository. No
 > wording was changed. Pristine original: `docs/source/canonical/PROJECT_HOME.md`.
+
+---
+
+## Workspace preparation update — KL-DOCS-002 (2026-08-07, not part of the owner original)
+
+### Repository location — canonical root
+
+```text
+/home/veasna/Development/HET_VEASNA_WORKSPACE/repos/het-kitluy-project
+```
+
+**This repository IS `repos/het-kitluy-project`** — simultaneously the
+development root, documentation root, AI-handoff root, infrastructure root and
+Supabase root. It is not contained inside another KitLuy directory. Root repair
+completed 2026-08-07: HEAD `e9a7c39…` unchanged, 279 commits, branch `main`,
+remote unchanged with push still disabled.
+
+Neither of these exists or may be created:
+
+```text
+repos/het-kitluy-project/HET-KITLUY-PROJECT/     <- removed 2026-08-07
+repos/het-kitluy-project/het-kitluy-project/     <- never create
+```
+
+**Canonical names.** Technical identifier: **`het-kitluy-project`** (lowercase
+kebab-case). Human-readable: **HET KitLuy Project**. Product: **KitLuy Suite**.
+Where they refer to _this consolidated project_, the names `HET-KITLUY-PROJECT`,
+`kitluy-eco-systen`, `kitluy-eco-system`, `kitluy ecosystem project` and
+`KITLUY-SUITE-REPO (MAIN)` are superseded. Product identifiers
+(`kitluy-admin-portal`, `kitluy-partner-portal`, `kitluy-chain-portal`,
+`kitluy-hub-agent`) and **"KitLuy Ecosystem"** as a product/architectural concept
+are **unchanged**. The GitHub remote is still named `HET-KITLUY-PROJECT`.
+
+**The six standalone repositories** live outside this repository at
+`repos/het-kitluy-standalone-repos/`, classified
+**`STANDALONE-MIGRATION-SOURCE`** — preserved, not migrated, not obsolete. See
+`docs/authority/STANDALONE_REPOSITORY_RECONCILIATION.md`.
+
+### LOCAL-FIRST KNOWLEDGE POLICY
+
+Develop from **local** documentation. Do not search Google Drive to start work.
+
+1. `PROJECT_HOME.md` (this file)
+2. `docs/authority/kitluy-source-of-truth-index-v1.0.0.md`
+3. Active product/feature documentation — locate via
+   **`docs/authority/LOCAL_DOCUMENTATION_MAP.md`**
+4. The relevant current handoff in `00_AI_HANDOFF/`
+5. Live code, migrations and tests
+
+Google Drive is queried only under the six triggers in
+**`docs/authority/DRIVE_SYNC_POLICY.md`** §5, and then only for identified
+documents by ID — never as a folder sweep.
+
+> **The repository outranks Drive.** Local canonical authority is rebuild bible
+> **v4.0.0** and business bible **v2.0.0** (`docs/source/canonical/`). Drive's
+> newest are v3.0.0 and v1.0.0 — both **SUPERSEDED**. Drive holds **no**
+> CANONICAL-class KitLuy document.
+
+### New governance documents
+
+| Document                                              | Purpose                                                                |
+| ----------------------------------------------------- | ---------------------------------------------------------------------- |
+| `docs/authority/DRIVE_SYNC_POLICY.md`                 | When Drive may be queried; conflict, deletion, supersession handling   |
+| `docs/authority/LOCAL_DOCUMENTATION_MAP.md`           | Question → local location; the navigation entry point                  |
+| `docs/authority/LEGACY_REPOSITORY_TO_MONOREPO_MAP.md` | Legacy → monorepo mapping (**mapping only — no migration authorized**) |
+
+Raw Drive mirror (Level A, immutable, workspace-level):
+`exported-drive-docs/kitluy/` with `DRIVE_SOURCE_MANIFEST.{md,json}` — 45 sources
+indexed, 2 mirrored, 0 unresolved.
+
+### Preparation record
+
+`00_AI_HANDOFF/preparation/` holds the seven mission reports. Start with
+`NEXT_DEVELOPMENT_STEPS.md`.
+
+### Blocker note added by this mission
+
+Beyond the four blockers listed above, **three consolidation conflicts** now
+require owner decisions — `KLDRV-CONF-001` (Order/Service vs T1 Booking
+vocabulary), `KLDRV-CONF-003` (POS desktop base), `KLDRV-CONF-004` (Supabase
+migration lineage). See `00_AI_HANDOFF/000_BLOCKERS.md`.
+
+### Environment requirement
+
+`engines.node` is `>=22.12 <23`; the system default is v24.14.1. Node 22.23.0 is
+installed alongside it. Every session:
+
+```bash
+nvm use 22.23.0 && corepack enable
+```

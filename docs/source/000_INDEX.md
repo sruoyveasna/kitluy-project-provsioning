@@ -25,7 +25,14 @@ offline/ shared-services/ ui-ux/` (batch 1, 102 sources) plus
   `infrastructure/` (batch-2 ops pack) and `owner-instructions/` (batch-2
   AI Swarm Operating System pack, subdirectory preserved) — 58 batch-2
   sources, KLSRC-0103..0160, batch inventory v1.1.0.
-  Still reserved/empty: `owner-decisions/ product-specs/ architecture/
+  Batch 3 (KLSRC-0161, inventory v1.2.0) added the Phase 1 Laundry master
+  build plan to `owner-instructions/`.
+  Batch 4 (KLSRC-0162, inventory v1.3.0, 2026-08-11) opened
+  `owner-decisions/` with the owner device factory-enrollment / Store
+  provisioning / Pi Terminal workflow — first source of authority class
+  `OWNER-DECISION`; registered as SOT-028 with reconciliation entries
+  KLD-2026-08-11-DEVICE-LIFECYCLE-001 and KLREC-2026-08-11-EDGE-001..003.
+  Still reserved/empty: `product-specs/ architecture/
 feature-registry/ approved-handoffs/ research/ competitor-rebuilds/
 superseded/ unclassified/`.
 - `processed/reconciliation/` — coverage matrix, authority map, conflict

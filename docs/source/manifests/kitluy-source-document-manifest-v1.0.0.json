@@ -2,8 +2,8 @@
   "manifest_version": "1.0.0",
   "task": "KL-DOCS-001",
   "ingested_at": "2026-07-26T16:00:00+07:00",
-  "last_batch_ingested_at": "2026-07-26T17:30:00+07:00",
-  "source_count": 161,
+  "last_batch_ingested_at": "2026-08-11T14:00:00+07:00",
+  "source_count": 162,
   "note": "Source IDs are stable and never reassigned. Originals live in docs/source/inbox/ and are never modified; classified copies are immutable.",
   "missing_expected_inputs": [
     {
@@ -4417,6 +4417,34 @@
       "implementation_evidence": "NONE",
       "ingested_at": "2026-07-26T17:30:00+07:00",
       "notes": ""
+    },
+    {
+      "source_id": "KLSRC-0162",
+      "batch": "2026-08-11-1",
+      "original_path": "docs/source/inbox/kitluy-device-factory-enrollment-store-provisioning-and-pi-terminal-workflow-v1.0.0.md",
+      "classified_path": "docs/source/owner-decisions/kitluy-device-factory-enrollment-store-provisioning-and-pi-terminal-workflow-v1.0.0.md",
+      "physical_filename": "kitluy-device-factory-enrollment-store-provisioning-and-pi-terminal-workflow-v1.0.0.md",
+      "declared_filename": "",
+      "document_title": "KitLuy Device Factory Enrollment, Store Provisioning, and Pi Terminal Workflow",
+      "version": "1.0.0",
+      "document_date": "",
+      "declared_owner": "",
+      "declared_status": "Owner-aligned workflow",
+      "sha256": "f74500802dd2a636d3ca26e5c8027f930b76e0d6dfec8121a944b94b2d136a11",
+      "file_size": 23299,
+      "file_type": "text/markdown",
+      "authority_class": "OWNER-DECISION",
+      "canonical_status": "CANONICAL-CURRENT",
+      "document_role": "DEVICE-LIFECYCLE-WORKFLOW (factory enrollment -> store provisioning -> terminal activation)",
+      "product_or_domain": "edge",
+      "vertical": "laundry",
+      "supersedes": "",
+      "superseded_by": "",
+      "duplicate_of": "",
+      "conflicts_with": "",
+      "implementation_evidence": "NONE",
+      "ingested_at": "2026-08-11T14:00:00+07:00",
+      "notes": "Owner-aligned workflow. Defers to the canonical device/provisioning schema by its own §39 — conceptual names (store_hub_id, terminal_profile_code) are not a schema instruction. Narrows the open edge blockers DEC-1/DEC-2 without closing them (KLREC-2026-08-11-EDGE-001). Ingested copy normalizes transfer-encoding mojibake in the diagram glyphs (KLREC-2026-08-11-EDGE-003)."
     }
   ]
 }
