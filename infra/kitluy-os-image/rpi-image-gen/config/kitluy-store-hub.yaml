@@ -8,6 +8,27 @@
 device:
   layer: rpi5
 
+# ACCESS MODEL: public key only, no password anywhere (owner decision
+# 2026-08-11). `pubkey_only` makes upstream write PermitRootLogin no,
+# PasswordAuthentication no and AuthenticationMethods publickey, which agrees
+# with the hardening kitluy-base.yaml already installs.
+#
+# The KEY ITSELF is deliberately not here. It is an operator value, injected at
+# build time by build-rpi-image.sh as IGconf_ssh_pubkey_user1, so this file
+# stays identical for every operator and no one's key is committed. Policy is
+# repository truth; the key is not.
+#
+# A public key in an image is not a secret — unlike the shared
+# ssl-cert-snakeoil.key defect tracked separately, nothing here is compromised
+# by being readable.
+#
+# Note: upstream creates device.user1 with `adduser --disabled-password` and
+# sets root's password field to `*`. With no password configured BOTH accounts
+# are locked, so this key is the ONLY way in. build-rpi-image.sh refuses to
+# build without it.
+ssh:
+  pubkey_only: y
+
 layer:
   custom: kitluy-store-hub
 

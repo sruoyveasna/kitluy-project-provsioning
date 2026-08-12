@@ -69,6 +69,12 @@ export const REGISTRY_ROLES = {
   /** Hub-authenticated Edge synchronization ingestion (group 0176): exactly
    *  the pairing-receipt ingestion and read-projection capabilities. */
   edgeSync: "kitluy_edge_sync_service",
+  /** Fleet/factory enrollment (group 0177 created the role; group 0190 admits
+   *  it to the manufacturing-enrollment doors). Holds EXECUTE on those four
+   *  doors and NOTHING else — the doors are SECURITY DEFINER owned by
+   *  `kitluy_fleet_governor`, so this identity can attempt an enrollment but
+   *  cannot write the device tables directly. */
+  fleet: "kitluy_fleet_service",
   /** A human acting under their own `auth.uid()` (group 0150/0152). */
   human: "authenticated",
 } as const;
@@ -139,6 +145,7 @@ export async function withServiceRole<T>(
     | "kitluy_worker_service"
     | "kitluy_provisioning_service"
     | "kitluy_edge_sync_service"
+    | "kitluy_fleet_service"
   >,
   fn: (client: pg.PoolClient) => Promise<T>,
 ): Promise<T> {

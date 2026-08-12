@@ -37,7 +37,12 @@ LIB_DIR="${BASE_OVERLAY}/usr/lib/kitluy/lib/firstboot-agent"
 # and `verify_closure` below fails the build if that ever stops being true.
 DEVICE_MODULES=(
   version identity bootstrap-state
+  # enrollment.js is TYPES ONLY at runtime — the enrollment client imports its
+  # interfaces, which erase. It is listed because `verify_closure` reads the
+  # emitted imports, and the emitted enrollment-bootstrap.js does reference it.
+  enrollment enrollment-pop-bytes
   adapters/device-identity-store adapters/device-key-provider adapters/linux-hardware-probe
+  adapters/http-enrollment-client
   bin/firstboot-identity bin/enrollment-bootstrap bin/health-reporter
   bin/update-bootstrap bin/bootstrap-ui
 )

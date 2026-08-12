@@ -82,5 +82,42 @@ export class FileKeyProvider {
             return false;
         }
     }
+    /**
+     * Signs a payload with the device key, WITHOUT the key leaving this object.
+     *
+     * This is the one capability enrollment adds to the provider, and its shape
+     * is the whole point: the caller hands in bytes and receives a signature. It
+     * cannot obtain the key, because nothing here returns one — the PEM is read,
+     * used and dropped inside a single call, exactly as `verifyKeyUsable` does.
+     *
+     * A `signPayload` that returned the key "for convenience" would make every
+     * caller a custody boundary. There is one, and it is here.
+     *
+     * Errors carry no key material and no path: a failure message naming the
+     * file would put a private-key location in a log line.
+     */
+    async signPayload(privateKeyHandle, payload) {
+        let pem;
+        try {
+            pem = readFileSync(privateKeyHandle, "utf8");
+        }
+        catch {
+            throw new Error("the device signing key is unreadable");
+        }
+        try {
+            const privateKey = createPrivateKey(pem);
+            if (privateKey.asymmetricKeyType !== KEY_ALGORITHM) {
+                throw new Error("the device signing key is not the expected algorithm");
+            }
+            // `null` algorithm is the Ed25519 form: the curve fixes the hash.
+            return new Uint8Array(sign(null, Buffer.from(payload), privateKey));
+        }
+        catch (error) {
+            // Re-thrown deliberately flat. The underlying error can carry PEM
+            // fragments in its message.
+            void error;
+            throw new Error("the device signing key could not produce a signature");
+        }
+    }
 }
 //# sourceMappingURL=device-key-provider.js.map

@@ -1,0 +1,30 @@
+{
+  "name": "@kitluy-services/kitluy-device-firstboot-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "KitLuy OS firstboot identity bootstrap and cloud enrollment agent \u2014 runs on both the Store Hub and Pi terminal image profiles. Establishes device-side identity, enrolls with the KitLuy cloud, heartbeats while unassigned, and polls for assignment.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist",
+    "test:db": "vitest run test/factory-enrollment.db.test.ts"
+  },
+  "devDependencies": {
+    "@kitluy/device-identity": "workspace:*",
+    "@types/node": "catalog:",
+    "@types/pg": "catalog:",
+    "pg": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

@@ -42,6 +42,7 @@ BUILD_DIR="${KITLUY_OS_IMAGE_ROOT}/build/work"
 PROFILE=""
 CHANNEL_OVERRIDE=""
 SKIP_DOCTOR="no"
+NO_INTERACTIVE_ACCESS="no"
 FILESYSTEM_ONLY="no"
 COLLECT_ONLY="no"
 
@@ -56,6 +57,9 @@ Options:
   --filesystem-only    Build the root filesystem, skip image generation.
   --collect-only       Skip the build; re-collect and re-hash existing artifacts.
   --skip-doctor        Skip the host preflight. Not recommended.
+  --no-interactive-access  Build an image with NO console or SSH access at all.
+                       Required to acknowledge that a failed bootstrap can then
+                       only be reflashed, never inspected.
   -h, --help           Show this help.
 EOF
 }
@@ -68,6 +72,7 @@ while [[ $# -gt 0 ]]; do
     --filesystem-only) FILESYSTEM_ONLY="yes"; shift ;;
     --collect-only)    COLLECT_ONLY="yes"; shift ;;
     --skip-doctor)     SKIP_DOCTOR="yes"; shift ;;
+    --no-interactive-access) NO_INTERACTIVE_ACCESS="yes"; shift ;;
     -h|--help)         usage; exit 0 ;;
     *)                 usage; die "unknown argument: $1" ;;
   esac
@@ -162,12 +167,30 @@ if [[ -n "${KITLUY_DEV_SSH_PUBKEY:-}" ]]; then
     || die "REFUSED: ${KITLUY_DEV_SSH_PUBKEY} does not look like an OpenSSH public key"
   RIG_OVERRIDES+=("IGconf_ssh_pubkey_user1=${KITLUY_DEV_SSH_PUBKEY}")
   log "recovery access: public key from ${KITLUY_DEV_SSH_PUBKEY} -> /home/pi/.ssh/authorized_keys"
-else
-  warn "no KITLUY_DEV_SSH_PUBKEY set — this image will have NO interactive access."
+elif [[ "$NO_INTERACTIVE_ACCESS" == "yes" ]]; then
+  warn "--no-interactive-access: building an image with NO way in, deliberately."
   warn "  root is locked, pi has no password, and sshd rejects password auth."
-  warn "  A device that fails to bootstrap can then only be reflashed, not inspected."
-  warn "  To allow recovery over SSH, rebuild with:"
-  warn "    KITLUY_DEV_SSH_PUBKEY=\$HOME/.ssh/id_ed25519.pub $0 --profile ${PROFILE}"
+  warn "  A device that fails to bootstrap can only be reflashed, never inspected."
+else
+  # REFUSE, not warn. This exact condition already shipped: an image with no
+  # key reached a Raspberry Pi on 2026-08-11, firstboot failed, and the device
+  # could not be logged into over console OR SSH — the cause had to be found by
+  # reading the build tree instead of the device. A warning printed halfway up
+  # a twenty-minute build scrolls past and changes nothing; the next person
+  # discovers it with a flashed card in their hand.
+  #
+  # An unreachable image is still a legitimate PRODUCTION posture, so the
+  # escape hatch exists — but it must be stated, not defaulted into.
+  die "this image would have NO interactive access at all.
+  root is locked by upstream (usermod --pass='*'), user 'pi' is created with
+  --disabled-password, and sshd rejects password authentication. Without a
+  public key the device cannot be inspected if bootstrap fails — only reflashed.
+
+  Build with recovery access:
+    KITLUY_DEV_SSH_PUBKEY=\$HOME/.ssh/id_ed25519.pub $0 --profile ${PROFILE}
+
+  Or state the lockdown explicitly:
+    $0 --profile ${PROFILE} --no-interactive-access"
 fi
 
 RIG_ARGS=(build -S "$KITLUY_SRC" -c "$RIG_CONFIG" -B "$BUILD_DIR")
