@@ -222,6 +222,17 @@ RIG_ARGS=(build -S "$KITLUY_SRC" -c "$RIG_CONFIG" -B "$BUILD_DIR")
 #
 # It has to be right at build time. The rootfs is erofs — read-only — so this
 # cannot be corrected on the card afterwards.
+# WHICH DEVICE THIS IMAGE IS.
+#
+# The profile has always known (`KITLUY_PROFILE_DEVICE_CLASS`) and this builder
+# already writes it into the manifest — but never into the image, so the agent
+# fell back to its default of `terminal`. A Store Hub built from this path would
+# have enrolled as a TERMINAL, and a terminal cannot anchor the provisioning
+# codes that `device_provisioning_codes.store_hub_device_id NOT NULL` requires.
+# The failure would have surfaced at Store pairing, far from its cause.
+RIG_OVERRIDES+=("IGconf_kitluy_device_class=${KITLUY_PROFILE_DEVICE_CLASS}")
+log "device class baked: ${KITLUY_PROFILE_DEVICE_CLASS}"
+
 if [[ -n "$ENROLLMENT_URL" ]]; then
   RIG_OVERRIDES+=("IGconf_kitluy_enrollment_url=${ENROLLMENT_URL}")
   log "enrollment endpoint baked: ${ENROLLMENT_URL}"

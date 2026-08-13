@@ -118,6 +118,7 @@ mmdebstrap:
       KITLUY_IMAGE_SCHEMA_VERSION=1
       KITLUY_IMAGE_VERSION=0.2.0-dev
       KITLUY_RELEASE_CHANNEL=internal
+      KITLUY_DEVICE_CLASS=terminal
       KITLUY_ENROLLMENT_BASE_URL=
       KITLUY_ENVIRONMENT=development
       KITLUY_DEFAULT_TIMEZONE=Asia/Phnom_Penh
@@ -138,6 +139,10 @@ mmdebstrap:
     - |
       if [ -n "${IGconf_kitluy_enrollment_url:-}" ]; then
         sed -i "s|^KITLUY_ENROLLMENT_BASE_URL=.*|KITLUY_ENROLLMENT_BASE_URL=${IGconf_kitluy_enrollment_url}|" \
+          "$1/etc/kitluy/image.env"
+      fi
+      if [ -n "${IGconf_kitluy_device_class:-}" ]; then
+        sed -i "s|^KITLUY_DEVICE_CLASS=.*|KITLUY_DEVICE_CLASS=${IGconf_kitluy_device_class}|" \
           "$1/etc/kitluy/image.env"
       fi
       if [ -n "${IGconf_kitluy_environment:-}" ]; then
