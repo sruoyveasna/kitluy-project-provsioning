@@ -1,0 +1,30 @@
+[Unit]
+Description=KitLuy release/update bootstrap agent
+After=kitluy-enrollment-agent.service network-online.target
+Wants=network-online.target
+Requires=kitluy-firstboot.service
+ConditionPathExists=/usr/lib/kitluy/update-agent
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/kitluy/update-agent
+User=root
+Restart=always
+RestartSec=120s
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictRealtime=yes
+CapabilityBoundingSet=
+ReadWritePaths=/var/lib/kitluy/update
+StateDirectory=kitluy
+StateDirectoryMode=0750
+
+[Install]
+WantedBy=multi-user.target

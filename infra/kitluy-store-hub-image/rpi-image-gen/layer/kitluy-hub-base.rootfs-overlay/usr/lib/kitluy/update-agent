@@ -1,0 +1,6 @@
+#!/bin/sh
+# KitLuy release/update bootstrap agent. Reads governed release configuration
+# and verifies signatures with PUBLIC trust material only. It refuses unsigned
+# or untrusted payloads and never reports an update as installed.
+set -eu
+exec /usr/bin/node /usr/lib/kitluy/lib/firstboot-agent/bin/update-bootstrap.js "$@"

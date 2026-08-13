@@ -1,0 +1,45 @@
+[Unit]
+Description=KitLuy per-device SSH host key generation
+Documentation=00_AI_HANDOFF/edge-platform/27_SYSTEMD_RUNTIME_RECONCILIATION.md
+# CLONE HYGIENE HAS A SECOND HALF.
+#
+# kitluy-hub-base.yaml deletes /etc/ssh/ssh_host_* from the golden image, and it is
+# right to: a fleet sharing one host key lets any device impersonate any other
+# on the LAN. But nothing then created keys on the device. Debian's stock
+# ssh.service runs `ExecStartPre=/usr/sbin/sshd -t`, which fails with no host
+# keys, and carries Restart=on-failure — so first boot produced an endless
+# start/fail loop and the device was unreachable over SSH forever.
+#
+# The suite here is bookworm-minbase, not Raspberry Pi OS, so there is no
+# regenerate_ssh_host_keys.service to inherit. This unit is that missing half.
+Before=ssh.service
+After=local-fs.target
+# ssh-keygen -A is itself a no-op for any key type already present, but this
+# keeps a normal boot from spawning the unit at all. A failed condition counts
+# as success, so ssh.service's Requires= is satisfied either way.
+ConditionPathExistsGlob=!/etc/ssh/ssh_host_*_key
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# -A generates one key of each supported type that is missing, and only those.
+ExecStart=/usr/bin/ssh-keygen -A
+User=root
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictRealtime=yes
+# Root writing root-owned files into a root-owned directory needs no
+# capability, so the bounding set stays empty like every other KitLuy unit.
+CapabilityBoundingSet=
+# The host key directory is the ONLY path this unit may write.
+ReadWritePaths=/etc/ssh
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,5 @@
+#!/bin/sh
+# KitLuy bootstrap health reporter. Reports locally until the device holds a
+# fleet identity; it does not invent a transport it has not been given.
+set -eu
+exec /usr/bin/node /usr/lib/kitluy/lib/firstboot-agent/bin/health-reporter.js "$@"

@@ -1,0 +1,45 @@
+# KitLuy STORE_HUB development image.
+#
+#   rpi-image-gen build -S infra/kitluy-store-hub-image/rpi-image-gen -c kitluy-store-hub.yaml
+#
+# Builder pinned by ../upstream.pin (rpi-image-gen v2.7.0).
+# image-rota gives the A/B slot layout plus a separate userdata partition,
+# which is the layout the Hub needs: the system rolls back, the data does not.
+device:
+  layer: rpi5
+
+# ACCESS MODEL: public key only, no password anywhere (owner decision
+# 2026-08-11). `pubkey_only` makes upstream write PermitRootLogin no,
+# PasswordAuthentication no and AuthenticationMethods publickey, which agrees
+# with the hardening kitluy-hub-base.yaml already installs.
+#
+# The KEY ITSELF is deliberately not here. It is an operator value, injected at
+# build time by build-rpi-image.sh as IGconf_ssh_pubkey_user1, so this file
+# stays identical for every operator and no one's key is committed. Policy is
+# repository truth; the key is not.
+#
+# A public key in an image is not a secret — unlike the shared
+# ssl-cert-snakeoil.key defect tracked separately, nothing here is compromised
+# by being readable.
+#
+# Note: upstream creates device.user1 with `adduser --disabled-password` and
+# sets root's password field to `*`. With no password configured BOTH accounts
+# are locked, so this key is the ONLY way in. build-rpi-image.sh refuses to
+# build without it.
+ssh:
+  pubkey_only: y
+
+layer:
+  custom: kitluy-store-hub
+
+image:
+  layer: image-rota
+  name: kitluy-storehub-os-arm64
+  compression: zstd
+  boot_part_size: 128M
+  # The Hub carries local PostgreSQL and the Hub services, so its system slot
+  # is larger than the terminal's. Both A and B slots are this size.
+  system_part_size: 4G
+  # Local Store database and the transactional outbox. Sized for development;
+  # production sizing is an owner decision against real Store volumes.
+  data_part_size: 8G
