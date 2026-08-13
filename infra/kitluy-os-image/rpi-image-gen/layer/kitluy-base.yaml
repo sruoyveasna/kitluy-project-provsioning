@@ -71,6 +71,42 @@ mmdebstrap:
     # material is ever placed here by the build.
     - install -d -m 0700 "$1/var/lib/kitluy/identity"
     - install -d "$1/etc/kitluy" "$1/var/lib/kitluy" "$1/usr/lib/kitluy"
+    # STATE DIRECTORIES FOR THE OTHER THREE AGENTS.
+    #
+    # Every bootstrap unit runs ProtectSystem=strict and names its own writable
+    # path with ReadWritePaths=. systemd REFUSES to start a unit whose
+    # ReadWritePaths does not exist — `226/NAMESPACE`, before ExecStart is even
+    # reached — so a missing directory is not a first-use failure, it is a
+    # service that can never run once.
+    #
+    # Only `identity` existed. On the first real Raspberry Pi boot
+    # (2026-08-13, pi5-zjjtir) kitluy-firstboot came up and the enrollment,
+    # health and update agents each crash-looped every 30 seconds from boot,
+    # having never executed a line of their own code. firstboot worked for
+    # exactly one reason: `identity` is the one directory that was created.
+    - install -d -m 0700 "$1/var/lib/kitluy/enrollment"
+    - install -d -m 0700 "$1/var/lib/kitluy/health"
+    - install -d -m 0700 "$1/var/lib/kitluy/update"
+    # THE KIOSK USER, CREATED AT BUILD TIME.
+    #
+    # `etc/sysusers.d/60-kitluy-terminal.conf` declares this user, and
+    # systemd-sysusers can never apply it: the rootfs is erofs, mounted
+    # read-only, so /etc/passwd cannot be written on the device. The unit
+    # therefore failed `217/USER` on the same first boot.
+    #
+    # The sysusers file is kept — it remains the declaration of intent and
+    # costs nothing — but the user is baked here, where /etc is still writable.
+    - |
+      chroot "$1" getent group kitluy-terminal >/dev/null 2>&1 \
+        || chroot "$1" groupadd --system kitluy-terminal
+      chroot "$1" getent passwd kitluy-terminal >/dev/null 2>&1 \
+        || chroot "$1" useradd --system --gid kitluy-terminal \
+             --home-dir /var/lib/kitluy/terminal --no-create-home \
+             --shell /usr/sbin/nologin \
+             --comment "KitLuy terminal kiosk runtime" kitluy-terminal
+      install -d -m 0700 -o kitluy-terminal -g kitluy-terminal \
+        "$1/var/lib/kitluy/terminal" 2>/dev/null \
+        || install -d -m 0700 "$1/var/lib/kitluy/terminal"
     # /etc/kitluy/image.env — the identity every KitLuy unit loads via
     # EnvironmentFile. It existed only on the staged path, so units on the REAL
     # image referenced a file that was never created; systemd fails a unit whose
