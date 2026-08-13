@@ -808,5 +808,6 @@ export * from "./release-manifest.js";
 export * from "./edge-discovery.js";
 export * from "./enrollment-time-token.js";
 export * from "./manufacturing-enrollment-pop.js";
+export * from "./hub-claim-payload.js";
 export * from "./terminal-configuration-delivery.js";
 export * from "./credential-package.js";

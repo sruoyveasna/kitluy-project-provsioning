@@ -283,3 +283,62 @@ describe("fleet freshness", () => {
     expect(deriveFleetFreshness("not-a-date", POLICY, NOW)).toBe("UNKNOWN");
   });
 });
+
+/**
+ * The loopback exemption exists so a developer can point the portal at their
+ * OWN Supabase stack. These tests are mostly about what it still refuses —
+ * the exemption is safe because the traffic never leaves the machine, not
+ * because the caller asked nicely.
+ */
+describe("loopback http Supabase url", () => {
+  const key = "sb_publishable_local";
+
+  it("is accepted only when the caller opts in", () => {
+    expect(() =>
+      createKitluyBrowserClient({
+        url: "http://127.0.0.1:54391",
+        publishableKey: key,
+        allowLoopbackHttp: true,
+      }),
+    ).not.toThrow();
+  });
+
+  it("is REFUSED without the opt-in — a built bundle passes false", () => {
+    expect(() =>
+      createKitluyBrowserClient({ url: "http://127.0.0.1:54391", publishableKey: key }),
+    ).toThrow();
+    expect(() =>
+      createKitluyBrowserClient({
+        url: "http://127.0.0.1:54391",
+        publishableKey: key,
+        allowLoopbackHttp: false,
+      }),
+    ).toThrow();
+  });
+
+  it("REFUSES any host that is not loopback, even with the opt-in", () => {
+    for (const url of [
+      "http://supabase.example.com",
+      "http://10.0.0.5:54391",
+      "http://127.0.0.1.evil.test",
+      "http://localhost.evil.test",
+      "http://[::1].evil.test",
+      "https://not-supabase.example.com",
+    ]) {
+      expect(() =>
+        createKitluyBrowserClient({ url, publishableKey: key, allowLoopbackHttp: true }),
+      ).toThrow();
+    }
+  });
+
+  it("still refuses a privileged credential on a loopback url", () => {
+    // The transport exemption must not become a credential exemption.
+    expect(() =>
+      createKitluyBrowserClient({
+        url: "http://127.0.0.1:54391",
+        publishableKey: "sb_secret_nope",
+        allowLoopbackHttp: true,
+      }),
+    ).toThrow();
+  });
+});

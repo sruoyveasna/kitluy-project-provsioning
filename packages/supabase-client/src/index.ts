@@ -44,6 +44,28 @@ export interface KitluyBrowserClientConfig {
   readonly url: string;
   /** Publishable/anon key ONLY. Never a server or database credential. */
   readonly publishableKey: string;
+  /**
+   * Permit an http LOOPBACK url, for a local Supabase stack.
+   *
+   * A hosted `*.supabase.co` URL is the only thing accepted otherwise, and
+   * that is right for anything shipped. But it also made a local stack
+   * unusable, so a developer could not point the portal at the database their
+   * own devices enrol into — which is precisely where a device is watched.
+   *
+   * Callers pass `import.meta.env.DEV`, which Vite replaces with `false` at
+   * build time. The exemption therefore cannot exist in a built bundle: it is
+   * removed by the bundler, not merely unset at runtime.
+   *
+   * Loopback only. `http://anything-else` stays refused with the flag on,
+   * because the reason this is safe is that the traffic never leaves the
+   * machine — not that the developer meant well.
+   */
+  readonly allowLoopbackHttp?: boolean;
+}
+
+/** A local Supabase stack: http, and a host that is unambiguously this machine. */
+function isLoopbackHttpUrl(url: string): boolean {
+  return /^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d{1,5})?$/i.test(url);
 }
 
 /**
@@ -118,7 +140,9 @@ export function assertBrowserSafeCredential(key: string, variable: string): void
  * reload; every request carries the user's JWT and is authorised by RLS.
  */
 export function createKitluyBrowserClient(config: KitluyBrowserClientConfig): SupabaseClient {
-  if (!/^https:\/\/[a-z0-9-]+\.supabase\.(co|in)$/i.test(config.url)) {
+  const hostedProject = /^https:\/\/[a-z0-9-]+\.supabase\.(co|in)$/i.test(config.url);
+  const localStack = config.allowLoopbackHttp === true && isLoopbackHttpUrl(config.url);
+  if (!hostedProject && !localStack) {
     throw new SupabaseClientConfigError(
       "SUPABASE_URL",
       "SUPABASE_URL must be an https Supabase project URL",

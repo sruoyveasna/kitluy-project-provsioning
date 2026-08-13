@@ -9,7 +9,7 @@
  * `packages/device-identity/src/manufacturing-enrollment-pop.ts`, and the
  * server verifies with it. Importing it here is not possible: the firstboot
  * agent ships INSIDE the golden image with **zero runtime dependencies**, and
- * `infra/kitluy-store-hub-image/scripts/package-bootstrap-runtime.sh` refuses the
+ * `infra/kitluy-os-image/scripts/package-bootstrap-runtime.sh` refuses the
  * build outright if that ever stops being true —
  *
  *     REFUSED: the firstboot agent gained runtime dependencies;

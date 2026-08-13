@@ -132,13 +132,35 @@ function assertPublishableKey(key: string): void {
   }
 }
 
+/**
+ * Whether an http auth endpoint is the LOCAL Supabase stack on this machine.
+ *
+ * https is mandatory for the auth endpoint, and stays mandatory for every host
+ * that is not loopback. The one exemption exists because a local Supabase
+ * stack serves GoTrue over http on 127.0.0.1, so without it this service
+ * cannot be run against a developer's own database at all — which is exactly
+ * where a device enrolled on a workstation can be seen.
+ *
+ * Two conditions, both required, and neither reachable from a deployment:
+ *
+ *   1. the host is loopback, so the traffic never touches a network and there
+ *      is no transport for anyone to intercept;
+ *   2. KITLUY_ENV is `local`, which the hosted deployment path never sets.
+ *
+ * A remote http URL is still refused in every environment, including `local`.
+ */
+function isLoopbackDevelopmentAuthUrl(authUrl: string, env: Env): boolean {
+  if ((env.KITLUY_ENV ?? "") !== "local") return false;
+  return /^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d{1,5})?$/i.test(authUrl);
+}
+
 export function loadManagementConfig(env: Env = process.env): ManagementConfig {
   const databaseUrl = requireString(env, MANAGEMENT_API_DATABASE_URL);
   const authUrl = requireString(env, MANAGEMENT_API_AUTH_URL);
   const authPublishableKey = requireString(env, MANAGEMENT_API_AUTH_PUBLISHABLE_KEY);
   assertPublishableKey(authPublishableKey);
 
-  if (!/^https:\/\/[^\s/]+$/i.test(authUrl)) {
+  if (!/^https:\/\/[^\s/]+$/i.test(authUrl) && !isLoopbackDevelopmentAuthUrl(authUrl, env)) {
     throw new ManagementConfigError(
       MANAGEMENT_API_AUTH_URL,
       `${MANAGEMENT_API_AUTH_URL} must be an https base URL with no path`,

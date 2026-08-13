@@ -157,3 +157,65 @@ describe("management configuration", () => {
     expect(config.allowedOrigins).toEqual(["http://localhost:5173", "http://127.0.0.1:5173"]);
   });
 });
+
+/**
+ * The auth endpoint stays https everywhere except the developer's own machine.
+ *
+ * The exemption exists so this service can run against a LOCAL Supabase stack,
+ * which serves GoTrue over http on loopback — without it a device enrolled on a
+ * workstation could never be seen in the Admin portal. It is deliberately
+ * narrow, and these tests are mostly about what it still REFUSES.
+ */
+describe("loopback development auth endpoint", () => {
+  const base = {
+    MANAGEMENT_API_DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:54392/postgres",
+    MANAGEMENT_API_AUTH_PUBLISHABLE_KEY: "sb_publishable_local",
+    MANAGEMENT_API_ALLOWED_ORIGINS: "http://localhost:5173",
+  };
+
+  it("accepts http on loopback when the environment is local", () => {
+    expect(() =>
+      loadManagementConfig({
+        ...base,
+        KITLUY_ENV: "local",
+        MANAGEMENT_API_AUTH_URL: "http://127.0.0.1:54391",
+      }),
+    ).not.toThrow();
+  });
+
+  it("REFUSES http on loopback when the environment is not local", () => {
+    for (const environment of ["development", "staging", "pilot", "production"]) {
+      expect(() =>
+        loadManagementConfig({
+          ...base,
+          KITLUY_ENV: environment,
+          MANAGEMENT_API_AUTH_URL: "http://127.0.0.1:54391",
+        }),
+      ).toThrow();
+    }
+  });
+
+  it("REFUSES a remote http endpoint even in local", () => {
+    // The exemption is about there being no network, not about convenience.
+    for (const url of [
+      "http://auth.example.com",
+      "http://10.0.0.5:54391",
+      "http://127.0.0.1.example.com",
+      "http://evil.test/127.0.0.1",
+    ]) {
+      expect(() =>
+        loadManagementConfig({ ...base, KITLUY_ENV: "local", MANAGEMENT_API_AUTH_URL: url }),
+      ).toThrow();
+    }
+  });
+
+  it("still requires https with no path for every hosted endpoint", () => {
+    expect(() =>
+      loadManagementConfig({
+        ...base,
+        KITLUY_ENV: "production",
+        MANAGEMENT_API_AUTH_URL: "https://project.supabase.co/auth",
+      }),
+    ).toThrow();
+  });
+});
