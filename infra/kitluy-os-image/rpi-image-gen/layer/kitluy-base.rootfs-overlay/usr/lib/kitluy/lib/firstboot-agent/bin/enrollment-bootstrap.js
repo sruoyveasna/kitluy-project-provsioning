@@ -29,7 +29,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { SERVICE_VERSION } from "../version.js";
-import { deviceLabelFromPublicKey, hasDefaultRoute, writeBootstrapState, } from "../bootstrap-state.js";
+import { deviceLabelFromPublicKey, hasDefaultRoute, readBootstrapState, writeBootstrapState, } from "../bootstrap-state.js";
 import { DEFAULT_IDENTITY_DIR, FileIdentityStore } from "../adapters/device-identity-store.js";
 import { FileKeyProvider } from "../adapters/device-key-provider.js";
 import { createHttpEnrollmentClient } from "../adapters/http-enrollment-client.js";
@@ -52,6 +52,7 @@ export async function evaluateBootstrap(options) {
     }
     const networkReady = hasDefaultRoute(options.procRoot);
     const imageVersion = readImageVersion(options.etcRoot);
+    const priorState = options.statePath === undefined ? readBootstrapState() : readBootstrapState(options.statePath);
     let phase;
     let detail;
     let enrolledDeviceRecordId;
@@ -68,6 +69,26 @@ export async function evaluateBootstrap(options) {
     else if (!networkReady) {
         phase = "NETWORK_WAIT";
         detail = "no default route; the device cannot reach the KitLuy fleet service";
+    }
+    else if (alreadyEnrolled(priorState, identity)) {
+        // ENROLLMENT IS NOT REPEATABLE, AND THIS AGENT IS A LOOP.
+        //
+        // `runEnrollmentStep` was written to be re-entered, but nothing read back
+        // what a previous pass had achieved, so every 30-second wake started from
+        // nothing and presented a ticket the server had already consumed. On the
+        // first real device this produced `ENROLLMENT_REDEMPTION_422` twice a
+        // minute for ever, and — worse than the noise — the device reported itself
+        // UNENROLLED while the fleet held it as `enrolled`. An operator screen
+        // reading that state would have said "Not enrolled" about an enrolled
+        // device indefinitely.
+        //
+        // The recorded result is trusted ONLY when it belongs to the identity in
+        // front of us. `deviceLabel` derives from the public key, so a device that
+        // re-keyed (firstboot `recreated`) no longer matches and correctly enrolls
+        // again — a stale file cannot make a new identity believe it is enrolled.
+        phase = "ENROLLED_UNASSIGNED";
+        detail = "the device is enrolled in the KitLuy fleet and is not assigned to a Store";
+        enrolledDeviceRecordId = priorState?.deviceRecordId;
     }
     else {
         // A card with NO ticket is the normal development case: an SD card copied
@@ -137,6 +158,23 @@ export async function evaluateBootstrap(options) {
         ...(identity === null ? {} : { deviceLabel: deviceLabelFromPublicKey(identity.publicKeyPem) }),
     };
     return { result: { phase, detail }, state };
+}
+/**
+ * Whether a previously recorded enrollment still applies to the identity the
+ * device is presenting now.
+ *
+ * All four conditions are required. A recorded phase alone is not enough: the
+ * file could have been written by a previous identity, and enrolling is
+ * something a SPECIFIC key pair did, not something the hardware did.
+ */
+function alreadyEnrolled(priorState, identity) {
+    if (priorState === null || identity === null || !identity.complete)
+        return false;
+    if (priorState.phase !== "ENROLLED_UNASSIGNED")
+        return false;
+    if (priorState.deviceRecordId === undefined)
+        return false;
+    return priorState.deviceLabel === deviceLabelFromPublicKey(identity.publicKeyPem);
 }
 /**
  * The flashed ticket file: `reference` and `secret`, one per line as
