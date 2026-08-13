@@ -264,3 +264,84 @@ repository has any deployment manifest — nothing is hosted anywhere today.
 heartbeat within 90 seconds (OD-EDGE-LIVENESS-001) and the device's `heartbeat()`
 returns `HEARTBEAT_NOT_IMPLEMENTED`. Moving to the cloud does not change this —
 heartbeats are separate, unbuilt work in both topologies.
+
+---
+
+# 2026-08-13 — A REAL RASPBERRY PI ENROLLED ITSELF
+
+Physical hardware, no laptop simulation, no hand-run SQL.
+
+```text
+asset_tag       KL-6EFCC7C6CC2A
+lifecycle       manufactured -> enrolled   DEC2_FLASH_TIME_TICKET_ENROLLMENT
+assignments     0
+mac_address     88:a2:9e:56:5c:33
+board_serial    53b91c797e480ed6
+soc_serial      53b91c797e480ed6
+storage_serial  0xd4b64a26
+storage_model   sh32g
+```
+
+Those signals came off a physical Pi 5 and the SD card it was flashed from;
+nothing in this repository could synthesise them. `assignments = 0` is the
+DEC-2 §6 outcome exactly: enrolled, unassigned, no Store, no vertical.
+
+Three of the day's fixes are now proven on hardware rather than in tests: the
+snake_case signal vocabulary (the database would otherwise have refused the
+whole redemption), the missing state directories (the agent could not start at
+all before), and the baked endpoint (the device dialled `172.16.21.17:8787`
+with nothing typed into it).
+
+## Runtime status on the device after the fixes
+
+```text
+kitluy-firstboot         active (exited)
+kitluy-enrollment-agent  active (running)   <- was 226/NAMESPACE crash-loop
+kitluy-health-reporter   active (running)   <- was 226/NAMESPACE crash-loop
+kitluy-update-agent      active (running)   <- was 226/NAMESPACE crash-loop
+kitluy-ssh-hostkeys      active (exited)
+kitluy-terminal-session  activating (auto-restart)
+```
+
+## OPEN — the graphical bootstrap session is UNFINISHED, not broken
+
+`kitluy-terminal-session` still fails, and it is not a one-line fix. Two
+separate facts, both verified on the device:
+
+1. **labwc dies starting Xwayland.**
+   `No display available in the first 33` / `cannot create xwayland server`.
+   `/tmp/.X11-unix` does not exist, and the unit sets `PrivateTmp=yes`, so
+   creating it in the image cannot help — the service gets an empty private
+   `/tmp`. Reproduced by running the compositor by hand as `pi`, so it is not
+   the unit's sandboxing.
+
+2. **Even with labwc running, the screen would be blank.** The "status surface"
+   is `exec /usr/bin/node .../bootstrap-ui.js` — a program that PRINTS TEXT to
+   stdout. Inside a Wayland compositor its output goes to the journal, not to
+   the display. There is no terminal emulator and no graphical toolkit in the
+   image for it to draw with.
+
+So a device today shows the ordinary console `login:` prompt. That is
+**cosmetic**: enrollment, health and update all run independently of the
+display, and the enrollment above happened while the console sat at a login
+prompt.
+
+Options for whoever picks this up, none of them chosen:
+
+- render the status on the console TTY instead of under Wayland (simplest —
+  the program already writes text, and needs no compositor at all);
+- ship a terminal emulator and run the script inside it;
+- write a real Wayland client.
+
+A device also cannot be logged into at the console by design: root is locked and
+`pi` is password-disabled. SSH with the operator key is the only way in, and it
+works — every diagnosis above was done that way.
+
+## Recorded, not fixed
+
+- The `KITLUY_DEVICE_CLASS` line is absent from the rpi-image-gen `image.env`
+  (the staged `build-image.sh` path writes it). The agent defaults to
+  `terminal`, which is correct for this profile and wrong for a Store Hub built
+  from the same base.
+- The image ships `sudo` despite the hardening intent to purge it: `raspinfo`
+  depends on it, so `dpkg --purge sudo` fails non-fatally.
