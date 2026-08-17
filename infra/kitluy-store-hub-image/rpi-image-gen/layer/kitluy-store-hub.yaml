@@ -25,13 +25,30 @@ mmdebstrap:
     # baked into a golden image.
     - |
       cat > "$1/etc/kitluy/hub.env" <<'EOF'
-      KITLUY_LAN_BIND_HOST=0.0.0.0
-      KITLUY_LAN_PORT=8443
-      KITLUY_LAN_TLS_MIN_VERSION=1.3
-      KITLUY_MDNS_SERVICE=_kitluy-edge._tcp.local
-      KITLUY_LOCAL_DATABASE=postgresql
-      KITLUY_LOCAL_DATABASE_MAJOR_VERSION=15
-      KITLUY_NVME_REQUIRED=yes
+      # The names below are the ones the agent actually READS
+      # (services/kitluy-hub-agent/src/main.ts). They previously carried a
+      # `KITLUY_LAN_*` prefix that no code looks for, so every value in this file
+      # was inert: the agent would silently use its own defaults and nothing
+      # would report the mismatch.
+      #
+      # 7443, NOT 8443. `EDGE_LAN_PORT` is 7443 (owner package §3) and a terminal
+      # REJECTS a discovery record advertising any other port — so a Hub serving
+      # 8443 would be refused by every terminal that found it, after a signature
+      # that verified correctly. That is the hardest kind of failure to diagnose.
+      HUB_LAN_PORT=7443
+      HUB_LAN_TLS_MIN_VERSION=1.3
+      HUB_MDNS_SERVICE=_kitluy-edge._tcp.local
+      HUB_LOCAL_DATABASE=postgresql
+      HUB_LOCAL_DATABASE_MAJOR_VERSION=15
+      HUB_NVME_REQUIRED=yes
+      # HUB_LAN_BIND_HOST is deliberately NOT set here.
+      #
+      # It used to read `0.0.0.0`, which `createEdgeTlsServer` refuses outright
+      # (FORBIDDEN_BINDS) — a Hub configured from that value could never start.
+      # The correct value is a real interface address, which is not knowable at
+      # build time, so the runtime has to resolve one. No value is written rather
+      # than a wrong one: a wrong value in a golden image is one somebody later
+      # trusts.
       EOF
     # The Hub ADVERTISES; terminals listen. The service name is locked by the
     # bootstrap contract (KLD-2026-08-06-WS12-T001-EDGE-BOOTSTRAP-001) and must
@@ -44,7 +61,10 @@ mmdebstrap:
         <name replace-wildcards="yes">KitLuy Store Hub on %h</name>
         <service>
           <type>_kitluy-edge._tcp</type>
-          <port>8443</port>
+          <!-- Must match HUB_LAN_PORT above and EDGE_LAN_PORT in code. A
+               terminal rejects a discovery record whose port is not 7443, so an
+               advert on any other port sends it to an address it will refuse. -->
+          <port>7443</port>
         </service>
       </service-group>
       EOF
