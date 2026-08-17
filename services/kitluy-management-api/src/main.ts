@@ -60,23 +60,61 @@ const server = createServer((req, res) => {
     return;
   }
 
-  handleManagementRequest(runtime.dependencies, {
-    method,
-    url,
-    authorization: req.headers.authorization,
-  })
-    .then(({ status, body }) => send(status, body))
-    .catch((error: unknown) => {
-      // The message is never returned to the caller: a database error text can
-      // carry schema and identity detail that a browser has no business seeing.
-      log.error("management route failed", {
-        route: url.split("?")[0] ?? url,
-        kind: error instanceof Error ? error.name : "unknown",
+  // THE BODY IS READ HERE, AND CAPPED.
+  //
+  // Every route was a GET until Store Hub pairing-code issuance
+  // (KLD-2026-08-13-HUB-PAIRING-ROUTE-001), so nothing ever needed the request
+  // body. The cap is not decoration: this runs BEFORE any authorization, so an
+  // unbounded read is memory an unauthenticated caller controls. 16 KiB matches
+  // the device-facing surfaces' owner-locked maximum rather than inventing a
+  // second number.
+  const MAX_BODY_BYTES = 16 * 1024;
+  const collectBody = (): Promise<string | null> => {
+    if (method === "GET" || method === "HEAD") return Promise.resolve("");
+    return new Promise((resolve) => {
+      let size = 0;
+      const chunks: Buffer[] = [];
+      req.on("data", (chunk: Buffer) => {
+        size += chunk.length;
+        if (size > MAX_BODY_BYTES) {
+          // Stop reading rather than politely buffering the rest.
+          req.destroy();
+          resolve(null);
+          return;
+        }
+        chunks.push(chunk);
       });
-      send(500, {
-        error: { code: "INTERNAL_ERROR", message: "The request could not be completed." },
-      });
+      req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+      req.on("error", () => resolve(null));
     });
+  };
+
+  void collectBody().then((body) => {
+    if (body === null) {
+      send(413, {
+        error: { code: "VALIDATION_FAILED", message: "The request body was too large." },
+      });
+      return;
+    }
+    handleManagementRequest(runtime.dependencies, {
+      method,
+      url,
+      authorization: req.headers.authorization,
+      body,
+    })
+      .then(({ status, body: responseBody }) => send(status, responseBody))
+      .catch((error: unknown) => {
+        // The message is never returned to the caller: a database error text can
+        // carry schema and identity detail that a browser has no business seeing.
+        log.error("management route failed", {
+          route: url.split("?")[0] ?? url,
+          kind: error instanceof Error ? error.name : "unknown",
+        });
+        send(500, {
+          error: { code: "INTERNAL_ERROR", message: "The request could not be completed." },
+        });
+      });
+  });
 });
 
 server.listen(port, () => {

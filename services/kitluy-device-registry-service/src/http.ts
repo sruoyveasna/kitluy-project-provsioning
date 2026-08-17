@@ -19,6 +19,7 @@ import {
   type TerminalProvisioningRouter,
 } from "./provisioning-routes.js";
 import { DEVICE_ENROLLMENT_PREFIX, type EnrollmentRouter } from "./enrollment-routes.js";
+import { HUB_PAIRING_PREFIX, type HubPairingRouter } from "./hub-pairing-routes.js";
 
 export interface KernelResponse {
   readonly status: number;
@@ -32,6 +33,7 @@ export interface KernelDeps {
   readonly revocationRouter?: RevocationRouter;
   readonly provisioningRouter?: TerminalProvisioningRouter;
   readonly enrollmentRouter?: EnrollmentRouter;
+  readonly hubPairingRouter?: HubPairingRouter;
 }
 
 /**
@@ -127,6 +129,31 @@ export async function handleRequest(
       };
     }
     const response = await deps.enrollmentRouter.handle({
+      method: request.method,
+      path: request.path,
+      headers: request.headers,
+      sourceIp: request.sourceIp ?? "",
+      rawBody: request.rawBody ?? "",
+    });
+    return { status: response.status, body: response.body, headers: response.headers };
+  }
+
+  // Store Hub pairing (KLD-2026-08-13-HUB-CLAIM-PRESENTATION-001). Same
+  // placement and the same fail-closed 503 as the two surfaces above, for the
+  // same reason: an operator is standing at a Hub console typing a code, and a
+  // 404 would tell them the code is wrong when the truth is that this deployment
+  // was never wired for pairing.
+  if (path.startsWith(HUB_PAIRING_PREFIX)) {
+    if (deps.hubPairingRouter === undefined) {
+      return {
+        status: 503,
+        body: errorEnvelope(
+          "DEPENDENCY_UNAVAILABLE",
+          "hub-pairing routes are not configured on this instance",
+        ),
+      };
+    }
+    const response = await deps.hubPairingRouter.handle({
       method: request.method,
       path: request.path,
       headers: request.headers,

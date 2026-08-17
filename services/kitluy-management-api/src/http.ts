@@ -18,6 +18,13 @@ import {
   type FreshnessPolicy,
 } from "./fleet.js";
 import { buildHealthReport, SERVICE_NAME, SERVICE_VERSION } from "./index.js";
+import {
+  issueHubPairingCode,
+  resolveStoreScope,
+  HUB_PAIRING_TTL_SECONDS,
+  type HubPairingIssuanceDeps,
+} from "./hub-pairing-issuance.js";
+import { authorizePartnerRequest } from "./partner-authorization.js";
 
 export interface KernelResponse {
   readonly status: number;
@@ -69,6 +76,17 @@ export interface ManagementRouterDependencies {
   /** Unruled by default — see `UNRULED_FRESHNESS_POLICY`. */
   readonly freshnessPolicy?: FreshnessPolicy;
   readonly now?: () => Date;
+  /**
+   * Required only by the Hub pairing-code route, which MUTATES and therefore
+   * needs a transaction it can enter `kitluy_hub_issuance_service` inside.
+   * `db` above is a bare query handle and cannot do that. Absent means the route
+   * fails CLOSED with 503 rather than 404 — "not configured" and "no such route"
+   * are different facts, and a Partner who saw 404 would think the feature does
+   * not exist.
+   */
+  readonly issuance?: HubPairingIssuanceDeps;
+  /** Environment asserted to `has_permission`; RLS-022 fails closed without it. */
+  readonly environment?: string;
 }
 
 export interface ManagementRequest {
@@ -76,6 +94,8 @@ export interface ManagementRequest {
   /** Raw request target; a query string is permitted and ignored. */
   readonly url: string;
   readonly authorization: string | undefined;
+  /** Raw JSON text, for the routes that mutate. Absent on every GET. */
+  readonly body?: string;
 }
 
 export function isManagementPath(url: string): boolean {
@@ -135,6 +155,144 @@ function notFound(message: string): KernelResponse {
 }
 
 /**
+ * `POST /management/v1/hub-pairing-codes` — a Partner issues a Store Hub pairing
+ * code for one of their own Hubs.
+ *
+ * ===========================================================================
+ * WHAT THE CALLER MAY NAME, AND WHAT IT MAY NOT
+ * ===========================================================================
+ * It names the Hub and where the Hub is going: `deviceRecordId`,
+ * `digitalStoreId`, `storeLocationId`. It may NOT name the Tenant — that is
+ * resolved from the Store row, because a caller able to supply it could try to
+ * attach a Hub across Tenants. It may not name the TTL either: fifteen minutes is
+ * the protocol, enforced by a row constraint, and a caller-chosen lifetime is not
+ * a thing this surface offers.
+ *
+ * Unknown fields are refused rather than ignored, the same discipline the
+ * device-facing routes hold.
+ *
+ * ===========================================================================
+ * TWO IDENTITIES, DELIBERATELY
+ * ===========================================================================
+ * Authority is decided as the ACTOR (`set local role authenticated`, so
+ * `auth.uid()` resolves and every governed check answers about the human).
+ * The governed door is then reached as `kitluy_hub_issuance_service`, which holds
+ * one capability and no table access. Neither identity can do the other's job,
+ * which is the point.
+ */
+async function handleHubPairingCodeIssuance(
+  deps: ManagementRouterDependencies,
+  request: ManagementRequest,
+): Promise<KernelResponse> {
+  if (deps.issuance === undefined) {
+    // Fails CLOSED. A Partner seeing 404 would conclude the feature does not
+    // exist; 503 says this deployment is not wired for it.
+    return {
+      status: 503,
+      body: errorEnvelope(
+        "DEPENDENCY_UNAVAILABLE",
+        "hub pairing-code issuance is not configured on this instance",
+      ),
+    };
+  }
+
+  let body: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(request.body ?? "");
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {
+        status: 422,
+        body: errorEnvelope("VALIDATION_FAILED", "Body must be a JSON object."),
+      };
+    }
+    body = parsed as Record<string, unknown>;
+  } catch {
+    return { status: 422, body: errorEnvelope("VALIDATION_FAILED", "Body must be a JSON object.") };
+  }
+
+  const allowed = ["deviceRecordId", "digitalStoreId", "storeLocationId"];
+  const unknown = Object.keys(body).filter((k) => !allowed.includes(k));
+  if (unknown.length > 0) {
+    return {
+      status: 422,
+      body: errorEnvelope("VALIDATION_FAILED", `Unknown field: ${unknown[0]}.`),
+    };
+  }
+
+  const ids: Record<string, string> = {};
+  for (const key of allowed) {
+    const value = body[key];
+    if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
+      return { status: 422, body: errorEnvelope("VALIDATION_FAILED", `${key} must be a uuid.`) };
+    }
+    ids[key] = value;
+  }
+
+  // AUTHORITY FIRST, and scoped to the named Store. `authorizePartnerRequest`
+  // checks the permission and the Store assignment separately, because
+  // `has_permission` ignores its own resource arguments.
+  const outcome = await authorizePartnerRequest(
+    deps.db,
+    deps.verifier,
+    request.authorization,
+    "fleet.hub_pairing_code.issue",
+    { digitalStoreId: ids.digitalStoreId! },
+    deps.environment ?? "development",
+  );
+  if (outcome.kind === "deny") {
+    return {
+      status: outcome.status,
+      body: errorEnvelope(
+        outcome.status === 401 ? "AUTHENTICATION_REQUIRED" : "SCOPE_PERMISSION_DENIED",
+        outcome.status === 401 ? "Sign in to continue." : "Access denied.",
+        { details: { reason: outcome.code } },
+      ),
+    };
+  }
+
+  // The Tenant comes from the Store, never from the request. This also validates
+  // that the Location actually belongs to the Store.
+  const scope = await resolveStoreScope(deps.issuance, ids.digitalStoreId!, ids.storeLocationId!);
+  if (scope === null) {
+    return notFound("No such Store or Location.");
+  }
+
+  const issued = await issueHubPairingCode(deps.issuance, {
+    deviceRecordId: ids.deviceRecordId!,
+    tenantId: scope.tenantId,
+    digitalStoreId: ids.digitalStoreId!,
+    storeLocationId: ids.storeLocationId!,
+    // Names the human who issued it, for the claim's audit trail.
+    operatorRef: `partner/${outcome.userId}`,
+  });
+
+  if (issued.kind === "refused") {
+    return {
+      status: 422,
+      body: errorEnvelope("VALIDATION_FAILED", issued.detail, {
+        details: { reason: issued.code },
+      }),
+    };
+  }
+
+  return {
+    status: 201,
+    body: {
+      // SHOWN ONCE. Only the digest is stored, so there is no endpoint that can
+      // return this value again — the Portal must render it immediately.
+      code: issued.issued.code,
+      claimId: issued.issued.claimId,
+      deviceRecordId: issued.issued.deviceRecordId,
+      expiresAt: issued.issued.expiresAt,
+      ttlSeconds: HUB_PAIRING_TTL_SECONDS,
+      showOnce: true,
+      detail:
+        "Give this code to the person at the Store Hub. It is valid once, for fifteen minutes, and cannot be retrieved again.",
+    },
+  };
+}
+
+/**
  * Route one management request.
  *
  * ORDER IS LOAD-BEARING: authorization runs before any argument is validated
@@ -149,9 +307,18 @@ export async function handleManagementRequest(
   const path = requestPath(request.url);
   const route = path.slice(MANAGEMENT_PREFIX.length);
 
+  // Store Hub pairing-code issuance — the ONE mutation on this surface
+  // (KLD-2026-08-13-HUB-PAIRING-ROUTE-001). Matched before the read-only guard
+  // below, which the rest of the slice still relies on.
+  if (route === "/hub-pairing-codes") {
+    if (request.method !== "POST") {
+      return { status: 405, body: errorEnvelope("VALIDATION_FAILED", "Method not allowed") };
+    }
+    return await handleHubPairingCodeIssuance(deps, request);
+  }
+
   if (request.method !== "GET") {
-    // Every route in this slice is a read. Provisioning issuance is a governed
-    // mutation and is deliberately NOT reachable here yet.
+    // Every OTHER route in this slice is a read.
     return { status: 405, body: errorEnvelope("VALIDATION_FAILED", "Method not allowed") };
   }
 

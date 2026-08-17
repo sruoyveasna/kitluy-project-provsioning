@@ -23,7 +23,7 @@
  * the project host and the database host, never a key, never a password.
  */
 import pg from "pg";
-import { optionalString, requireString, type Env } from "@kitluy/shared-config";
+import { optionalString, requireEnvironment, requireString, type Env } from "@kitluy/shared-config";
 import { createSupabaseTokenVerifier, type TokenVerifier } from "./authorization.js";
 import type { FreshnessPolicy } from "./fleet.js";
 import type { ManagementRouterDependencies } from "./http.js";
@@ -230,7 +230,17 @@ export function createManagementRuntime(env: Env = process.env, max = 8): Manage
     pool,
     verifier,
     allowedOrigins: config.allowedOrigins,
-    dependencies: { db: pool, verifier, freshnessPolicy: config.freshness },
+    dependencies: {
+      db: pool,
+      verifier,
+      freshnessPolicy: config.freshness,
+      // The Hub pairing-code route MUTATES, so it needs a handle it can open a
+      // transaction on and enter `kitluy_hub_issuance_service` inside. `db` above
+      // is a bare query handle and cannot do that.
+      issuance: { pool },
+      // Asserted to `has_permission`; RLS-022 fails closed without it.
+      environment: requireEnvironment(env),
+    },
     describe() {
       return {
         authHost: safeHost(config.authUrl),

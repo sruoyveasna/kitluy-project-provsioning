@@ -75,6 +75,12 @@ export const REGISTRY_ROLES = {
    *  `kitluy_fleet_governor`, so this identity can attempt an enrollment but
    *  cannot write the device tables directly. */
   fleet: "kitluy_fleet_service",
+  /** Store Hub pairing composition (group 0192): EXACTLY the pairing-code
+   *  presentation evaluator (0191) and the claim redemption door (0121), and
+   *  nothing else. It exists because `/v1/hub-pairing` is a pre-credential
+   *  surface whose caller is authorized by an eight-character code alone, and
+   *  such a surface must never run as `service_role`, which holds BYPASSRLS. */
+  hubPairing: "kitluy_hub_pairing_service",
   /** A human acting under their own `auth.uid()` (group 0150/0152). */
   human: "authenticated",
 } as const;
@@ -146,6 +152,7 @@ export async function withServiceRole<T>(
     | "kitluy_provisioning_service"
     | "kitluy_edge_sync_service"
     | "kitluy_fleet_service"
+    | "kitluy_hub_pairing_service"
   >,
   fn: (client: pg.PoolClient) => Promise<T>,
 ): Promise<T> {

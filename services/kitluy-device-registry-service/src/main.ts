@@ -23,6 +23,8 @@ import type { TrustEnvironment } from "@kitluy/device-identity";
 import { resolveDeviceRevocationService } from "./composition.js";
 import { EnrollmentComposition, type DevelopmentOpenEnrollment } from "./enrollment-composition.js";
 import { createEnrollmentRouter, DEVICE_ENROLLMENT_PREFIX } from "./enrollment-routes.js";
+import { HubPairingComposition } from "./hub-pairing-composition.js";
+import { createHubPairingRouter, HUB_PAIRING_PREFIX } from "./hub-pairing-routes.js";
 import { resolveEnrollmentTimeSigningKeyReference } from "./enrollment-time-signer.js";
 import { handleRequest } from "./http.js";
 import { createLapseWorkerLoop } from "./lapse-worker-runtime.js";
@@ -183,6 +185,27 @@ const enrollmentRouter = createEnrollmentRouter({
 });
 
 /**
+ * THE STORE HUB PAIRING SURFACE (KLD-2026-08-13-HUB-CLAIM-PRESENTATION-001).
+ *
+ * Composed unconditionally, unlike open enrollment: pairing needs no development
+ * concession and no environment opt-in. Its authority is a code an operator
+ * typed, and the governed doors behind it hold the same line in every
+ * environment — 0191 counts attempts and locks, 0121 enforces single use, and
+ * activation stays fail-closed under BLK-005 regardless of deployment.
+ *
+ * It reaches the database as `kitluy_hub_pairing_service` (group 0192), NOT as
+ * the connecting `service_role`, so this pre-credential surface cannot touch a
+ * table even if every check above it were bypassed.
+ */
+const hubPairingRouter = createHubPairingRouter({
+  composition: new HubPairingComposition({
+    source: revocation.pool,
+    logger: { info: (fields) => log.info("hub-pairing", fields) },
+  }),
+  logger: { info: (fields) => log.info("hub-pairing-route", fields) },
+});
+
+/**
  * THE DEPLOYED LAPSE WORKER.
  *
  * Every emergency revocation enqueues an obligation to have a SECOND human
@@ -240,7 +263,13 @@ const server = createServer((req, res) => {
     // and an attacker could probe indefinitely with garbage JSON.
     const url = req.url ?? "";
     const isBootstrap =
-      url.startsWith(TERMINAL_PROVISIONING_PREFIX) || url.startsWith(DEVICE_ENROLLMENT_PREFIX);
+      url.startsWith(TERMINAL_PROVISIONING_PREFIX) ||
+      url.startsWith(DEVICE_ENROLLMENT_PREFIX) ||
+      // Hub pairing owns its raw text for the same reason, and needs it more:
+      // its rate limiter is the only thing standing between an eight-character
+      // code and unlimited guessing volume. A malformed body rejected here would
+      // never reach that limiter, so garbage JSON would be free.
+      url.startsWith(HUB_PAIRING_PREFIX);
     let parsed: unknown;
     if (!isBootstrap && raw.text.length > 0) {
       try {
@@ -276,6 +305,7 @@ const server = createServer((req, res) => {
         revocationRouter: revocation.revocationRouter,
         provisioningRouter,
         enrollmentRouter,
+        hubPairingRouter,
       },
     );
     res.writeHead(status, { "content-type": "application/json", ...(headers ?? {}) });
