@@ -225,6 +225,9 @@ importers:
       '@kitluy/localization':
         specifier: workspace:*
         version: link:../../packages/localization
+      '@kitluy/supabase-client':
+        specifier: workspace:*
+        version: link:../../packages/supabase-client
       '@kitluy/web-ui':
         specifier: workspace:*
         version: link:../../packages/web-ui

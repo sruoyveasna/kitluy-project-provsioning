@@ -14,7 +14,9 @@ import { readPortalConfig, resolvePortalRuntime } from "../src/config.js";
 import {
   conditionLabel,
   deviceCondition,
+  filterByClass,
   freshnessLabel,
+  hubAssignmentSummary,
   sortForOperator,
 } from "../src/device-presentation.js";
 import {
@@ -345,5 +347,45 @@ describe("message bundle", () => {
         expect(value.length, `${locale}.${key} is empty`).toBeGreaterThan(0);
       }
     }
+  });
+});
+
+describe("the Store Hub view", () => {
+  // Built on the file's own DEVICE fixture (a store_hub) so this suite cannot
+  // drift from the shape the rest of the tests exercise.
+  const device = (over: Partial<FleetDeviceView>): FleetDeviceView => ({ ...DEVICE, ...over });
+
+  it("shows every device when the filter is off", () => {
+    const all = [device({}), device({ deviceClass: "pi_terminal", deviceId: "t" })];
+    expect(filterByClass(all, "all")).toHaveLength(2);
+  });
+
+  it("narrows to Store Hubs, which is the question asked when a shop is stuck", () => {
+    const all = [device({}), device({ deviceClass: "pi_terminal", deviceId: "t" })];
+    const hubs = filterByClass(all, "store_hub");
+    expect(hubs).toHaveLength(1);
+    expect(hubs[0]?.deviceId).toBe(DEVICE.deviceId);
+  });
+
+  it("returns nothing rather than everything when no device matches", () => {
+    // Falling back to the unfiltered list would silently answer a different
+    // question than the operator asked.
+    expect(filterByClass([device({ deviceClass: "pi_terminal" })], "store_hub")).toHaveLength(0);
+  });
+
+  it("reports a Hub as SERVING only when its assignment is active", () => {
+    const hub = (state: string | null) => hubAssignmentSummary(device({ assignmentState: state }));
+
+    expect(hub("active")?.serving).toBe(true);
+    // pending_trust is a correctly paired Hub waiting on BLK-005 activation. It
+    // is not faulty and it cannot serve Terminals — both are true at once.
+    expect(hub("pending_trust")?.serving).toBe(false);
+    expect(hub("revoked")?.serving).toBe(false);
+    expect(hub(null)?.state).toBe("unassigned");
+    expect(hub(null)?.serving).toBe(false);
+  });
+
+  it("refuses to describe a Terminal in Hub terms", () => {
+    expect(hubAssignmentSummary(device({ deviceClass: "pi_terminal" }))).toBeNull();
   });
 });

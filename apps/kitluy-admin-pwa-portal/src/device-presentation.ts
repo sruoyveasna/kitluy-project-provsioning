@@ -106,3 +106,44 @@ export function sortForOperator(devices: readonly FleetDeviceView[]): readonly F
     return a.deviceReference.localeCompare(b.deviceReference);
   });
 }
+
+/**
+ * The device-class filter offered in the fleet list.
+ *
+ * `store_hub` earns its own entry because a Hub is the thing a Store cannot
+ * operate without — `device_provisioning_codes.store_hub_device_id` is NOT NULL
+ * and a Terminal cannot be provisioned until its Hub is active — so "show me the
+ * Hubs" is the question an operator asks when a shop is stuck.
+ */
+export type DeviceClassFilter = "all" | "store_hub" | "pi_terminal";
+
+export function filterByClass(
+  devices: readonly FleetDeviceView[],
+  filter: DeviceClassFilter,
+): readonly FleetDeviceView[] {
+  if (filter === "all") return devices;
+  return devices.filter((d) => d.deviceClass === filter);
+}
+
+/**
+ * What a Hub's assignment state means for whether the shop can work.
+ *
+ * Deliberately NOT collapsed into the generic condition badge: a Hub sitting at
+ * `pending_trust` is not faulty — it paired correctly and is waiting on
+ * certificate-backed activation (BLK-005) — but the Store still cannot provision
+ * Terminals against it. An operator needs to tell "broken" from "waiting", and a
+ * single "attention" colour cannot say which.
+ *
+ * Returns null for a device whose class is not `store_hub`, so a caller cannot
+ * accidentally render Hub semantics against a Terminal.
+ */
+export function hubAssignmentSummary(
+  device: FleetDeviceView,
+): { readonly state: string; readonly serving: boolean } | null {
+  if (device.deviceClass !== "store_hub") return null;
+  const state = device.assignmentState ?? "unassigned";
+  // `active` is the only state in which a Hub can serve Terminals. Everything
+  // else — unassigned, pending_trust, revoked — means the shop is not ready,
+  // and saying so is more useful than a green tick that means "not broken".
+  return { state, serving: state === "active" };
+}

@@ -15,8 +15,11 @@ import {
   conditionColor,
   conditionLabel,
   deviceCondition,
+  filterByClass,
   freshnessLabel,
+  hubAssignmentSummary,
   sortForOperator,
+  type DeviceClassFilter,
 } from "./device-presentation.js";
 import type { DeviceDetail, FleetDeviceView, FleetPage } from "./management-client.js";
 import { t, type MessageKey } from "./messages.js";
@@ -171,8 +174,30 @@ function ConditionBadge(props: { device: FleetDeviceView; locale: KitluyLocale }
   );
 }
 
+/**
+ * A Hub's readiness to serve its Store.
+ *
+ * Rendered only for `store_hub`, and separately from the condition badge: a Hub
+ * at `pending_trust` is not faulty — it paired correctly and waits on
+ * certificate-backed activation (BLK-005) — but its Store still cannot provision
+ * Terminals. "Broken" and "waiting" need different answers from an operator.
+ */
+function HubAssignmentCell(props: { device: FleetDeviceView; locale: KitluyLocale }): JSX.Element {
+  const summary = hubAssignmentSummary(props.device);
+  if (summary === null) return <>—</>;
+  return (
+    <>
+      {summary.state}
+      <br />
+      <small>{t(props.locale, summary.serving ? "hubServing" : "hubNotServing")}</small>
+    </>
+  );
+}
+
 export function DeviceListView(props: { locale: KitluyLocale; page: FleetPage }): JSX.Element {
   const { locale, page } = props;
+  const [classFilter, setClassFilter] = useState<DeviceClassFilter>("all");
+
   if (page.devices.length === 0) {
     return (
       <section aria-label="devices">
@@ -181,6 +206,8 @@ export function DeviceListView(props: { locale: KitluyLocale; page: FleetPage })
       </section>
     );
   }
+
+  const visible = filterByClass(page.devices, classFilter);
 
   return (
     <section aria-label="devices">
@@ -196,34 +223,64 @@ export function DeviceListView(props: { locale: KitluyLocale; page: FleetPage })
         {t(locale, page.freshnessPolicyRuled ? "freshnessDevelopmentDefault" : "freshnessUnruled")}
       </p>
 
-      <table>
-        <thead>
-          <tr>
-            <th scope="col">{t(locale, "devices")}</th>
-            <th scope="col">{t(locale, "lifecycle")}</th>
-            <th scope="col">{t(locale, "lastSeen")}</th>
-            <th scope="col">{t(locale, "openIncidents")}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {sortForOperator(page.devices).map((device) => (
-            <tr key={device.deviceId} data-device-condition={deviceCondition(device)}>
-              <td>
-                <a href={routeHref({ kind: "device", deviceId: device.deviceId })}>
-                  {device.deviceReference}
-                </a>
-                <br />
-                <small>{device.deviceClass}</small>
-              </td>
-              <td>
-                {device.lifecycle} <ConditionBadge device={device} locale={locale} />
-              </td>
-              <td>{freshnessLabel(device.freshness, locale)}</td>
-              <td>{device.openIncidentCount}</td>
+      <p>
+        <label htmlFor="device-class">{t(locale, "showClass")}</label>{" "}
+        <select
+          id="device-class"
+          value={classFilter}
+          onChange={(e) => setClassFilter(e.target.value as DeviceClassFilter)}
+        >
+          <option value="all">{t(locale, "classAll")}</option>
+          <option value="store_hub">{t(locale, "classStoreHub")}</option>
+          <option value="pi_terminal">{t(locale, "classPiTerminal")}</option>
+        </select>
+        {/* The filter runs over the devices ON THIS PAGE. Saying so matters when
+            the page is capped: "2 Store Hubs" would otherwise read as the whole
+            fleet when it is two out of a truncated 200. */}
+        {classFilter === "all" ? null : (
+          <>
+            {" "}
+            <small role="note">{t(locale, "filteredFromPage")}</small>
+          </>
+        )}
+      </p>
+
+      {visible.length === 0 ? (
+        <p role="note">{t(locale, "noneOfClass")}</p>
+      ) : (
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">{t(locale, "devices")}</th>
+              <th scope="col">{t(locale, "lifecycle")}</th>
+              <th scope="col">{t(locale, "assignment")}</th>
+              <th scope="col">{t(locale, "lastSeen")}</th>
+              <th scope="col">{t(locale, "openIncidents")}</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {sortForOperator(visible).map((device) => (
+              <tr key={device.deviceId} data-device-condition={deviceCondition(device)}>
+                <td>
+                  <a href={routeHref({ kind: "device", deviceId: device.deviceId })}>
+                    {device.deviceReference}
+                  </a>
+                  <br />
+                  <small>{device.deviceClass}</small>
+                </td>
+                <td>
+                  {device.lifecycle} <ConditionBadge device={device} locale={locale} />
+                </td>
+                <td data-hub-serving={hubAssignmentSummary(device)?.serving ?? undefined}>
+                  <HubAssignmentCell device={device} locale={locale} />
+                </td>
+                <td>{freshnessLabel(device.freshness, locale)}</td>
+                <td>{device.openIncidentCount}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </section>
   );
 }

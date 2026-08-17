@@ -2,7 +2,7 @@
   "name": "@kitluy-apps/kitluy-partner-pwa-portal",
   "version": "0.1.0",
   "private": true,
-  "description": "Partner PWA Portal — Full web/PWA back office for a Partner operating one active Digital Store context: configuration, tables, finance, reports, staff, Integration Hub (partner-portal spec v2.0.0, Proposed).",
+  "description": "Partner PWA Portal \u2014 Full web/PWA back office for a Partner operating one active Digital Store context: configuration, tables, finance, reports, staff, Integration Hub (partner-portal spec v2.0.0, Proposed).",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -14,6 +14,7 @@
   "dependencies": {
     "@kitluy/feature-flags": "workspace:*",
     "@kitluy/localization": "workspace:*",
+    "@kitluy/supabase-client": "workspace:*",
     "@kitluy/web-ui": "workspace:*",
     "react": "catalog:",
     "react-dom": "catalog:"
