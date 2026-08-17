@@ -170,8 +170,14 @@ export async function openHubPairingSession(
     // Read the authoritative expiry back rather than computing it: the row's
     // `expires_at` comes from the DATABASE clock, and a Portal that displayed a
     // locally computed deadline would count down to the wrong moment.
+    //
+    // Through a CAPABILITY, not a table read. This identity holds no table access
+    // by design (group 0192, "one capability, no table reach"), so selecting from
+    // `hub_pairing_sessions` here failed with `permission denied` on the first
+    // real run — and granting SELECT to fix it would have handed the issuer every
+    // column of every session for every Store to save one function.
     const { rows: sessionRows } = await client.query<{ expires_at: Date }>(
-      "select expires_at from kitluy_devices.hub_pairing_sessions where id = $1::uuid",
+      "select kitluy_devices.hub_pairing_session_expiry_v1($1::uuid) as expires_at",
       [sessionId],
     );
     await client.query("commit");
