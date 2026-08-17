@@ -3555,3 +3555,90 @@ independently of this work: it expects `data-surface-state="unavailable"` while
 the shell now renders `loading` during session restore. The assertion is stale,
 not the shell — but deciding what that smoke test should assert is a separate
 call and was not made here.
+
+---
+
+## KLREC-2026-08-17-DEV-TARGET-001 — development was pinned to a local stack no decision required, while the dev cloud project sat unused (2026-08-17)
+
+**Closure state: CORRECTED — `dev:fleet` now targets the hosted development project by default.**
+
+Owner instruction, 2026-08-17, recorded verbatim because it is the authority for
+this change:
+
+> "from now please choosing kitluy dev cloud supabase it created it for dev . so
+> if we don't use it it will be useless . and one more thing is that it make me so
+> confuse when you keep using local supabase on my conputer"
+
+### What was actually wrong
+
+`scripts/development/fleet-service.mjs` refused **every** non-loopback database,
+citing `KLD-2026-08-12-DEV-OPEN-ENROLLMENT-001 §5`. Re-reading that decision, it
+does not say that. Its five LOCKED guards concern the ENVIRONMENT (`development`
+only), explicit opt-in, being announced in the startup log, the image staying
+secret-free, and pilot/production being untouched. **None is about where the
+database is hosted.** §4 states the accepted risk as a property of the ENDPOINT —
+*"anything that can REACH the development enrollment endpoint can create a device
+record"* — and the endpoint remains bound to the workstation's LAN whichever
+database sits behind it.
+
+The decision's own §1 in fact says the opposite of the restriction: *"have every
+Pi come online **in the cloud** by itself."*
+
+### The cost of a guard being stricter than its authority
+
+The two databases drifted, and the local one is now the WORSE of the two:
+
+| | local `kitluy-repo17` | hosted `kitluy-project-pos` |
+| --- | --- | --- |
+| migration ledger | 88 of 93 | **93 of 93** |
+| group 0189 | cannot be applied — segfaults the backend (KLREC-2026-08-11-EDGE-006) | applied |
+| group 0190 | PARTIAL — `open_manufacturing_enrollment_challenge_v1` missing (KLREC-2026-08-11-EDGE-007) | **complete** |
+
+So the guard did not protect development; it confined it to the only stack that
+cannot hold the full schema. It also made every statement about "the database"
+ambiguous, which is the confusion the owner reports above.
+
+### A second defect, invisible until a Hub was booted
+
+`dev:fleet` passed only `KITLUY_DEV_ENROLLMENT_PROFILE_TERMINAL`. Open enrollment
+resolves a hardware profile BY DEVICE CLASS and answers `TICKET_REFUSED` for a
+class with none — so **no Store Hub could enrol through it at all**, and no test
+caught it because every terminal test passed. Both classes are now preflighted
+and both are passed to the service.
+
+### What changed
+
+* Two permitted targets and no others: a loopback database, or the single
+  allowlisted development project (`ALLOWED_HOSTED_DEV`). Anything else is
+  refused before a connection opens. Every LOCKED guard is still enforced.
+* The `docker exec … psql` transport is replaced by a client library — that
+  transport is what silently made a local CONTAINER a hard requirement, and this
+  host has no `psql`.
+* Fixture names are per target. The hosted project already carries active
+  `CLOUD-STATION-01`, `CLOUD-TERM-PI5` and `CLOUD-HUB-PI5`; using those avoids a
+  second set of fixtures that would slowly disagree about what a Pi 5 is.
+* New `pnpm dev:seed:hosted-scope`. The hosted project had enrollment fixtures
+  but **zero Digital Stores**, so a Hub could enrol and then have nothing to pair
+  into. This is deliberately NOT `pnpm db:seed`: that seed's guard refuses to run
+  unless the caller asserts `kitluy.environment='local'`, and asserting that
+  against a hosted project would be a lie. It inserts the smallest set that makes
+  pairing possible, reusing the canonical fixture IDs verbatim.
+* `governedRoutes` in the startup log gained `/v1/hub-pairing`, which was wired
+  but unlisted — that line is the one place an operator checks what a deployment
+  answers.
+
+### Deployment performed
+
+`pnpm db:deploy:hosted-dev` took `kitluy-project-pos` from 88 to **93/93**,
+applying groups 0190, 0191, 0192, 0193 and 0194. Forward-only, allowlisted
+project, no destructive operation. Verified afterwards: all four session doors,
+the presentation door, `hub_pairing_sessions`, both least-privilege service
+identities, and the widened claim-event vocabulary are present.
+
+### Standing note for whoever reads this next
+
+The `supabase` CLI and the claude.ai Supabase MCP connector on this workstation
+are authenticated to **different accounts**. The connector returns
+*"you do not have permission"* for `gjgbnkhuwlwhngbtrgts`; the CLI and a direct
+pooler connection both work. Check both channels before concluding anything about
+hosted state — this is the second time that has cost a session.
