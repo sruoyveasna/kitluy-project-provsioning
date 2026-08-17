@@ -1,0 +1,159 @@
+#!/bin/sh
+# KitLuy Store Hub — encrypted NVMe data volume, provisioned at first boot.
+#
+# =============================================================================
+# WHAT THIS OWNS
+# =============================================================================
+# The Hub's local database lives on an NVMe drive, encrypted with LUKS2, unlocked
+# automatically at boot by a key bound to THIS Raspberry Pi. Nothing else on the
+# device may write there, and the volume is useless in another machine.
+#
+# Owner decision: NVMe is REQUIRED. A Hub without one does not silently fall back
+# to the SD card — an SD card is not durable enough to hold a shop's till, and a
+# Hub that quietly degraded to one would lose a day's takings on a card failure
+# nobody was warned about. It refuses, and says so.
+#
+# =============================================================================
+# WHERE THE ENCRYPTION KEY COMES FROM, AND WHY NOT THE OBVIOUS PLACE
+# =============================================================================
+# From the Pi's OTP device-unique private key, read with `rpi-otp-private-key`.
+# That value lives in one-time-programmable fuses, is NOT exposed by
+# `vcgencmd otp_dump`, and cannot be recovered from the NVMe itself. So a drive
+# removed from a Hub and put in a reader is ciphertext.
+#
+# It is NOT used as the passphrase directly. The passphrase is an HMAC of a fixed
+# domain string under that key, so the OTP secret is never written anywhere, and
+# a future second use of the same OTP key for another purpose cannot collide with
+# this one.
+#
+# The upstream rpi-image-gen pattern (`block-device-id | rpi-fw-crypto hmac`) is
+# NOT used, because neither tool exists on this image: they ship with Raspberry Pi
+# OS and this is Debian Bookworm minbase. That was verified against the built
+# rootfs rather than assumed, and it is why this derives its own key instead.
+#
+# IF THE OTP KEY IS NOT PROGRAMMED, THIS REFUSES.
+# Writing it burns fuses and can never be undone — OTP bits do not return from 1
+# to 0. That is an owner decision about a physical board, not something a boot
+# script may do on its own initiative, and silently falling back to a weaker key
+# would give encryption that only LOOKS like it is bound to hardware.
+set -eu
+
+log()  { printf '[kitluy-hub-storage] %s\n' "$*"; }
+die()  { printf '[kitluy-hub-storage] REFUSED: %s\n' "$*" >&2; exit 1; }
+
+MAPPER_NAME="kitluy-hub-data"
+MOUNT_POINT="/var/lib/kitluy/hub"
+STATE_DIR="/var/lib/kitluy/hub"
+PROVISIONED_MARKER="/var/lib/kitluy/hub/.luks-provisioned"
+
+# -----------------------------------------------------------------------------
+# 1. Already unlocked?
+# -----------------------------------------------------------------------------
+# Idempotent by construction: this runs on EVERY boot, not only the first. A
+# provisioner that only worked once would leave a Hub with no database after any
+# reboot, which is the state a shop opens to.
+#
+# MOUNTING IS NOT DONE HERE. `var-lib-kitluy-hub.mount` owns it, because a
+# service that mounts inside its own sandbox namespace would mount into that
+# namespace alone — the database and the agent would see an empty directory
+# while this unit reported success.
+if [ -e "/dev/mapper/$MAPPER_NAME" ]; then
+  log "data volume already unlocked as $MAPPER_NAME"
+  exit 0
+fi
+
+# -----------------------------------------------------------------------------
+# 2. Find the NVMe
+# -----------------------------------------------------------------------------
+# Resolved by TYPE, never by a hardcoded /dev/nvme0n1: a Hub with two drives, or
+# one that enumerates differently after a firmware update, must not silently
+# encrypt the wrong disk.
+NVME_DEVICE=""
+for candidate in /dev/nvme*n1; do
+  [ -b "$candidate" ] || continue
+  if [ -n "$NVME_DEVICE" ]; then
+    die "more than one NVMe drive is present ($NVME_DEVICE, $candidate); this Hub will not guess which one holds the Store's data"
+  fi
+  NVME_DEVICE="$candidate"
+done
+
+[ -n "$NVME_DEVICE" ] || die "no NVMe drive found. A Store Hub keeps the Store's database on NVMe and does not fall back to the boot card (owner decision). Fit an NVMe drive and reboot."
+
+log "found NVMe at $NVME_DEVICE"
+
+# The BOOT device must never be touched. On this architecture the Pi boots from
+# the SD card and NVMe is data only; a Hub that ever booted from NVMe would have
+# this script pointed at its own root filesystem.
+ROOT_SOURCE="$(findmnt -no SOURCE / 2>/dev/null || echo '')"
+case "$ROOT_SOURCE" in
+  "$NVME_DEVICE"*) die "$NVME_DEVICE carries the running root filesystem; refusing to reformat the disk this Hub booted from" ;;
+esac
+
+# -----------------------------------------------------------------------------
+# 3. Derive the hardware-bound passphrase
+# -----------------------------------------------------------------------------
+command -v rpi-otp-private-key >/dev/null 2>&1 \
+  || die "rpi-otp-private-key is not installed; the data volume key is bound to this board's OTP and cannot be derived without it"
+
+# `-c` exits non-zero when the key is all zeros, i.e. never programmed.
+if ! rpi-otp-private-key -c >/dev/null 2>&1; then
+  die "this board has no device-unique OTP key programmed.
+  The Store Hub data volume is encrypted with a key bound to the board, and
+  programming OTP is IRREVERSIBLE (fuses never return from 1 to 0), so it is an
+  owner decision and not something first boot performs on its own.
+  Provision the board, then reboot. See rpi-otp-private-key -h for the procedure."
+fi
+
+# HMAC of a fixed domain string under the OTP key. The OTP secret itself is never
+# written to disk, never logged, and never becomes the passphrase.
+derive_passphrase() {
+  otp_key="$(rpi-otp-private-key 2>/dev/null | tr -d ' \n')"
+  [ -n "$otp_key" ] || die "the OTP device key read back empty"
+  printf 'kitluy.hub-data-volume.v1' \
+    | openssl dgst -sha256 -mac HMAC -macopt "hexkey:${otp_key}" -hex \
+    | sed 's/^.*= //'
+  unset otp_key
+}
+
+# -----------------------------------------------------------------------------
+# 4. Format, if this drive is not already ours
+# -----------------------------------------------------------------------------
+install -d -m 0700 "$STATE_DIR"
+
+if cryptsetup isLuks "$NVME_DEVICE" 2>/dev/null; then
+  log "$NVME_DEVICE already carries a LUKS container"
+else
+  # A drive that is neither LUKS nor blank is somebody's data. Refusing is the
+  # only safe answer: this script cannot tell a spare drive from one carrying
+  # another Store's records, and formatting the wrong one is unrecoverable.
+  if blkid "$NVME_DEVICE" >/dev/null 2>&1; then
+    die "$NVME_DEVICE already holds a filesystem that is not a KitLuy volume; refusing to destroy data this Hub cannot identify. Wipe it deliberately if it is spare."
+  fi
+  log "formatting $NVME_DEVICE as LUKS2 (this destroys nothing — the drive is blank)"
+  derive_passphrase | cryptsetup luksFormat \
+    --type luks2 \
+    --cipher aes-xts-plain64 \
+    --key-size 512 \
+    --hash sha256 \
+    --pbkdf argon2id \
+    --batch-mode \
+    "$NVME_DEVICE" -
+fi
+
+# -----------------------------------------------------------------------------
+# 5. Open and mount
+# -----------------------------------------------------------------------------
+if [ ! -e "/dev/mapper/$MAPPER_NAME" ]; then
+  derive_passphrase | cryptsetup open --type luks2 "$NVME_DEVICE" "$MAPPER_NAME" -
+  log "unlocked $NVME_DEVICE as $MAPPER_NAME"
+fi
+
+if ! blkid "/dev/mapper/$MAPPER_NAME" >/dev/null 2>&1; then
+  log "creating the data filesystem"
+  mkfs.ext4 -q -L kitluy-hub "/dev/mapper/$MAPPER_NAME"
+fi
+
+# The mount point must exist for the .mount unit that follows.
+install -d -m 0700 "$MOUNT_POINT"
+
+log "encrypted volume unlocked as /dev/mapper/${MAPPER_NAME}; var-lib-kitluy-hub.mount will mount it at ${MOUNT_POINT}"

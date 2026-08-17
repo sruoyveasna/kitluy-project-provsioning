@@ -170,3 +170,17 @@ mmdebstrap:
     # Caught by scan-image-secrets.sh against the BUILT image, which is the
     # check the staged-tree scan could not perform.
     - rm -f "$1"/etc/ssl/private/ssl-cert-snakeoil.key "$1"/etc/ssl/certs/ssl-cert-snakeoil.pem
+    # A crypto library's own TEST VECTORS, which are 2.8 MB of PEM-shaped
+    # fixtures — a third of the package — that nothing on a Hub ever executes.
+    #
+    # `scan-image-secrets.sh` matched them as "[SECRET] Private key material" and
+    # failed the built image. They are not KitLuy material, but the right answer
+    # is not to teach the scanner to ignore a directory named SelfTest: it is to
+    # stop shipping test data to a shop. A scanner that is permanently red is a
+    # scanner nobody reads, and the next real finding would land in that noise.
+    #
+    # The LIBRARY stays. `rpi-eeprom-config` imports Cryptodome to handle signed
+    # Pi 5 EEPROM images, so removing the package would break firmware tooling on
+    # the very board this image targets — verified by reading the shipped script,
+    # not assumed from the package name.
+    - rm -rf "$1"/usr/lib/python3/dist-packages/Cryptodome/SelfTest

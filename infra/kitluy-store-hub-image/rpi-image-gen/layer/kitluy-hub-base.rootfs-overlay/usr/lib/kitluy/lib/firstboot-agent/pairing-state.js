@@ -35,7 +35,7 @@
  * gated on BLK-005, and a device that rendered "ready" off this file would be
  * lying about a Hub that cannot yet serve a terminal.
  */
-import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync, } from "node:fs";
 import { dirname } from "node:path";
 export const PAIRING_STATE_PATH = "/var/lib/kitluy/pairing-state.json";
 /** Same atomic discipline as the identity store: temp -> fsync -> rename -> fsync dir. */

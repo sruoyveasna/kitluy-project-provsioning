@@ -83,6 +83,27 @@ IDENTITY_PATHS=(
 printf '\nKitLuy golden-image secret and binding scan\n'
 printf '  targets: %s\n\n' "${TARGETS[*]}"
 
+# -----------------------------------------------------------------------------
+# KNOWN NEGATIVE-TEST PROBE — named individually, never a directory skip.
+# -----------------------------------------------------------------------------
+# Hub migration 0038 asserts AT APPLY TIME that the release trust registry
+# REFUSES a private key: it attempts to insert a string beginning with the PEM
+# private-key marker and requires the constraint to reject it. The marker is the
+# whole point of the test, so the file matches "[SECRET] Private key material"
+# while containing no key material at all.
+#
+# It is exempted here rather than rewritten, because this exact file is the one
+# an independent review called "THE ONE REAL BREACH": a commit labelled
+# `docs(...)` once silently amended this same probe in an already-applied
+# migration, and a later commit had to restore it byte for byte
+# (00_AI_HANDOFF/shared/2026-08-06__SHARED__WS-11-T008__INITIAL-INDEPENDENT-REVIEW).
+# Schema contract §4 — "an applied file is never edited" — means the right place
+# to absorb this is the scanner, not the migration.
+#
+# Scoped to ONE path. A real key added to that same file would still be reported
+# under every other check, and this probe text appearing anywhere else still fails.
+KNOWN_PROBE_0038="hub-migrations/0038_release_trust_and_cache.sql"
+
 FAIL=0
 PASS=0
 
@@ -91,7 +112,8 @@ for entry in "${CHECKS[@]}"; do
   # -I skips binary files: a random byte sequence inside a compiled binary that
   # happens to match is noise, and reporting it trains people to ignore this.
   hits="$(grep -rIn --binary-files=without-match -E "$regex" "${TARGETS[@]}" 2>/dev/null \
-          | grep -vE '\[REQUIRED:' | head -20)"
+          | grep -vE '\[REQUIRED:' \
+          | grep -vF "$KNOWN_PROBE_0038" | head -20)"
   if [[ -n "$hits" ]]; then
     printf '  FAIL  [%s] %s\n' "$class" "$desc"
     # File and line only — never the matched text.

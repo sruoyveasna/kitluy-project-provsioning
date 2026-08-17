@@ -107,7 +107,14 @@ grep -qiE "labwc|wayland|xserver-xorg" "${SRC}/layer/kitluy-store-hub.yaml" 2>/d
   || ok "store-hub stays headless"
 
 # --- Zero-secret (mission §23) ----------------------------------------------
-if grep -rIqE 'service_role|SUPABASE_SERVICE_ROLE_KEY[[:space:]]*=[[:space:]]*.+|BEGIN [A-Z ]*PRIVATE KEY|PGPASSWORD[[:space:]]*=[[:space:]]*.+' "$SRC" 2>/dev/null; then
+# The one known negative-test probe is excluded by NAME, matching the shared
+# scanner (scan-image-secrets.sh, KNOWN_PROBE_0038): Hub migration 0038 asserts
+# at apply time that the trust registry REFUSES a private key, so it contains the
+# PEM marker on purpose and holds no key material. It cannot be rewritten — an
+# independent review recorded an earlier silent amendment of this exact probe as
+# "THE ONE REAL BREACH", and schema contract §4 forbids editing an applied file.
+if grep -rIE 'service_role|SUPABASE_SERVICE_ROLE_KEY[[:space:]]*=[[:space:]]*.+|BEGIN [A-Z ]*PRIVATE KEY|PGPASSWORD[[:space:]]*=[[:space:]]*.+' "$SRC" 2>/dev/null \
+     | grep -vF 'hub-migrations/0038_release_trust_and_cache.sql' | grep -q .; then
   bad "external source is zero-secret" "credential material found"
 else
   ok "external source is zero-secret"

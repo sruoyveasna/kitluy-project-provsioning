@@ -1,0 +1,170 @@
+[
+  {
+    "filename": "0000_extensions_and_roles.sql",
+    "checksumSha256": "718f2ba2aaee7c87c200214f9fe6039febda82f18bb64a1a9521d553556f9d0b"
+  },
+  {
+    "filename": "0001_types_and_helpers.sql",
+    "checksumSha256": "35a942daa1bbbc6842c3c69a6207f83e8c75a089fb92ff10126b7f9c31e53692"
+  },
+  {
+    "filename": "0002_identity.sql",
+    "checksumSha256": "985b135e60da135a66287ff89213f913497945918c3926045b6ac194a9b573ac"
+  },
+  {
+    "filename": "0003_configuration.sql",
+    "checksumSha256": "57b6fd35a36a196a73573aae412cf35e03e26ae380cbef48a2ee694ff25fdc66"
+  },
+  {
+    "filename": "0004_core.sql",
+    "checksumSha256": "caf79302f36f4caf520617cd6a8560feefe01d7c9c448f1f30dc4d19b79c8cb1"
+  },
+  {
+    "filename": "0005_laundry.sql",
+    "checksumSha256": "fc77e50f325cae548b1eaeda6e2452113ec5362d2a655153a8149a832a055bbf"
+  },
+  {
+    "filename": "0006_payments_and_cash.sql",
+    "checksumSha256": "b99b23ed4cc82e49fe2ad4476f476372b1bcbf6b7236770aae31f745785a2a17"
+  },
+  {
+    "filename": "0007_documents_and_print.sql",
+    "checksumSha256": "13b4161860464c5dc8a60258b176b77cb3d6859d1751ad9b3d9d7d0f772dd670"
+  },
+  {
+    "filename": "0008_files.sql",
+    "checksumSha256": "d50244cd0abfd7d31a617f417844baf4dc6df072c0951ebffbbe5bdb14e7fc67"
+  },
+  {
+    "filename": "0009_sync.sql",
+    "checksumSha256": "3b449cf0b8b8f17d960b1b867e0106d7594a65d5b995ee51a4159ffb1369b003"
+  },
+  {
+    "filename": "0010_hardware.sql",
+    "checksumSha256": "7940ff23274c65192148314eca9ae51575e917f556b7143baf7eca00cff1e764"
+  },
+  {
+    "filename": "0011_audit_and_security.sql",
+    "checksumSha256": "336f6086cdf1e89f557646a21709cfdf95a650793102eb6546fbb536646820e7"
+  },
+  {
+    "filename": "0012_indexes_and_constraints.sql",
+    "checksumSha256": "e1782663f80032ba3f91b791d9f42cde458f2b79ed758f1f285317383687fa42"
+  },
+  {
+    "filename": "0013_views_and_procedures.sql",
+    "checksumSha256": "c2b33a75ded0b163e26b12704c7373a9c9d849980b4f13e4513bb01dd4b9ca0a"
+  },
+  {
+    "filename": "0014_seed_reference_profiles.sql",
+    "checksumSha256": "d7f0076b962fe49702a3f6390b25fd4ead52567a5314c3be05cf3207aee9cf42"
+  },
+  {
+    "filename": "0015_sync_delivery_state_alignment.sql",
+    "checksumSha256": "471d59f9acabaec2d47ec4a0e1b7a36fecfc0ed716158ab4b2698022049f5913"
+  },
+  {
+    "filename": "0016_sync_outbox_leasing.sql",
+    "checksumSha256": "10155852ad08082e1a9ed14a0820ae1e8fdc33f7c00273d140de86c1ab56f989"
+  },
+  {
+    "filename": "0017_sync_transmission_batches.sql",
+    "checksumSha256": "02bd5f38bf8ac663a4e2079d378b792ba9ea5c4853c5e02eccb9d9f517397d65"
+  },
+  {
+    "filename": "0018_hub_effect_keys.sql",
+    "checksumSha256": "741336ae5dec3427ddef9fee8c766581b12624d37872dc10337deb0ed8079a26"
+  },
+  {
+    "filename": "0019_sync_delivery_outcomes.sql",
+    "checksumSha256": "241797b4c0577b728756e49262cbd2d57dc62e4592d6dfa0acea50157089c80c"
+  },
+  {
+    "filename": "0020_revoke_public_execute.sql",
+    "checksumSha256": "18ffc32bd6962354603281a6cd912ffded43ea18f0a3d56d7ad99ab274d5650b"
+  },
+  {
+    "filename": "0021_cloud_inbox_and_provider_outcomes.sql",
+    "checksumSha256": "37ed9c67b65c7aef92474889ad0831efa2b01a60e2aad637345826d1842e13e6"
+  },
+  {
+    "filename": "0022_signed_grants_and_activation.sql",
+    "checksumSha256": "0e1a22e2e0b248052879e52057f510a5a064f6d13b6a8542a12cec2173e2cbad"
+  },
+  {
+    "filename": "0023_operator_repair_and_recovery.sql",
+    "checksumSha256": "7345419d43864e927f9031273e7b8adf8aec4dff6e0c9605daf496cb55f56095"
+  },
+  {
+    "filename": "0024_governed_marker_and_scope_hierarchy.sql",
+    "checksumSha256": "a512615b8e55bf8bb4e497ca4357e8fa45bd82846c3662e434e8e0e3c0d369b0"
+  },
+  {
+    "filename": "0025_grant_scope_isolation.sql",
+    "checksumSha256": "4fe6c4f707b1a783bc2ec45601bf0cf61bcbb4282287b41f19b6595158048ece"
+  },
+  {
+    "filename": "0026_amendment_projection_and_transitions.sql",
+    "checksumSha256": "81eceba7d79b679f702c3a29349f70aa3b5999133b57fcd4bcef32f1055ffd3b"
+  },
+  {
+    "filename": "0027_revocation_trust_and_snapshot.sql",
+    "checksumSha256": "2d4d6721c683a00c6c60bc567d5ba6be14c70104c9cb54f039b7b97695c6c891"
+  },
+  {
+    "filename": "0028_revocation_reader_least_privilege.sql",
+    "checksumSha256": "e752a5932e65cba88dd17aff5da601f0b9ad63cbf2125e2c2c770656349d053a"
+  },
+  {
+    "filename": "0029_offline_device_record_enforcement.sql",
+    "checksumSha256": "677e8bc74ed4c0fe4cb3462bbd0426e43aa9e2f2e3fc392286ecae3a068b5f1b"
+  },
+  {
+    "filename": "0030_governed_snapshot_staging.sql",
+    "checksumSha256": "9c7146ba02299dc028b2a72d40bdfa1007d89949af6b826ec659a6aad0690bfd"
+  },
+  {
+    "filename": "0031_terminal_pairing.sql",
+    "checksumSha256": "8d7be00d6190f474f7727558a148b55d83530577f459bb0dfbae61ea0e05dc84"
+  },
+  {
+    "filename": "0032_pairing_lifetime_and_transport_reads.sql",
+    "checksumSha256": "adb12e5f155f1c1d2c33f712254ebc8950083af2d5f16096f073515c1216d2e6"
+  },
+  {
+    "filename": "0033_terminal_credential_projection.sql",
+    "checksumSha256": "69f1d49a67f87491e6580cb94ef72babcb071e4ee0b55e71316abaae9e185dc3"
+  },
+  {
+    "filename": "0034_credential_projection_scope_index.sql",
+    "checksumSha256": "3530f229d4f296f8ce7a039576f36adcd2441f857427510b6dfac7309cd25c81"
+  },
+  {
+    "filename": "0035_terminal_health_and_containment.sql",
+    "checksumSha256": "2ae34fefc5c8c3433d663a55c90e5ccdc8c4e53bbdc17c75b8bd1101af341c3a"
+  },
+  {
+    "filename": "0036_terminal_heartbeat_and_reporter_state.sql",
+    "checksumSha256": "effbe76a7a6e8be9994dfdee063e9006dc5d679a3248d810e2082e94355e7116"
+  },
+  {
+    "filename": "0037_hub_replacement_local_state.sql",
+    "checksumSha256": "324e4e638dc0b41b2c6fa24605830ea9701884b6bebae2d60b38dec23c6e6095"
+  },
+  {
+    "filename": "0038_release_trust_and_cache.sql",
+    "checksumSha256": "3d571e17e226ded82ab8aaf1e55ad54efac3a959c9de1d45b4d23554b8a2ab78"
+  },
+  {
+    "filename": "0039_release_installation_state.sql",
+    "checksumSha256": "66ad427cbf03f06ee32b3adbccb86e42d921e1b4e3704b5f7ae33600196d3280"
+  },
+  {
+    "filename": "0040_t1_customer_consent_and_booking_draft.sql",
+    "checksumSha256": "8f7b3c8dc4a5c1db87e247ba29aa459e65c2db61e7461dfc677caa53fe90cc45"
+  },
+  {
+    "filename": "0041_booking_draft_sync_acknowledgment.sql",
+    "checksumSha256": "67840cc2609b225cb6ab2813bb67f5e36bd5b680fbf0e96efc1f05828ed3a0bb"
+  }
+]

@@ -1,0 +1,31 @@
+[Unit]
+Description=KitLuy Store Hub local database (PostgreSQL 15 on the encrypted volume)
+Documentation=infra/kitluy-store-hub-image/README.md
+# Requires the MOUNT, not the unlock: a Hub must never initialise a cluster on
+# the boot card because the volume happened not to be mounted yet.
+Requires=var-lib-kitluy-hub.mount
+After=var-lib-kitluy-hub.mount
+ConditionPathExists=/usr/lib/kitluy/hub-database-provision
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/kitluy/hub-database-provision
+User=root
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+RestrictSUIDSGID=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+# The database is reachable over a UNIX socket only; it never listens on TCP, so
+# it needs no network at all.
+PrivateNetwork=yes
+ReadWritePaths=/var/lib/kitluy/hub /run/postgresql
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

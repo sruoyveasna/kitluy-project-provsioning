@@ -134,3 +134,43 @@ fi
 find "$LIB_DIR" -type f -exec chmod 0644 {} +
 find "$LIB_DIR" -type d -exec chmod 0755 {} +
 echo "packaged $(find "$LIB_DIR" -name '*.js' | wc -l) js files into ${LIB_DIR#"$REPO"/}"
+
+# -----------------------------------------------------------------------------
+# The Hub schema, copied from the ONE place it is authored.
+# -----------------------------------------------------------------------------
+# `hub/migrations/` is the canonical set (`scripts/hub/hub-db.mjs` owns it, with a
+# checksum journal). The image must carry the same bytes, because the Hub agent
+# refuses to serve when the applied checksums disagree with what its release
+# expects — so a second, hand-copied set in the overlay would eventually diverge
+# and produce a Hub that refuses for a reason nobody could explain.
+#
+# Copied at package time rather than committed into the overlay, so there is
+# exactly one source and `git status` cannot show the two disagreeing.
+HUB_MIGRATIONS_SRC="${REPO}/hub/migrations"
+HUB_MIGRATIONS_DST="${BASE_OVERLAY}/usr/lib/kitluy/hub-migrations"
+
+if [[ -d "$HUB_MIGRATIONS_SRC" ]]; then
+  rm -rf "$HUB_MIGRATIONS_DST"
+  mkdir -p "$HUB_MIGRATIONS_DST"
+  cp "$HUB_MIGRATIONS_SRC"/*.sql "$HUB_MIGRATIONS_DST"/
+  find "$HUB_MIGRATIONS_DST" -type f -exec chmod 0644 {} +
+
+  # The manifest the agent reads to know what THIS release expects. Generated
+  # from the same bytes that were just copied, so the expectation and the shipped
+  # files cannot disagree — a Hub that discovered its own expectations by
+  # scanning a directory at runtime could never detect that it is running
+  # against the wrong database.
+  node -e '
+    const fs=require("fs"), path=require("path"), crypto=require("crypto");
+    const dir=process.argv[1];
+    const entries=fs.readdirSync(dir).filter(f=>f.endsWith(".sql")).sort().map(filename=>({
+      filename,
+      checksumSha256: crypto.createHash("sha256").update(fs.readFileSync(path.join(dir,filename))).digest("hex"),
+    }));
+    fs.writeFileSync(path.join(dir,"..","hub-migration-manifest.json"), JSON.stringify(entries,null,2)+"\n");
+    console.log("hub schema: "+entries.length+" migrations + manifest");
+  ' "$HUB_MIGRATIONS_DST"
+else
+  echo "REFUSED: no Hub migration set at ${HUB_MIGRATIONS_SRC#"$REPO"/}" >&2
+  exit 4
+fi

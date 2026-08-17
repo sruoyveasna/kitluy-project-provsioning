@@ -1,0 +1,149 @@
+#!/bin/sh
+# KitLuy Store Hub — the local PostgreSQL cluster on the encrypted data volume.
+#
+# =============================================================================
+# WHAT THIS OWNS
+# =============================================================================
+# Creating the Hub's PostgreSQL cluster INSIDE the LUKS2 volume that
+# `hub-storage-provision` unlocked, starting it, and — in development only —
+# applying the Hub migration set.
+#
+# It runs after storage and before the Hub agent. If the volume is not mounted it
+# refuses rather than initialising a cluster on the boot card, which would put the
+# Store's database on unencrypted, non-durable media while everything reported
+# healthy.
+#
+# =============================================================================
+# WHY MIGRATIONS ARE NOT APPLIED OUTSIDE DEVELOPMENT
+# =============================================================================
+# KL-INF-P1-037 is OWNER-LOCKED and the Hub runner states it plainly:
+# "Production Hub migrations are human-operated and never automatic." CLAUDE.md
+# repeats it as a hard rule — not from CI, not from app startup.
+#
+# So this reads `KITLUY_ENVIRONMENT` from the image identity and applies the set
+# ONLY when it is `development`. In pilot or production it creates the cluster,
+# then stops and says that migrations are a human step. The Hub agent's own
+# schema check then refuses to serve until someone has run them, which is the
+# designed outcome rather than a failure.
+set -eu
+
+log() { printf '[kitluy-hub-database] %s\n' "$*"; }
+die() { printf '[kitluy-hub-database] REFUSED: %s\n' "$*" >&2; exit 1; }
+
+DATA_VOLUME="/var/lib/kitluy/hub"
+CLUSTER_DIR="${DATA_VOLUME}/postgresql/15/main"
+MIGRATIONS_DIR="/usr/lib/kitluy/hub-migrations"
+PG_BIN="/usr/lib/postgresql/15/bin"
+SOCKET_DIR="/run/postgresql"
+HUB_DB="kitluy_hub"
+
+[ -f /etc/kitluy/image.env ] && . /etc/kitluy/image.env
+ENVIRONMENT="${KITLUY_ENVIRONMENT:-unknown}"
+
+# -----------------------------------------------------------------------------
+# 1. The encrypted volume must be there
+# -----------------------------------------------------------------------------
+mountpoint -q "$DATA_VOLUME" \
+  || die "$DATA_VOLUME is not mounted; the Store database is created on the encrypted NVMe volume and nowhere else"
+
+[ -x "${PG_BIN}/initdb" ] || die "PostgreSQL 15 is not installed at ${PG_BIN}"
+
+install -d -m 0755 "$SOCKET_DIR"
+chown postgres:postgres "$SOCKET_DIR"
+
+# -----------------------------------------------------------------------------
+# 2. Create the cluster, once
+# -----------------------------------------------------------------------------
+if [ ! -s "${CLUSTER_DIR}/PG_VERSION" ]; then
+  log "initialising the PostgreSQL cluster on the encrypted volume"
+  install -d -m 0700 -o postgres -g postgres "$(dirname "$CLUSTER_DIR")" "$CLUSTER_DIR"
+  # `--auth=peer` and no listening socket: the Hub agent connects over the UNIX
+  # socket as a local user. A Hub database that accepted TCP would be reachable
+  # from the shop's network, and nothing outside this device may ever query it.
+  runuser -u postgres -- /bin/sh -c \
+    "${PG_BIN}/initdb --pgdata='${CLUSTER_DIR}' --auth=peer --encoding=UTF8 --locale=C.UTF-8" \
+    >/dev/null
+  {
+    echo "listen_addresses = ''"
+    echo "unix_socket_directories = '${SOCKET_DIR}'"
+    echo "fsync = on"
+    echo "synchronous_commit = on"
+  } >> "${CLUSTER_DIR}/postgresql.conf"
+  log "cluster created"
+else
+  log "cluster already present"
+fi
+
+# -----------------------------------------------------------------------------
+# 3. Start it
+# -----------------------------------------------------------------------------
+if ! runuser -u postgres -- /bin/sh -c "${PG_BIN}/pg_ctl -D '${CLUSTER_DIR}' status" >/dev/null 2>&1; then
+  runuser -u postgres -- /bin/sh -c \
+    "${PG_BIN}/pg_ctl -D '${CLUSTER_DIR}' -l '${DATA_VOLUME}/postgresql.log' -w start" >/dev/null
+  log "cluster started"
+fi
+
+psql_as_postgres() {
+  runuser -u postgres -- /bin/sh -c "${PG_BIN}/psql -h '${SOCKET_DIR}' -v ON_ERROR_STOP=1 $*"
+}
+
+if ! psql_as_postgres "-tAc \"select 1 from pg_database where datname='${HUB_DB}'\"" | grep -q 1; then
+  log "creating database ${HUB_DB}"
+  psql_as_postgres "-d postgres -c \"create database ${HUB_DB}\"" >/dev/null
+fi
+
+# -----------------------------------------------------------------------------
+# 4. Migrations — DEVELOPMENT ONLY
+# -----------------------------------------------------------------------------
+if [ "$ENVIRONMENT" != "development" ]; then
+  log "environment is '${ENVIRONMENT}': migrations are HUMAN-OPERATED and will not be applied automatically (KL-INF-P1-037, owner-locked)."
+  log "the cluster and database exist; the Hub agent will refuse to serve until the schema is applied by an operator."
+  exit 0
+fi
+
+[ -d "$MIGRATIONS_DIR" ] || die "no migration set shipped at ${MIGRATIONS_DIR}"
+
+# The journal is the same one `scripts/hub/hub-db.mjs` writes, so a device and a
+# workstation agree on what "applied" means, and the Hub agent's drift check can
+# read it without a second convention.
+psql_as_postgres "-d ${HUB_DB} -c \"
+  create schema if not exists edge_ops;
+  create table if not exists edge_ops.migration_journal (
+    filename text primary key,
+    sequence_number integer,
+    checksum_sha256 text not null,
+    applied_at timestamptz not null default now(),
+    execution_ms integer,
+    hub_tooling_version text
+  );\"" >/dev/null
+
+applied=0
+skipped=0
+for file in "$MIGRATIONS_DIR"/*.sql; do
+  [ -f "$file" ] || continue
+  name="$(basename "$file")"
+  checksum="$(sha256sum "$file" | cut -d' ' -f1)"
+
+  recorded="$(psql_as_postgres "-d ${HUB_DB} -tAc \"select checksum_sha256 from edge_ops.migration_journal where filename='${name}'\"" || true)"
+  recorded="$(printf '%s' "$recorded" | tr -d ' \n')"
+
+  if [ -n "$recorded" ]; then
+    # Schema contract §4: an applied file is never edited. A changed checksum is
+    # not a migration to re-run — it means the database and this release disagree
+    # about history, and continuing would hide that.
+    [ "$recorded" = "$checksum" ] \
+      || die "migration ${name} was applied with a different checksum than the one shipped here. An applied migration is never edited (schema contract §4)."
+    skipped=$((skipped + 1))
+    continue
+  fi
+
+  log "applying ${name}"
+  runuser -u postgres -- /bin/sh -c \
+    "${PG_BIN}/psql -h '${SOCKET_DIR}' -d ${HUB_DB} -v ON_ERROR_STOP=1 -f '${file}'" >/dev/null
+  psql_as_postgres "-d ${HUB_DB} -c \"
+    insert into edge_ops.migration_journal (filename, checksum_sha256, hub_tooling_version)
+    values ('${name}', '${checksum}', 'image')\"" >/dev/null
+  applied=$((applied + 1))
+done
+
+log "schema ready — ${applied} applied, ${skipped} already present"

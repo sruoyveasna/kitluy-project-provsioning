@@ -61,7 +61,11 @@ const CROCKFORD = /^[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{8}$/;
  */
 export function render(bootstrap, pairing, message) {
     const device = bootstrap?.deviceLabel ?? "Unknown";
-    const fleet = bootstrap === null ? "Unknown" : bootstrap.deviceRecordId !== undefined ? "Enrolled" : "Not enrolled";
+    const fleet = bootstrap === null
+        ? "Unknown"
+        : bootstrap.deviceRecordId !== undefined
+            ? "Enrolled"
+            : "Not enrolled";
     // The Store line is DERIVED, never hardcoded. It also refuses to speak for a
     // pairing that belongs to a different device record — a copied card carries a
     // stale file, and rendering it would tell an operator their Hub is assigned to
