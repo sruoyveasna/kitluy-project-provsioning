@@ -1,0 +1,67 @@
+# The Store Hub setup console, on tty1.
+#
+# WHY THIS UNIT EXISTS AT ALL
+# ---------------------------
+# Until it did, this image shipped a screen program (`bootstrap-ui.js`, via
+# DEVICE_MODULES) and NOTHING that ran it — no unit in this tree owned a tty. So
+# a Hub booted to a bare getty login an operator cannot satisfy: root is locked
+# and `pi` is password-disabled by design. The program was dead weight and the
+# screen was never going to appear.
+#
+# WHY A CONSOLE TUI AND NOT A COMPOSITOR
+# --------------------------------------
+# Settled on the first real device (2026-08-13) for the Pi Terminal, and the
+# reasoning is identical here: the program writes ANSI text on stdout and redraws
+# on demand. Inside a compositor that output reaches the journal, not the display,
+# and this image ships no terminal emulator to draw it in. Run as what it is.
+#
+# WHY IT IS NOT `kitluy-bootstrap-screen.service`
+# -----------------------------------------------
+# That unit runs the Pi Terminal's status screen, which titles itself "KitLuy
+# Terminal" and hardcodes `Store assignment .. Unassigned` — wrong on a Hub, and a
+# lie the moment the Hub pairs. It is also deliberately read-only
+# (`ReadOnlyPaths=/var/lib/kitluy`), and pairing WRITES state.
+[Unit]
+Description=KitLuy Store Hub pairing console (tty1)
+After=kitluy-firstboot.service kitluy-enrollment-agent.service
+# The console OWNS tty1. Without this, getty prints a login prompt over the
+# pairing screen and an operator sees a login they can never satisfy.
+Conflicts=getty@tty1.service
+ConditionPathExists=/usr/lib/kitluy/hub-pairing-ui
+
+[Service]
+Type=simple
+# root, deliberately: it reads two state files, writes one, and talks to a tty.
+# Running it unprivileged would need a seat and device rules for no benefit.
+User=root
+EnvironmentFile=/etc/kitluy/image.env
+ExecStart=/usr/lib/kitluy/hub-pairing-ui
+StandardInput=tty
+StandardOutput=tty
+StandardError=journal
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+# An operator may walk away mid-prompt, and the console must come back rather
+# than leave a dead screen on the wall.
+Restart=always
+RestartSec=5s
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+# READ-WRITE, unlike the terminal status screen: this program records the pairing
+# result so the screen can tell the truth after a reboot, and so it does not
+# re-present a claim the cloud has already consumed. Scoped to exactly the one
+# directory it owns state in.
+ReadWritePaths=/var/lib/kitluy
+
+[Install]
+WantedBy=multi-user.target

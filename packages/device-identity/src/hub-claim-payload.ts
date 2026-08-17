@@ -11,8 +11,8 @@
  *    Digital Store or Location."
  *
  * That promise is only as good as the two sides agreeing, byte for byte, on
- * what "the canonical claim payload (device + scope + expiry)" IS — and until
- * now nothing defined it. Three test suites each invented their own filler
+ * what "the canonical claim payload (device + scope)" IS — and until now nothing
+ * defined it. Three test suites each invented their own filler
  * (`JSON.stringify({ deviceRecordId })`, a bare string, a reused fixture), so
  * the column's guarantee was never actually exercised: issuer and redeemer
  * agreed only because the same test wrote both halves.
@@ -32,10 +32,34 @@
  *   tenantId        \
  *   digitalStoreId   >  the SCOPE — the whole point of the binding
  *   storeLocationId /
- *   expiresAt       so a captured payload cannot be re-presented with a longer life
  *
  * The kind string leads, so a hash over these bytes can never be mistaken for,
  * or replayed as, a hash over another record type.
+ *
+ * ===========================================================================
+ * WHY THE EXPIRY IS **NOT** IN HERE
+ * ===========================================================================
+ * It was, on the first pass, reasoned as "so a captured payload cannot be
+ * re-presented with a longer life". That was wrong twice over, and a live
+ * integration test is what proved it — a stub agrees with itself.
+ *
+ * IMPOSSIBLE: `create_device_claim_v1` takes a TTL and derives `expires_at` from
+ * the DATABASE clock, and the row is immutable the moment it exists
+ * (`KLUY-DEVICE-CLAIM-IMMUTABLE` covers device, scope, token, payload AND
+ * expiry). So the issuer cannot know the instant it would need to hash — not
+ * before the insert, and not after. Every legitimate pairing would have failed
+ * with `KLUY-DEVICE-CLAIM-PAYLOAD-ALTERED`.
+ *
+ * REDUNDANT: redemption already checks `v_claim.expires_at <= clock_timestamp()`
+ * against the authoritative row, and that row cannot be edited. Hashing the
+ * expiry added no check that was not already unconditional.
+ *
+ * What remains is exactly the promise the column makes: "a captured token cannot
+ * be replayed against a different Tenant, Digital Store or Location."
+ *
+ * The kind string stays `v1` because these bytes were never produced anywhere
+ * before this change — the three suites this file replaced each invented their
+ * own filler, which is the defect it exists to fix.
  *
  * Field order is FIXED. Changing it, the separator, or the kind string breaks
  * every issued claim, which is why the drift test exists.
@@ -50,7 +74,6 @@ export interface HubClaimPayloadFields {
   readonly tenantId: string;
   readonly digitalStoreId: string;
   readonly storeLocationId: string;
-  readonly expiresAt: Date;
 }
 
 /**
@@ -85,8 +108,9 @@ export class HubClaimPayloadError extends Error {
  * The canonical bytes. Both the issuer (Partner surface) and the redeemer
  * (device) MUST produce these and hash them identically.
  *
- * `expiresAt` is serialised as an ISO-8601 instant so a payload cannot mean two
- * different moments in two different timezones.
+ * Every input is a value the ISSUER chooses and passes to
+ * `create_device_claim_v1`, which is what makes the digest computable at issue
+ * time. Nothing server-derived appears here — see the header on the expiry.
  */
 export function hubClaimPayloadBytes(fields: HubClaimPayloadFields): Uint8Array {
   const injected = findHubClaimSeparatorInjection(fields);
@@ -99,7 +123,6 @@ export function hubClaimPayloadBytes(fields: HubClaimPayloadFields): Uint8Array 
       fields.tenantId,
       fields.digitalStoreId,
       fields.storeLocationId,
-      fields.expiresAt.toISOString(),
     ].join("\n"),
     "utf8",
   );

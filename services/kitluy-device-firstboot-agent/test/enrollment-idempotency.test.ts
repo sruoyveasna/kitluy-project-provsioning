@@ -189,6 +189,84 @@ describe("when the recorded enrolment does not apply", () => {
   });
 });
 
+describe("a future phase must not erase enrolment — the re-arming trap", () => {
+  /**
+   * The predicate used to require `phase === "ENROLLED_UNASSIGNED"` exactly.
+   * That made every NEW phase a latent re-run of the `70a339d` defect: write one
+   * into this file and the agent forgets it ever enrolled, then re-presents a
+   * consumed ticket twice a minute for ever.
+   *
+   * Store Hub pairing needs device-side phases, so this is the test that keeps
+   * the door shut. `pairing-state.ts` is the other half of the answer — pairing
+   * writes its OWN file — but a predicate that only works because nobody has
+   * touched this file yet is not a predicate, it is a coincidence.
+   */
+  it("stays enrolled when an UNRECOGNISED phase is recorded with real evidence", async () => {
+    writeBootstrapState(
+      {
+        // Stands in for any phase a later milestone might add.
+        phase: "SOME_FUTURE_PHASE" as never,
+        detail: "a phase this agent has never heard of",
+        identityReady: true,
+        networkReady: true,
+        agentVersion: "test",
+        updatedAt: new Date().toISOString(),
+        deviceRecordId: "dev-still-enrolled",
+        deviceLabel: deviceLabelFromPublicKey(PUBLIC_KEY_A),
+      },
+      statePath,
+    );
+
+    const { state } = await run();
+
+    // No network call: the evidence of enrolment survived a phase this code does
+    // not recognise.
+    expect(enrollCalls).toBe(0);
+    expect(state.deviceRecordId).toBe("dev-still-enrolled");
+  });
+
+  it("STILL re-enrols on an explicit denial, which outranks a stray record id", async () => {
+    // The counterpart. `UNENROLLED` is a statement that the last pass failed, and
+    // a record id sitting beside it does not overrule that.
+    writeBootstrapState(
+      {
+        phase: "UNENROLLED",
+        detail: "refused last time",
+        identityReady: true,
+        networkReady: true,
+        agentVersion: "test",
+        updatedAt: new Date().toISOString(),
+        deviceRecordId: "dev-should-be-ignored",
+        deviceLabel: deviceLabelFromPublicKey(PUBLIC_KEY_A),
+      },
+      statePath,
+    );
+
+    await run();
+    expect(enrollCalls).toBe(1);
+  });
+
+  it("re-enrols while a previous attempt was still ENROLLING", async () => {
+    writeBootstrapState(
+      {
+        phase: "ENROLLING",
+        detail: "mid-flight when the power went out",
+        identityReady: true,
+        networkReady: true,
+        agentVersion: "test",
+        updatedAt: new Date().toISOString(),
+        deviceRecordId: "dev-incomplete",
+        deviceLabel: deviceLabelFromPublicKey(PUBLIC_KEY_A),
+      },
+      statePath,
+    );
+
+    await run();
+    // In progress is not done.
+    expect(enrollCalls).toBe(1);
+  });
+});
+
 describe("the earlier states still win", () => {
   it("a missing network is reported even when enrolment was recorded", async () => {
     recordEnrolled(PUBLIC_KEY_A);

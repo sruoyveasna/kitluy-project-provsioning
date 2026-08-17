@@ -1,0 +1,9 @@
+#!/bin/sh
+# KitLuy Store Hub pairing console.
+#
+# Renders the setup screen the owner decision §2.3 mandates and prompts for the
+# pairing code an operator generated in the Partner Portal. Pairing ends at
+# ASSIGNED and awaiting trust — never ACTIVE, which is certificate-backed and
+# gated on BLK-005.
+set -eu
+exec /usr/bin/node /usr/lib/kitluy/lib/firstboot-agent/bin/hub-pairing-ui.js "$@"

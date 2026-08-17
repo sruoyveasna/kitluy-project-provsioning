@@ -37,6 +37,14 @@ LIB_DIR="${BASE_OVERLAY}/usr/lib/kitluy/lib/firstboot-agent"
 # and `verify_closure` below fails the build if that ever stops being true.
 DEVICE_MODULES=(
   version identity bootstrap-state
+  # image-env.js is the ONE reader of /etc/kitluy/image.env, shared by the
+  # enrollment agent and the pairing console. Two copies of a config parser
+  # eventually disagree about where the fleet service lives.
+  image-env
+  # pairing-state.js is the Hub's own state file. Deliberately NOT a phase in
+  # bootstrap-state.json: writing one there makes `alreadyEnrolled()` answer
+  # false and the enrollment agent re-presents a consumed ticket for ever.
+  pairing-state
   # enrollment.js is TYPES ONLY at runtime — the enrollment client imports its
   # interfaces, which erase. It is listed because `verify_closure` reads the
   # emitted imports, and the emitted enrollment-bootstrap.js does reference it.
@@ -44,7 +52,13 @@ DEVICE_MODULES=(
   adapters/device-identity-store adapters/device-key-provider adapters/linux-hardware-probe
   adapters/http-enrollment-client
   bin/firstboot-identity bin/enrollment-bootstrap bin/health-reporter
-  bin/update-bootstrap bin/bootstrap-ui
+  bin/update-bootstrap
+  # bin/bootstrap-ui is the PI TERMINAL's status screen — it titles itself
+  # "KitLuy Terminal" and hardcodes `Store assignment .. Unassigned`, which is
+  # wrong on a Hub and a lie once the Hub pairs. It was shipped here with no
+  # shim and no unit to run it, so it was dead weight. The Hub's screen is
+  # bin/hub-pairing-ui, which renders the owner decision §2.3 layout and prompts.
+  bin/hub-pairing-ui
 )
 rm -rf "$LIB_DIR"
 mkdir -p "$LIB_DIR"

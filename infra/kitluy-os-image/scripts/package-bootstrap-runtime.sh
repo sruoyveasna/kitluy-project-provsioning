@@ -37,6 +37,11 @@ LIB_DIR="${BASE_OVERLAY}/usr/lib/kitluy/lib/firstboot-agent"
 # and `verify_closure` below fails the build if that ever stops being true.
 DEVICE_MODULES=(
   version identity bootstrap-state
+  # image-env.js is the ONE reader of /etc/kitluy/image.env. Extracted from
+  # bin/enrollment-bootstrap so the Store Hub pairing console can share it;
+  # listed here because the emitted enrollment-bootstrap.js now imports it and
+  # `verify_closure` would otherwise fail the build.
+  image-env
   # enrollment.js is TYPES ONLY at runtime — the enrollment client imports its
   # interfaces, which erase. It is listed because `verify_closure` reads the
   # emitted imports, and the emitted enrollment-bootstrap.js does reference it.

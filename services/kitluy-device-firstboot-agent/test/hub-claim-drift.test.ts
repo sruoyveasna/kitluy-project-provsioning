@@ -34,7 +34,6 @@ const FIELDS = {
   tenantId: "22222222-2222-4222-8222-222222222222",
   digitalStoreId: "33333333-3333-4333-8333-333333333333",
   storeLocationId: "44444444-4444-4444-8444-444444444444",
-  expiresAt: new Date("2026-08-13T10:00:00.000Z"),
 };
 
 const sha256 = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
@@ -65,7 +64,6 @@ describe("the scope binding is real, not decorative", () => {
       { ...FIELDS, digitalStoreId: "99999999-9999-4999-8999-999999999999" },
       { ...FIELDS, storeLocationId: "99999999-9999-4999-8999-999999999999" },
       { ...FIELDS, deviceRecordId: "99999999-9999-4999-8999-999999999999" },
-      { ...FIELDS, expiresAt: new Date("2026-08-13T11:00:00.000Z") },
     ];
     for (const v of variants) {
       // If any of these collided, a captured token WOULD be replayable against
@@ -76,9 +74,15 @@ describe("the scope binding is real, not decorative", () => {
     }
   });
 
-  it("the expiry is an instant, not a local rendering", () => {
+  it("carries NO server-derived field — the issuer must be able to compute it", () => {
+    // The expiry was removed for exactly this reason: `create_device_claim_v1`
+    // derives `expires_at` from the database clock and the row is immutable, so
+    // an issuer could never hash it. Anything server-derived appearing here
+    // again would make every legitimate pairing fail with
+    // KLUY-DEVICE-CLAIM-PAYLOAD-ALTERED.
     const text = Buffer.from(hubClaimPayloadBytes(FIELDS)).toString("utf8");
-    expect(text).toContain("2026-08-13T10:00:00.000Z");
+    expect(text.split("\n")).toHaveLength(5);
+    expect(text).not.toMatch(/\d{4}-\d{2}-\d{2}T/);
   });
 });
 

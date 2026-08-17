@@ -27,7 +27,7 @@
  * separate lifecycle stage with a separate credential (KLSRC-0162 §35).
  */
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { imageEnvPath, readImageEnv } from "../image-env.js";
 import { SERVICE_VERSION } from "../version.js";
 import { deviceLabelFromPublicKey, hasDefaultRoute, readBootstrapState, writeBootstrapState, } from "../bootstrap-state.js";
 import { DEFAULT_IDENTITY_DIR, FileIdentityStore } from "../adapters/device-identity-store.js";
@@ -170,8 +170,31 @@ export async function evaluateBootstrap(options) {
 function alreadyEnrolled(priorState, identity) {
     if (priorState === null || identity === null || !identity.complete)
         return false;
-    if (priorState.phase !== "ENROLLED_UNASSIGNED")
+    // PHASES THAT DENY ENROLMENT — a deny list, not an allow list of one.
+    //
+    // This used to read `phase !== "ENROLLED_UNASSIGNED" -> false`, which is
+    // fragile in a specific way: ANY new phase written into this file would flip
+    // enrolment back to "never happened", and the agent would re-present its
+    // consumed ticket every thirty seconds for ever (`ENROLLMENT_REDEMPTION_422`,
+    // the defect fixed in `70a339d`). Adding a pairing phase would have re-armed
+    // it, which is why pairing keeps its own file (`pairing-state.ts`).
+    //
+    // But the phase is not merely decorative either: a recorded `UNENROLLED` is an
+    // EXPLICIT statement that the last pass did not achieve enrolment, and it must
+    // outweigh a stray `deviceRecordId` sitting next to it. That case is asserted
+    // by name in `enrollment-idempotency.test.ts` ("dev-should-be-ignored").
+    //
+    // A deny list satisfies both: an explicit denial is honoured, an unrecognised
+    // or future phase cannot silently erase real evidence of enrolment.
+    if (priorState.phase === "UNENROLLED" || priorState.phase === "ENROLLING")
         return false;
+    if (priorState.phase === "HALTED")
+        return false;
+    // What enrolment actually IS: a server-issued record id belonging to the
+    // identity in front of us. `deviceLabel` derives from the public key, so a
+    // re-keyed device (firstboot `recreated`) no longer matches and correctly
+    // enrols again — a stale file cannot make a new identity believe it is
+    // enrolled.
     if (priorState.deviceRecordId === undefined)
         return false;
     return priorState.deviceLabel === deviceLabelFromPublicKey(identity.publicKeyPem);
@@ -211,38 +234,12 @@ function readTicket(path) {
  * image was built. The names are reconciled here, on the reader, because the
  * image side is the one with the build-time override plumbed through it.
  */
-export const IMAGE_ENV_PATH = "/etc/kitluy/image.env";
-function imageEnvPath(etcRoot) {
-    return etcRoot === undefined ? IMAGE_ENV_PATH : join(etcRoot, "kitluy", "image.env");
-}
 /**
- * One key from the generated image environment.
- *
- * An EMPTY value is `undefined`, not "": the build writes
- * `KITLUY_ENROLLMENT_BASE_URL=` when no environment supplied one, and an empty
- * string is the absence of an endpoint rather than an endpoint whose address is
- * nothing. Comment lines are skipped — the generated file starts with two.
+ * Re-exported so the historical name keeps working. The reader itself now lives
+ * in `image-env.ts`, because the Hub pairing CLI needs the SAME parser and two
+ * copies would eventually disagree about where the fleet service is.
  */
-function readImageEnv(key, etcRoot) {
-    let text;
-    try {
-        text = readFileSync(imageEnvPath(etcRoot), "utf8");
-    }
-    catch {
-        return undefined;
-    }
-    for (const line of text.split("\n")) {
-        const trimmed = line.trim();
-        if (trimmed.startsWith("#"))
-            continue;
-        const separator = trimmed.indexOf("=");
-        if (separator === -1 || trimmed.slice(0, separator) !== key)
-            continue;
-        const value = trimmed.slice(separator + 1).trim();
-        return value.length === 0 ? undefined : value;
-    }
-    return undefined;
-}
+export const IMAGE_ENV_PATH = imageEnvPath();
 /** Where the fleet service lives. Config, never a compiled-in default. */
 function readEnrollmentBaseUrl(etcRoot) {
     return readImageEnv("KITLUY_ENROLLMENT_BASE_URL", etcRoot);

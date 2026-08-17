@@ -31,7 +31,6 @@ export interface HubClaimFields {
   readonly tenantId: string;
   readonly digitalStoreId: string;
   readonly storeLocationId: string;
-  readonly expiresAt: Date;
 }
 
 /** Mirrors `findHubClaimSeparatorInjection`. Returns the field name, or null. */
@@ -65,7 +64,6 @@ export function hubClaimPayloadBytes(fields: HubClaimFields): Uint8Array {
       fields.tenantId,
       fields.digitalStoreId,
       fields.storeLocationId,
-      fields.expiresAt.toISOString(),
     ].join("\n"),
     "utf8",
   );
