@@ -3457,3 +3457,101 @@ Consequences recorded deliberately:
 Timing note: nothing from Phase A was committed or deployed to cloud when this
 decision landed, which is the only reason it was cheap. The same change after the
 Phase A commit would have required an additive correction group instead.
+
+---
+
+## KLREC-2026-08-13-HUB-PAIRING-WIRING-001 — group 0194 was applied but unreachable; the services still spoke the per-device contract (2026-08-13)
+
+**Closure state: CORRECTED — both routes now use the session model.**
+
+Found while building the Partner Portal screen. Migration group `0194` implements
+the owner decision KLD-2026-08-13-HUB-PAIRING-SESSION-001 — *the code is for the
+Store, and any Hub may use it* — and its three doors
+(`open_hub_pairing_session_v1`, `evaluate_hub_pairing_session_v1`,
+`consume_hub_pairing_session_v1`) were applied and correctly granted. **No
+TypeScript called any of them.** Both committed routes still implemented the
+per-device model of group 0193:
+
+| Surface | Was | Now |
+| --- | --- | --- |
+| `POST /management/v1/hub-pairing-codes` | required `deviceRecordId`, called `issue_hub_claim_v1` | Store + Location only, calls `open_hub_pairing_session_v1` |
+| `/v1/hub-pairing` (device) | `evaluate_hub_claim_code_v1` | `evaluate_hub_pairing_session_v1` → mint claim → redeem → consume |
+
+This was not a cosmetic gap. Building the Portal on the shipped contract would
+have forced a **Hub picker** onto the Partner — the exact question the owner
+decision rejected, and one with no honest answer: an unpaired Hub belongs to
+nobody, so "their" Hubs cannot be listed without listing everyone's, and the
+console label (`KL-1A2B3C4D`) is derived on-device and stored nowhere.
+
+### What the device route does now, and why in that order
+
+Present → mint a device-bound claim → redeem → consume the session, all in ONE
+transaction as `kitluy_hub_pairing_service`.
+
+The claim is minted at presentation because that is the first moment the Hub's
+identity is honestly known. `device_claims.device_id NOT NULL` was never
+relaxed, so the canonical payload binding, 0191's attempt budget and every 0121
+refusal keep working unchanged. Group 0194 anticipated this exactly: it grants
+`issue_hub_claim_v1` to the pairing role for this step.
+
+The session is consumed **last**. Consuming first would burn a code on a failed
+redemption, and a crash between the two would leave a shop unable to pair with a
+code that still looked live. `consume_hub_pairing_session_v1` updates conditional
+on `state = 'open'`, so two Hubs racing one code serialise and the loser is
+refused rather than quietly gaining a second assignment.
+
+### Two behaviours the tests were rewritten to state honestly
+
+1. **A wrong code can never lock a session.** It matches no session, so there is
+   nothing to count it against. The pre-session suite asserted a lockout after
+   five wrong codes; under the session model that would let a stranger lock a
+   shop out by typing rubbish. The budget is spent only by a HIT that then fails
+   — the right code presented by an ineligible device.
+2. **The fifth failure locks but still reports the CAUSE.** It answers
+   `KLUY-HUBSESSION-DEVICE-INELIGIBLE`, not `-LOCKED`; only a later presentation
+   meets the closed door. Asserted as it behaves, because telling an operator why
+   that device cannot pair is the more useful message at that moment.
+
+The pre-session payload test — issuing a claim with a mis-scoped digest and
+proving redemption refused it — is now **unreachable** and was replaced rather
+than kept passing vacuously: there is no window in which a mis-scoped claim
+exists, because the composition builds the payload itself from the door's scope.
+The replacement proves the property that took over: a paired Hub lands in the
+session's Store.
+
+### New surface
+
+`GET /management/v1/partner/stores`. A session names a Store and a Location, so a
+Portal must offer them — and it cannot read them itself: `kitluy_core` is not
+exposed to the data API at all (`config.toml` exposes `public`), so a browser has
+no path to `digital_stores` whatever its session. Identifiers come from
+`current_digital_store_ids()`, the same server-resolved helper the authorizer and
+the RLS policies use, and names are read as `authenticated` so the row policies
+apply as an independent second guard.
+
+`authorizePartnerRequest` gained an optional scope (`PartnerScope | null`) for
+this call. It is not a weaker check — the permission is still required, and the
+answer carries only the actor's own assignments — it simply does not ask a
+question about a Store the caller has not yet named.
+
+### Evidence
+
+* `hub-pairing.integration.test.ts` 9 tests and `hub-pairing-routes.test.ts` 16
+  tests, passing against the PG17 stack.
+* `hub-pairing-codes.test.ts` within the management API's 112 passing tests,
+  including that a `deviceRecordId` is now refused outright so an integration
+  built against the old shape fails loudly rather than silently meaning
+  something else.
+* Live chain on 2026-08-13: a session opened for a Store with no device named;
+  a Hub the Partner never identified presented the code in lowercase and reached
+  `MATCH_READY` with the Store resolved from the session.
+* Partner Portal 20 tests; Admin Portal 5 new tests for the `store_hub` filter
+  and Hub readiness.
+
+### Out of scope, recorded not fixed
+
+`apps/kitluy-admin-pwa-portal/test/smoke.test.tsx` fails at HEAD, before and
+independently of this work: it expects `data-surface-state="unavailable"` while
+the shell now renders `loading` during session restore. The assertion is stale,
+not the shell — but deciding what that smoke test should assert is a separate
+call and was not made here.
