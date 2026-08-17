@@ -170,3 +170,46 @@ mmdebstrap:
     # Caught by scan-image-secrets.sh against the BUILT image, which is the
     # check the staged-tree scan could not perform.
     - rm -f "$1"/etc/ssl/private/ssl-cert-snakeoil.key "$1"/etc/ssl/certs/ssl-cert-snakeoil.pem
+    # =========================================================================
+    # TTY1 OWNERSHIP IS DECIDED HERE, NOT CONTESTED AT BOOT.
+    # =========================================================================
+    # A KitLuy device is an appliance: an operator must never meet `login:` as
+    # the product. The KitLuy console unit already declares
+    # `Conflicts=getty@tty1.service`, but Conflicts ALONE leaves three ways for a
+    # login prompt to appear on tty1, all three verified present in the built
+    # artifact before this hook existed:
+    #
+    #   1. `getty@tty1.service` is still enabled in `getty.target.wants/` by the
+    #      Debian preset, so getty and the KitLuy console are both wanted and
+    #      race. Conflicts is explicitly "orthogonal to ordering", and no
+    #      ordering was declared between them.
+    #   2. `systemd-logind` autospawns `autovt@ttyN.service` on VT activation.
+    #      `autovt@.service` is a symlink to `getty@.service`, so it is the SAME
+    #      program under a DIFFERENT unit name — and `Conflicts=getty@tty1.service`
+    #      does not name it. Default `NAutoVTs=6` covers tty1.
+    #   3. The KitLuy console uses `Restart=always`; each restart releases and
+    #      re-acquires tty1, reopening the window in 1 and 2.
+    #
+    # So getty is removed from tty1 and autospawn is switched off, which makes the
+    # outcome deterministic instead of a race.
+    #
+    # MAINTENANCE ACCESS IS PRESERVED, deliberately (this must not become a device
+    # that cannot be recovered): getty is ENABLED ON tty2 instead. A technician
+    # presses Ctrl+Alt+F2 and gets the normal authenticated Debian login; SSH with
+    # governed keys is unchanged. tty1 belongs to the product, tty2 to maintenance.
+    - |
+      rm -f "$1/etc/systemd/system/getty.target.wants/getty@tty1.service"
+      install -d "$1/etc/systemd/system/getty.target.wants"
+      ln -sf /lib/systemd/system/getty@.service \
+        "$1/etc/systemd/system/getty.target.wants/getty@tty2.service"
+    - |
+      install -d "$1/etc/systemd/logind.conf.d"
+      cat > "$1/etc/systemd/logind.conf.d/10-kitluy-appliance.conf" <<'EOF'
+      [Login]
+      # No VT gets an automatic login shell. Without this, logind starts
+      # autovt@tty1 (an alias of getty@) whenever tty1 is activated, which no
+      # Conflicts= on `getty@tty1.service` can prevent because the unit NAME
+      # differs. getty on tty2 is enabled explicitly above and is unaffected.
+      NAutoVTs=0
+      ReserveVT=0
+      EOF

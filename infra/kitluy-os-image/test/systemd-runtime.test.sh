@@ -296,5 +296,92 @@ for profile in store-hub pi-terminal; do
   done
 done
 
+# ---------------------------------------------------------------------------
+# TTY1 OWNERSHIP IS DECIDED, NOT CONTESTED.
+# ---------------------------------------------------------------------------
+# Four of five built Terminal artifacts contained NO unit claiming tty1 at all,
+# so `login:` was the only thing tty1 could show — the symptom an operator
+# reported. The console unit now exists, but `Conflicts=getty@tty1.service`
+# alone is not sufficient, and three mechanisms were each verified in a built
+# artifact:
+#
+#   1. Debian's preset leaves `getty@tty1.service` enabled in
+#      `getty.target.wants/`, so getty and the console are both wanted and race.
+#      Conflicts= is documented as orthogonal to ordering, and none was declared.
+#   2. `systemd-logind` autospawns `autovt@ttyN.service`; `autovt@.service` is a
+#      SYMLINK to `getty@.service` — the same program under a different unit
+#      name, which `Conflicts=getty@tty1.service` does not match.
+#   3. The console uses `Restart=always`, reopening that window on each restart.
+#
+# Asserted against the RECIPE, because the recipe is what a rebuild reproduces.
+for layer in "${LAYER_DIR}"/kitluy-base.yaml; do
+  name="$(basename "$layer")"
+
+  if grep -q 'rm -f "$1/etc/systemd/system/getty.target.wants/getty@tty1.service"' "$layer"; then
+    ok "${name}: getty is removed from tty1"
+  else
+    bad "${name}: getty is removed from tty1" \
+        "getty@tty1 stays enabled and races the KitLuy console for tty1"
+  fi
+
+  if grep -q 'NAutoVTs=0' "$layer"; then
+    ok "${name}: logind autospawn is disabled"
+  else
+    bad "${name}: logind autospawn is disabled" \
+        "logind starts autovt@tty1 (an alias of getty@), which Conflicts= cannot prevent"
+  fi
+
+  # MAINTENANCE MUST SURVIVE. Taking tty1 without leaving another authenticated
+  # console would make a device unrecoverable — a worse failure than the login
+  # prompt this fixes.
+  if grep -q 'getty.target.wants/getty@tty2.service' "$layer"; then
+    ok "${name}: an authenticated maintenance console remains on tty2"
+  else
+    bad "${name}: an authenticated maintenance console remains on tty2" \
+        "tty1 taken with no maintenance TTY left"
+  fi
+
+  if grep -qE 'autologin|--autologin|agetty.* -a ' "$layer"; then
+    bad "${name}: no autologin shortcut" "an appliance must not auto-login a shell"
+  else
+    ok "${name}: no autologin shortcut"
+  fi
+done
+
+# A unit that claims tty1 must displace getty, and the console the image relies
+# on must actually be enabled — the defect four artifacts shipped was a console
+# that existed nowhere in the image.
+for overlay_unit in "${LAYER_DIR}"/*.rootfs-overlay/etc/systemd/system/kitluy-*.service; do
+  [[ -f "$overlay_unit" ]] || continue
+  grep -q 'TTYPath=/dev/tty1' "$overlay_unit" || continue
+  name="$(basename "$overlay_unit")"
+  overlay_root="${overlay_unit%/etc/systemd/system/*}"
+
+  if grep -q 'Conflicts=.*getty@tty1' "$overlay_unit"; then
+    ok "${name}: conflicts with getty@tty1"
+  else
+    bad "${name}: conflicts with getty@tty1" "claims tty1 without displacing getty"
+  fi
+
+  if [[ -e "${overlay_root}/etc/systemd/system/multi-user.target.wants/${name}" ]]; then
+    ok "${name}: enabled in the overlay that defines it"
+  else
+    bad "${name}: enabled in the overlay that defines it" \
+        "defines a tty1 console the image never enables — getty keeps tty1"
+  fi
+
+  # The guard must be satisfiable: a failed ConditionPathExists SKIPS the unit
+  # silently, and Conflicts never fires, so getty keeps tty1.
+  guard="$(grep -oE '^ConditionPathExists=.*' "$overlay_unit" | cut -d= -f2-)"
+  if [[ -n "$guard" ]]; then
+    if [[ -e "${overlay_root}${guard}" ]]; then
+      ok "${name}: its ConditionPathExists target is shipped"
+    else
+      bad "${name}: its ConditionPathExists target is shipped" \
+          "guard ${guard} is absent, so the unit is skipped and getty keeps tty1"
+    fi
+  fi
+done
+
 printf '\n  %d passed, %d failed\n\n' "$PASS" "$FAIL"
 [[ $FAIL -eq 0 ]] || exit 1

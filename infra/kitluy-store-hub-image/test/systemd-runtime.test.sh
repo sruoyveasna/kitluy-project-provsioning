@@ -295,5 +295,70 @@ for profile in store-hub; do
   done
 done
 
+# ---------------------------------------------------------------------------
+# 9. TTY1 OWNERSHIP IS DECIDED, NOT CONTESTED.
+# ---------------------------------------------------------------------------
+# An operator must never meet `login:` as the product. The KitLuy console unit
+# declares `Conflicts=getty@tty1.service`, and that alone is NOT sufficient —
+# three mechanisms were verified in a built artifact that each put a login
+# prompt back on tty1:
+#
+#   1. Debian's preset leaves `getty@tty1.service` enabled in
+#      `getty.target.wants/`, so getty and the console are both wanted and race.
+#      Conflicts= is documented as orthogonal to ordering.
+#   2. `systemd-logind` autospawns `autovt@ttyN.service`, and `autovt@.service`
+#      is a SYMLINK to `getty@.service` — the same program under a different
+#      unit name, which `Conflicts=getty@tty1.service` does not match.
+#   3. The console uses `Restart=always`, reopening that window on every restart.
+#
+# These assertions are on the LAYER RECIPE rather than a built artifact, because
+# the recipe is what a rebuild reproduces.
+for layer in "${LAYER_DIR}"/kitluy-hub-base.yaml; do
+  name="$(basename "$layer")"
+
+  if grep -q 'rm -f "$1/etc/systemd/system/getty.target.wants/getty@tty1.service"' "$layer"; then
+    ok "${name}: getty is removed from tty1"
+  else
+    bad "${name}: getty is removed from tty1" \
+        "getty@tty1 stays enabled and races the KitLuy console for tty1"
+  fi
+
+  if grep -q 'NAutoVTs=0' "$layer"; then
+    ok "${name}: logind autospawn is disabled"
+  else
+    bad "${name}: logind autospawn is disabled" \
+        "logind will start autovt@tty1 (an alias of getty@), which Conflicts= cannot prevent"
+  fi
+
+  # MAINTENANCE MUST SURVIVE. Removing getty from tty1 without providing another
+  # authenticated console would make a device unrecoverable, which is a worse
+  # failure than the login prompt this fixes.
+  if grep -q 'getty.target.wants/getty@tty2.service' "$layer"; then
+    ok "${name}: an authenticated maintenance console remains on tty2"
+  else
+    bad "${name}: an authenticated maintenance console remains on tty2" \
+        "tty1 taken with no maintenance TTY left — the device becomes unrecoverable"
+  fi
+
+  # The fix must not become an autologin shortcut.
+  if grep -qE 'autologin|--autologin|ExecStart=.*agetty.*-a ' "$layer"; then
+    bad "${name}: no autologin shortcut" "an appliance must not auto-login a shell"
+  else
+    ok "${name}: no autologin shortcut"
+  fi
+done
+
+# Every KitLuy unit that claims tty1 must ALSO conflict with the autovt alias.
+for overlay_unit in "${LAYER_DIR}"/*.rootfs-overlay/etc/systemd/system/kitluy-*.service; do
+  [[ -f "$overlay_unit" ]] || continue
+  grep -q 'TTYPath=/dev/tty1' "$overlay_unit" || continue
+  name="$(basename "$overlay_unit")"
+  if grep -q 'Conflicts=.*getty@tty1' "$overlay_unit"; then
+    ok "${name}: conflicts with getty@tty1"
+  else
+    bad "${name}: conflicts with getty@tty1" "claims tty1 without displacing getty"
+  fi
+done
+
 printf '\n  %d passed, %d failed\n\n' "$PASS" "$FAIL"
 [[ $FAIL -eq 0 ]] || exit 1
