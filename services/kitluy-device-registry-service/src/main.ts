@@ -331,8 +331,10 @@ server.listen(port, () => {
     // Recorded so a deployment can be seen to have the real wiring. No DSN, no
     // credential and no role name is logged.
     revocationWiring: "governed-database",
-    governedRoutes:
-      "/v1/device-credentials/*, /v1/terminal-provisioning/*, /v1/device-enrollment/*",
+    // `/v1/hub-pairing` is wired above but was missing from this line, so the
+    // startup log reported a smaller surface than the service actually answers —
+    // and this log is the one place an operator checks what a deployment serves.
+    governedRoutes: `/v1/device-credentials/*, /v1/terminal-provisioning/*, /v1/device-enrollment/*, ${HUB_PAIRING_PREFIX}`,
     trustEnvironment,
     // Whether this deployment can complete an enrollment, not merely start one.
     // A key REFERENCE is a name, never key material — nothing secret is logged.
