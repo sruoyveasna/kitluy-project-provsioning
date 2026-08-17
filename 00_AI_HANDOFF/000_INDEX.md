@@ -4,6 +4,51 @@ Read the newest relevant handoff before starting work. Naming:
 `YYYY-MM-DD__<AREA>__<TASK-ID>__<SLUG>__AI-HANDOFF.md` under the matching
 subfolder (repository/ shared/ apps/ services/ data/ infrastructure/ reviews/).
 
+## Store Hub pairing, the cloud development target, and Phase B storage (2026-08-17)
+
+**Development now targets the hosted development project** `kitluy-project-pos`
+(`gjgbnkhuwlwhngbtrgts`), not a local stack — owner instruction. The guard that
+prevented it was stricter than the decision it cited: that decision's own §1 asks
+for Pis to "come online **in the cloud** by itself", and its locked guards concern
+the ENVIRONMENT, not where the database lives. Hosted is now the more complete of
+the two databases — **93/93** against the local stack's 88, which still cannot
+apply `0189` at all (`KLREC-2026-08-11-EDGE-006`, OPEN).
+
+**Store Hub pairing is a STORE-scoped session.** Migrations `0191`–`0194` gave the
+code its rules (Crockford, fifteen minutes, five-attempt lockout) and the session
+model the owner chose — *"the code is for the Store, and any Hub may use it"*.
+Group 0194 was applied and granted but **no TypeScript called it**; both routes
+still spoke the per-device contract, which would have forced a Hub picker onto the
+Partner — the exact question the owner rejected, and one with no honest answer.
+Partner Portal screen and Admin `store_hub` view built on the corrected model.
+
+**Two defects that only appear with real hardware:** `dev:fleet` configured only a
+TERMINAL hardware profile, so every Store Hub was answered `TICKET_REFUSED`; and
+the image advertised LAN port `8443` while a terminal REJECTS anything but `7443`
+— a Hub would have presented a correctly verifying signature and still been
+refused by every terminal.
+
+**Phase B: the Hub now provisions its own encrypted database.** It did not before
+— `postgresql-15` was installed and nothing ever ran `initdb`. LUKS2 on NVMe,
+keyed by HMAC from the Pi's **OTP device-unique key** (fuses; a stolen drive is
+ciphertext). Migrations apply in **development only** (`KL-INF-P1-037`). Plus a
+production entrypoint that refuses in a deliberate order rather than improvising,
+with disk usage MEASURED rather than assumed.
+
+**B3b remains BLOCKED on BLK-005**: nothing in the codebase can produce a Hub
+certificate or device CA, so **a terminal cannot talk to a Hub**. The test suites
+mint their own CAs; those helpers stay test-local and were not promoted.
+
+`pnpm verify` is RED and was before this session — 19 environmental
+device-registry failures, one stale admin smoke assertion, `prettier` blocked by
+`EACCES` on root-owned chroot dirs, and 43 `no-undef` from a lint config that
+declares no `Buffer`/`fetch` for `.mjs`. All attributed; none from this work.
+**Nothing in Phase B has run on hardware.**
+
+Record: `shared/2026-08-17__SHARED__HUB-PAIRING-AND-PHASE-B__SESSION-PAIRING-CLOUD-TARGET-AND-STORE-HUB-STORAGE__AI-HANDOFF.md`
+
+---
+
 ## A fresh device enrolls itself, end to end (2026-08-12)
 
 **DEVWF-B05 and DEVWF-B06 move ABSENT/BLOCKED → IMPLEMENTED-IN-DEV.** The
