@@ -3137,3 +3137,323 @@ therefore not made.
 **Consequence:** group 0190 must be treated as INCOMPLETE. It is authored,
 locally applied and security-verified, but the issuance path does not yet
 function end to end, and no cloud write was performed.
+
+---
+
+## KLD-2026-08-13-HUB-CLAIM-PRESENTATION-001 — Store Hub pairing-code presentation: format, ceiling, lockout (2026-08-13)
+
+**Closure state: DECIDED — implemented as migration group `0191`.**
+
+Authority: `kitluy-device-discovery-and-pairing-protocol-v1.0.0` §6.1, which
+specifies the Store Hub provisioning code as eight characters of unambiguous
+Crockford Base32, valid fifteen minutes, single-use, with five failed attempts
+locking the session and emitting a security event; and KLSRC-0162 §12/§33.
+
+`device_claims` (group 0121) implemented the single-use, replay-protected and
+atomic half of that contract correctly, and **none** of the rest: its TTL door
+accepts one second to twenty-four hours, there is no attempt counter, and no
+constraint on the code format. The machinery existed only for TERMINALS
+(`device_provisioning_codes` + `evaluate_terminal_provisioning_code_v1`, groups
+0162/0164), which is structurally terminal-only and whose header explicitly
+refuses to be widened into the Hub path.
+
+### Three decisions recorded here
+
+**1. Copy the ordering, not the table.** `evaluate_hub_claim_code_v1` reuses the
+sequencing learned in 0164 — expiry evaluated BEFORE any attempt is counted, the
+digest compared in constant time, the presented value and its digest never
+persisted — while keeping Hub semantics and its own table.
+
+**2. The function is owned by `postgres`, NOT by `kitluy_activation_governor`.**
+Copying 0164's governor ownership is the tempting answer and is wrong here. The
+terminal path's event table is owned by the governor; the claim path's tables are
+owned by `postgres` with **FORCED** row-level security, and the governor's only
+policies on them (`device_claims_activation_read`,
+`device_claim_events_activation_read`) are SELECT. A governor-owned definer would
+have required new INSERT/UPDATE policies on the claim ledger for a role the
+schema deliberately kept read-only. Instead the function joins its siblings
+(`create_device_claim_v1`, `redeem_device_claim_v1`, `record_claim_event`) under
+`postgres`, and `constant_time_text_eq_v1` is granted to `postgres` — a grant
+that confers no capability, since `postgres` already holds BYPASSRLS and owns
+these tables, and the helper is a pure side-effect-free comparison.
+
+**3. `device_claim_events.event_type` is WIDENED by three values, and this is
+the destructive statement the group carries.** The closed vocabulary knew only
+the redemption half of the lifecycle. `CLAIM_PRESENTED`, `CLAIM_FAILED_ATTEMPT`
+and `CLAIM_LOCKED` are added rather than folded into the existing
+`CLAIM_REFUSED`, because §6.1 requires that the fifth failure emit a **security**
+event: recording a lockout as a generic refusal makes the one event the protocol
+mandates indistinguishable in the audit trail from an ordinary wrong code, which
+is the same as not emitting it.
+
+Widening a CHECK requires dropping and re-adding it. Nothing is destroyed — the
+new vocabulary is a strict superset, every existing row stays valid, and the
+constraint is re-added in the same transaction. This decision id is the authority
+carried by the `-- kitluy:destructive-approved:` marker in group `0191`.
+
+### Scope refused
+
+The group does **not** touch `redeem_device_claim_v1`. Redemption stays as group
+0121 left it, including its deliberate stop at `awaiting_trust` — activation is
+certificate-backed and gated on **BLK-005**. Presentation consumes nothing;
+redemption re-checks everything under its own lock.
+
+The fifteen-minute ceiling is enforced as a **NOT VALID** row constraint rather
+than by altering 0121's shared issuance door, whose TTL argument is a caller
+contract. Claims issued under the old ceiling stay readable and redeemable.
+
+### Evidence
+
+`services/kitluy-device-firstboot-agent/test/hub-claim-presentation.db.test.ts`
+— 11 tests, passing against the PG17 stack (2026-08-13): lowercase folding,
+Crockford rejection, wrong-length and display-hyphen rejection, refusals that do
+not distinguish MALFORMED from MISMATCH to the caller while recording the
+difference in the audit trail, the five-attempt budget, a locked claim refusing
+even the correct code, exactly one `CLAIM_LOCKED` event, no code material stored
+anywhere, expiry costing no attempt, and the ceiling refusing 3600s while
+accepting 900s.
+
+The suite skips — rather than passing vacuously — when the stack is unreachable
+or predates 0191, which is required because no local stack can replay the full
+chain while KLREC-2026-08-11-EDGE-006 stays open.
+
+---
+
+## KLD-2026-08-13-HUB-PAIRING-ROUTE-001 — the `/v1/hub-pairing` surface and its least-privilege identity (2026-08-13)
+
+**Closure state: DECIDED — implemented as migration group `0192` plus
+`hub-pairing-composition.ts` / `hub-pairing-routes.ts`.**
+
+Authority: KLD-2026-08-13-HUB-CLAIM-PRESENTATION-001; pairing protocol §6.1;
+KLSRC-0162 §12; the transport constants of
+KLD-2026-08-05-TERMINAL-TRANSPORT-001, reused rather than reinvented.
+
+A cloud route is **mandatory, not a convenience**: `redeem_device_claim_v1` is
+granted to `service_role` only, so a Store Hub physically cannot redeem its own
+claim.
+
+### Four decisions recorded here
+
+**1. One route, not two.** Presentation and redemption are two governed steps but
+not two REQUESTS. Exposing presentation alone would publish an oracle that
+confirms a code while consuming nothing, and the gap between two calls is exactly
+where a second caller could redeem the claim first. Both doors run in ONE
+transaction, so `for update` on the claim serialises racing Hubs.
+
+**2. A dedicated NOLOGIN identity, `kitluy_hub_pairing_service` (group 0192).**
+Both doors were reachable only by `service_role`, which holds **BYPASSRLS**.
+Running a pre-credential, internet-facing surface — authorized by eight
+characters an operator typed — as the most privileged database client in the
+system was the single largest avoidable risk in this feature. The role holds
+EXECUTE on exactly two functions, no table access, and is a member of nothing;
+group 0192 asserts all of that on apply rather than claiming it in a comment.
+
+**3. `redeem_hub_claim_v1`, a SECURITY DEFINER bridge.** `redeem_device_claim_v1`
+is **not** a definer: it runs as its caller and writes three tables, so it only
+works for a caller holding those privileges. Granting it to a least-privilege
+role succeeds and then fails on the first write — which is what the integration
+suite caught. The terminal path never met this because its doors ARE definers
+(0172); group 0121 predates the pattern. Rejected alternatives: giving the
+pairing role table privileges (destroys the property), and converting 0121's door
+to a definer (a shared door with ~two dozen integration callers and the whole
+terminal path — its own decision, not a footnote). The bridge adds no authority:
+every 0121 refusal propagates unchanged.
+
+**4. A wrong code and a malformed code are the SAME answer.** Both are
+`SCOPE_PERMISSION_DENIED`, never `VALIDATION_FAILED`. Answering 400 for a bad
+shape and 403 for a wrong code would let a guesser learn the alphabet and length
+for free, without spending one of its five attempts. `LOCKED` keeps its own safe
+MESSAGE (so an operator is told to fetch a new code rather than retype) while
+sharing the status code.
+
+### KLREC — three defects found and corrected during this work
+
+**(a) The canonical claim payload was IMPOSSIBLE to compute.**
+`hubClaimPayloadBytes` originally included `expiresAt`. But
+`create_device_claim_v1` derives `expires_at` from the DATABASE clock and the row
+is immutable the instant it exists (`KLUY-DEVICE-CLAIM-IMMUTABLE` covers device,
+scope, token, payload *and* expiry), so no issuer could ever hash the value it
+needed. **Every legitimate pairing would have failed** with
+`KLUY-DEVICE-CLAIM-PAYLOAD-ALTERED`. It was also redundant: redemption already
+checks `expires_at <= clock_timestamp()` against the authoritative row.
+
+The expiry is removed; the payload is device + scope, which is exactly the
+promise the column makes. The kind string stays `v1` because these bytes were
+never produced anywhere before — the three suites this canonicalizer replaced
+each invented their own filler, the defect it exists to fix. **A unit test could
+not have caught this: a stub agrees with itself.** The live integration suite did.
+
+**(b) Group 0191 left two helpers executable by PUBLIC.**
+`hub_claim_code_alphabet_v1` and `normalize_hub_claim_code_v1` carried the
+function default, which is EXECUTE to PUBLIC — so `anon` could call them. Nothing
+secret escapes (one returns a constant, the other upper-cases), which is why it
+went unnoticed; 0192's capability assertion is what found it. Now revoked from
+PUBLIC and `anon`, and kept for `authenticated` on purpose: a Partner Portal
+generating a code should draw from the same 32 characters the presenter validates
+against, and asking the database beats re-typing the alphabet into TypeScript.
+
+**(c) Both new database suites were single-use.** They resolved a free Store Hub
+from the development fixtures, and a Hub leaves that set PERMANENTLY once touched
+— a locked claim stays `issued` for ever, and a paired Hub holds a live
+assignment. So they passed once and skipped afterwards, which is worse than
+failing because a skipped suite still reads as green. Both now MINT their own
+Hubs through `enroll_device_v1` with randomised hardware signals (shared evidence
+would quarantine the previous test's device). Verified by running each twice
+consecutively.
+
+### Evidence
+
+- `test/hub-pairing-routes.test.ts` — 16 tests: malformed and wrong codes
+  indistinguishable, wrong length not a 400, LOCKED distinct in message only,
+  unknown-field and scope-naming refusals, size gate before parsing, limiter
+  counting malformed attempts and not keyed on caller-chosen values.
+- `test/hub-pairing.integration.test.ts` — 7 tests against the PG17 stack:
+  PAIRED reaching `pending_trust` with `activated:false`, lowercase accepted, a
+  wrong code leaving the claim issued, LOCKED after five, and redemption REFUSED
+  when the stored payload was bound to a different tenant.
+- `pnpm lint` 0 errors; `pnpm typecheck` 99/99; `pnpm secret:scan` 1755 files;
+  `pnpm migrations:validate` 91 files.
+- Pre-existing failures unchanged: registry service 19 (baseline 2026-08-12
+  identical), firstboot agent 3 in `trusted-time-activation.db.test.ts`.
+
+---
+
+## KLREC-2026-08-13-AUTHZ-001 — `has_permission` accepts a resource scope and ignores it (2026-08-13)
+
+**Closure state: OPEN — no live exposure found, but the signature is a trap for
+new callers.**
+
+`kitluy_auth.has_permission(p_permission_key, p_resource_type, p_resource_id,
+p_environment)` reads as a resource-scoped authorization check. It is not one.
+
+In the deployed function body, `p_resource_type` and `p_resource_id` each appear
+**exactly once — in the signature** — and `scope_type` / `scope_id` appear **zero
+times**. The only use of `assignment_scopes` is:
+
+```sql
+or exists (
+  select 1 from kitluy_auth.assignment_scopes s
+  where s.role_assignment_id = ra.id
+    and s.environment in (p_environment, 'all')
+)
+```
+
+That gates on ENVIRONMENT. Nothing compares the caller's assigned scope to the
+resource being asked about. `assert_permission` delegates straight to it and
+inherits the same behaviour.
+
+**Consequence:** a caller that passes a resource and trusts the boolean has no
+resource binding at all. A `DIGITAL_STORE_STAFF` user assigned to Store A would
+receive `true` for `has_permission('...', 'digital_store', <Store B>, 'development')`.
+
+### No live exposure — and the first reading of this was wrong
+
+The group 0095 RLS policies pass a per-row resource id, which looked alarming:
+
+```sql
+and kitluy_auth.has_permission('laundry.bookings.read', 'store_location', store_location_id, null)
+```
+
+But every one of those policies pairs it with a REAL scope conjunct —
+
+```sql
+store_location_id = any (kitluy_auth.current_location_ids())
+```
+
+— and `current_location_ids()` does the actual binding: it reads
+`assignment_scopes` for `scope_type = 'store_location'`, falls back to
+`current_digital_store_ids()`, and excludes SUSPENDED/CLOSED locations. So rows are
+correctly scoped, and the `has_permission` call beside it is a permission check
+whose resource arguments are decorative rather than the scope binding. An initial
+assessment that this was a cross-tenant data exposure was **incorrect** and is
+recorded here so the correction is not lost.
+
+### What was done about it
+
+Group 0193's issuance route does **not** rely on it. `authorizePartnerRequest`
+(`services/kitluy-management-api/src/partner-authorization.ts`) asks two separate
+questions in one round trip, both as the actor:
+
+* the PERMISSION, via `has_permission(key, null, null, environment)` — resource
+  arguments deliberately omitted, so no reader mistakes them for a constraint;
+* the SCOPE, via `$1::uuid = any (kitluy_auth.current_digital_store_ids())`.
+
+`test/hub-pairing-codes.test.ts` proves the scope question is actually asked: an
+actor holding the permission and assigned to Store A is REFUSED for Store B, and
+never reaches the issuance layer.
+
+### Owner decision required
+
+Two options, neither taken here because both are wider than this work:
+
+1. **Implement resource scoping inside `has_permission`.** Correct, and it would
+   make every existing caller stronger — but it changes an authorization primitive
+   the whole RLS surface depends on, so it needs its own evidence and review.
+2. **Rename or narrow the signature** so it cannot imply a guarantee it does not
+   provide (for example dropping the unused parameters, or naming it
+   `has_permission_in_environment`). Cheaper and honest, but touches every call
+   site.
+
+Until one is chosen, any NEW caller must pair the permission check with an
+explicit scope conjunct, as this group does.
+
+---
+
+## KLD-2026-08-13-HUB-PAIRING-SESSION-001 — one pairing code per Store, not per Hub (2026-08-13)
+
+**Closure state: DECIDED — owner decision, implemented as migration group `0194`.**
+
+Owner's words, 2026-08-13: *"we boot up store hub, input the code generated from
+partner"*. Asked how the Partner Portal should identify WHICH Hub a code is for,
+the owner chose: **the code is for the STORE, and any Hub may use it.**
+
+This matches the owner decision's own Milestone 3 wording — "Partner opens Store
+Hub pairing **SESSION**" — and it removes a step that had no good answer. A Hub
+that has never paired belongs to nobody, so there is no way to show a Partner
+"their" unpaired Hubs without showing them everyone's; and the label on the Hub
+console (`KL-1A2B3C4D`) is derived on-device from the public key and stored
+nowhere, so it could not be looked up either.
+
+### Why `device_claims` was NOT relaxed
+
+The obvious implementation — drop `device_claims.device_id NOT NULL` — was
+rejected. Three things depend on a claim knowing its device from the moment it
+exists:
+
+* the canonical payload `kitluy.hub-claim-payload.v1` binds device + scope, which
+  is what stops a captured token being replayed elsewhere;
+* group 0191's five-attempt lockout counts against THE CLAIM, resolved via its
+  device;
+* redemption refuses a mismatch with `KLUY-DEVICE-CLAIM-WRONG-DEVICE`.
+
+Relaxing the column unpicks all three and rewrites most of groups 0121, 0191 and
+0192. It also makes the attempt budget unimplementable as specified: a wrong code
+that matches no claim has nothing to count against.
+
+### What was built instead
+
+A pairing SESSION: store-scoped, with its own code digest, fifteen-minute row
+ceiling, five-attempt budget and single-use rule. It is not a claim and never
+becomes one. When a Hub presents a session code, the service creates a normal
+device-bound `device_claims` row for THAT Hub and redeems it immediately — so the
+claim model, the canonical payload and every 0121 refusal are untouched, and the
+device binding happens at the only moment it can honestly be known: when a
+specific Hub actually asks.
+
+Consequences recorded deliberately:
+
+* **One open session per Store.** Opening a second revokes the first. Two live
+  codes for one shop is how a Hub gets attached by a code someone believed was
+  already dead.
+* **A miss cannot be counted.** A code matching no session is refused identically
+  to a malformed one and spends no budget — you cannot lock a session you did not
+  find. Guessing is bounded by the transport rate limiter and by the ~1.1×10¹²
+  code space against a fifteen-minute window. Only a HIT that then fails (an
+  ineligible device) spends the session's five attempts, which is the honest
+  reading of §6.1's "five failed attempts lock the session".
+* **Racing Hubs serialise.** `consume_hub_pairing_session_v1` updates conditional
+  on `state = 'open'`, so exactly one of two Hubs presenting the same code wins.
+
+Timing note: nothing from Phase A was committed or deployed to cloud when this
+decision landed, which is the only reason it was cheap. The same change after the
+Phase A commit would have required an additive correction group instead.
