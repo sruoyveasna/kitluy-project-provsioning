@@ -19,7 +19,8 @@ import {
 } from "./fleet.js";
 import { buildHealthReport, SERVICE_NAME, SERVICE_VERSION } from "./index.js";
 import {
-  issueHubPairingCode,
+  listPartnerStores,
+  openHubPairingSession,
   resolveStoreScope,
   HUB_PAIRING_TTL_SECONDS,
   type HubPairingIssuanceDeps,
@@ -155,18 +156,23 @@ function notFound(message: string): KernelResponse {
 }
 
 /**
- * `POST /management/v1/hub-pairing-codes` — a Partner issues a Store Hub pairing
- * code for one of their own Hubs.
+ * `POST /management/v1/hub-pairing-codes` — a Partner opens a pairing session for
+ * one of their own Stores.
  *
  * ===========================================================================
  * WHAT THE CALLER MAY NAME, AND WHAT IT MAY NOT
  * ===========================================================================
- * It names the Hub and where the Hub is going: `deviceRecordId`,
- * `digitalStoreId`, `storeLocationId`. It may NOT name the Tenant — that is
- * resolved from the Store row, because a caller able to supply it could try to
- * attach a Hub across Tenants. It may not name the TTL either: fifteen minutes is
- * the protocol, enforced by a row constraint, and a caller-chosen lifetime is not
- * a thing this surface offers.
+ * It names WHERE the Hub is going, and nothing else: `digitalStoreId` and
+ * `storeLocationId`.
+ *
+ * It may NOT name a device. The code belongs to the Store and any Hub may use it
+ * (KLD-2026-08-13-HUB-PAIRING-SESSION-001) — the device binding is created when a
+ * specific Hub presents the code, which is the only moment it is honestly known.
+ *
+ * It may NOT name the Tenant — that is resolved from the Store row, because a
+ * caller able to supply it could try to attach a Hub across Tenants. It may not
+ * name the TTL either: fifteen minutes is the protocol, enforced by a row
+ * constraint, and a caller-chosen lifetime is not a thing this surface offers.
  *
  * Unknown fields are refused rather than ignored, the same discipline the
  * device-facing routes hold.
@@ -210,7 +216,12 @@ async function handleHubPairingCodeIssuance(
     return { status: 422, body: errorEnvelope("VALIDATION_FAILED", "Body must be a JSON object.") };
   }
 
-  const allowed = ["deviceRecordId", "digitalStoreId", "storeLocationId"];
+  // No `deviceRecordId`. The code belongs to the STORE and any Hub may use it
+  // (KLD-2026-08-13-HUB-PAIRING-SESSION-001); the device binding is created when
+  // a specific Hub presents the code, which is the only moment it is honestly
+  // known. A caller that sends one is refused rather than ignored, so an
+  // integration built against the old per-device shape fails loudly.
+  const allowed = ["digitalStoreId", "storeLocationId"];
   const unknown = Object.keys(body).filter((k) => !allowed.includes(k));
   if (unknown.length > 0) {
     return {
@@ -257,12 +268,11 @@ async function handleHubPairingCodeIssuance(
     return notFound("No such Store or Location.");
   }
 
-  const issued = await issueHubPairingCode(deps.issuance, {
-    deviceRecordId: ids.deviceRecordId!,
+  const issued = await openHubPairingSession(deps.issuance, {
     tenantId: scope.tenantId,
     digitalStoreId: ids.digitalStoreId!,
     storeLocationId: ids.storeLocationId!,
-    // Names the human who issued it, for the claim's audit trail.
+    // Names the human who opened it, for the session's audit trail.
     operatorRef: `partner/${outcome.userId}`,
   });
 
@@ -281,13 +291,16 @@ async function handleHubPairingCodeIssuance(
       // SHOWN ONCE. Only the digest is stored, so there is no endpoint that can
       // return this value again — the Portal must render it immediately.
       code: issued.issued.code,
-      claimId: issued.issued.claimId,
-      deviceRecordId: issued.issued.deviceRecordId,
+      sessionId: issued.issued.sessionId,
       expiresAt: issued.issued.expiresAt,
       ttlSeconds: HUB_PAIRING_TTL_SECONDS,
       showOnce: true,
+      // Says "any Store Hub" deliberately: the operator does not need to know
+      // which unit will use it, and telling them otherwise invents a constraint
+      // the system does not have. Opening this session revoked any earlier one
+      // for this Store, so a previously issued code has already stopped working.
       detail:
-        "Give this code to the person at the Store Hub. It is valid once, for fifteen minutes, and cannot be retrieved again.",
+        "Type this code into any Store Hub at this Location. It is valid once, for fifteen minutes, and cannot be retrieved again. Any code issued earlier for this Store no longer works.",
     },
   };
 }
@@ -320,6 +333,43 @@ export async function handleManagementRequest(
   if (request.method !== "GET") {
     // Every OTHER route in this slice is a read.
     return { status: 405, body: errorEnvelope("VALIDATION_FAILED", "Method not allowed") };
+  }
+
+  // The Stores a PARTNER may open a session for. Separate from `/me`, which
+  // answers the Admin question and refuses anyone without an HET admin profile —
+  // a Partner is exactly that caller.
+  if (route === "/partner/stores") {
+    if (deps.issuance === undefined) {
+      // Fail CLOSED, and say so: an empty list would read as "you hold no
+      // Stores", which is a different and wrong answer.
+      return {
+        status: 503,
+        body: errorEnvelope("DEPENDENCY_UNAVAILABLE", "Pairing is not configured on this service."),
+      };
+    }
+    const outcome = await authorizePartnerRequest(
+      deps.db,
+      deps.verifier,
+      request.authorization,
+      "fleet.hub_pairing_code.issue",
+      // No Store named: this is the call that finds out which Stores exist for
+      // this actor. The permission is still required.
+      null,
+      deps.environment ?? "development",
+    );
+    if (outcome.kind === "deny") {
+      return {
+        status: outcome.status,
+        body: errorEnvelope(
+          outcome.status === 401 ? "AUTHENTICATION_REQUIRED" : "SCOPE_PERMISSION_DENIED",
+          outcome.status === 401 ? "Sign in to continue." : "Access denied.",
+          { details: { reason: outcome.code } },
+        ),
+      };
+    }
+
+    const stores = await listPartnerStores(deps.issuance, outcome.userId, outcome.digitalStoreIds);
+    return { status: 200, body: { stores, count: stores.length, dataAsOf: nowIso(deps) } };
   }
 
   if (route === "/me") {

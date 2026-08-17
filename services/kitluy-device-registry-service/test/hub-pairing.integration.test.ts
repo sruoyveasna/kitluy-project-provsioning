@@ -146,29 +146,25 @@ function freshCode(): string {
 }
 
 /**
- * Issue a code exactly the way the PARTNER PORTAL will: ONE call to
- * `create_device_claim_v1`, with `payload_sha256` computed up front from the
- * canonical canonicalizer over values the issuer already holds.
+ * Open a session exactly the way the PARTNER PORTAL does: store scope and a code
+ * digest, and NO DEVICE.
  *
- * This helper is the reason the expiry is no longer in the canonical payload. The
- * first version of it inserted a placeholder digest and then UPDATEd the real one,
- * because `expires_at` does not exist until the row does — and the database
- * refused with `KLUY-DEVICE-CLAIM-IMMUTABLE`. That refusal was correct, and it
- * proved the payload definition was impossible for any issuer to satisfy.
+ * That absence is the whole point of the model
+ * (KLD-2026-08-13-HUB-PAIRING-SESSION-001). A helper that named a device here
+ * would be testing a contract the Portal cannot express — it has no way to know
+ * which Hub will be standing in the shop, and no way to list "their" unpaired
+ * Hubs to find out.
+ *
+ * The device-bound claim still exists; it is minted by the composition under
+ * test, at the moment a specific Hub presents the code. So the canonical payload
+ * digest is computed there rather than here, which is why this helper no longer
+ * needs `hubClaimPayloadBytes` at all.
  */
-async function issueLikeThePortal(deviceId: string, code: string, scope: Scope): Promise<string> {
-  const payload = sha256(
-    hubClaimPayloadBytes({
-      deviceRecordId: deviceId,
-      tenantId: scope.tenantId,
-      digitalStoreId: scope.digitalStoreId,
-      storeLocationId: scope.storeLocationId,
-    }),
-  );
+async function openSessionLikeThePortal(code: string, scope: Scope): Promise<string> {
   const { rows } = await pool.query<{ id: string }>(
-    `select kitluy_devices.create_device_claim_v1(
-              $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, 900, 'operator/pairing-suite') as id`,
-    [deviceId, scope.tenantId, scope.digitalStoreId, scope.storeLocationId, sha256(code), payload],
+    `select kitluy_devices.open_hub_pairing_session_v1(
+              $1::uuid, $2::uuid, $3::uuid, $4, 900, 'operator/pairing-suite') as id`,
+    [scope.tenantId, scope.digitalStoreId, scope.storeLocationId, sha256(code)],
   );
   return rows[0]!.id;
 }
@@ -181,7 +177,7 @@ describe.skipIf(!live)("a Store Hub pairs, and lands exactly where the model say
     if (device === null) return;
     const scope = await borrowedScope();
     const code = freshCode();
-    await issueLikeThePortal(device, code, scope);
+    await openSessionLikeThePortal(code, scope);
 
     const outcome = await composition.pair({
       deviceRecordId: device,
@@ -216,7 +212,7 @@ describe.skipIf(!live)("a Store Hub pairs, and lands exactly where the model say
     if (device === null) return;
     const scope = await borrowedScope();
     const code = freshCode();
-    await issueLikeThePortal(device, code, scope);
+    await openSessionLikeThePortal(code, scope);
 
     const outcome = await composition.pair({
       deviceRecordId: device,
@@ -229,12 +225,12 @@ describe.skipIf(!live)("a Store Hub pairs, and lands exactly where the model say
 });
 
 describe.skipIf(!live)("refusals reach the composition intact", () => {
-  it("refuses a wrong code, and the claim survives for another attempt", async () => {
+  it("refuses a wrong code, and the session survives UNSPENT", async () => {
     const device = await mintHub();
     if (device === null) return;
     const scope = await borrowedScope();
     const code = freshCode();
-    await issueLikeThePortal(device, code, scope);
+    const sessionId = await openSessionLikeThePortal(code, scope);
 
     const outcome = await composition.pair({
       deviceRecordId: device,
@@ -245,43 +241,101 @@ describe.skipIf(!live)("refusals reach the composition intact", () => {
     expect(outcome.result).toBe("CODE_REFUSED");
 
     const { rows } = await pool.query<{ failed_attempt_count: number; state: string }>(
-      `select failed_attempt_count, state::text as state from kitluy_devices.device_claims
-        where device_id = $1::uuid order by created_at desc limit 1`,
-      [device],
+      `select failed_attempt_count, state from kitluy_devices.hub_pairing_sessions where id = $1::uuid`,
+      [sessionId],
     );
-    expect(rows[0]?.failed_attempt_count).toBe(1);
-    // Still issued: a wrong guess must not consume the operator's code.
-    expect(rows[0]?.state).toBe("issued");
+    // ZERO, not one. A wrong code matches no session at all, so there is nothing
+    // to count it against — you cannot lock a session you did not find
+    // (KLD-2026-08-13-HUB-PAIRING-SESSION-001). Guessing is bounded by the
+    // transport rate limiter and the code space, not by this counter.
+    expect(rows[0]?.failed_attempt_count).toBe(0);
+    expect(rows[0]?.state).toBe("open");
   });
 
-  it("reports LOCKED distinctly once the budget is spent", async () => {
+  it("a wrong code can NEVER lock the session, however many times it is tried", async () => {
     const device = await mintHub();
     if (device === null) return;
     const scope = await borrowedScope();
     const code = freshCode();
-    await issueLikeThePortal(device, code, scope);
+    const sessionId = await openSessionLikeThePortal(code, scope);
 
-    const results: string[] = [];
-    for (let i = 0; i < 5; i += 1) {
+    for (let i = 0; i < 6; i += 1) {
       const r = await composition.pair({
         deviceRecordId: device,
         presentedCode: "ZZZZ2222",
         actorRef: "device/pairing-suite",
       });
-      results.push(r.result);
+      expect(r.result).toBe("CODE_REFUSED");
     }
 
-    // The fifth failure locks. LOCKED, not CODE_REFUSED, is what lets the CLI
-    // tell the operator to fetch a new code instead of retyping.
-    expect(results[4]).toBe("LOCKED");
-
-    // And now even the CORRECT code is refused.
+    // The operator's own code still works. If misses DID spend the budget, a
+    // stranger could lock a shop out of pairing by typing rubbish six times.
     const correct = await composition.pair({
       deviceRecordId: device,
       presentedCode: code,
       actorRef: "device/pairing-suite",
     });
-    expect(correct.result).toBe("LOCKED");
+    expect(correct.result).toBe("PAIRED");
+
+    const { rows } = await pool.query<{ state: string }>(
+      "select state from kitluy_devices.hub_pairing_sessions where id = $1::uuid",
+      [sessionId],
+    );
+    expect(rows[0]?.state).toBe("consumed");
+  });
+
+  it("reports LOCKED once five INELIGIBLE devices spend the budget", async () => {
+    const scope = await borrowedScope();
+    const code = freshCode();
+    const sessionId = await openSessionLikeThePortal(code, scope);
+
+    // A HIT that then fails is what §6.1's "five failed attempts lock the
+    // session" can honestly mean. Here the code is RIGHT every time and the
+    // presenting device is not an enrolled Store Hub — a real scenario: someone
+    // typing the Hub's code into a Pi Terminal.
+    const { rows: terminals } = await pool.query<{ id: string }>(
+      `select id from kitluy_devices.devices
+        where device_class <> 'store_hub' or lifecycle_state <> 'enrolled'
+        order by created_at desc limit 5`,
+    );
+    if (terminals.length < 5) return;
+
+    const results: string[] = [];
+    for (const t of terminals) {
+      const r = await composition.pair({
+        deviceRecordId: t.id,
+        presentedCode: code,
+        actorRef: "device/pairing-suite",
+      });
+      results.push(r.result);
+    }
+
+    // The fifth attempt LOCKS the session but still answers with the reason it
+    // failed, not with "locked" — the door records the transition and reports the
+    // cause, and only a LATER presentation meets the closed door. Asserted as it
+    // actually behaves rather than as one might assume: an operator whose fifth
+    // try is refused is told why that device cannot pair, which is the more useful
+    // message at that moment.
+    expect(results.every((r) => r === "CODE_REFUSED")).toBe(true);
+
+    const { rows } = await pool.query<{ state: string; failed_attempt_count: number }>(
+      `select state, failed_attempt_count from kitluy_devices.hub_pairing_sessions where id = $1::uuid`,
+      [sessionId],
+    );
+    expect(rows[0]?.failed_attempt_count).toBe(5);
+    expect(rows[0]?.state).toBe("locked");
+
+    // THIS is where LOCKED surfaces, and it is what lets the CLI tell the operator
+    // to fetch a new code rather than retype the one they are holding. A genuine
+    // Hub with the correct code is now refused — the code is dead.
+    const hub = await mintHub();
+    if (hub === null) return;
+    const late = await composition.pair({
+      deviceRecordId: hub,
+      presentedCode: code,
+      actorRef: "device/pairing-suite",
+    });
+    expect(late.result).toBe("LOCKED");
   });
 
   it("refuses a code whose alphabet is wrong WITHOUT reaching the database", async () => {
@@ -305,50 +359,83 @@ describe.skipIf(!live)("refusals reach the composition intact", () => {
   });
 });
 
-describe.skipIf(!live)("the payload binding is not decorative", () => {
-  it("REFUSES redemption when the stored payload was bound to a different scope", async () => {
+describe.skipIf(!live)("the scope comes from the session, never from the caller", () => {
+  /**
+   * The pre-session version of this suite issued a claim carrying a payload
+   * digest bound to the WRONG tenant, and proved redemption refused it with
+   * `KLUY-DEVICE-CLAIM-PAYLOAD-ALTERED`.
+   *
+   * That scenario is now UNREACHABLE, and saying so is more useful than keeping a
+   * test that no longer tests it: there is no window in which a mis-scoped claim
+   * exists, because the composition mints the claim itself, in the same
+   * transaction, from the scope the session door returned. The binding is now
+   * structural rather than checked after the fact.
+   *
+   * So what is worth proving is the property that replaced it — a Hub lands in
+   * the session's Store, and the caller has no way to influence that.
+   */
+  it("a paired Hub lands in the SESSION's Store, not one the device asked for", async () => {
     const device = await mintHub();
     if (device === null) return;
     const scope = await borrowedScope();
     const code = freshCode();
-
-    // Issue with a payload digest bound to the WRONG tenant. Presentation still
-    // matches — the code is right — but redemption must refuse, which is exactly
-    // the promise `payload_sha256` carries: a captured token cannot be replayed
-    // against a different Tenant, Digital Store or Location.
-    const client = await pool.connect();
-    try {
-      const { rows } = await client.query<{ id: string }>(
-        `select kitluy_devices.create_device_claim_v1(
-                  $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, 900, 'operator/pairing-suite') as id`,
-        [
-          device,
-          scope.tenantId,
-          scope.digitalStoreId,
-          scope.storeLocationId,
-          sha256(code),
-          sha256(
-            hubClaimPayloadBytes({
-              deviceRecordId: device,
-              tenantId: "99999999-9999-4999-8999-999999999999",
-              digitalStoreId: scope.digitalStoreId,
-              storeLocationId: scope.storeLocationId,
-            }),
-          ),
-        ],
-      );
-      expect(rows[0]?.id).toBeTruthy();
-    } finally {
-      client.release();
-    }
+    await openSessionLikeThePortal(code, scope);
 
     const outcome = await composition.pair({
       deviceRecordId: device,
       presentedCode: code,
       actorRef: "device/pairing-suite",
     });
+    expect(outcome.result).toBe("PAIRED");
 
-    expect(outcome.result).toBe("REDEMPTION_REFUSED");
-    expect(outcome.auditDetail).toContain("payload");
+    // Read the ASSIGNMENT the database actually wrote, not the composition's own
+    // report of it — the two agreeing is the point.
+    const { rows } = await pool.query<{
+      tenant_id: string;
+      digital_store_id: string;
+      store_location_id: string;
+    }>(
+      `select tenant_id, digital_store_id, store_location_id
+         from kitluy_devices.device_assignments
+        where device_id = $1::uuid order by created_at desc limit 1`,
+      [device],
+    );
+    expect(rows[0]?.tenant_id).toBe(scope.tenantId);
+    expect(rows[0]?.digital_store_id).toBe(scope.digitalStoreId);
+    expect(rows[0]?.store_location_id).toBe(scope.storeLocationId);
+  });
+
+  it("the claim it minted is bound to THAT Hub, so the 0121 model still holds", async () => {
+    const device = await mintHub();
+    if (device === null) return;
+    const scope = await borrowedScope();
+    const code = freshCode();
+    await openSessionLikeThePortal(code, scope);
+
+    await composition.pair({
+      deviceRecordId: device,
+      presentedCode: code,
+      actorRef: "device/pairing-suite",
+    });
+
+    // `device_claims.device_id` was never relaxed (see 0194's header). A claim
+    // exists for this Hub, it is redeemed, and its payload digest is the
+    // canonical one — which is what keeps every 0121 refusal meaningful.
+    const { rows } = await pool.query<{ state: string; payload_sha256: string }>(
+      `select state::text as state, payload_sha256 from kitluy_devices.device_claims
+        where device_id = $1::uuid order by created_at desc limit 1`,
+      [device],
+    );
+    expect(rows[0]?.state).toBe("redeemed");
+    expect(rows[0]?.payload_sha256).toBe(
+      sha256(
+        hubClaimPayloadBytes({
+          deviceRecordId: device,
+          tenantId: scope.tenantId,
+          digitalStoreId: scope.digitalStoreId,
+          storeLocationId: scope.storeLocationId,
+        }),
+      ),
+    );
   });
 });

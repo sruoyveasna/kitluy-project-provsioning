@@ -109,18 +109,25 @@ export interface PairedHubMaterial {
 }
 
 /**
- * Presentation refusals from 0191, mapped TOTALLY.
+ * Session presentation refusals from 0194, mapped TOTALLY.
  *
  * The value is the audit string, not a distinguishing outcome. Only
- * `KLUY-HUBCLAIM-LOCKED` earns its own external code, because it is the one
- * refusal where the correct operator action differs.
+ * `KLUY-HUBSESSION-LOCKED` earns its own external code, because it is the one
+ * refusal where the correct operator action differs — everything else means
+ * "type it again or ask for a new one", and telling the two apart at the console
+ * would tell a guesser whether a code exists.
  */
 const PRESENTATION_REFUSALS: Readonly<Record<string, string>> = {
-  "KLUY-HUBCLAIM-NO-DEVICE": "presentation named no device",
-  "KLUY-HUBCLAIM-NO-OUTSTANDING": "no pairing code has been issued for this device",
-  "KLUY-HUBCLAIM-EXPIRED": "the pairing code expired",
-  "KLUY-HUBCLAIM-INVALID": "wrong or malformed code",
-  "KLUY-HUBCLAIM-LOCKED": "attempt budget exhausted",
+  "KLUY-HUBSESSION-NO-DEVICE": "presentation named no device",
+  "KLUY-HUBSESSION-INVALID": "wrong or malformed code, or no such session",
+  "KLUY-HUBSESSION-DEVICE-INELIGIBLE": "the code was right but this Hub cannot be paired",
+  // `KLUY-HUBSESSION-<STATE>`, built by the door from a non-open session's state.
+  // The states are open/consumed/expired/revoked/locked, so these are the four a
+  // presentation can meet.
+  "KLUY-HUBSESSION-CONSUMED": "that pairing code has already been used",
+  "KLUY-HUBSESSION-REVOKED": "that pairing code was replaced by a newer one",
+  "KLUY-HUBSESSION-EXPIRED": "the pairing code expired",
+  "KLUY-HUBSESSION-LOCKED": "attempt budget exhausted",
 };
 
 /**
@@ -147,6 +154,10 @@ const REDEMPTION_REFUSALS: Readonly<Record<string, string>> = {
     "device shares hardware evidence with another non-retired device",
   "KLUY-DEVICE-ALREADY-CLAIMED": "the device already holds a live assignment",
   "KLUY-DEVICE-MISSING": "no such device",
+  // Raised by this composition, not by a door: another Hub consumed the session
+  // between our match and our consume. Mapped here so it is answered as an
+  // ordinary refusal rather than surfacing as an internal error.
+  "KLUY-HUBSESSION-RACE-LOST": "another Store Hub used that pairing code first",
 };
 
 interface DoorRow {
@@ -178,6 +189,16 @@ const NO_LOG: SafeLogger = { info: () => undefined };
  * never by admitting something the door would reject.
  */
 const HUB_CODE = /^[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{8}$/;
+
+/**
+ * The life of the device-bound claim this composition mints on a match.
+ *
+ * It is created and redeemed inside ONE transaction, so this is not a window an
+ * operator ever waits in — it exists only because `issue_hub_claim_v1` requires a
+ * TTL and `device_claims_ttl_chk` caps it at fifteen minutes. The session's own
+ * expiry, already checked by the door above, is the deadline that governs pairing.
+ */
+const HUB_CLAIM_TTL_SECONDS = 900;
 
 export interface HubPairingCompositionDeps {
   readonly source: ClientSource;
@@ -226,10 +247,13 @@ export class HubPairingComposition {
 
     try {
       return await withServiceRole(this.deps.source, REGISTRY_ROLES.hubPairing, async (client) => {
+        // Resolution is by CODE ALONE — the session is store-scoped and does not
+        // know which Hub will use it. The device id still goes in, because the
+        // door checks THIS Hub's eligibility before answering MATCH_READY.
         const presented = await callDoor(
           client,
-          "kitluy_devices.evaluate_hub_claim_code_v1($1::uuid, $2, $3)",
-          [input.deviceRecordId, code, input.actorRef],
+          "kitluy_devices.evaluate_hub_pairing_session_v1($1, $2::uuid, $3)",
+          [code, input.deviceRecordId, input.actorRef],
         );
 
         const outcome = presented.outcome;
@@ -238,19 +262,19 @@ export class HubPairingComposition {
           const audit = PRESENTATION_REFUSALS[refusalCode] ?? `unmapped refusal ${refusalCode}`;
           this.logger.info({ event: "hub-pairing-presentation-refused", correlationId, audit });
           return {
-            result: refusalCode === "KLUY-HUBCLAIM-LOCKED" ? "LOCKED" : "CODE_REFUSED",
+            result: refusalCode === "KLUY-HUBSESSION-LOCKED" ? "LOCKED" : "CODE_REFUSED",
             correlationId,
             auditDetail: audit,
           };
         }
 
         // The scope comes from the DOOR, never from the caller. See the header.
-        const claimId = presented.claim_id;
+        const sessionId = presented.session_id;
         const tenantId = presented.tenant_id;
         const digitalStoreId = presented.digital_store_id;
         const storeLocationId = presented.store_location_id;
         if (
-          typeof claimId !== "string" ||
+          typeof sessionId !== "string" ||
           typeof tenantId !== "string" ||
           typeof digitalStoreId !== "string" ||
           typeof storeLocationId !== "string"
@@ -279,9 +303,38 @@ export class HubPairingComposition {
           )
           .digest("hex");
 
-        // The claim token digest is the digest of the NORMALISED code — the same
-        // value the issuer stored. Computed here and never logged.
+        // The claim token digest is the digest of the NORMALISED code. Computed
+        // here and never logged.
         const claimTokenSha256 = createHash("sha256").update(code, "utf8").digest("hex");
+
+        // ===================================================================
+        // THE DEVICE BINDING IS CREATED HERE, AND THIS IS THE ONLY PLACE IT CAN BE
+        // ===================================================================
+        // A session belongs to a Store, so no claim existed until now. Group 0194
+        // deliberately did NOT relax `device_claims.device_id NOT NULL` — the
+        // canonical payload binds device + scope, 0191's attempt budget counts
+        // against a claim resolved via its device, and redemption refuses a
+        // mismatch with KLUY-DEVICE-CLAIM-WRONG-DEVICE. All three survive because
+        // the claim is minted for THIS Hub, at the first moment its identity is
+        // honestly known, and redeemed immediately.
+        //
+        // 0194 grants `issue_hub_claim_v1` to this role for exactly this step.
+        // Same transaction as the presentation, so a claim can never be left
+        // behind by a redemption that fails after it.
+        await client.query(
+          `select kitluy_devices.issue_hub_claim_v1(
+                    $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7::integer, $8)`,
+          [
+            input.deviceRecordId,
+            tenantId,
+            digitalStoreId,
+            storeLocationId,
+            claimTokenSha256,
+            payloadSha256,
+            HUB_CLAIM_TTL_SECONDS,
+            input.actorRef,
+          ],
+        );
 
         // `redeem_hub_claim_v1`, NOT `redeem_device_claim_v1` directly.
         //
@@ -310,6 +363,28 @@ export class HubPairingComposition {
             correlationId,
             auditDetail: "redemption returned no assignment id and raised nothing",
           };
+        }
+
+        // Spend the session, LAST — after the assignment exists.
+        //
+        // `consume_hub_pairing_session_v1` updates conditional on `state='open'`
+        // and returns whether it won. Two Hubs presenting the same code serialise
+        // on this row, so exactly one can pair; the loser is refused rather than
+        // quietly producing a second assignment.
+        //
+        // Consuming BEFORE redemption would be worse in both directions: a failed
+        // redemption would burn a code the operator still needs, and a crash
+        // between the two would leave a Store unable to pair with a code that
+        // still looks live.
+        const { rows: consumed } = await client.query<{ won: boolean }>(
+          "select kitluy_devices.consume_hub_pairing_session_v1($1::uuid, $2::uuid) as won",
+          [sessionId, input.deviceRecordId],
+        );
+        if (consumed[0]?.won !== true) {
+          // Another Hub took this session between our match and here. Roll the
+          // whole transaction back rather than keep an assignment nobody
+          // authorised — `withServiceRole` rolls back on a throw.
+          throw new Error("KLUY-HUBSESSION-RACE-LOST");
         }
 
         return {

@@ -85,10 +85,10 @@ function issuance(overrides: { fail?: string } = {}) {
                   rows: [{ alphabet: "0123456789ABCDEFGHJKMNPQRSTVWXYZ" }],
                 });
               }
-              if (sql.includes("issue_hub_claim_v1")) {
+              if (sql.includes("open_hub_pairing_session_v1")) {
                 if (overrides.fail !== undefined) throw new Error(overrides.fail);
                 return Promise.resolve({
-                  rows: [{ claim_id: "22222222-2222-4222-8222-222222222222" }],
+                  rows: [{ session_id: "22222222-2222-4222-8222-222222222222" }],
                 });
               }
               if (sql.includes("expires_at")) {
@@ -126,9 +126,10 @@ function deps(
   };
 }
 
+// No `deviceRecordId`: a session belongs to the STORE
+// (KLD-2026-08-13-HUB-PAIRING-SESSION-001).
 const body = (over: Record<string, unknown> = {}) =>
   JSON.stringify({
-    deviceRecordId: DEVICE,
     digitalStoreId: STORE,
     storeLocationId: LOCATION,
     ...over,
@@ -203,8 +204,16 @@ describe("what the caller may not name", () => {
   });
 
   it("refuses a malformed uuid", async () => {
-    const response = await post(body({ deviceRecordId: "nope" }), deps(db([STORE]), issuance()));
+    const response = await post(body({ digitalStoreId: "nope" }), deps(db([STORE]), issuance()));
     expect(response.status).toBe(422);
+  });
+
+  it("refuses a deviceRecordId outright, so the old per-device shape fails LOUDLY", async () => {
+    // Ignoring it would let an integration built against the pre-session contract
+    // keep issuing codes that silently mean something else.
+    const response = await post(body({ deviceRecordId: DEVICE }), deps(db([STORE]), issuance()));
+    expect(response.status).toBe(422);
+    expect(JSON.stringify(response.body)).toContain("deviceRecordId");
   });
 
   it("refuses a non-object body", async () => {
@@ -240,14 +249,16 @@ describe("configuration and method", () => {
 });
 
 describe("governed refusals reach the caller as guidance", () => {
-  it("reports an already-assigned Hub in terms the operator can act on", async () => {
-    const iss = issuance({ fail: "KLUY-DEVICE-ALREADY-CLAIMED: device x already holds" });
+  it("reports a mismatched Store and Location in terms the operator can act on", async () => {
+    const iss = issuance({
+      fail: "KLUY-HUBSESSION-SCOPE-UNKNOWN: that Location does not belong to that Digital Store",
+    });
     const response = await post(body(), deps(db([STORE]), iss));
 
     expect(response.status).toBe(422);
     // Safe to be specific here: the caller is an authenticated human who already
-    // holds this Store, so "already assigned" is guidance, not enumeration.
-    expect(JSON.stringify(response.body)).toContain("already holds a live assignment");
+    // holds this Store, so this is guidance, not enumeration.
+    expect(JSON.stringify(response.body)).toContain("do not match");
   });
 
   it("never leaks a SQLSTATE or function name", async () => {

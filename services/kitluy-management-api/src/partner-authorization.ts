@@ -78,17 +78,25 @@ interface ScopeRow {
 }
 
 /**
- * Resolve a partner's authority for one permission against one Digital Store.
+ * Resolve a partner's authority for one permission, optionally against one
+ * Digital Store.
  *
- * Returns `allow` only when BOTH hold: the actor holds the permission, and the
- * named Digital Store is one they are actually assigned to.
+ * With a scope, returns `allow` only when BOTH hold: the actor holds the
+ * permission, and the named Digital Store is one they are actually assigned to.
+ *
+ * With `scope = null` the STORE question is not asked, because there is no store
+ * to ask about — this is for a caller that needs to know which Stores it may act
+ * in before it can name one. It is not a weaker check: the permission is still
+ * required, and the answer carries only `current_digital_store_ids()`, which is
+ * server-resolved from the actor's own assignments and can therefore never
+ * describe a Store they do not hold.
  */
 export async function authorizePartnerRequest(
   db: DatabaseHandle,
   verifier: TokenVerifier,
   authorizationHeader: string | undefined,
   requiredPermission: string,
-  scope: PartnerScope,
+  scope: PartnerScope | null,
   environment: string,
 ): Promise<PartnerAuthorizationOutcome> {
   const token = bearerToken(authorizationHeader);
@@ -128,10 +136,16 @@ export async function authorizePartnerRequest(
       // them would suggest they constrain the answer, and they do not (see the
       // header). The scope is the separate `in_scope` column, resolved from the
       // canonical helper the RLS policies use.
+      // `$3` null means "no Store named". `in_scope` is then TRUE by
+      // construction rather than by a comparison that would evaluate to NULL —
+      // written explicitly so the deny branch below cannot read a null as a
+      // failure and refuse a caller who asked a legitimate question.
       `select kitluy_auth.has_permission($1::text, null, null, $2::text) as permitted,
               kitluy_auth.current_digital_store_ids()                    as digital_store_ids,
-              $3::uuid = any (kitluy_auth.current_digital_store_ids())   as in_scope`,
-      [requiredPermission, environment, scope.digitalStoreId],
+              case when $3::uuid is null then true
+                   else $3::uuid = any (kitluy_auth.current_digital_store_ids())
+              end                                                        as in_scope`,
+      [requiredPermission, environment, scope?.digitalStoreId ?? null],
     );
     rows = result.rows;
   } finally {

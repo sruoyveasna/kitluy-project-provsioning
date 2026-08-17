@@ -1,15 +1,15 @@
 /**
- * Issuing a Store Hub pairing code.
+ * Opening a Store Hub pairing session, and the code that unlocks it.
  *
- * Authority: KLD-2026-08-13-HUB-PAIRING-ROUTE-001; migration group 0193 (the
- * permission, the `kitluy_hub_issuance_service` identity and the
- * `issue_hub_claim_v1` bridge); group 0191 (the code's rules); group 0121 (the
- * claim model).
+ * Authority: KLD-2026-08-13-HUB-PAIRING-SESSION-001 (the owner decision that a
+ * code belongs to a STORE, not a Hub) implemented as migration group 0194;
+ * KLD-2026-08-13-HUB-PAIRING-ROUTE-001; group 0193 (the permission and the
+ * `kitluy_hub_issuance_service` identity); group 0191 (the code's rules).
  *
  * ===========================================================================
  * THE CODE IS GENERATED HERE, AND SHOWN EXACTLY ONCE
  * ===========================================================================
- * Only the DIGEST reaches the database. `device_claims.claim_token_sha256` is
+ * Only the DIGEST reaches the database. `hub_pairing_sessions.code_sha256` is
  * what is stored, so the plaintext exists in this process and in the HTTP
  * response, and nowhere else — not in a log line, not in an audit row, not in a
  * second read model. That is why the route returns it once and the Portal must
@@ -28,15 +28,14 @@
  * ===========================================================================
  * WHY THE TTL IS PASSED EXPLICITLY
  * ===========================================================================
- * `create_device_claim_v1` accepts one second to twenty-four hours. The pairing
- * protocol says fifteen minutes, and 0191 enforces it as a row constraint
- * (`device_claims_ttl_chk`). Passing 900 here is not the enforcement — the table
- * is — but passing nothing, or passing a default from somewhere else, is how a
- * caller ends up refused by a constraint it did not know about.
+ * The pairing protocol says fifteen minutes, and 0194 enforces it as a row
+ * constraint (`hub_pairing_sessions_ttl_chk`). Passing 900 here is not the
+ * enforcement — the table is — but passing nothing, or passing a default from
+ * somewhere else, is how a caller ends up refused by a constraint it did not
+ * know about.
  */
 import { createHash, randomInt } from "node:crypto";
 
-import { hubClaimPayloadBytes } from "@kitluy/device-identity";
 import type pg from "pg";
 
 /** Pairing protocol §6.1: "Valid for 15 minutes by default." */
@@ -47,9 +46,9 @@ export const HUB_PAIRING_CODE_LENGTH = 8;
 export interface IssuedHubPairingCode {
   /** Plaintext. Returned ONCE and never persisted. */
   readonly code: string;
-  readonly claimId: string;
+  /** The SESSION this code opened. Not a claim — see `openHubPairingSession`. */
+  readonly sessionId: string;
   readonly expiresAt: string;
-  readonly deviceRecordId: string;
 }
 
 export type IssuanceResult =
@@ -57,24 +56,16 @@ export type IssuanceResult =
   | { readonly kind: "refused"; readonly code: string; readonly detail: string };
 
 /**
- * Refusals `create_device_claim_v1` raises, mapped for a STAFF caller.
+ * Refusals `open_hub_pairing_session_v1` raises, mapped for a STAFF caller.
  *
  * Unlike the device-facing surface, these are safe to distinguish: the caller is
- * an authenticated human acting inside their own Store, and "that Hub is already
- * assigned" is exactly what they need to know to stop trying. Enumeration is not
- * a concern when the actor already holds the Store.
+ * an authenticated human acting inside their own Store, and knowing the Location
+ * belongs to a different shop is exactly what they need in order to stop trying.
+ * Enumeration is not a concern when the actor already holds the Store.
  */
 const ISSUANCE_REFUSALS: Readonly<Record<string, string>> = {
-  "KLUY-DEVICE-MISSING": "no such device",
-  "KLUY-DEVICE-ALREADY-CLAIMED": "that Store Hub already holds a live assignment",
-  "KLUY-DEVICE-QUARANTINED": "that Store Hub is quarantined and needs governed re-enrollment",
-  "KLUY-DEVICE-TERMINAL": "that Store Hub is retired or otherwise terminal",
-  "KLUY-DEVICE-CLAIM-STATE": "that Store Hub is not in an enrolled state",
-  "KLUY-DEVICE-CLAIM-TTL": "the requested code lifetime is outside the permitted range",
-  "KLUY-DEVICE-SCOPE-UNKNOWN": "the Store or Location does not exist",
-  "KLUY-DEVICE-SCOPE-CROSS-TENANT": "the Store and Location belong to different Tenants",
-  "KLUY-DEVICE-SCOPE-CROSS-STORE": "the Location does not belong to that Store",
-  device_claims_ttl_chk: "the requested code lifetime exceeds the fifteen-minute ceiling",
+  "KLUY-HUBSESSION-SCOPE-UNKNOWN": "that Store or Location does not exist, or they do not match",
+  hub_pairing_sessions_ttl_chk: "the requested code lifetime exceeds the fifteen-minute ceiling",
 };
 
 /**
@@ -95,8 +86,22 @@ export interface HubPairingIssuanceDeps {
 }
 
 /**
- * Issue one code for one Hub, inside one transaction as
+ * Open a pairing session for one STORE, inside one transaction as
  * `kitluy_hub_issuance_service`.
+ *
+ * ===========================================================================
+ * WHY THIS NAMES NO DEVICE
+ * ===========================================================================
+ * Owner decision KLD-2026-08-13-HUB-PAIRING-SESSION-001: *the code is for the
+ * Store, and any Hub may use it*. A Partner opens a session for their shop, not
+ * for a serial number they would have to read off a box — and there is no honest
+ * way to offer the alternative, because a Hub that has never paired belongs to
+ * nobody, so "their" unpaired Hubs cannot be listed without listing everyone's.
+ *
+ * The device binding happens later, at the only moment it can honestly be known:
+ * when a specific Hub actually presents the code. See the device registry's
+ * pairing composition, which creates and redeems a normal device-bound claim at
+ * that point, so the claim model and every 0121 refusal stay untouched.
  *
  * Authorization has ALREADY happened — see `authorizePartnerRequest`. This
  * function assumes the caller may act in the named Store and does not re-derive
@@ -104,11 +109,16 @@ export interface HubPairingIssuanceDeps {
  * the actor, and the governed door is reached as the least-privilege service.
  * Mixing them would mean either the actor needs table privileges or the service
  * decides authority, and both are worse.
+ *
+ * Opening a session REVOKES any session already open for the same Store. Two
+ * live codes for one shop is how a Hub gets attached by a code someone believed
+ * was already dead, so the door makes that impossible rather than warning about
+ * it. A caller that re-issues has replaced the previous code, and the response
+ * says so.
  */
-export async function issueHubPairingCode(
+export async function openHubPairingSession(
   deps: HubPairingIssuanceDeps,
   input: {
-    readonly deviceRecordId: string;
     readonly tenantId: string;
     readonly digitalStoreId: string;
     readonly storeLocationId: string;
@@ -134,61 +144,45 @@ export async function issueHubPairingCode(
     }
 
     const code = generateCode(alphabet);
-    // Device + scope, and nothing server-derived — the issuer must be able to
-    // compute the same bytes the redeemer will. See `hub-claim-payload.ts` on why
-    // the expiry is deliberately not part of this.
-    const payloadSha256 = createHash("sha256")
-      .update(
-        hubClaimPayloadBytes({
-          deviceRecordId: input.deviceRecordId,
-          tenantId: input.tenantId,
-          digitalStoreId: input.digitalStoreId,
-          storeLocationId: input.storeLocationId,
-        }),
-      )
-      .digest("hex");
 
-    const { rows } = await client.query<{ claim_id: string }>(
-      `select kitluy_devices.issue_hub_claim_v1(
-                $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7::integer, $8) as claim_id`,
+    const { rows } = await client.query<{ session_id: string }>(
+      `select kitluy_devices.open_hub_pairing_session_v1(
+                $1::uuid, $2::uuid, $3::uuid, $4, $5::integer, $6) as session_id`,
       [
-        input.deviceRecordId,
         input.tenantId,
         input.digitalStoreId,
         input.storeLocationId,
         createHash("sha256").update(code, "utf8").digest("hex"),
-        payloadSha256,
         HUB_PAIRING_TTL_SECONDS,
         input.operatorRef,
       ],
     );
-    const claimId = rows[0]?.claim_id;
-    if (claimId === undefined) {
+    const sessionId = rows[0]?.session_id;
+    if (sessionId === undefined) {
       await client.query("rollback");
       return {
         kind: "refused",
         code: "KLUY-HUBCODE-NOT-ISSUED",
-        detail: "the issuance door returned no claim",
+        detail: "the issuance door returned no session",
       };
     }
 
     // Read the authoritative expiry back rather than computing it: the row's
     // `expires_at` comes from the DATABASE clock, and a Portal that displayed a
     // locally computed deadline would count down to the wrong moment.
-    const { rows: claimRows } = await client.query<{ expires_at: Date }>(
-      "select expires_at from kitluy_devices.device_claims where id = $1::uuid",
-      [claimId],
+    const { rows: sessionRows } = await client.query<{ expires_at: Date }>(
+      "select expires_at from kitluy_devices.hub_pairing_sessions where id = $1::uuid",
+      [sessionId],
     );
     await client.query("commit");
 
-    const expiresAt = claimRows[0]?.expires_at;
+    const expiresAt = sessionRows[0]?.expires_at;
     return {
       kind: "issued",
       issued: {
         code,
-        claimId,
+        sessionId,
         expiresAt: (expiresAt ?? new Date()).toISOString(),
-        deviceRecordId: input.deviceRecordId,
       },
     };
   } catch (error) {
@@ -211,15 +205,14 @@ export async function issueHubPairingCode(
 }
 
 /**
- * The Hub's scope, resolved from the DEVICE's own Store assignment history — not
- * from the caller.
+ * The Tenant, resolved from the Store row — never taken from the request.
  *
- * A Hub that has never been assigned has no scope of its own, so the issuer names
- * the Store. But the request must not be trusted to name the TENANT: a caller who
- * could supply that could try to attach a Hub to a Store in another Tenant, and
- * `create_device_claim_v1` would refuse with `KLUY-DEVICE-SCOPE-CROSS-TENANT`
- * only if the mismatch happened to be inconsistent. Resolving the tenant from the
- * Store row removes the question.
+ * A caller who could supply the Tenant could try to open a session against a
+ * Store in someone else's. `open_hub_pairing_session_v1` does check the pair and
+ * refuses with `KLUY-HUBSESSION-SCOPE-UNKNOWN`, so this is defence in depth
+ * rather than the only guard — but resolving the Tenant from the Store removes
+ * the question a layer earlier, and returns null for a Location that does not
+ * belong to the Store.
  */
 export async function resolveStoreScope(
   deps: HubPairingIssuanceDeps,
@@ -235,4 +228,104 @@ export async function resolveStoreScope(
   );
   const tenantId = rows[0]?.tenant_id;
   return tenantId === undefined ? null : { tenantId };
+}
+
+export interface PartnerStoreOption {
+  readonly digitalStoreId: string;
+  readonly digitalStoreReference: string;
+  readonly locations: readonly {
+    readonly storeLocationId: string;
+    readonly locationReference: string;
+  }[];
+}
+
+/**
+ * The Stores and Locations a Partner may open a pairing session for.
+ *
+ * ===========================================================================
+ * WHY THIS ENDPOINT HAD TO EXIST
+ * ===========================================================================
+ * A session names a Store and a Location, so a Portal must be able to offer
+ * them — and it cannot read them itself. `kitluy_core` is deliberately NOT
+ * exposed to the data API (`config.toml` exposes `public` alone), so a browser
+ * holding an `authenticated` session has no path to `digital_stores` at all,
+ * RLS policies notwithstanding.
+ *
+ * The identifiers come from `current_digital_store_ids()` — the same
+ * server-resolved helper the authorizer and the RLS policies use — so this can
+ * never list a Store the actor does not hold, whatever the caller sends.
+ *
+ * Names are read as `authenticated`, not as the service identity: the row-level
+ * policies (`digital_stores_select_scoped`, `store_locations_select_scoped`) then
+ * apply as a second, independent guard. Reading these as a privileged role would
+ * make this function the only thing standing between a Partner and every shop in
+ * the system.
+ */
+export async function listPartnerStores(
+  deps: HubPairingIssuanceDeps,
+  userId: string,
+  digitalStoreIds: readonly string[],
+): Promise<readonly PartnerStoreOption[]> {
+  if (digitalStoreIds.length === 0) return [];
+
+  const client = await deps.pool.connect();
+  try {
+    await client.query("begin");
+    await client.query("select set_config('request.jwt.claim.sub', $1, true)", [userId]);
+    await client.query(
+      "select set_config('request.jwt.claims', json_build_object('sub', $1::text, 'role', 'authenticated')::text, true)",
+      [userId],
+    );
+    await client.query("set local role authenticated");
+
+    const { rows } = await client.query<{
+      digital_store_id: string;
+      digital_store_reference: string;
+      store_location_id: string | null;
+      location_reference: string | null;
+    }>(
+      // `store_code` / `location_code` are what staff actually say out loud, and
+      // `name` is what they read. Both are joined into one label so the Portal
+      // does not have to invent a formatting rule of its own.
+      `select ds.id                                as digital_store_id,
+              ds.store_code || ' — ' || ds.name    as digital_store_reference,
+              sl.id                                as store_location_id,
+              sl.location_code || ' — ' || sl.name as location_reference
+         from kitluy_core.digital_stores ds
+         left join kitluy_core.store_locations sl on sl.digital_store_id = ds.id
+        where ds.id = any ($1::uuid[])
+        order by ds.store_code, sl.location_code`,
+      [[...digitalStoreIds]],
+    );
+
+    const byStore = new Map<
+      string,
+      PartnerStoreOption & { locations: PartnerStoreOption["locations"][number][] }
+    >();
+    for (const r of rows) {
+      let entry = byStore.get(r.digital_store_id);
+      if (entry === undefined) {
+        entry = {
+          digitalStoreId: r.digital_store_id,
+          digitalStoreReference: r.digital_store_reference,
+          locations: [],
+        };
+        byStore.set(r.digital_store_id, entry);
+      }
+      // A Store with no Location yields one row with nulls from the LEFT JOIN.
+      // Kept as a Store with an empty location list rather than dropped: the
+      // Portal must be able to say "this shop has no Location yet" instead of
+      // silently omitting it and leaving an operator hunting for it.
+      if (r.store_location_id !== null && r.location_reference !== null) {
+        entry.locations.push({
+          storeLocationId: r.store_location_id,
+          locationReference: r.location_reference,
+        });
+      }
+    }
+    return [...byStore.values()];
+  } finally {
+    await client.query("rollback").catch(() => undefined);
+    client.release();
+  }
 }
