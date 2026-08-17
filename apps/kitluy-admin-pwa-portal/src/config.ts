@@ -76,6 +76,12 @@ export function resolvePortalRuntime(
         client: createKitluyBrowserClient({
           url: config.supabaseUrl,
           publishableKey: config.publishableKey,
+          // Vite replaces this with a literal `false` when building, so a
+          // shipped bundle cannot accept an http loopback Supabase URL — the
+          // branch is removed by the bundler rather than left switched off.
+          // It exists so the portal can be pointed at a local stack, which is
+          // where a device enrolled on a workstation can actually be seen.
+          allowLoopbackHttp: import.meta.env.DEV === true,
         }),
         managementApiUrl: config.managementApiUrl,
       },

@@ -31,7 +31,6 @@
  */
 import { execFileSync } from "node:child_process";
 import { readdirSync } from "node:fs";
-import { join } from "node:path";
 
 import {
   ALLOWED_HOSTED_DEV,

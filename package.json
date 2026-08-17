@@ -36,6 +36,7 @@
     "db:apply": "node scripts/database/db-exec.mjs apply",
     "device:prepare": "pnpm --filter @kitluy-services/kitluy-device-firstboot-agent build && pnpm --filter @kitluy-services/kitluy-device-firstboot-agent prepare-card",
     "dev:fleet": "node scripts/development/fleet-service.mjs",
+    "dev:fleet:watch": "node scripts/development/fleet-watch.mjs",
     "db:deploy:hosted-dev": "node scripts/database/db-deploy-hosted-dev.mjs",
     "db:deploy:hosted-dev:check": "node scripts/database/hosted-dev-target.test.mjs",
     "db:seed": "node scripts/database/db-exec.mjs seed",
