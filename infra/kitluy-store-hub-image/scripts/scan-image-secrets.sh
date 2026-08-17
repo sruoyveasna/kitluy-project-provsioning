@@ -102,7 +102,31 @@ printf '  targets: %s\n\n' "${TARGETS[*]}"
 #
 # Scoped to ONE path. A real key added to that same file would still be reported
 # under every other check, and this probe text appearing anywhere else still fails.
-KNOWN_PROBE_0038="hub-migrations/0038_release_trust_and_cache.sql"
+# Each entry is a PATH FRAGMENT. A file is exempt only for matching this exact
+# path; the same text anywhere else still fails, and every OTHER check still
+# applies to these files.
+KNOWN_FALSE_POSITIVES=(
+  # Hub migration 0038 asserts AT APPLY TIME that the release trust registry
+  # REFUSES a private key, so it carries the PEM marker on purpose and holds no
+  # key material. It is exempted rather than rewritten because an independent
+  # review recorded an earlier silent amendment of this exact probe as "THE ONE
+  # REAL BREACH", and schema contract §4 forbids editing an applied migration.
+  "hub-migrations/0038_release_trust_and_cache.sql"
+  # The crypto library's own source. Both lines are `startswith` checks that
+  # DETECT an OpenSSH private key format — writing and recognising PEM is what
+  # the library does, so its source will always contain these markers. The
+  # library stays because `rpi-eeprom-config` imports it for signed Pi 5 EEPROM
+  # images; its 2.8 MB of SelfTest fixtures are removed from the image instead.
+  "Cryptodome/PublicKey/ECC.py"
+  "Cryptodome/PublicKey/RSA.py"
+)
+
+# ⚠️ THREE named exceptions is a signal, not a comfort. The underlying cause is
+# that this check matches a PEM MARKER rather than key material, so any file that
+# mentions the format trips it. Tightening the pattern to require a real PEM block
+# was considered and rejected here: every safe tightening also stops matching a
+# key pasted into a single-line string, which is exactly the case worth catching.
+# Recorded so the next person sees a known limitation rather than a habit.
 
 FAIL=0
 PASS=0
@@ -113,7 +137,7 @@ for entry in "${CHECKS[@]}"; do
   # happens to match is noise, and reporting it trains people to ignore this.
   hits="$(grep -rIn --binary-files=without-match -E "$regex" "${TARGETS[@]}" 2>/dev/null \
           | grep -vE '\[REQUIRED:' \
-          | grep -vF "$KNOWN_PROBE_0038" | head -20)"
+          | grep -vFf <(printf '%s\n' "${KNOWN_FALSE_POSITIVES[@]}") | head -20)"
   if [[ -n "$hits" ]]; then
     printf '  FAIL  [%s] %s\n' "$class" "$desc"
     # File and line only — never the matched text.

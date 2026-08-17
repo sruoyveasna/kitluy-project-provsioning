@@ -43,6 +43,21 @@ const pinnedRejectionFixtures = [
     pattern: "Private key block",
     sha256: "3d571e17e226ded82ab8aaf1e55ad54efac3a959c9de1d45b4d23554b8a2ab78",
   },
+  // The SAME FILE, packaged into the Store Hub image.
+  // `package-bootstrap-runtime.sh` copies `hub/migrations/` into the overlay so
+  // the device carries the exact bytes the Hub agent's drift check expects, and
+  // this repository commits packaged output (the firstboot JS closure is
+  // committed the same way).
+  //
+  // Pinned to the SAME checksum as the original, which is the assertion worth
+  // making: if the copy ever diverges from its source — the failure mode the
+  // packager exists to prevent — this stops matching and the finding returns.
+  // A real secret introduced into either copy does the same.
+  {
+    file: "infra/kitluy-store-hub-image/rpi-image-gen/layer/kitluy-hub-base.rootfs-overlay/usr/lib/kitluy/hub-migrations/0038_release_trust_and_cache.sql",
+    pattern: "Private key block",
+    sha256: "3d571e17e226ded82ab8aaf1e55ad54efac3a959c9de1d45b4d23554b8a2ab78",
+  },
 ];
 const sha256Lf = (content) =>
   createHash("sha256").update(content.replace(/\r\n/g, "\n"), "utf8").digest("hex");
