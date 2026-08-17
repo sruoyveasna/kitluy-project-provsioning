@@ -27,6 +27,7 @@
     "dev": "turbo run dev",
     "dev:fleet": "node scripts/development/fleet-service.mjs",
     "dev:fleet:watch": "node scripts/development/fleet-watch.mjs",
+    "dev:seed:hosted-partner": "node scripts/development/seed-hosted-dev-partner.mjs",
     "dev:seed:hosted-scope": "node scripts/development/seed-hosted-dev-scope.mjs",
     "device:prepare": "pnpm --filter @kitluy-services/kitluy-device-firstboot-agent build && pnpm --filter @kitluy-services/kitluy-device-firstboot-agent prepare-card",
     "docs:authority-check": "node scripts/docs/check-authority.mjs",
