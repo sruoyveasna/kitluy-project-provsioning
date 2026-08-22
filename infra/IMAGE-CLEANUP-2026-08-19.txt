@@ -1,0 +1,49 @@
+# KitLuy OS image cleanup — 2026-08-19
+# Deleted build trees (gitignored build output). Recorded before removal.
+
+## Terminal tree: infra/kitluy-os-image/build/
+7.9G	infra/kitluy-os-image/build/previous-images
+15M	infra/kitluy-os-image/build/upstream
+18G	infra/kitluy-os-image/build/work
+6.9G	infra/kitluy-os-image/build/work-fresh
+6.9G	infra/kitluy-os-image/build/work-veasna-0812
+6.9G	infra/kitluy-os-image/build/work-veasna-0812b
+6.9G	infra/kitluy-os-image/build/work-veasna-0813
+6.9G	infra/kitluy-os-image/build/work-veasna-0813b
+
+## Store Hub tree: infra/kitluy-store-hub-image/build/
+18M	infra/kitluy-store-hub-image/build/upstream
+6.4G	infra/kitluy-store-hub-image/build/work
+6.3G	infra/kitluy-store-hub-image/build/work-full
+6.3G	infra/kitluy-store-hub-image/build/work-release
+1.1G	infra/kitluy-store-hub-image/build/work-ttyfix
+
+## Image artifacts removed (sha256 not recomputed; from build manifests)
+2026-08-10 12:18    649401226 infra/kitluy-os-image/build/previous-images/deploy-v2.7.0-kitluy-0.1.0/kitluy-storehub-os-arm64.img.zst
+2026-08-10 12:18  17490268160 infra/kitluy-os-image/build/work/image-kitluy-storehub-os-arm64/kitluy-storehub-os-arm64.img
+2026-08-10 12:46    729460636 infra/kitluy-os-image/build/previous-images/deploy-v2.7.0-kitluy-0.1.0/kitluy-pos-terminal-wayland-arm64.img.zst
+2026-08-10 12:46   8900333568 infra/kitluy-os-image/build/previous-images/image-kitluy-pos-terminal-wayland-arm64-0.1.0/kitluy-pos-terminal-wayland-arm64.img
+2026-08-11 10:26   8900333568 infra/kitluy-os-image/build/work/deploy-v2.7.0/kitluy-pos-terminal-wayland-arm64.img
+2026-08-11 13:38    729528579 infra/kitluy-os-image/build/work/deploy-v2.7.0/kitluy-pos-terminal-wayland-arm64.img.zst
+2026-08-11 13:38   8900333568 infra/kitluy-os-image/build/work/image-kitluy-pos-terminal-wayland-arm64/kitluy-pos-terminal-wayland-arm64.img
+2026-08-12 13:55    729527967 infra/kitluy-os-image/build/work-fresh/deploy-v2.7.0/kitluy-pos-terminal-wayland-arm64.img.zst
+2026-08-12 13:55   8900333568 infra/kitluy-os-image/build/work-fresh/image-kitluy-pos-terminal-wayland-arm64/kitluy-pos-terminal-wayland-arm64.img
+2026-08-12 16:28    729531358 infra/kitluy-os-image/build/work-veasna-0812/deploy-v2.7.0/kitluy-pos-terminal-wayland-arm64.img.zst
+2026-08-12 16:28   8900333568 infra/kitluy-os-image/build/work-veasna-0812/image-kitluy-pos-terminal-wayland-arm64/kitluy-pos-terminal-wayland-arm64.img
+2026-08-12 16:54    729526666 infra/kitluy-os-image/build/work-veasna-0812b/deploy-v2.7.0/kitluy-pos-terminal-wayland-arm64.img.zst
+2026-08-12 16:54   8900333568 infra/kitluy-os-image/build/work-veasna-0812b/image-kitluy-pos-terminal-wayland-arm64/kitluy-pos-terminal-wayland-arm64.img
+2026-08-13 09:28    729521762 infra/kitluy-os-image/build/work-veasna-0813/deploy-v2.7.0/kitluy-pos-terminal-wayland-arm64.img.zst
+2026-08-13 09:28   8900333568 infra/kitluy-os-image/build/work-veasna-0813/image-kitluy-pos-terminal-wayland-arm64/kitluy-pos-terminal-wayland-arm64.img
+2026-08-13 10:57    729519410 infra/kitluy-os-image/build/work-veasna-0813b/deploy-v2.7.0/kitluy-pos-terminal-wayland-arm64.img.zst
+2026-08-13 10:57   8900333568 infra/kitluy-os-image/build/work-veasna-0813b/image-kitluy-pos-terminal-wayland-arm64/kitluy-pos-terminal-wayland-arm64.img
+2026-08-17 10:44    649569710 infra/kitluy-store-hub-image/build/work/deploy-v2.7.0/kitluy-storehub-os-arm64.img.zst
+2026-08-17 10:44  17490268160 infra/kitluy-store-hub-image/build/work/image-kitluy-storehub-os-arm64/kitluy-storehub-os-arm64.img
+2026-08-17 11:41    648388182 infra/kitluy-store-hub-image/build/work-full/deploy-v2.7.0/kitluy-storehub-os-arm64.img.zst
+2026-08-17 11:41  17490268160 infra/kitluy-store-hub-image/build/work-full/image-kitluy-storehub-os-arm64/kitluy-storehub-os-arm64.img
+2026-08-17 16:12    648384530 infra/kitluy-store-hub-image/build/work-release/deploy-v2.7.0/kitluy-storehub-os-arm64.img.zst
+2026-08-17 16:12  17490268160 infra/kitluy-store-hub-image/build/work-release/image-kitluy-storehub-os-arm64/kitluy-storehub-os-arm64.img
+
+## PRESERVED
+infra/kitluy-os-image/build/upstream (pinned rpi-image-gen checkout)
+infra/kitluy-store-hub-image/build/upstream (pinned rpi-image-gen checkout)
+infra/kitluy-os-image/out (536K staged rootfs + release manifests, no images)

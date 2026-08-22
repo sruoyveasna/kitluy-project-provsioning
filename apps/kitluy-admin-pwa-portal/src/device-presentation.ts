@@ -147,3 +147,92 @@ export function hubAssignmentSummary(
   // and saying so is more useful than a green tick that means "not broken".
   return { state, serving: state === "active" };
 }
+
+/**
+ * Plain words for a lifecycle state.
+ *
+ * ===========================================================================
+ * WHY THE RAW ENUM WAS THE WRONG THING TO SHOW
+ * ===========================================================================
+ * The list rendered `device.lifecycle` directly, so an operator read
+ * `manufactured` — a word that sounds like a factory step and gives no hint
+ * that a person is being waited on. The single most common question this screen
+ * has to answer is "is anything waiting for me?", and the answer was written in
+ * a vocabulary only the database uses.
+ *
+ * These are DISPLAY strings. The enum stays canonical; nothing here is ever sent
+ * back to the server or compared against a stored value.
+ */
+export function lifecycleLabel(lifecycle: string, locale: KitluyLocale): string {
+  const km = locale === "km-KH";
+  switch (lifecycle) {
+    case "manufactured":
+      // The important one: this device is waiting for a human decision.
+      return km ? "រង់ចាំការអនុម័ត" : "Waiting for approval";
+    case "enrolled":
+      return km ? "បានអនុម័ត" : "Approved";
+    case "active":
+      return km ? "កំពុងដំណើរការ" : "Active";
+    case "quarantined":
+      return km ? "ត្រូវបានដាក់ឱ្យនៅដាច់ដោយឡែក" : "Quarantined";
+    case "restricted_investigation":
+      return km ? "កំពុងស៊ើបអង្កេត" : "Under investigation";
+    case "suspended":
+      return km ? "ត្រូវបានផ្អាក" : "Suspended";
+    case "retired":
+      return km ? "ឈប់ប្រើ" : "Retired";
+    case "replaced":
+      return km ? "ត្រូវបានជំនួស" : "Replaced";
+    default:
+      // An unrecognised state is shown VERBATIM rather than softened into
+      // something friendly — inventing a reassuring word for a state this build
+      // does not know about is exactly how a screen starts lying.
+      return lifecycle;
+  }
+}
+
+/** Lifecycle states where a person is being waited on. */
+const AWAITING_DECISION: ReadonlySet<string> = new Set(["manufactured"]);
+
+export interface FleetSummary {
+  readonly total: number;
+  /** Devices waiting for a HET approval decision. The number that needs a person. */
+  readonly awaitingApproval: number;
+  readonly withIncidents: number;
+  readonly contained: number;
+  readonly hubs: number;
+}
+
+/**
+ * The counts a fleet screen should answer before any table is read.
+ *
+ * Computed over the devices ON THIS PAGE, like the class filter — a truncated
+ * page cannot speak for the whole fleet, and the caller shows the truncation
+ * notice alongside.
+ */
+export function summariseFleet(devices: readonly FleetDeviceView[]): FleetSummary {
+  let awaitingApproval = 0;
+  let withIncidents = 0;
+  let contained = 0;
+  let hubs = 0;
+  for (const d of devices) {
+    if (AWAITING_DECISION.has(d.lifecycle)) awaitingApproval += 1;
+    if (d.openIncidentCount > 0) withIncidents += 1;
+    if (ABNORMAL_LIFECYCLES.has(d.lifecycle)) contained += 1;
+    if (d.deviceClass === "store_hub") hubs += 1;
+  }
+  return { total: devices.length, awaitingApproval, withIncidents, contained, hubs };
+}
+
+/**
+ * Whether ANY device has ever reported its own status.
+ *
+ * Liveness reporting is not built — the device agent answers
+ * `HEARTBEAT_NOT_IMPLEMENTED` and `last_observed_at` is null for every device in
+ * the fleet. So the honest screen says "no device reports yet" ONCE, at the top,
+ * instead of printing an ambiguous "Unknown" on every row and leaving an
+ * operator to wonder whether that means offline.
+ */
+export function anyDeviceHasReported(devices: readonly FleetDeviceView[]): boolean {
+  return devices.some((d) => d.lastSeenAt !== null);
+}

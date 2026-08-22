@@ -335,3 +335,89 @@ export async function listPartnerStores(
     client.release();
   }
 }
+
+/**
+ * What a Partner may know about a pairing session they opened.
+ *
+ * ===========================================================================
+ * WHY THIS EXISTS
+ * ===========================================================================
+ * Issuing a code told the Partner what to type and then went silent. On the
+ * first real pairing the operator typed the code, the Hub paired successfully,
+ * and the Portal still showed a ticking countdown — so the only way to learn it
+ * had worked was to read a server log. A session that can be opened must be
+ * observable, or "did it work?" has no answer on the screen that asked.
+ *
+ * Deliberately NOT Realtime over the data API: OD-ADMIN-FLEET-001 keeps
+ * `kitluy_devices` closed to browsers, so a subscription would mean exposing the
+ * schema. Polling this governed route keeps the boundary intact.
+ */
+export interface PairingSessionStatus {
+  readonly sessionId: string;
+  /** `pending` · `consumed` · `revoked` · `expired` · `locked` — the stored state. */
+  readonly state: string;
+  readonly pairedAt: string | null;
+  /** The Hub that used the code. An opaque id, safe to show — contract §9. */
+  readonly pairedDeviceId: string | null;
+  readonly pairedDeviceReference: string | null;
+  readonly failedAttemptCount: number;
+  readonly lockedAt: string | null;
+  readonly expiresAt: string;
+  readonly digitalStoreId: string;
+}
+
+/**
+ * Read one session. Returns null when it does not exist.
+ *
+ * The caller MUST check the returned `digitalStoreId` against the Stores the
+ * actor holds — this function deliberately does no authorization of its own, so
+ * a future caller cannot mistake it for a guarded read.
+ */
+export async function readPairingSession(
+  deps: HubPairingIssuanceDeps,
+  sessionId: string,
+): Promise<PairingSessionStatus | null> {
+  const client = await deps.pool.connect();
+  try {
+    const { rows } = await client.query<{
+      id: string;
+      state: string;
+      paired_at: string | null;
+      paired_device_id: string | null;
+      asset_tag: string | null;
+      failed_attempt_count: string | number;
+      locked_at: string | null;
+      expires_at: string;
+      digital_store_id: string;
+    }>(
+      `select s.id,
+              s.state::text                as state,
+              s.paired_at,
+              s.paired_device_id,
+              d.asset_tag,
+              s.failed_attempt_count,
+              s.locked_at,
+              s.expires_at,
+              s.digital_store_id
+         from kitluy_devices.hub_pairing_sessions s
+         left join kitluy_devices.devices d on d.id = s.paired_device_id
+        where s.id = $1::uuid`,
+      [sessionId],
+    );
+    const row = rows[0];
+    if (row === undefined) return null;
+    return {
+      sessionId: row.id,
+      state: row.state,
+      pairedAt: row.paired_at,
+      pairedDeviceId: row.paired_device_id,
+      pairedDeviceReference: row.asset_tag,
+      failedAttemptCount: Number(row.failed_attempt_count ?? 0),
+      lockedAt: row.locked_at,
+      expiresAt: row.expires_at,
+      digitalStoreId: row.digital_store_id,
+    };
+  } finally {
+    client.release();
+  }
+}

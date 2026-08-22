@@ -120,6 +120,8 @@ mmdebstrap:
       KITLUY_RELEASE_CHANNEL=internal
       KITLUY_DEVICE_CLASS=terminal
       KITLUY_ENROLLMENT_BASE_URL=
+      KITLUY_REGISTRATION_URL=
+      KITLUY_HARDWARE_PROFILE_KEY=
       KITLUY_ENVIRONMENT=development
       KITLUY_DEFAULT_TIMEZONE=Asia/Phnom_Penh
       KITLUY_DEFAULT_LOCALES=km-KH,en-US
@@ -139,6 +141,22 @@ mmdebstrap:
     - |
       if [ -n "${IGconf_kitluy_enrollment_url:-}" ]; then
         sed -i "s|^KITLUY_ENROLLMENT_BASE_URL=.*|KITLUY_ENROLLMENT_BASE_URL=${IGconf_kitluy_enrollment_url}|" \
+          "$1/etc/kitluy/image.env"
+      fi
+      # The CLOUD registration route, as a FULL url. A separate key from
+      # KITLUY_ENROLLMENT_BASE_URL on purpose: that names the fleet service,
+      # which does not serve this route, and a device that assembled one from
+      # the other would POST registrations to a host answering 404 — which it
+      # could not tell apart from a genuine refusal.
+      if [ -n "${IGconf_kitluy_registration_url:-}" ]; then
+        sed -i "s|^KITLUY_REGISTRATION_URL=.*|KITLUY_REGISTRATION_URL=${IGconf_kitluy_registration_url}|" \
+          "$1/etc/kitluy/image.env"
+      fi
+      # The hardware profile KEY, never a UUID. A key names a MODEL, so a
+      # generic image may carry one and stay generic (plan §5.2); a UUID would
+      # differ per environment and make the image environment-specific.
+      if [ -n "${IGconf_kitluy_hardware_profile_key:-}" ]; then
+        sed -i "s|^KITLUY_HARDWARE_PROFILE_KEY=.*|KITLUY_HARDWARE_PROFILE_KEY=${IGconf_kitluy_hardware_profile_key}|" \
           "$1/etc/kitluy/image.env"
       fi
       if [ -n "${IGconf_kitluy_device_class:-}" ]; then

@@ -50,6 +50,11 @@ usage() {
   cat >&2 <<'EOF'
 Usage: build-rpi-image.sh --profile <store-hub> [options]
 
+  --registration-url <url>
+                          bake the CLOUD registration route into the image,
+                          e.g. https://<ref>.supabase.co/functions/v1/device-registration
+  --hardware-profile-key <key>
+                          bake the hardware profile KEY the device registers as
   --enrollment-url <url>  bake the fleet enrollment endpoint into the image,
                           e.g. http://172.16.21.17:8787 . Without it the card
                           boots and reports that no endpoint is configured.
@@ -76,6 +81,12 @@ while [[ $# -gt 0 ]]; do
     # kitluy-hub-base layer can bake it into /etc/kitluy/image.env, which is what
     # makes a card cloneable: every copy already knows where the fleet is.
     --enrollment-url)  ENROLLMENT_URL="${2:-}"; shift 2 ;;
+    # The CLOUD registration route, as a FULL url. Separate from the fleet
+    # endpoint because it is a different service: Supabase does not serve
+    # /v1/device-enrollment, and the fleet service does not serve this.
+    --registration-url) REGISTRATION_URL="${2:-}"; shift 2 ;;
+    # A stable hardware profile KEY (never a UUID) so the image stays generic.
+    --hardware-profile-key) HARDWARE_PROFILE_KEY="${2:-}"; shift 2 ;;
     --build-dir)       BUILD_DIR="${2:-}"; shift 2 ;;
     --filesystem-only) FILESYSTEM_ONLY="yes"; shift ;;
     --collect-only)    COLLECT_ONLY="yes"; shift ;;
@@ -163,6 +174,8 @@ mkdir -p "$BUILD_DIR"
 # should be a decision, not a side effect.
 RIG_OVERRIDES=()
 ENROLLMENT_URL="${ENROLLMENT_URL:-${KITLUY_ENROLLMENT_BASE_URL:-}}"
+REGISTRATION_URL="${REGISTRATION_URL:-${KITLUY_REGISTRATION_URL:-}}"
+HARDWARE_PROFILE_KEY="${HARDWARE_PROFILE_KEY:-${KITLUY_HARDWARE_PROFILE_KEY:-}}"
 if [[ -n "${KITLUY_DEV_SSH_PUBKEY:-}" ]]; then
   [[ -f "$KITLUY_DEV_SSH_PUBKEY" ]] \
     || die "KITLUY_DEV_SSH_PUBKEY is not a readable file: ${KITLUY_DEV_SSH_PUBKEY}"
@@ -240,6 +253,40 @@ else
   warn "no --enrollment-url given: the image will boot and report that no"
   warn "  enrollment endpoint is configured. The rootfs is read-only, so this"
   warn "  cannot be fixed on the card — rebuild with --enrollment-url."
+fi
+
+# THE CLOUD REGISTRATION ROUTE.
+#
+# Without it the device cannot announce itself to KitLuy at all, and — because
+# the rootfs is read-only and dm-verity protected — nothing on the flashed card
+# can add it later. Warned about in the same terms as the fleet endpoint, and
+# for the same reason: the fix is a rebuild, and the operator should learn that
+# here rather than with a card in their hand.
+if [[ -n "$REGISTRATION_URL" ]]; then
+  RIG_OVERRIDES+=("IGconf_kitluy_registration_url=${REGISTRATION_URL}")
+  log "cloud registration route baked: ${REGISTRATION_URL}"
+else
+  warn "no --registration-url given: this image cannot register itself to the"
+  warn "  cloud. The rootfs is read-only, so rebuild with --registration-url."
+fi
+
+if [[ -n "$HARDWARE_PROFILE_KEY" ]]; then
+  RIG_OVERRIDES+=("IGconf_kitluy_hardware_profile_key=${HARDWARE_PROFILE_KEY}")
+  log "hardware profile key baked: ${HARDWARE_PROFILE_KEY}"
+elif [[ -n "$REGISTRATION_URL" ]]; then
+  # A registration URL with no profile key produces a device that reaches the
+  # cloud and is refused KLUY-REG-UNKNOWN-PROFILE every time. Refused here
+  # rather than warned, because the two values are only useful together and the
+  # failure would otherwise appear as a network-looking error in a shop.
+  die "--registration-url given without --hardware-profile-key.
+  A device registering with no profile key is refused KLUY-REG-UNKNOWN-PROFILE
+  by the cloud on every attempt, and the read-only rootfs cannot be corrected
+  on the card.
+
+  Pass both, e.g.:
+    $0 --profile ${PROFILE} \\
+      --registration-url https://<ref>.supabase.co/functions/v1/device-registration \\
+      --hardware-profile-key CLOUD-HUB-PI5"
 fi
 
 [[ ${#RIG_OVERRIDES[@]} -gt 0 ]] && RIG_ARGS+=(-- "${RIG_OVERRIDES[@]}")

@@ -51,8 +51,14 @@ DEVICE_MODULES=(
   enrollment enrollment-pop-bytes
   adapters/device-identity-store adapters/device-key-provider adapters/linux-hardware-probe
   adapters/http-enrollment-client
+  # Cloud registration: the device announces itself to KitLuy and waits for a
+  # HET decision. `device-registration-bytes` is the device's copy of the
+  # canonical signing form, kept byte-identical by
+  # test/device-registration-bytes-drift.test.ts.
+  device-registration-bytes installation registration-state
+  adapters/http-registration-client
   bin/firstboot-identity bin/enrollment-bootstrap bin/health-reporter
-  bin/update-bootstrap
+  bin/update-bootstrap bin/cloud-registration
   # bin/bootstrap-ui is the PI TERMINAL's status screen — it titles itself
   # "KitLuy Terminal" and hardcodes `Store assignment .. Unassigned`, which is
   # wrong on a Hub and a lie once the Hub pairs. It was shipped here with no

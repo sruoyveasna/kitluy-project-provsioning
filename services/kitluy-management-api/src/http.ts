@@ -21,10 +21,16 @@ import { buildHealthReport, SERVICE_NAME, SERVICE_VERSION } from "./index.js";
 import {
   listPartnerStores,
   openHubPairingSession,
+  readPairingSession,
   resolveStoreScope,
   HUB_PAIRING_TTL_SECONDS,
   type HubPairingIssuanceDeps,
 } from "./hub-pairing-issuance.js";
+import {
+  approveDeviceEnrollment,
+  listPendingRegistrations,
+  type DeviceApprovalDeps,
+} from "./device-approval.js";
 import { authorizePartnerRequest } from "./partner-authorization.js";
 
 export interface KernelResponse {
@@ -86,6 +92,14 @@ export interface ManagementRouterDependencies {
    * not exist.
    */
   readonly issuance?: HubPairingIssuanceDeps;
+  /**
+   * Required only by the device-approval route, which MUTATES and must enter
+   * `service_role` inside a transaction to reach the governed door. Absent means
+   * the route fails CLOSED with 503 rather than 404 — "not configured" and "no
+   * such route" are different facts, and an Admin who saw 404 would conclude
+   * approval does not exist.
+   */
+  readonly approval?: DeviceApprovalDeps;
   /** Environment asserted to `has_permission`; RLS-022 fails closed without it. */
   readonly environment?: string;
 }
@@ -306,6 +320,154 @@ async function handleHubPairingCodeIssuance(
 }
 
 /**
+ * `POST /management/v1/devices/{id}/approve-enrollment` — HET admits one
+ * verified board to the trusted fleet.
+ *
+ * ===========================================================================
+ * VERIFY AND APPROVE, NOT "TRUST DEVICE"
+ * ===========================================================================
+ * Plan §4.4 supersedes the old "never approve an unknown Pi" prohibition in
+ * exactly one narrow way: an Admin may approve an observed untrusted device
+ * AFTER explicit HET hardware verification. So this route requires the caller to
+ * state WHAT was verified (`verificationEvidenceRef`) as well as why
+ * (`reason`) — both refused when blank by the governed door, and refused here
+ * too so the caller learns it without a round trip through PostgreSQL.
+ *
+ * A route that accepted a bare device id would be the one-click "Trust Device"
+ * the plan forbids, no matter what the button said.
+ *
+ * ===========================================================================
+ * TWO IDENTITIES, DELIBERATELY — the same shape as pairing-code issuance
+ * ===========================================================================
+ * Authority is decided as the ACTOR: `authorizeRequest` evaluates the human's
+ * permission, scope, environment and account state against canonical database
+ * state. Only then is the governed door reached, inside a transaction, as the
+ * role migration 0197 granted it to. Frontend visibility authorizes nothing.
+ */
+async function handleApproveEnrollment(
+  deps: ManagementRouterDependencies,
+  request: ManagementRequest,
+  deviceId: string,
+): Promise<KernelResponse> {
+  // AUTHORITY FIRST — before the id is validated and before any row is read, so
+  // an unauthorized caller cannot tell a real device from a malformed one.
+  const outcome = await authorizeRequest(
+    deps.db,
+    deps.verifier,
+    request.authorization,
+    PERMISSION.FLEET_ENROLLMENT_APPROVE,
+  );
+  if (outcome.kind === "deny") return denialResponse(outcome);
+
+  if (deps.approval === undefined) {
+    return {
+      status: 503,
+      body: errorEnvelope(
+        "DEPENDENCY_UNAVAILABLE",
+        "device approval is not configured on this instance",
+      ),
+    };
+  }
+
+  if (!UUID_PATTERN.test(deviceId)) return notFound("No such device.");
+
+  let body: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(request.body ?? "");
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {
+        status: 422,
+        body: errorEnvelope("VALIDATION_FAILED", "Body must be a JSON object."),
+      };
+    }
+    body = parsed as Record<string, unknown>;
+  } catch {
+    return { status: 422, body: errorEnvelope("VALIDATION_FAILED", "Body must be a JSON object.") };
+  }
+
+  // Unknown fields are REFUSED, not ignored — the same discipline the rest of
+  // this surface holds. A caller that believes it may set `lifecycleState` or
+  // name its own approver is a caller to fix, and silence would hide that.
+  const allowed = ["reason", "verificationEvidenceRef", "secondApproverRef"];
+  const unknown = Object.keys(body).filter((k) => !allowed.includes(k));
+  if (unknown.length > 0) {
+    return {
+      status: 422,
+      body: errorEnvelope("VALIDATION_FAILED", `Unknown field: ${unknown[0]}.`),
+    };
+  }
+
+  const reason = typeof body["reason"] === "string" ? body["reason"].trim() : "";
+  const evidence =
+    typeof body["verificationEvidenceRef"] === "string"
+      ? body["verificationEvidenceRef"].trim()
+      : "";
+  if (reason === "") {
+    return {
+      status: 422,
+      body: errorEnvelope("VALIDATION_FAILED", "A reason is required to approve a device."),
+    };
+  }
+  if (evidence === "") {
+    return {
+      status: 422,
+      body: errorEnvelope(
+        "VALIDATION_FAILED",
+        "A verification evidence reference is required — approval records WHAT was verified.",
+      ),
+    };
+  }
+
+  const second = body["secondApproverRef"];
+  if (second !== undefined && (typeof second !== "string" || second.trim() === "")) {
+    return {
+      status: 422,
+      body: errorEnvelope("VALIDATION_FAILED", "secondApproverRef must be a non-empty string."),
+    };
+  }
+
+  const result = await approveDeviceEnrollment(deps.approval, {
+    deviceId,
+    // Names the HUMAN, resolved from the verified token — never taken from the
+    // body. A caller able to name its own approver could sign someone else's
+    // name to an immutable audit record.
+    actorRef: `admin/${outcome.userId}`,
+    reason,
+    verificationEvidenceRef: evidence,
+    ...(typeof second === "string" ? { secondApproverRef: second.trim() } : {}),
+    environment: deps.environment ?? "development",
+  });
+
+  if (result.kind === "refused") {
+    // 422, not 403: the caller HELD the permission. The device is not in a state
+    // that may be approved, which is a fact about the device and not about them.
+    return {
+      status: result.code === "KLUY-APPROVE-NO-DEVICE" ? 404 : 422,
+      body: errorEnvelope(
+        result.code === "KLUY-APPROVE-NO-DEVICE" ? "RESOURCE_NOT_FOUND" : "VALIDATION_FAILED",
+        result.detail,
+        { details: { reason: result.code } },
+      ),
+    };
+  }
+
+  return {
+    status: 200,
+    body: {
+      deviceId: result.deviceId,
+      lifecycleState: result.lifecycleState,
+      // Says what approval did and did NOT do. An approved board is
+      // provisioning-ELIGIBLE; it holds no operational certificate, because
+      // nothing in the codebase can issue one yet (BLK-005). A portal that read
+      // "enrolled" as "ready to serve terminals" would be wrong.
+      detail:
+        "This device is admitted to the trusted fleet and is now eligible for provisioning. It has not been issued an operational certificate and cannot yet serve terminals.",
+      dataAsOf: nowIso(deps),
+    },
+  };
+}
+
+/**
  * Route one management request.
  *
  * ORDER IS LOAD-BEARING: authorization runs before any argument is validated
@@ -330,9 +492,82 @@ export async function handleManagementRequest(
     return await handleHubPairingCodeIssuance(deps, request);
   }
 
+  // Device-enrollment approval — the second mutation on this surface
+  // (KLD-2026-08-17-DEVICE-REGISTRATION-APPROVAL-001). Matched before the
+  // read-only guard below, as pairing-code issuance is.
+  const approveMatch = /^\/devices\/([^/]+)\/approve-enrollment$/.exec(route);
+  if (approveMatch !== null) {
+    if (request.method !== "POST") {
+      return { status: 405, body: errorEnvelope("VALIDATION_FAILED", "Method not allowed") };
+    }
+    return await handleApproveEnrollment(deps, request, decodeURIComponent(approveMatch[1] ?? ""));
+  }
+
   if (request.method !== "GET") {
     // Every OTHER route in this slice is a read.
     return { status: 405, body: errorEnvelope("VALIDATION_FAILED", "Method not allowed") };
+  }
+
+  // Pairing session status — how a Partner learns the code was used.
+  // A GET, so it sits after the mutation guard above and before the read-only
+  // routes below.
+  const sessionMatch = /^\/hub-pairing-codes\/([^/]+)$/.exec(route);
+  if (sessionMatch !== null) {
+    if (deps.issuance === undefined) {
+      return {
+        status: 503,
+        body: errorEnvelope("DEPENDENCY_UNAVAILABLE", "Pairing is not configured on this service."),
+      };
+    }
+    // AUTHORITY FIRST, with no Store named: the session decides which Store this
+    // is, and the caller's holdings are checked against it below. Authorizing
+    // against a Store read out of the session would let the session choose its
+    // own auditor.
+    const outcome = await authorizePartnerRequest(
+      deps.db,
+      deps.verifier,
+      request.authorization,
+      "fleet.hub_pairing_code.issue",
+      null,
+      deps.environment ?? "development",
+    );
+    if (outcome.kind === "deny") {
+      return {
+        status: outcome.status,
+        body: errorEnvelope(
+          outcome.status === 401 ? "AUTHENTICATION_REQUIRED" : "SCOPE_PERMISSION_DENIED",
+          outcome.status === 401 ? "Sign in to continue." : "Access denied.",
+          { details: { reason: outcome.code } },
+        ),
+      };
+    }
+
+    const sessionId = decodeURIComponent(sessionMatch[1] ?? "");
+    if (!UUID_PATTERN.test(sessionId)) return notFound("No such pairing session.");
+
+    const session = await readPairingSession(deps.issuance, sessionId);
+    // A session belonging to another Partner's Store is reported as ABSENT, not
+    // as forbidden: "no such session" and "not yours" must look identical, or the
+    // route becomes an oracle for which session ids exist.
+    if (session === null || !outcome.digitalStoreIds.includes(session.digitalStoreId)) {
+      return notFound("No such pairing session.");
+    }
+
+    return {
+      status: 200,
+      body: {
+        sessionId: session.sessionId,
+        state: session.state,
+        paired: session.state === "consumed",
+        pairedAt: session.pairedAt,
+        pairedDeviceId: session.pairedDeviceId,
+        pairedDeviceReference: session.pairedDeviceReference,
+        failedAttemptCount: session.failedAttemptCount,
+        locked: session.lockedAt !== null,
+        expiresAt: session.expiresAt,
+        dataAsOf: nowIso(deps),
+      },
+    };
   }
 
   // The Stores a PARTNER may open a session for. Separate from `/me`, which
@@ -414,6 +649,38 @@ export async function handleManagementRequest(
     };
   }
 
+  // Pending registrations. A SEPARATE route from `/devices` because it answers a
+  // different question and carries verification evidence the fleet list does not:
+  // this is the queue a person works through with hardware in front of them.
+  if (route === "/devices-pending") {
+    const outcome = await authorizeRequest(
+      deps.db,
+      deps.verifier,
+      request.authorization,
+      // Reading the queue needs the APPROVE permission, not merely fleet read.
+      // The evidence here — board serials, key fingerprints — is exactly what an
+      // attacker would want to forge a convincing registration, so it is not
+      // shown to every operator who may view the fleet.
+      PERMISSION.FLEET_ENROLLMENT_APPROVE,
+    );
+    if (outcome.kind === "deny") return denialResponse(outcome);
+
+    const pending = await listPendingRegistrations(deps.db, { limit: DEVICE_PAGE_LIMIT });
+    return {
+      status: 200,
+      body: {
+        pending,
+        count: pending.length,
+        limit: DEVICE_PAGE_LIMIT,
+        truncated: pending.length >= DEVICE_PAGE_LIMIT,
+        // Told to the client so the UI can require a second approver without
+        // hardcoding an environment rule that lives in the database.
+        fourEyesRequired: ["pilot", "production"].includes(deps.environment ?? "development"),
+        dataAsOf: nowIso(deps),
+      },
+    };
+  }
+
   const deviceMatch = /^\/devices\/([^/]+)$/.exec(route);
   if (deviceMatch !== null) {
     const outcome = await authorizeRequest(
@@ -473,7 +740,12 @@ export function resolveCorsHeaders(
   return {
     "access-control-allow-origin": origin,
     "access-control-allow-headers": "authorization, content-type",
-    "access-control-allow-methods": "GET, OPTIONS",
+    // POST is listed because this surface HAS mutations: Hub pairing-code
+    // issuance and device-enrollment approval. It previously advertised only
+    // "GET, OPTIONS", so a browser preflight for either POST was answered with
+    // a method list that excluded it and the browser refused the request — the
+    // route worked for curl and could never work from the Portal it exists for.
+    "access-control-allow-methods": "GET, POST, OPTIONS",
     "access-control-max-age": "600",
     vary: "Origin",
   };

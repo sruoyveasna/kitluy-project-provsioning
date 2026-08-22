@@ -157,6 +157,122 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+  /management/v1/devices-pending:
+    get:
+      operationId: listPendingRegistrations
+      summary: Devices that registered themselves and await a HET decision
+      description: >-
+        Requires the `fleet.device_enrollment.approve` permission — NOT merely
+        `fleet.read`. The evidence carried here (board serials, registration key
+        fingerprints) is exactly what would be needed to forge a convincing
+        registration, so it is not shown to every operator who may view the
+        fleet. Every `claimed*` value is SELF-REPORTED by the device and is a
+        claim, never a verified fact; that is why an approval step exists.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: The pending queue
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pending, count, fourEyesRequired]
+                properties:
+                  pending:
+                    type: array
+                    items: { $ref: "#/components/schemas/PendingRegistration" }
+                  count: { type: integer }
+                  limit: { type: integer }
+                  truncated: { type: boolean }
+                  fourEyesRequired:
+                    type: boolean
+                    description: >-
+                      True in pilot and production, where the governed door
+                      requires a second distinct approver. Told to the client so
+                      the form does not hardcode an environment rule that lives
+                      in the database.
+                  dataAsOf: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+  /management/v1/devices/{deviceId}/approve-enrollment:
+    post:
+      operationId: approveDeviceEnrollment
+      summary: Admit one verified board to the trusted fleet
+      description: >-
+        Requires the `fleet.device_enrollment.approve` permission. VERIFY AND
+        APPROVE, never a one-click "trust device": the caller must state a
+        `reason` AND a `verificationEvidenceRef` recording WHAT was verified
+        against the physical hardware, and both are refused when blank. The
+        approver is taken from the verified token and never from the body.
+        Moves `manufactured` -> `enrolled` only; a quarantined, retired,
+        replaced or restricted device is never resurrected by an approval, and a
+        device carrying an open trust incident is refused so a suspected clone
+        cannot be approved past its own security finding. Approval makes a board
+        provisioning-ELIGIBLE and issues no operational certificate (BLK-005).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: deviceId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason, verificationEvidenceRef]
+              properties:
+                reason: { type: string, minLength: 1 }
+                verificationEvidenceRef:
+                  type: string
+                  minLength: 1
+                  description: >-
+                    Names the verification record — what was checked, not who
+                    clicked. Written into the immutable lifecycle event.
+                secondApproverRef:
+                  type: string
+                  minLength: 1
+                  description: >-
+                    Required in pilot and production, and refused when it equals
+                    the acting approver. Omitted entirely when absent; an empty
+                    string is refused rather than read as "no second approver".
+      responses:
+        "200":
+          description: The device is admitted to the trusted fleet
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deviceId, lifecycleState]
+                properties:
+                  deviceId: { type: string, format: uuid }
+                  lifecycleState: { type: string, enum: [enrolled] }
+                  detail: { type: string }
+                  dataAsOf: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404":
+          description: No such device, or an identifier that cannot name one
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "422":
+          description: >-
+            The caller HELD the permission and the request was well-formed, but
+            the governed door refused. `error.details.reason` carries the
+            KLUY-APPROVE-* code so a client can branch without parsing prose.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "503":
+          description: Approval is not configured on this instance
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
 components:
   responses:
     Unauthenticated:
@@ -232,6 +348,52 @@ components:
             owner value, a device with a heartbeat reports UNKNOWN — never a
             guessed ONLINE. NEVER_SEEN is a fact, not a threshold.
         requiresAttention: { type: boolean }
+    PendingRegistration:
+      type: object
+      description: >-
+        One board awaiting a HET decision. Every `claimed*` field is reported by
+        the device itself and is named that way deliberately: an Admin reading
+        this screen is verifying hardware, not reading facts the system knows.
+      required: [deviceId, deviceReference, lifecycle, approvable]
+      properties:
+        deviceId: { type: string, format: uuid }
+        deviceReference: { type: string }
+        deviceClass: { type: string }
+        hardwareProfile: { type: [string, "null"] }
+        lifecycle: { type: string }
+        trustLevel: { type: [string, "null"] }
+        reportedHostname: { type: [string, "null"] }
+        claimedBoardSerial: { type: [string, "null"] }
+        claimedSocSerial: { type: [string, "null"] }
+        claimedMacAddress: { type: [string, "null"] }
+        installationGeneration: { type: [integer, "null"] }
+        imageRelease: { type: [string, "null"] }
+        registrationKeyFingerprint: { type: [string, "null"] }
+        enrollmentSequence: { type: [integer, "null"] }
+        firstSeenAt: { type: [string, "null"], format: date-time }
+        lastRegistrationAt: { type: [string, "null"], format: date-time }
+        openIncidents:
+          type: array
+          items:
+            type: object
+            properties:
+              incidentType: { type: string }
+              severity: { type: string }
+              detectedAt: { type: string, format: date-time }
+              detail: { type: [string, "null"] }
+        suspectedCredentialReuse: { type: boolean }
+        verificationEvidenceRecorded:
+          type: boolean
+          description: Always false. Approval is what records verification.
+        approvable:
+          type: boolean
+          description: >-
+            Derived with the SAME open-incident predicate the governed door
+            applies. If this said true and the door disagreed, a verifier would
+            meet an unexplained refusal after typing a reason.
+        blockingReasons:
+          type: array
+          items: { type: string }
     ProvisioningReadiness:
       type: object
       description: >-

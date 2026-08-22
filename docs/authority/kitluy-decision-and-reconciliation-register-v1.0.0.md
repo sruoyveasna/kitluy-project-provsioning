@@ -3642,3 +3642,591 @@ are authenticated to **different accounts**. The connector returns
 *"you do not have permission"* for `gjgbnkhuwlwhngbtrgts`; the CLI and a direct
 pooler connection both work. Check both channels before concluding anything about
 hosted state — this is the second time that has cost a session.
+
+---
+
+## KLD-2026-08-17-DEVICE-REGISTRATION-APPROVAL-001 — a generic image may register; only HET may trust (2026-08-17)
+
+**Closure state: DECIDED — owner decision, plan v1.0.0. Database layer built as
+migration group `0197`; the device-facing and operator-facing halves are NOT
+built (see "What is not built" below).**
+
+Owner's words, 2026-08-17, in two parts. First the shape:
+
+> *"it will tell cloud about it identity like it host name, unice device id (in
+> here I want it to tell the hardware uniqe id), then it will request a
+> registration to admin so admin can accept it. in here it mean that not all pi
+> machine that install can do paring it need to approve factorry enrollment from
+> admin first."*
+
+Then the correction that reshaped the design:
+
+> *"one hardware device has it unuiqe id no matter it boot with any os version or
+> sd card. if we use same raspberry pi board it still same device you got that?"*
+
+### The decision
+
+A generic KitLuy image may bring a Raspberry Pi online **only as an untrusted
+observed fleet device**. The permanent KitLuy device identity is the opaque
+server-generated `device_record_id` associated with the physical Raspberry Pi
+board. Reflashes and storage changes create new installation generations, and
+credential changes create new credential generations, but neither changes the
+permanent device identity. Unknown boards receive no Store or operational trust
+until HET verification and approval. Production operational trust remains
+certificate/PKI controlled.
+
+### This CHOOSES option D, and closes the gap KLD-2026-08-11-DEVICE-LIFECYCLE-001 left open
+
+That decision narrowed factory enrollment to options **B** (per-device secret at
+flash time), **C** (Pi 5 hardware root of trust) and **D** (open enrollment with
+server-side quarantine and manual Admin approval — "development only, must never
+reach Pilot"), and recorded that it could not choose between them.
+
+**The owner has chosen D**, with the qualifier honoured rather than dropped:
+what may never reach Pilot is *open enrollment* — a device becoming `enrolled`
+by asking. What reaches Pilot is registration-as-observation plus an explicit HET
+trust decision, which is a different thing and is why D is now admissible beyond
+development. The Pilot/production hardening is four-eyes approval (built) and
+certificate-bound operational trust (blocked on BLK-005, not built).
+
+It also answers the unreconciled signature problem recorded there: a field Pi has
+no `p_enrollment_station_id` and no `p_enrollment_operator_ref`, so it cannot call
+`enroll_device_v1` at all. `register_device_v1` does not ask it to. Registration
+is *attributed* to an active station rather than authenticated by one, and that
+weakness is precisely what the downstream approval exists to compensate for.
+
+### Reconciliation with the Store Hub specification
+
+Two spec rules appear to be contradicted and are not:
+
+* **"The Admin Portal must not provide an 'approve unknown Raspberry Pi' action"**
+  (`docs/source/imported/kitluy-storehub-phase1-spec-v1.0.0.md:623`)
+* **"Automatic approval of unknown Raspberry Pi hardware"** listed as a Phase 1
+  non-goal (same file, §2.2)
+
+Both survive. The second is untouched: nothing is automatic, and registration
+cannot produce `enrolled` under any input. The first is **narrowed, in one
+direction only** — HET may approve an *observed untrusted board after explicit
+hardware verification*, recorded as a mandatory verification-evidence reference.
+What remains forbidden is what the spec was protecting against: a one-click
+"Trust Device" that approves a board nobody has looked at. The operator surface
+must therefore read **Verify & Approve**, and `approve_device_enrollment_v1`
+refuses without both a reason and a verification-evidence reference.
+
+Spec §"Installing a copied KitLuy OS on an unknown Pi must not make it
+provisionable" (line 495) is satisfied exactly: a copied image yields
+`lifecycle_state = 'manufactured'`, which every pairing and provisioning path
+already refuses.
+
+### Hardware evidence RESOLVES identity; it does not DEFINE it
+
+This is the reconciliation the owner's correction forced, and it is the entry's
+load-bearing sentence. Earlier code comments state that hardware signals are
+evidence and not identity. That remains true. Both hold together because:
+
+* `device_record_id` stays opaque and server-generated — never derived by hashing
+  a serial, MAC, hostname, storage ID or public key;
+* the server uses **board-bound** evidence only to answer "have I already
+  registered this physical board?";
+* `board_serial` resolves, `soc_serial` corroborates, and **MAC alone never
+  auto-reclaims** a device — it returns `TRUST_REVIEW_REQUIRED` instead, because
+  a MAC-only merge is how two physical devices silently become one;
+* **storage evidence never resolves identity.** `storage_serial` and
+  `storage_model` are installation history. A card moved to another board makes a
+  new device, not a returning one.
+
+**What was wrong before.** Development open enrollment made identity effectively
+follow the SD card, because the key lives on the card. A reflashed board arrived
+as a brand-new device carrying the same `board_serial`, which
+`colliding_evidence_device_ids` correctly flagged and
+`quarantine_evidence_collisions_v1` quarantined. That was observed on real
+hardware this month; the database was reporting that the identity anchor was
+wrong.
+
+### Three lifecycles, deliberately separate
+
+| Lifecycle | Identity | Changes when |
+| --- | --- | --- |
+| Physical device | `device_record_id` | the board is physically replaced |
+| Installation | `device_installations.generation` | a new card, NVMe, reflash or reimage |
+| Credential | `manufacturing_enrollments.enrollment_sequence`, and `device_credentials.certificate_generation` downstream | a key rotates |
+
+Installation generations are new (`device_installations`); credential generations
+were **already built** and are reused unchanged —
+`device_credentials.certificate_generation` with
+`device_credential_heads.current_generation/previous_generation/overlap_ends_at`
+already implements rotate-with-overlap, so 0197 adds no credential table.
+
+Both chains are append-only: the previous row is marked `superseded` and kept,
+because it is the evidence of what the board presented before.
+
+### Three behaviours worth recording as decisions in their own right
+
+**A pending board's registration key is rotated by the registration path, not by
+`reenroll_device_v1`.** That door refuses any state but `enrolled`
+(`KLUY-DEVICE-REENROLL-STATE`), and the refusal is correct — it owns the trust
+consequences of replacing a key on a *trusted* device. A board that has never
+been approved has no such consequences: its registration credential is untrusted
+by definition. So an enrolled board rotates through the governed door and a
+pending board supersedes its own pending enrollment.
+
+**A reused credential does not vanish; it becomes visible as itself.** The plan's
+Path D requires the second board to receive its OWN pending identity plus a
+security event. An outright refusal was implemented first and was wrong: it left
+HET with no record of a cloned appliance somebody is physically holding. The
+second board now gets its own `device_record_id`, an open CRITICAL
+`credential_reuse_detected` incident naming the earlier holder, and no route to
+trust.
+
+That incident **is** the containment. An open trust incident is already consulted
+by `evaluate_provisioning_eligibility_v1`, `activate_device_v1`,
+`prepare_device_credential_issuance_v1` and `reenroll_device_v1`, so one insert
+withholds eligibility, activation and issuance without registration writing a
+lifecycle state it has no authority to choose. Quarantine stays a governed
+decision with its own door.
+
+`approve_device_enrollment_v1` was additionally hardened to refuse any device
+carrying an open trust incident (`KLUY-APPROVE-OPEN-INCIDENT`), using the
+predicate `evaluate_provisioning_eligibility_v1` already applies so the two
+cannot disagree. Without it, the suspected clone could be approved past its own
+security finding — which plan §8.6 forbids and the first implementation allowed.
+
+**The poisoning case, recorded because it is easy to reintroduce.** The clone
+seals the shared key into its own enrollment, so a naive "is this key held
+elsewhere?" test then sees the clone and reports the *legitimate* board as a
+clone too — letting one copied card lock the real device out of registration
+permanently. The detection query therefore excludes holders already flagged for
+reusing that same fingerprint, and the earliest holder is treated as legitimate
+because that is the only assumption a machine can defend. Which board is really
+the impostor is what the HET review decides.
+
+**A revoked current credential is not rotated around.** Plan §2.4 requires that a
+replay never restore a revoked credential. `enforce_enrollment_append_only` in
+fact refuses the supersede already — but as a raw
+`KLUY-DEVICE-ENROLLMENT-IMMUTABLE` trigger error escaping a function whose
+contract is to return a status. Registration now refuses first, with
+`KLUY-CREDENTIAL-REVOKED`, and mutates nothing.
+
+The same append-only rule bounds how far this guard needs to reach, and the
+reasoning is recorded because the first implementation reached further and was
+checking a branch that cannot fire: a `sealed` row may close exactly once, so a
+row that closed as `superseded` can never later become `revoked`. Only the
+CURRENT enrollment can therefore be revoked, and only it is examined. A merely
+superseded fingerprint is a legitimate case — the same board booting an older
+card presents the key that card still holds — and rotates forward to a new
+generation with the reason recording that it happened, rather than resurrecting
+the old row.
+
+### A new incident type was added
+
+`trust_incident_type` gained `credential_reuse_detected`. The nearest existing
+value, `key_fingerprint_mismatch`, means the opposite thing — a board presenting
+a key that is *not* the one on record — and reusing it would make a
+cloned-appliance report indistinguishable from an ordinary key mismatch in the
+very view HET triages from. `ALTER TYPE ... ADD VALUE` is additive; no existing
+value is renamed or removed, so no stored row changes meaning.
+
+### Separation of duty, as a grant rather than a description
+
+`kitluy_device_registration_service` may execute `register_device_v1` and nothing
+else. It cannot approve, enrol, re-enrol or activate, and holds no table
+privilege on `devices`, `device_credentials`, `device_credential_heads`,
+`device_trust_incidents`, `device_installations`,
+`manufacturing_enrollments` or `hardware_manifest_signals`. The approval door is
+granted to `service_role` only.
+
+### What is built, and verified
+
+Migration `0197` applied to the local PG17 stack with its own assertions passing,
+and `services/kitluy-device-firstboot-agent/test/device-registration-continuity.db.test.ts`
+passes 20/20, covering plan §8.4 Tests A–E, the approval refusals of §1.6/§8.1,
+the replay behaviour of §2.4, and the least-privilege assertions of §8.2 — the
+last both as privilege-graph assertions and as live refusals observed while
+actually holding the role.
+
+Plan §8.4 Test A — "the core requirement" — is proven end to end: a board is
+registered, HET approves it, then it is reflashed with a new card, a new key and
+a new hostname, and `device_record_id` is unchanged, the installation is a new
+generation, the physical device row count is unchanged, no evidence collision is
+raised, and the board keeps its approval.
+
+### An unreachable role, found by a test that passed dishonestly
+
+Two findings, and the second was only exposed by chasing the first.
+
+**The dishonest test.** The §8.2 role tests were first written as `set local role
+kitluy_device_registration_service` followed by
+`rejects.toThrow(/permission denied/)`. Setting the role was ITSELF refused —
+SQLSTATE 42501, message "permission denied to set role" — so the tests passed
+**without ever assuming the role**, and would have kept passing if the role held
+every privilege in the schema. Matching the SQLSTATE instead does not help: both
+refusals are 42501.
+
+**The role was unreachable, and therefore decorative.** Chasing *why* the SET was
+refused found the real defect. **PostgreSQL 16 gives the creator of a role only an
+ADMIN-option membership**, with `inherit_option` and `set_option` both false. A
+role that is merely `create role`d can therefore be entered by nobody — and the
+runtime pattern every KitLuy service uses is precisely `SET LOCAL ROLE` inside a
+transaction while connected as `service_role`
+(`services/kitluy-management-api/src/hub-pairing-issuance.ts:131`). Measured on
+the local PG17 stack: `kitluy_hub_issuance_service`, `kitluy_hub_pairing_service`
+and `kitluy_fleet_service` could all be assumed, and
+`kitluy_device_registration_service` could not.
+
+So 0197's least-privilege identity existed, held exactly the right grants, and
+**could not have been used by the Edge Function that was going to use it.** The
+missing statement is the one 0192 and 0193 both have and this file lacked:
+
+```sql
+grant kitluy_device_registration_service to service_role;
+```
+
+The suite now proves both halves — the privilege graph, and live refusals
+observed while actually holding the role. The live tests assert `current_user`
+immediately after `SET LOCAL ROLE`, because without that assertion a refused SET
+would leave the connection as the superuser and the "cannot approve" test would
+be asserting that `postgres` cannot approve, which is false.
+
+Standing lesson: a `create role` with no membership grant is not a security
+control, it is an unused object. Assert that a new service identity can be
+ASSUMED, not merely that it exists.
+
+### The registration intake, and how far its evidence reaches
+
+`supabase/functions/device-registration/index.ts` exists, with its contract at
+`docs/api/device-registration-edge-function-v1.md` written first as
+`supabase/functions/README.md` requires. It was served on Deno against the local
+PG17 stack and `pnpm probe:device-registration` passed 12/12 — the happy path, an
+idempotent replay, a reflash that preserved the device id, and every refusal in
+the contract's §9, including a forged signature, a fingerprint that is not its own
+key, an injected `tenantId`, and an unknown profile key.
+
+Proof of possession is Ed25519 over a canonical form with a fixed field order and
+a domain separator, defined ONCE in `@kitluy/device-identity` with a Deno twin
+under `supabase/functions/_shared/`. The twin is only defensible because
+`device-registration-canonical-parity.test.ts` reads both and asserts identical
+bytes, fingerprints and verdicts across `node:crypto` and WebCrypto — 11/11. The
+canonical form sorts `key=value` pairs rather than serialising JSON, and REFUSES
+`;` and `=` inside values instead of escaping them, because an escaping rule is
+one more thing two implementations can implement differently.
+
+Two implementation notes worth keeping, both found by measurement rather than
+reading:
+
+* **`postgres.js` needs `sql.json(...)`, not `JSON.stringify(...)`.** A
+  stringified array destined for a `jsonb` parameter arrives as a JSON *string*,
+  so `jsonb_array_elements` fails with "cannot extract elements from a scalar"
+  (22023). `jsonb_typeof` returns `string` for the stringified form and `array`
+  for `sql.json`.
+* **The route cannot use `supabase.rpc()`.** That sends one statement with no
+  transaction, so there is nowhere to put `SET LOCAL ROLE` — and the role change
+  is the entire security posture of an unauthenticated surface, because
+  `service_role` holds BYPASSRLS.
+
+### What is NOT built
+
+Named explicitly so no reader mistakes this entry for completion:
+
+* **Nothing is deployed and nothing is committed.** The function exists in the
+  repository and has never run anywhere but a local Deno container.
+* **No device-side registration client, `installation_id` persistence, or console
+  states** for pending/approval-required. **So no Raspberry Pi can register
+  today** — the route exists; nothing on a device calls it.
+* **No rate limiting** on a surface that is unauthenticated by design. Anything
+  that can reach it can create pending rows. They grant nothing and are visible to
+  HET, so the risk is fleet-list noise rather than trust — but transport-level
+  limiting is required before this is exposed beyond development.
+* **No `POST /management/v1/devices/{id}/approve-enrollment`** and no Admin
+  "Verify & Approve" view.
+* **`scripts/development/fleet-service.mjs` still calls the enrollment path and
+  still produces `enrolled` directly**, which plan §5.3 requires it to stop
+  doing.
+* **The Store Hub image does not yet bake a stable cloud registration origin.**
+* **Not deployed to cloud.** `kitluy-project-pos` is at 95/95; 0197 is local
+  only.
+* **Operational certificate issuance remains blocked on BLK-005.** Approval makes
+  a board provisioning-*eligible*; it issues nothing. The hardware E2E of plan
+  §8.8 can therefore prove registration → approval → pairing, and not certificate
+  issuance.
+
+### Standing consequence for the Pi Terminal work
+
+Terminals register through the same door. Nothing in `register_device_v1` is
+Hub-specific — the hardware profile's `device_class` distinguishes them — so the
+approval gate applies to every KitLuy Pi, and a Terminal flashed from a generic
+image is equally unpairable until HET approves it.
+
+---
+
+## KLREC-2026-08-17-PG16-ROLE-MEMBERSHIP-001 — PostgreSQL 16's creator auto-grant breaks two things in opposite directions (2026-08-17)
+
+**Closure state: RECORDED — one half fixed, one half OUT OF SCOPE and open.**
+
+PostgreSQL 16 changed `CREATE ROLE`: the creating role receives an
+**ADMIN-option-only membership** in the new role. Measured on the local PG17
+stack:
+
+```text
+pg_auth_members:  admin_option = true,  inherit_option = false,  set_option = false
+```
+
+That single behaviour caused two defects this session that look unrelated and are
+the same fact seen from both sides.
+
+### Direction one — a role nobody can enter (FIXED)
+
+`kitluy_device_registration_service` was created by migration 0197 and never
+granted to anything. With only the creator's admin-option membership, `SET LOCAL
+ROLE` fails with *"permission denied to set role"* — for every login, including
+the superuser. Since `SET LOCAL ROLE` is exactly how every KitLuy service reaches
+its least-privilege identity, the role was unusable and the least-privilege design
+was decorative.
+
+Fixed by `grant kitluy_device_registration_service to service_role`, the statement
+0192 and 0193 both carry. Full detail in
+KLD-2026-08-17-DEVICE-REGISTRATION-APPROVAL-001.
+
+### Direction two — a guard that sees a borrow that cannot exist (OPEN, out of scope)
+
+`packages/device-identity/test/scope-consumption-concurrency.integration.test.ts`
+and one sibling suite refuse to run when the governor role is already granted to
+the login, on the correct reasoning that handing it back would revoke another
+session's borrow. The check is:
+
+```sql
+select pg_has_role(current_user, 'kitluy_credential_issuer', 'MEMBER')
+```
+
+**`pg_has_role(…, 'MEMBER')` returns TRUE for the admin-option-only creator
+membership**, while `SET ROLE` to the same role is REFUSED. Both measured
+side by side:
+
+```text
+pg_has_role(current_user,'kitluy_credential_issuer','MEMBER')  ->  t
+begin; set local role kitluy_credential_issuer;                ->  ERROR: permission denied to set role
+```
+
+So the guard reports a borrow that confers no ability to assume the role and
+therefore cannot be a borrow. On PostgreSQL 16+ these two suites **can never
+run** — they fail closed at setup, on every machine, forever.
+
+This is why they appear in the standing "environmental test failures" tally. They
+are not environmental: they are a version-behaviour change that the guard predates.
+
+**Not fixed here, deliberately.** It is outside this task's scope, and tightening
+the predicate touches a control whose purpose is to protect OTHER sessions —
+getting it wrong would let two runs revoke each other's borrow, which is a worse
+failure than a refusal. The apparent fix is to require a membership that can
+actually be assumed rather than one that merely exists:
+
+```sql
+-- for review, NOT applied
+select exists (
+  select 1 from pg_auth_members m
+    join pg_roles r on r.oid = m.roleid
+    join pg_roles g on g.oid = m.member
+   where r.rolname = 'kitluy_credential_issuer'
+     and g.rolname = current_user
+     and (m.set_option or m.inherit_option))
+```
+
+Whoever takes it should confirm against a real concurrent run, not only against a
+quiet database.
+
+### Standing lesson
+
+The same question — "is this role usable by this login?" — has two wrong answers
+available. `pg_has_role(…, 'MEMBER')` overstates it, and a bare `CREATE ROLE`
+understates it to nothing. Check `pg_auth_members.set_option` when the answer
+matters, and assert that a new service identity can be **ASSUMED**, not merely
+that it exists.
+
+### Measured this session, for whoever reconciles the test tally
+
+With `KITLUY_DEV_DB_URL` pointed at the stack that actually carries the schema,
+`@kitluy/device-identity` runs **899 passed, 0 failed, 23 skipped** across 39 of 42
+suite files. The two failures above are suite-level setup refusals, not assertion
+failures. The package's live suites default to
+`postgresql://…@127.0.0.1:54322`, which on this workstation is
+`supabase_db_hsa_eco` — the HSA stack, holding **zero** `kitluy_devices` tables —
+and `turbo` does not forward `KITLUY_DEV_DB_URL` unless it is declared, so
+`pnpm test` reaches the wrong database regardless of the shell environment.
+
+---
+
+## KLREC-2026-08-19-DEVICE-IDENTITY-PER-SLOT-001 — the device key lives on a per-slot path, so an A/B update would orphan the device's identity (2026-08-19)
+
+**Closure state: RECORDED — OPEN, out of scope, NOT fixed.**
+
+Found while choosing where the new `installation.json` belongs (plan v1.0.0 §3.2).
+Not fixed here on purpose: it changes image persistence semantics for material a
+device cannot regenerate, and that is an owner decision, not a side effect of
+wiring up registration.
+
+### The fact, from upstream's own layout document
+
+`infra/kitluy-store-hub-image/build/upstream/image/gpt/ab_userdata/image.adoc`:
+
+```text
+| /persistent      | PERSISTENT                     | ext4 | rw Shared persistent storage
+| /home            | /persistent/home               | bind | User data shared across slots
+| /var             | /persistent/slots/<slot>/var   | bind | Per-slot runtime state
+| <slot-shared>    | /persistent/shared/<path>      | bind | layer-declared, shared across slots
+```
+
+`/var` is **per-slot by construction**. The only path any KitLuy layer declares
+slot-shared is `/etc/ssh`:
+
+```text
+infra/kitluy-store-hub-image/rpi-image-gen/layer/kitluy-hub-base.rootfs-overlay/
+  etc/rpi-image-gen/slot-shared.d/60-kitluy-ssh.conf   ->  Path=/etc/ssh
+```
+
+### What that means
+
+The device's identity — the Ed25519 private key and the record naming it — lives
+at `/var/lib/kitluy/identity`, and `base.sh` describes it as living "on the
+encrypted data partition". On this layout it is per-slot. After an A/B system
+update the device would boot into the other slot with **no key and no identity
+record**, and `kitluy-firstboot.service`, which is deliberately rerun-safe, would
+mint a NEW identity for the same physical board.
+
+The same applies to `bootstrap-state.json` and `pairing-state.json`: a Hub that
+had paired with a Store would come back from an update reporting itself
+unenrolled and unpaired.
+
+This is the same class of defect the 2026-08-11 plan
+(`distributed-plotting-coral.md` step 1) fixed for SSH host keys — the fix was
+applied to `/etc/ssh` and not to the device's own identity.
+
+### Why it is not urgent, and why it is still real
+
+It is bounded today: no A/B update has ever been performed, and migration 0197's
+board resolution means a re-keyed board still resolves to the SAME
+`device_record_id` from `board_serial`, so the fleet would not gain a duplicate
+device. It would gain a new **enrollment generation** on every system update, and
+the device would lose its recorded pairing.
+
+It becomes acute the first time an A/B update runs on a paired Hub.
+
+### Candidate fix, unapplied
+
+Declare the identity path slot-shared, exactly as SSH host keys are:
+
+```text
+etc/rpi-image-gen/slot-shared.d/61-kitluy-identity.conf
+  Version=1
+  Path=/var/lib/kitluy
+```
+
+Deliberately NOT applied here. `/var/lib/kitluy` also holds `installation.json`,
+whose per-slot behaviour is CORRECT — a new root installation is a new
+installation generation (plan §1.2) — so sharing the whole directory would make
+an A/B update stop producing a new installation id. A correct fix has to separate
+the two, and which paths are device-lifetime versus installation-lifetime is a
+decision the owner should take rather than one inferred from a directory layout.
+
+**Decide:** which of `identity/`, `bootstrap-state.json`, `pairing-state.json`
+and `registration-state.json` are DEVICE-lifetime (slot-shared) and which are
+INSTALLATION-lifetime (per-slot).
+
+---
+
+## KLREC-2026-08-20-CERT-POLICY-OFFLINE-CONTRADICTION-001 — the approved certificate numbers cannot deliver the offline continuity they promise (2026-08-20)
+
+**Closure state: RECORDED — OPEN, needs an owner decision. Nothing implements it yet, so the fix is currently free.**
+
+`kitluy_devices.pki_trust_configuration` (approved under `KLD-2026-07-28-002`)
+holds three values that cannot all be true:
+
+```text
+certificate_lifetime_days   30
+renewal_window_days         10      (renewal begins 20 days after issue)
+offline_grace_hours         720     (= 30 days)
+```
+
+A Store that loses its WAN link immediately before renewal becomes eligible has
+**about eleven days of certificate validity remaining**, not thirty. The
+effective offline tolerance is not the stated grace; it is whatever validity
+happens to remain when the outage starts.
+
+The relationship that must hold:
+
+```text
+remaining validity at the earliest normal renewal point
+   >   maximum required offline duration  +  safety margin
+```
+
+With 30 / 10 / 30 it does not hold. One consistent alternative is 90-day
+lifetime, renewal beginning 45 days before expiry, 30-day offline requirement,
+15-day reserve. The exact numbers are negotiable; the inequality is not.
+
+### Why this is not urgent, and why it must still be decided before issuance
+
+Measured 2026-08-20: **`offline_grace_hours` is consumed by nothing.** It is
+declared in `packages/device-identity/src/index.ts` (line 357), validated as
+non-negative (line 766), and read by no validity, renewal or trusted-time
+decision. No shipped code is behaving inconsistently, because the grace was never
+implemented.
+
+That is exactly why now is the cheapest moment to change it. Once issuance is
+wired, the lifetime is stamped into every certificate in the field and a change
+means reissuing the fleet.
+
+**Do NOT resolve this by accepting expired certificates in a custom TLS callback.**
+That gives certificate expiry two meanings and destroys a boundary the rest of the
+design depends on.
+
+### Independently confirmed
+
+Raised during this session and put to an external review with the Store Hub and
+infrastructure Phase 1 specifications attached. That review reached the same
+conclusion independently and called it a policy defect rather than something to
+explain away.
+
+**Decide:** either raise the certificate lifetime and renewal window, or lower the
+offline-continuity requirement. Keeping all three current numbers is not a
+coherent security model.
+
+---
+
+## KLREC-2026-08-20-REFLASH-FORGETS-PAIRING-001 — a reflashed Hub asks to be paired to the Store it is already paired to (2026-08-20)
+
+**Closure state: RECORDED — OPEN, not fixed. Read the caution before testing it.**
+
+The Store Hub console reads its Store assignment from
+
+```text
+/var/lib/kitluy/pairing-state.json
+```
+
+and `/var` is bind-mounted **per slot** on this image layout
+(`/persistent/slots/<slot>/var`, upstream `image/gpt/ab_userdata`). A reflash
+therefore erases it, while the cloud keeps the `device_assignments` row.
+
+So after reflashing an already-paired Hub the screen will read
+`Store … Unassigned` and prompt for a pairing code the device does not need. The
+device is assigned; only its local memory is gone.
+
+This is the same class as the two display defects fixed on 2026-08-19 and
+2026-08-20 — local state and cloud state disagreeing, with the screen trusting
+the local copy.
+
+### Caution before anyone investigates
+
+**Do not type a fresh pairing code into a Hub in this state** until it is known
+whether the governed door refuses a second pairing for an already-assigned device
+or silently creates a second assignment. Finding out by doing it is the wrong way
+round; read `redeem_device_claim_v1` first.
+
+### The fix, unapplied
+
+The registration agent already receives an authoritative answer about this device
+from the cloud every 60 seconds. The console should learn its assignment from
+that answer rather than from a file a reflash deletes. That would make reflashing
+genuinely stateless, which is the property the whole board-identity model is
+reaching for — a board keeps its identity, its approval and its Store across any
+number of reflashes, and the screen should say so without being re-taught.
+
+Related: `KLREC-2026-08-19-DEVICE-IDENTITY-PER-SLOT-001` records the same per-slot
+problem for the device's private key, which is more serious and equally unfixed.

@@ -19,7 +19,12 @@
 import { useCallback, useEffect, useState } from "react";
 import type { KitluyLocale } from "@kitluy/localization";
 import { AppShell, DataSurface, KitluyErrorBoundary, LocaleProvider } from "@kitluy/web-ui";
-import { resolveAccess, type AccessState } from "./access.js";
+import {
+  holdsPermission,
+  resolveAccess,
+  PERMISSION_FLEET_ENROLLMENT_APPROVE,
+  type AccessState,
+} from "./access.js";
 import { resolvePortalRuntime, type BrowserEnv, type PortalRuntime } from "./config.js";
 import {
   createManagementClient,
@@ -27,11 +32,19 @@ import {
   type FleetPage,
   type ManagementClient,
   type ManagementOutcome,
+  type PendingPage,
 } from "./management-client.js";
 import { MESSAGES, t, type MessageKey } from "./messages.js";
 import { DEFAULT_ROUTE, parseRoute, routeHref, type Route } from "./routing.js";
 import { classifySignInError, validateCredentials, type SignInState } from "./sign-in.js";
-import { AdminNav, DeviceDetailView, DeviceListView, LoginView, NoticePanel } from "./views.js";
+import {
+  AdminNav,
+  DeviceDetailView,
+  DeviceListView,
+  LoginView,
+  NoticePanel,
+  PendingApprovalsView,
+} from "./views.js";
 
 export const PRODUCT_NAME = "kitluy-admin-pwa-portal" as const;
 export { MESSAGES };
@@ -60,6 +73,11 @@ export function App(): JSX.Element {
   const [signIn, setSignIn] = useState<SignInState>({ kind: "idle" });
   const [fleet, setFleet] = useState<Loadable<FleetPage>>({ kind: "loading" });
   const [detail, setDetail] = useState<Loadable<DeviceDetail>>({ kind: "loading" });
+  const [pending, setPending] = useState<Loadable<PendingPage>>({ kind: "loading" });
+  const [approving, setApproving] = useState<string | null>(null);
+  const [approvalNotice, setApprovalNotice] = useState<
+    { readonly deviceId: string; readonly message: string } | undefined
+  >(undefined);
 
   const runtime: PortalRuntime | null = config.kind === "ready" ? config.runtime : null;
 
@@ -116,6 +134,11 @@ export function App(): JSX.Element {
         return { kind: "problem", messageKey: "accessRefused" };
       case "not_found":
         return { kind: "problem", messageKey: "noDevices" };
+      case "refused":
+        // A governed door refused an ACTION. As the answer to a LIST request it
+        // is not something the operator can act on, so it is surfaced with the
+        // door's own message rather than a generic failure.
+        return { kind: "problem", messageKey: "serviceUnavailable", detail: outcome.message };
       case "unavailable":
         return { kind: "problem", messageKey: "serviceUnavailable", detail: outcome.detail };
     }
@@ -132,6 +155,19 @@ export function App(): JSX.Element {
       live = false;
     };
   }, [api, access.kind, route.kind, handleOutcome]);
+
+  const loadPending = useCallback((): void => {
+    if (api === null) return;
+    setPending({ kind: "loading" });
+    void api.listPendingRegistrations().then((outcome) => {
+      setPending(handleOutcome(outcome));
+    });
+  }, [api, handleOutcome]);
+
+  useEffect(() => {
+    if (api === null || access.kind !== "granted" || route.kind !== "pending") return;
+    loadPending();
+  }, [api, access.kind, route.kind, loadPending]);
 
   const deviceId = route.kind === "device" ? route.deviceId : null;
   useEffect(() => {
@@ -174,6 +210,42 @@ export function App(): JSX.Element {
         });
     },
     [runtime, checkAccess],
+  );
+
+  const onApprove = useCallback(
+    (
+      targetId: string,
+      input: { reason: string; verificationEvidenceRef: string; secondApproverRef?: string },
+    ): void => {
+      if (api === null) return;
+      setApproving(targetId);
+      setApprovalNotice(undefined);
+      void api.approveEnrollment(targetId, input).then((outcome) => {
+        setApproving(null);
+        if (outcome.kind === "ok") {
+          setApprovalNotice({ deviceId: targetId, message: outcome.value.detail });
+          // Re-read rather than removing the row locally. The server decides what
+          // is still pending, and a list edited optimistically would disagree with
+          // it the moment another Admin approved something.
+          loadPending();
+          return;
+        }
+        if (outcome.kind === "refused" || outcome.kind === "denied") {
+          setApprovalNotice({ deviceId: targetId, message: outcome.message });
+          return;
+        }
+        if (outcome.kind === "unauthenticated") {
+          setAccess({ kind: "signed_out", messageKey: "sessionExpired" });
+          return;
+        }
+        setApprovalNotice({
+          deviceId: targetId,
+          message:
+            outcome.kind === "unavailable" ? outcome.detail : "This device could not be found.",
+        });
+      });
+    },
+    [api, loadPending],
   );
 
   const onSignOut = useCallback((): void => {
@@ -232,7 +304,13 @@ export function App(): JSX.Element {
 
     if (route.kind === "login") {
       // Already granted; the login route has nothing to offer.
-      return <DeviceListLoader locale={locale} fleet={fleet} />;
+      return (
+        <DeviceListLoader
+          locale={locale}
+          fleet={fleet}
+          canApprove={holdsPermission(access, PERMISSION_FLEET_ENROLLMENT_APPROVE)}
+        />
+      );
     }
 
     if (route.kind === "device") {
@@ -245,17 +323,44 @@ export function App(): JSX.Element {
       return <DeviceDetailView locale={locale} detail={detail.value} />;
     }
 
+    if (route.kind === "pending") {
+      if (pending.kind === "loading") return <DataSurface state="loading" />;
+      if (pending.kind === "problem") {
+        return (
+          <NoticePanel locale={locale} messageKey={pending.messageKey} detail={pending.detail} />
+        );
+      }
+      return (
+        <PendingApprovalsView
+          locale={locale}
+          page={pending.value}
+          canApprove={holdsPermission(access, PERMISSION_FLEET_ENROLLMENT_APPROVE)}
+          busyDeviceId={approving}
+          notice={approvalNotice}
+          onApprove={onApprove}
+        />
+      );
+    }
+
     if (route.kind === "unknown") {
       return <NoticePanel locale={locale} messageKey="noDevices" detail={route.path} />;
     }
 
-    return <DeviceListLoader locale={locale} fleet={fleet} />;
+    return (
+      <DeviceListLoader
+        locale={locale}
+        fleet={fleet}
+        canApprove={holdsPermission(access, PERMISSION_FLEET_ENROLLMENT_APPROVE)}
+      />
+    );
   }
 }
 
 function DeviceListLoader(props: {
   locale: KitluyLocale;
   fleet: Loadable<FleetPage>;
+  /** Presentation only; the API re-decides authority per request. */
+  canApprove: boolean;
 }): JSX.Element {
   if (props.fleet.kind === "loading") return <DataSurface state="loading" />;
   if (props.fleet.kind === "problem") {
@@ -267,7 +372,9 @@ function DeviceListLoader(props: {
       />
     );
   }
-  return <DeviceListView locale={props.locale} page={props.fleet.value} />;
+  return (
+    <DeviceListView locale={props.locale} page={props.fleet.value} canApprove={props.canApprove} />
+  );
 }
 
 /** Re-exported so a test can assert the vocabulary without importing internals. */

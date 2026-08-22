@@ -217,4 +217,6 @@ export async function authorizeRequest(
 export const PERMISSION = {
   FLEET_READ: "fleet.read",
   FLEET_PROVISIONING_ISSUE: "fleet.device_provisioning_code.issue",
+  /** Registered by migration 0197 as CRITICAL. Admits hardware to the fleet. */
+  FLEET_ENROLLMENT_APPROVE: "fleet.device_enrollment.approve",
 } as const;

@@ -10,11 +10,16 @@
  *     KitLuy Store Hub
  *
  *     Device ............ KL-1A2B3C4D
- *     Fleet ............. Enrolled
+ *     KitLuy ............ Approved
  *     Store ............. Unassigned
  *
  *     Enter pairing code:
  *     > __________
+ *
+ * A `Fleet` row appears only for a device that enrolled through the older
+ * flash-time ticket path. A Store Hub reaches the fleet through cloud
+ * registration, so it shows `KitLuy` and no `Fleet` row at all — printing both
+ * read as a contradiction on real hardware.
  *
  * ===========================================================================
  * WHY THIS IS NOT `bootstrap-ui.ts`
@@ -49,6 +54,7 @@ import { createInterface } from "node:readline/promises";
 import { readBootstrapState } from "../bootstrap-state.js";
 import { readImageEnv } from "../image-env.js";
 import { pairingBelongsTo, readPairingState, writePairingState, } from "../pairing-state.js";
+import { readRegistrationState, registrationHeadline, } from "../registration-state.js";
 const CLEAR_SCREEN = "[2J[H";
 /** The canonical alphabet, mirrored from `hub_claim_code_alphabet_v1()`. */
 const CROCKFORD = /^[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{8}$/;
@@ -59,18 +65,40 @@ const CROCKFORD = /^[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{8}$/;
  * `bootstrap-ui.ts` records. A screen that invents "Enrolled" because it has no
  * data is worse than one that admits it does not know.
  */
-export function render(bootstrap, pairing, message) {
+export function render(bootstrap, pairing, message, 
+/**
+ * Cloud registration, when this image has it. Optional and LAST so every
+ * existing caller and test keeps working — an image built before registration
+ * existed renders exactly as it did.
+ */
+registration) {
     const device = bootstrap?.deviceLabel ?? "Unknown";
-    const fleet = bootstrap === null
-        ? "Unknown"
-        : bootstrap.deviceRecordId !== undefined
-            ? "Enrolled"
-            : "Not enrolled";
+    /**
+     * The ticket-based enrolment row, shown ONLY to a device that took that path.
+     *
+     * A Store Hub reaches the fleet through cloud registration and never presents
+     * a flash-time ticket, so this row read `Not enrolled` directly beneath
+     * `KitLuy ... Approved` — two rows that look like a contradiction to anyone
+     * who has not been told there are two enrolment paths. Observed on real
+     * hardware, and it cost an operator a worried question.
+     *
+     * With the ticket agent retired from this image (plan §5.3) there is no
+     * `bootstrap-state.json` at all, so the row would degrade to `Unknown` — no
+     * better. It is therefore omitted entirely unless the device actually holds a
+     * ticket-path identity, which a Pi terminal still does.
+     */
+    const fleet = bootstrap?.deviceRecordId !== undefined ? "Enrolled" : null;
     // The Store line is DERIVED, never hardcoded. It also refuses to speak for a
     // pairing that belongs to a different device record — a copied card carries a
     // stale file, and rendering it would tell an operator their Hub is assigned to
     // a Store it has never spoken to.
-    const mine = pairingBelongsTo(pairing, bootstrap?.deviceRecordId);
+    // The SAME resolution the prompt uses. Asking only `bootstrap` here meant a
+    // Hub that reached the fleet through the CLOUD path never recognised its own
+    // pairing: the assignment existed, the state file said PAIRED, and the screen
+    // still read "Unassigned" because it was comparing against an id that device
+    // never had. Observed on real hardware immediately after the first successful
+    // pairing.
+    const mine = pairingBelongsTo(pairing, resolvePairableDeviceId(bootstrap, registration ?? null));
     const store = !mine
         ? "Unassigned"
         : pairing?.phase === "PAIRED"
@@ -78,16 +106,86 @@ export function render(bootstrap, pairing, message) {
             : pairing?.phase === "LOCKED"
                 ? "Unassigned (code locked)"
                 : "Unassigned";
+    // KitLuy registration is a THIRD axis, not a step on the fleet line: a board
+    // can be registered and unapproved, or approved and unpaired. Rendered as its
+    // own row so an operator is never shown "Not enrolled" for a device that has
+    // in fact reached KitLuy and is waiting on a human decision.
+    const registrationLine = registration === undefined || registration === null
+        ? undefined
+        : registrationPhaseLabel(registration.phase);
+    // Deliberately NOT rendered as a failure. Plan §3.3: pending approval is a
+    // healthy waiting condition, and the headline says whether to wait or act.
+    const registrationNote = registration === undefined || registration === null || registration.phase === "APPROVED"
+        ? []
+        : [`  ${registrationHeadline(registration.phase)}`, ""];
     return [
         "",
         "  KitLuy Store Hub",
         "",
         `  Device ............ ${device}`,
-        `  Fleet ............. ${fleet}`,
+        ...(registrationLine === undefined ? [] : [`  KitLuy ............ ${registrationLine}`]),
+        ...(fleet === null ? [] : [`  Fleet ............. ${fleet}`]),
         `  Store ............. ${store}`,
         "",
+        // The id an admin needs to be quoted over the phone. Contract §9 makes this
+        // the one identifier a pending device receives, precisely so it can be read
+        // out loud; it is opaque and grants nothing.
+        ...(registration?.deviceId === undefined
+            ? []
+            : [`  Device id ......... ${registration.deviceId}`, ""]),
+        ...registrationNote,
         ...(message === undefined ? [] : [`  ${message}`, ""]),
     ].join("\n");
+}
+/** Short status word for the KitLuy row. The headline carries the explanation. */
+function registrationPhaseLabel(phase) {
+    switch (phase) {
+        case "NOT_REGISTERED":
+            return "Not registered";
+        case "REGISTERING":
+            return "Registering";
+        case "AWAITING_APPROVAL":
+            return "Waiting for approval";
+        case "TRUST_REVIEW_REQUIRED":
+            return "Trust review required";
+        case "APPROVED":
+            return "Approved";
+        case "CONTAINED":
+            return "Stopped by KitLuy";
+        case "UNREACHABLE":
+            return "No connection";
+    }
+}
+/**
+ * The device id this Hub may pair with, from EITHER enrolment path.
+ *
+ * ===========================================================================
+ * WHY THE CLOUD PATH COUNTS, AND ONLY WHEN APPROVED
+ * ===========================================================================
+ * Pairing needs one thing before it can begin: a device id the fleet already
+ * recognises. Historically that came only from `bootstrap-state.json`, written
+ * by the ticket-based fleet enrolment agent. A board that reached the fleet the
+ * NEW way — registering itself to the cloud and being approved by HET — has
+ * exactly the same standing and a `deviceId` to prove it, but wrote it to a
+ * different file. Without this, an approved Hub sat on "Waiting for fleet
+ * enrolment" for ever while the cloud held it as `enrolled`.
+ *
+ * `APPROVED` is the only registration phase accepted, deliberately.
+ * `AWAITING_APPROVAL` means HET has NOT yet admitted this board, and letting it
+ * pair would make the approval gate decorative — the device would be attaching
+ * itself to a Store while still untrusted, which is the whole thing
+ * KLD-2026-08-17-DEVICE-REGISTRATION-APPROVAL-001 exists to prevent.
+ *
+ * Bootstrap state wins when both exist: it is the older, ticket-backed path, and
+ * a device holding both should present the identity it enrolled with.
+ */
+export function resolvePairableDeviceId(bootstrap, registration) {
+    if (bootstrap?.deviceRecordId !== undefined)
+        return bootstrap.deviceRecordId;
+    if (registration?.phase === "APPROVED" && typeof registration.deviceId === "string") {
+        return registration.deviceId;
+    }
+    return undefined;
 }
 /**
  * Turn one cloud answer into what the operator is told and what is recorded.
@@ -234,8 +332,31 @@ export function createPairingTransport(options) {
  * attempt budget. This exists so an obvious typo costs a round trip and, more
  * importantly, does NOT spend one of the operator's five attempts.
  */
+/**
+ * What an operator typed, reduced to what the protocol actually is.
+ *
+ * ===========================================================================
+ * THE DEFECT THIS FIXES, OBSERVED ON REAL HARDWARE
+ * ===========================================================================
+ * The Partner Portal renders an issued code GROUPED for readability —
+ * `groupCode()` puts a space after the fourth character, so the screen shows
+ * `4A5M MGSC`. The operator reads that, types it exactly as shown, and the
+ * console refused it: `trim()` removes surrounding whitespace but not the space
+ * in the middle, so the string was nine characters and failed the length check.
+ *
+ * Both halves were individually reasonable and together they were broken. The
+ * grouping is PRESENTATION; the code is eight characters. Hyphens are stripped
+ * too, because a person copying a code by hand writes the separator they are
+ * used to, and refusing them teaches nothing.
+ *
+ * This only makes the input more forgiving. The alphabet check below is
+ * unchanged, so a genuinely wrong code is still refused before any round trip.
+ */
+export function normalisePairingCode(raw) {
+    return raw.replace(/[\s-]/g, "").toUpperCase();
+}
 export function looksLikeCode(raw) {
-    return CROCKFORD.test(raw.trim().toUpperCase());
+    return CROCKFORD.test(normalisePairingCode(raw));
 }
 export async function main() {
     const baseUrl = readImageEnv("KITLUY_ENROLLMENT_BASE_URL");
@@ -243,21 +364,36 @@ export async function main() {
     try {
         for (;;) {
             const bootstrap = readBootstrapState();
+            const registration = readRegistrationState();
             const pairing = readPairingState();
-            const deviceRecordId = bootstrap?.deviceRecordId;
+            const deviceRecordId = resolvePairableDeviceId(bootstrap, registration);
             // Already paired for THIS device: render and stop prompting. Re-presenting
             // a consumed claim is the mistake enrolment already learned once.
             if (pairingBelongsTo(pairing, deviceRecordId) && pairing?.phase === "PAIRED") {
                 process.stdout.write(CLEAR_SCREEN);
-                process.stdout.write(render(bootstrap, pairing));
-                return;
+                process.stdout.write(render(bootstrap, pairing, undefined, registration));
+                // DO NOT RETURN. The unit is `Restart=always`, so exiting on success made
+                // systemd restart the console every few seconds — the restart counter
+                // reached 50 within minutes of the first real pairing, and the screen
+                // redrew constantly. Staying alive also lets the display follow a later
+                // change (revocation, re-assignment) without a reboot.
+                await new Promise((r) => setTimeout(r, 15_000));
+                continue;
             }
             process.stdout.write(CLEAR_SCREEN);
-            process.stdout.write(render(bootstrap, pairing));
+            process.stdout.write(render(bootstrap, pairing, undefined, registration));
             if (deviceRecordId === undefined) {
-                // Not enrolled yet. Pairing cannot start, and inviting a code would be
+                // Not admitted yet. Pairing cannot start, and inviting a code would be
                 // asking for something that cannot possibly work.
-                process.stdout.write("\n  Waiting for fleet enrolment before pairing can begin.\n\n");
+                //
+                // The reason is taken from the registration state when there is one, so
+                // an operator is told WHICH wait they are in — "waiting for HET
+                // approval" is a healthy resting state with a person at the other end,
+                // and reporting it as "waiting for fleet enrolment" would send them
+                // looking for a fault in the wrong system.
+                process.stdout.write(registration === null
+                    ? "\n  Waiting for fleet enrolment before pairing can begin.\n\n"
+                    : `\n  ${registrationHeadline(registration.phase)}\n\n`);
                 await new Promise((r) => setTimeout(r, 5000));
                 continue;
             }
@@ -268,18 +404,19 @@ export async function main() {
             }
             const answer = await rl.question("  Enter pairing code:\n  > ");
             if (!looksLikeCode(answer)) {
-                process.stdout.write("\n  A pairing code is 8 characters, letters and digits (no I, L, O or U).\n\n");
+                process.stdout.write("\n  A pairing code is 8 characters, letters and digits (no I, L, O or U).\n" +
+                    "  Spaces and dashes are ignored, so type it exactly as the Portal shows it.\n\n");
                 await new Promise((r) => setTimeout(r, 2500));
                 continue;
             }
             const outcome = interpret(await createPairingTransport({ baseUrl }).submit({
                 deviceRecordId,
-                code: answer.trim().toUpperCase(),
+                code: normalisePairingCode(answer),
             }), deviceRecordId);
             if (outcome.state !== null)
                 writePairingState(outcome.state);
             process.stdout.write(CLEAR_SCREEN);
-            process.stdout.write(render(readBootstrapState(), readPairingState(), outcome.message));
+            process.stdout.write(render(readBootstrapState(), readPairingState(), outcome.message, readRegistrationState()));
             if (outcome.done)
                 return;
             await new Promise((r) => setTimeout(r, 3000));

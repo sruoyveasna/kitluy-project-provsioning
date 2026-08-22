@@ -26,6 +26,7 @@
     "db:validate": "node scripts/database/db-validate.mjs",
     "dev": "turbo run dev",
     "dev:fleet": "node scripts/development/fleet-service.mjs",
+    "probe:device-registration": "node scripts/development/probe-device-registration-edge.mjs",
     "dev:fleet:watch": "node scripts/development/fleet-watch.mjs",
     "dev:seed:hosted-partner": "node scripts/development/seed-hosted-dev-partner.mjs",
     "dev:seed:hosted-scope": "node scripts/development/seed-hosted-dev-scope.mjs",

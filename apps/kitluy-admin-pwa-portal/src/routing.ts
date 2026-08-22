@@ -9,6 +9,9 @@
 export type Route =
   | { readonly kind: "login" }
   | { readonly kind: "devices" }
+  /** The verify-and-approve queue. A separate route because it is a separate
+   * job: a person works through it with hardware in front of them. */
+  | { readonly kind: "pending" }
   | { readonly kind: "device"; readonly deviceId: string }
   | { readonly kind: "unknown"; readonly path: string };
 
@@ -35,6 +38,7 @@ export function parseRoute(hash: string): Route {
 
   if (segments.length === 0) return DEFAULT_ROUTE;
   if (segments.length === 1 && segments[0] === "login") return { kind: "login" };
+  if (segments.length === 1 && segments[0] === "pending") return { kind: "pending" };
   if (segments[0] === "devices") {
     if (segments.length === 1) return { kind: "devices" };
     if (segments.length === 2) {
@@ -50,6 +54,8 @@ export function routeHref(route: Route): string {
       return "#/login";
     case "devices":
       return "#/devices";
+    case "pending":
+      return "#/pending";
     case "device":
       return `#/devices/${encodeURIComponent(route.deviceId)}`;
     case "unknown":

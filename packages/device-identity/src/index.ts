@@ -811,3 +811,4 @@ export * from "./manufacturing-enrollment-pop.js";
 export * from "./hub-claim-payload.js";
 export * from "./terminal-configuration-delivery.js";
 export * from "./credential-package.js";
+export * from "./device-registration-request.js";

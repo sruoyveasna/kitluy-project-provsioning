@@ -4,6 +4,141 @@ Read the newest relevant handoff before starting work. Naming:
 `YYYY-MM-DD__<AREA>__<TASK-ID>__<SLUG>__AI-HANDOFF.md` under the matching
 subfolder (repository/ shared/ apps/ services/ data/ infrastructure/ reviews/).
 
+## A Raspberry Pi went from box to paired Hub, on real hardware (2026-08-20)
+
+Handoff:
+[`shared/2026-08-20__SHARED__STORE-HUB-HARDWARE-PROOF__REGISTER-APPROVE-PAIR-ON-REAL-HARDWARE__AI-HANDOFF.md`](shared/2026-08-20__SHARED__STORE-HUB-HARDWARE-PROOF__REGISTER-APPROVE-PAIR-ON-REAL-HARDWARE__AI-HANDOFF.md)
+· Task `KL-DEV-REG-0197-C`
+
+**The whole chain ran on hardware.** Flash, plug in ethernet, and with no card
+preparation and nothing typed: firstboot made an identity, the agent read the
+board's own serials and registered to Supabase, the device appeared in the Admin
+Portal, the owner approved it, generated a pairing code in the Partner Portal and
+typed it on the Hub — assigned to `DEMO-LAUNDRY-001 / DEMO-PP-01`. **Board
+continuity proven twice on metal**: a new SD card in the same board returns the
+SAME `device_record_id`, keeps its approval, and gains a new installation
+generation.
+
+**Three defects were found by USING it, none of which any test could see.** The
+Hub refused its own pairing code, because the Portal displays `4A5M MGSC` and the
+console's `trim()` does not remove the space inside. A successfully paired Hub
+displayed `Store … Unassigned`, because `render()` asked the ticket path for an
+identity a cloud-registered device does not have. And the console restart-looped
+on success — `return` against `Restart=always`, counter at 50 — a pre-existing
+flaw unreachable until somebody actually paired.
+
+**Built:** the Admin approval queue and fleet summary (`manufactured` now reads
+"Waiting for approval"), a live Partner pairing status that flips to "Paired" by
+itself, and `issuance-gateway.ts` — the missing bridge from the TypeScript
+issuance pipeline to the already-deployed SQL doors. The gateway typechecks and
+**has never run**.
+
+**A gate nobody had surfaced: trusted time.** Issuance sits behind
+`evaluate_trusted_time_v1`, and the Hub has zero trusted-time rows. The order is
+trusted time → certificate → activation.
+
+**Two findings recorded, not fixed.** A reflash makes a paired Hub forget its
+shop — `pairing-state.json` lives on per-slot `/var` — so it will ask for a code
+it does not need; nobody should type one until it is known whether the cloud
+refuses a second pairing. And the certificate policy is internally inconsistent
+(30-day lifetime, 10-day renewal, 30-day offline grace), confirmed by external
+review; nothing consumes `offline_grace_hours` yet, so the numbers are still free
+to change.
+
+Also: a pre-existing CORS defect fixed in passing — the surface advertised
+`GET, OPTIONS` while already serving a POST, so that route could never have
+worked from a browser. And the development fleet was reset at owner request
+(~750 rows) from a guarded script with protected-count rollback.
+
+---
+
+## The cloud intake is deployed, and a device can now reach it (2026-08-19)
+
+Handoff:
+[`shared/2026-08-19__SHARED__DEVICE-REGISTRATION-CLOUD__DEPLOYED-INTAKE-AND-DEVICE-SIDE-CLIENT__AI-HANDOFF.md`](shared/2026-08-19__SHARED__DEVICE-REGISTRATION-CLOUD__DEPLOYED-INTAKE-AND-DEVICE-SIDE-CLIENT__AI-HANDOFF.md)
+· Task `KL-DEV-REG-0197-B`
+
+**The two sentences the 2026-08-17 handoff ended on are now closed.** It said
+`0197` was local-only and that "no device-side client exists, so no Pi can
+register yet". `kitluy-project-pos` is now at **96/96** with the
+`device-registration` Edge Function deployed and answering on the public
+internet, and the firstboot agent has a registration client that speaks its
+contract. Owner-authorized, deployed only through `pnpm db:deploy:hosted-dev`.
+
+**Proven against the real cloud, not a local stack:** the 12-check contract probe
+passes against the DEPLOYED route, and driving the actual device client through
+it produced plan §8.4 Test A — the same board with a **new key, a new card and a
+new hostname** kept ONE `deviceId` and gained a new `installationId`.
+
+**The client separates board evidence from installation evidence**, which is the
+identity model's central rule: `board_serial`/`soc_serial`/`mac_address` are
+board signals, storage is installation evidence. If storage ever reached the
+board signals a cloned card would resolve to the board it was copied from, so a
+test asserts its ABSENCE. Values are normalised before signing, so the bytes
+signed and the bytes stored are one form. 38 new tests.
+
+**A Store Hub image was built with the cloud route baked in** — new
+`--registration-url` and `--hardware-profile-key` flags, a new
+`kitluy-cloud-registration.service`, and a console that renders "WAITING FOR HET
+APPROVAL" as the healthy resting state it is rather than as a fault. All existing
+OS images were deleted first at owner request: ~80 GB across both image trees,
+inventory recorded in `infra/IMAGE-CLEANUP-2026-08-19.txt`.
+
+**NO HARDWARE HAS BOOTED ANY OF IT.** Everything is bench evidence. Approval is
+still SQL-only (no Management API route, no Admin view), the old
+`enrolled`-producing dev path still exists beside the new gate, terminals still
+cannot register, and BLK-005 means approval issues no certificate.
+
+**One HIGH finding recorded, not fixed:** the device's private key lives on
+`/var`, which the A/B layout binds PER SLOT, so a system update would orphan the
+device identity — `KLREC-2026-08-19-DEVICE-IDENTITY-PER-SLOT-001`. It is the same
+class of defect the 2026-08-11 plan fixed for SSH host keys, applied there and
+not here. Which state is device-lifetime versus installation-lifetime is an owner
+decision.
+
+---
+
+## Permanent board identity and admin-approved cloud registration (2026-08-17)
+
+Handoff:
+[`shared/2026-08-17__SHARED__DEVICE-REGISTRATION-APPROVAL__PERMANENT-BOARD-IDENTITY-AND-CLOUD-REGISTRATION-INTAKE__AI-HANDOFF.md`](shared/2026-08-17__SHARED__DEVICE-REGISTRATION-APPROVAL__PERMANENT-BOARD-IDENTITY-AND-CLOUD-REGISTRATION-INTAKE__AI-HANDOFF.md)
+· Decision: `KLD-2026-08-17-DEVICE-REGISTRATION-APPROVAL-001`
+
+**One physical Raspberry Pi board now maps to one permanent `device_record_id`.**
+Owner rule: _"one hardware device has its unique id no matter it boot with any os
+version or sd card"_. Hardware evidence **RESOLVES** that identity; it does not
+DEFINE it. `board_serial` resolves, `soc_serial` corroborates, MAC alone returns
+`TRUST_REVIEW_REQUIRED`, and storage evidence is excluded entirely — a card moved
+to another board makes a NEW device. Reflashes create installation generations;
+key changes create enrollment generations; neither changes the board's identity.
+Proven: a board approved, then reflashed with a new card, new key and new
+hostname, keeps its id, its approval, and raises no collision.
+
+**A generic image registers, but earns nothing.** Migration `0197` adds
+`register_device_v1` (paths A–D) and `approve_device_enrollment_v1`. Registration
+cannot produce `enrolled` under any input; a cloned SD card in another board gets
+its own pending identity plus an open CRITICAL `credential_reuse_detected`
+incident and cannot be approved past it. This CHOOSES option **D** and closes the
+gap `KLD-2026-08-11-DEVICE-LIFECYCLE-001` left open.
+
+**A device can now reach the cloud without a workstation** —
+`supabase/functions/device-registration/`, contract written first in `docs/api/`,
+Ed25519 proof of possession over a canonical form defined once and copied for Deno
+with a byte-parity suite. Served and probed 12/12 locally.
+
+**Nothing is committed and nothing is deployed.** `kitluy-project-pos` stays at
+95/95. **No device-side client exists, so no Pi can register yet**, and
+`fleet-service.mjs` still produces `enrolled` directly — the old bypass is still
+open beside the new gate.
+
+Two defects found in my own first implementation, both recorded: the
+least-privilege role **could not be assumed** (PostgreSQL 16 gives a role's
+creator an admin-only membership, so a bare `CREATE ROLE` is an unused object),
+and that was hidden by a test that **passed dishonestly** because
+"permission denied to set role" matches `/permission denied/` and shares SQLSTATE 42501. Same root cause, opposite direction, in two device-identity suites that
+can never pass as written — `KLREC-2026-08-17-PG16-ROLE-MEMBERSHIP-001`, left
+unfixed as out of scope.
+
 ## Store Hub pairing, the cloud development target, and Phase B storage (2026-08-17)
 
 **Development now targets the hosted development project** `kitluy-project-pos`
@@ -16,7 +151,7 @@ apply `0189` at all (`KLREC-2026-08-11-EDGE-006`, OPEN).
 
 **Store Hub pairing is a STORE-scoped session.** Migrations `0191`–`0194` gave the
 code its rules (Crockford, fifteen minutes, five-attempt lockout) and the session
-model the owner chose — *"the code is for the Store, and any Hub may use it"*.
+model the owner chose — _"the code is for the Store, and any Hub may use it"_.
 Group 0194 was applied and granted but **no TypeScript called it**; both routes
 still spoke the per-device contract, which would have forced a Hub picker onto the
 Partner — the exact question the owner rejected, and one with no honest answer.

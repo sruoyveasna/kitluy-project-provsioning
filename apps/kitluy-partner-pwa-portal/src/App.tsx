@@ -29,12 +29,20 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { KitluyLocale } from "@kitluy/localization";
-import { AppShell, DataSurface, KitluyErrorBoundary, LocaleProvider } from "@kitluy/web-ui";
+import {
+  AppShell,
+  DataSurface,
+  KitluyErrorBoundary,
+  LocaleProvider,
+  kitluyTokens,
+} from "@kitluy/web-ui";
 
 import { resolvePortalRuntime, type PortalRuntime } from "./config.js";
 import { MESSAGES, type MessageKey } from "./messages.js";
 import {
   createPairingClient,
+  type PairingClient,
+  type PairingSessionStatus,
   type IssuedCode,
   type PairingOutcome,
   type PartnerStore,
@@ -128,40 +136,153 @@ function SignInForm({
  * expired message the moment the SERVER's deadline passes — a code that looks
  * live but is dead sends an operator to type it and be refused.
  */
-function IssuedCodePanel({ locale, issued }: { locale: KitluyLocale; issued: IssuedCode }) {
+function IssuedCodePanel({
+  locale,
+  issued,
+  client,
+}: {
+  locale: KitluyLocale;
+  issued: IssuedCode;
+  client: PairingClient;
+}) {
   const t = MESSAGES[locale];
   const [now, setNow] = useState(() => new Date());
+  const [status, setStatus] = useState<PairingSessionStatus | null>(null);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
+  /**
+   * Watch the session the Portal just opened.
+   *
+   * Polling, not Realtime: OD-ADMIN-FLEET-001 keeps `kitluy_devices` closed to
+   * browsers, so a subscription would mean exposing the schema to the client.
+   * Three seconds is chosen against the human loop — someone walks to the Hub
+   * and types eight characters — not against a machine one.
+   *
+   * Stops the moment the answer is final. A poller that kept running after a
+   * successful pairing would hammer the API for the life of the tab.
+   */
+  useEffect(() => {
+    let live = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const poll = async (): Promise<void> => {
+      const outcome = await client.sessionStatus(issued.sessionId);
+      if (!live) return;
+      if (outcome.kind === "ok") {
+        setStatus(outcome.value);
+        if (outcome.value.paired || outcome.value.locked) return;
+      }
+      // A transient failure must not kill the watch — the operator is still
+      // standing at the Hub. Keep trying until the code's own deadline passes.
+      if (Date.parse(issued.expiresAt) <= Date.now()) return;
+      timer = setTimeout(() => void poll(), 3000);
+    };
+
+    void poll();
+    return () => {
+      live = false;
+      if (timer !== undefined) clearTimeout(timer);
+    };
+  }, [client, issued.sessionId, issued.expiresAt]);
+
   const life = codeLife(issued.expiresAt, now);
+
+  // SUCCESS WINS OVER THE CLOCK. A code that was used at 14:59:58 is paired even
+  // though the countdown has since run out, and showing "expired" then would be
+  // both wrong and alarming.
+  if (status?.paired === true) {
+    return (
+      <section aria-label="pairing-code" data-paired="true">
+        <h2 style={{ color: kitluyTokens.colorPrimary }}>{t.pairedHeading}</h2>
+        <p>{t.pairedDetail}</p>
+        {status.pairedDeviceReference === null ? null : (
+          <p style={{ color: kitluyTokens.colorMuted }}>
+            {t.pairedDevice}:{" "}
+            <strong style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
+              {status.pairedDeviceReference}
+            </strong>
+          </p>
+        )}
+      </section>
+    );
+  }
+
+  if (status?.locked === true) {
+    return (
+      <section aria-label="pairing-code" data-locked="true">
+        <h2>{t.codeHeading}</h2>
+        <p role="alert" style={{ color: kitluyTokens.colorDanger, fontWeight: 700 }}>
+          {t.lockedOut}
+        </p>
+      </section>
+    );
+  }
+
+  // Under two minutes the countdown turns urgent. An operator walking to the
+  // Hub needs to know the code may die before they arrive, and a uniform grey
+  // timer does not say that.
+  const urgent = life.kind === "live" && life.secondsRemaining <= 120;
 
   return (
     <section aria-label="pairing-code">
       <h2>{t.codeHeading}</h2>
       {life.kind === "expired" ? (
-        <p role="alert">{t.expired}</p>
+        <p role="alert" style={{ color: kitluyTokens.colorDanger, fontWeight: 700 }}>
+          {t.expired}
+        </p>
       ) : (
-        <>
+        <div
+          style={{
+            border: `2px solid ${kitluyTokens.colorPrimary}`,
+            borderRadius: kitluyTokens.radius,
+            padding: "1.25rem 1.5rem",
+            textAlign: "center",
+            maxWidth: "26rem",
+          }}
+        >
           {/* `aria-label` carries the ungrouped code so a screen reader does not
               announce the display gap as part of what to type. */}
-          <p aria-label={issued.code}>
-            <strong style={{ fontSize: "2rem", letterSpacing: "0.15em" }}>
+          <p aria-label={issued.code} style={{ margin: "0 0 .5rem" }}>
+            <strong
+              style={{
+                fontSize: "2.6rem",
+                letterSpacing: "0.18em",
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                color: kitluyTokens.colorPrimary,
+              }}
+            >
               {groupCode(issued.code)}
             </strong>
           </p>
-          <p>
-            {t.expiresIn} <time>{life.label}</time>
+          <p
+            style={{
+              margin: 0,
+              color: urgent ? kitluyTokens.colorDanger : kitluyTokens.colorMuted,
+            }}
+          >
+            {t.expiresIn}{" "}
+            <time style={{ fontWeight: urgent ? 700 : 500, fontVariantNumeric: "tabular-nums" }}>
+              {life.label}
+            </time>
           </p>
-        </>
+        </div>
       )}
-      <p>
+      <p role="status" style={{ color: kitluyTokens.colorMuted }}>
+        {t.waitingForHub}
+      </p>
+      {status !== null && status.failedAttemptCount > 0 ? (
+        <p role="alert" style={{ color: kitluyTokens.colorWarning }}>
+          {t.attemptsFailed}: {status.failedAttemptCount}
+        </p>
+      ) : null}
+      <p style={{ color: kitluyTokens.colorMuted }}>
         <em>{t.shownOnce}</em>
       </p>
-      <p>
+      <p style={{ color: kitluyTokens.colorMuted }}>
         <em>{t.replaced}</em>
       </p>
     </section>
@@ -321,7 +442,7 @@ function PairingView({ locale, runtime }: { locale: KitluyLocale; runtime: Porta
         {busy ? t.generating : t.generate}
       </button>
 
-      {issued === null ? null : <IssuedCodePanel locale={locale} issued={issued} />}
+      {issued === null ? null : <IssuedCodePanel locale={locale} issued={issued} client={client} />}
     </section>
   );
 }

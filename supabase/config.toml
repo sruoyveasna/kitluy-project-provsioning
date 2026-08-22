@@ -21,3 +21,20 @@ site_url = "http://localhost:3000"
 
 [auth.sms]
 enable_signup = false
+
+# Device registration intake — deployed WITHOUT user JWT verification.
+#
+# A first-boot device does not lack a key: it generates a registration keypair
+# on first boot. What it lacks is a previously trusted KitLuy credential — no
+# device certificate, no operational credential, no Supabase user — so there is
+# nothing for a JWT gate to check. Adding one would mean shipping a shared
+# secret in a clonable golden image, which Store Hub spec §34 forbids.
+#
+# What replaces it: Ed25519 proof of possession over the canonical form, plus
+# the fact that a successful call grants nothing — registration cannot produce
+# `enrolled` under any input.
+#
+# Contract: docs/api/device-registration-edge-function-v1.md §3.
+# Authority: KLD-2026-08-17-DEVICE-REGISTRATION-APPROVAL-001; plan v1.0.0 §2.1.
+[functions.device-registration]
+verify_jwt = false

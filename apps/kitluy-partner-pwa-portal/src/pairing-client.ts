@@ -98,8 +98,28 @@ export interface PairingClientOptions {
   readonly fetchImpl?: typeof fetch;
 }
 
+/**
+ * What the Portal learns about a session it opened.
+ *
+ * `paired` is the one an operator is waiting for. It is derived on the server
+ * from the stored state so the Portal cannot disagree with the database about
+ * what "paired" means.
+ */
+export interface PairingSessionStatus {
+  readonly sessionId: string;
+  readonly state: string;
+  readonly paired: boolean;
+  readonly pairedAt: string | null;
+  readonly pairedDeviceReference: string | null;
+  readonly failedAttemptCount: number;
+  readonly locked: boolean;
+  readonly expiresAt: string;
+}
+
 export interface PairingClient {
   listStores(): Promise<PairingOutcome<readonly PartnerStore[]>>;
+  /** Poll one session. Used to turn the code screen into a live one. */
+  sessionStatus(sessionId: string): Promise<PairingOutcome<PairingSessionStatus>>;
   issuePairingCode(input: {
     readonly digitalStoreId: string;
     readonly storeLocationId: string;
@@ -163,5 +183,7 @@ export function createPairingClient(options: PairingClientOptions): PairingClien
 
     issuePairingCode: (input) =>
       request<IssuedCode>("/hub-pairing-codes", { method: "POST", body: input }),
+    sessionStatus: (sessionId: string) =>
+      request<PairingSessionStatus>(`/hub-pairing-codes/${encodeURIComponent(sessionId)}`),
   };
 }

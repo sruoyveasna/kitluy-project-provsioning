@@ -28,6 +28,13 @@ export const MESSAGES = {
     expired: "លេខកូដផុតកំណត់ហើយ។ សូមបង្កើតលេខកូដថ្មី។",
     shownOnce: "លេខកូដនេះបង្ហាញតែម្តងគត់។ វាមិនអាចមើលឡើងវិញបានទេ។",
     replaced: "លេខកូដចាស់សម្រាប់ហាងនេះលែងដំណើរការហើយ។",
+    pairedHeading: "ភ្ជាប់ជោគជ័យ",
+    pairedDetail:
+      "Store Hub បានភ្ជាប់ជាមួយហាងនេះហើយ។ វាកំពុងរង់ចាំការផ្តល់វិញ្ញាបនបត្រ មុនពេលអាចបម្រើម៉ាស៊ីនលក់បាន។",
+    pairedDevice: "ឧបករណ៍",
+    waitingForHub: "កំពុងរង់ចាំ Store Hub វាយលេខកូដនេះ…",
+    attemptsFailed: "ការព្យាយាមខុស",
+    lockedOut: "លេខកូដនេះត្រូវបានចាក់សោដោយសារព្យាយាមខុសច្រើនដង។ សូមបង្កើតលេខកូដថ្មី។",
     noStores: "គណនីនេះមិនទាន់ភ្ជាប់ជាមួយហាងណាមួយទេ។",
     noLocation: "ហាងនេះមិនទាន់មានទីតាំងទេ។ សូមបន្ថែមទីតាំងជាមុនសិន។",
     // Failures
@@ -58,6 +65,13 @@ export const MESSAGES = {
     expired: "This code has expired. Generate a new one.",
     shownOnce: "This code is shown once. It cannot be retrieved again.",
     replaced: "Any code issued earlier for this shop has stopped working.",
+    pairedHeading: "Paired",
+    pairedDetail:
+      "The Store Hub is now assigned to this shop. It is waiting on a certificate before it can serve tills.",
+    pairedDevice: "Device",
+    waitingForHub: "Waiting for a Store Hub to type this code…",
+    attemptsFailed: "Failed attempts",
+    lockedOut: "This code is locked after too many wrong attempts. Generate a new one.",
     noStores: "This account is not linked to any shop yet.",
     noLocation: "This shop has no Location yet. Add one before pairing a Store Hub.",
     // Failures

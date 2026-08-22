@@ -76,12 +76,30 @@ describe("the screen the owner decision §2.3 mandates", () => {
   it("admits what it does not know rather than guessing", () => {
     const screen = render(null, null);
     expect(screen).toContain("Device ............ Unknown");
-    expect(screen).toContain("Fleet ............. Unknown");
+    // The DEVICE row still admits ignorance. The FLEET row no longer does —
+    // see the test below for why it is now absent instead.
+    expect(screen).toContain("Store ............. Unassigned");
   });
 
-  it("says Not enrolled when there is no device record", () => {
-    const screen = render({ ...enrolled, deviceRecordId: undefined }, null);
-    expect(screen).toContain("Fleet ............. Not enrolled");
+  it("omits the Fleet row entirely when there is no ticket enrolment", () => {
+    // CHANGED DELIBERATELY. These two assertions previously required
+    // `Fleet ... Unknown` and `Fleet ... Not enrolled`.
+    //
+    // Both wordings existed to describe a ticket-based enrolment that had not
+    // happened. On a Store Hub it never will: the Hub reaches the fleet through
+    // cloud registration, and the ticket agent is retired from that image
+    // (plan §5.3). The row therefore sat under `KitLuy ... Approved` saying
+    // "Not enrolled" about a device that was enrolled — a contradiction an
+    // operator hit on real hardware.
+    //
+    // Saying nothing is the honest option. The row returns for a device that
+    // did take the ticket path, asserted immediately below.
+    expect(render(null, null)).not.toContain("Fleet ...");
+    expect(render({ ...enrolled, deviceRecordId: undefined }, null)).not.toContain("Fleet ...");
+  });
+
+  it("still shows Fleet for a device that DID enrol with a ticket", () => {
+    expect(render(enrolled, null)).toContain("Fleet ............. Enrolled");
   });
 });
 
@@ -195,10 +213,26 @@ describe("the local shape check", () => {
     }
   });
 
-  it("rejects the wrong length and the display hyphen", () => {
+  it("rejects the wrong length", () => {
     expect(looksLikeCode("ABCD829")).toBe(false);
     expect(looksLikeCode("ABCD82911")).toBe(false);
-    // `ABCD-8291` is a presentation form; a caller must strip it before sending.
-    expect(looksLikeCode("ABCD-8291")).toBe(false);
+  });
+
+  it("now ACCEPTS the display form it used to reject", () => {
+    // REVERSED DELIBERATELY, after the failure was seen on real hardware.
+    //
+    // This assertion previously read `.toBe(false)`, on the rule that a
+    // presentation form is the CALLER's job to strip. That rule was correct in
+    // principle and wrong in practice: the only caller stripped with `trim()`,
+    // which removes surrounding whitespace but not the separator inside the
+    // code. The Partner Portal displays `4A5M MGSC`, an operator typed exactly
+    // that, and the Hub refused its own code with a message that read like the
+    // code was wrong.
+    //
+    // Validation and normalisation now sit together, so the pair cannot be
+    // misused the way it was. Correctness is unchanged — alphabet and length are
+    // still enforced, immediately above and below this test.
+    expect(looksLikeCode("ABCD-8291")).toBe(true);
+    expect(looksLikeCode("ABCD 8291")).toBe(true);
   });
 });

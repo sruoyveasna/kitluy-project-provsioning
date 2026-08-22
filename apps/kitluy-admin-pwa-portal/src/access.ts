@@ -46,6 +46,11 @@ export function resolveAccess(outcome: ManagementOutcome<CurrentAdmin>): AccessS
         reason: outcome.reason,
         messageKey: REFUSAL_MESSAGE[outcome.reason] ?? "accessRefused",
       };
+    case "refused":
+      // A governed door refused an ACTION. It can never be the answer to `/me`,
+      // which asks only whether this is a usable Admin — so treating it as a
+      // grant would be wrong, and treating it as a denial would mislabel it.
+      return { kind: "unavailable", detail: outcome.message };
     case "not_found":
       // The session endpoint always exists; a 404 means the portal is pointed
       // at something that is not this API. That is a configuration fault, not
@@ -62,3 +67,5 @@ export function holdsPermission(access: AccessState, permission: string): boolea
 }
 
 export const PERMISSION_FLEET_READ = "fleet.read" as const;
+/** Registered CRITICAL by migration 0197. Presentation gate only. */
+export const PERMISSION_FLEET_ENROLLMENT_APPROVE = "fleet.device_enrollment.approve" as const;

@@ -1,0 +1,12 @@
+#!/bin/sh
+# KitLuy cloud registration client.
+#
+# The device announces itself to KitLuy and waits for a HET approval decision.
+# It presents NO ticket and NO credential — a generic image is meant to be able
+# to do this — and it cannot become `enrolled` by any answer this route gives.
+#
+# PENDING IS THE DESIGNED RESTING STATE (plan §3.3), so this runs as a loop and
+# must never be read as a failure: a Store network that is not up yet, and an
+# approval a human has not made yet, are both normal.
+set -eu
+exec /usr/bin/node /usr/lib/kitluy/lib/firstboot-agent/bin/cloud-registration.js "$@"

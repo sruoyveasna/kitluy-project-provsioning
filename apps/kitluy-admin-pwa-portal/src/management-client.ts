@@ -22,6 +22,14 @@ export type ManagementOutcome<T> =
   /** 403 — authenticated, but refused. `reason` says which refusal. */
   | { readonly kind: "denied"; readonly reason: string; readonly message: string }
   | { readonly kind: "not_found" }
+  /**
+   * 422 — the caller HELD the permission and the request was well-formed, but the
+   * governed door refused the action. Distinct from `denied` on purpose: "you may
+   * not do this" and "this device is not in a state where this can be done" are
+   * different sentences, and a portal that showed the first for the second would
+   * send an Admin to ask for access they already have.
+   */
+  | { readonly kind: "refused"; readonly reason: string; readonly message: string }
   /** Network failure, 5xx, or a body that is not the agreed shape. */
   | { readonly kind: "unavailable"; readonly detail: string };
 
@@ -43,6 +51,63 @@ export interface FleetDeviceView {
   readonly fleetStatus: string | null;
   readonly freshness: string;
   readonly requiresAttention: boolean;
+}
+
+/**
+ * One pending board as the verifier sees it.
+ *
+ * Every `claimed*` field is SELF-REPORTED by the device and is named that way on
+ * purpose (plan §4.4): the Admin is verifying hardware, not reading facts the
+ * system already knows.
+ */
+export interface PendingRegistrationView {
+  readonly deviceId: string;
+  readonly deviceReference: string;
+  readonly deviceClass: string;
+  readonly hardwareProfile: string | null;
+  readonly lifecycle: string;
+  readonly trustLevel: string | null;
+  readonly reportedHostname: string | null;
+  readonly claimedBoardSerial: string | null;
+  readonly claimedSocSerial: string | null;
+  readonly claimedMacAddress: string | null;
+  readonly installationGeneration: number | null;
+  readonly imageRelease: string | null;
+  readonly registrationKeyFingerprint: string | null;
+  readonly enrollmentSequence: number | null;
+  readonly firstSeenAt: string | null;
+  readonly lastRegistrationAt: string | null;
+  readonly openIncidents: readonly {
+    readonly incidentType: string;
+    readonly severity: string;
+    readonly detectedAt: string;
+    readonly detail: string | null;
+  }[];
+  readonly suspectedCredentialReuse: boolean;
+  readonly approvable: boolean;
+  readonly blockingReasons: readonly string[];
+}
+
+export interface PendingPage {
+  readonly pending: readonly PendingRegistrationView[];
+  readonly count: number;
+  readonly limit: number;
+  readonly truncated: boolean;
+  /** Told by the server so the form can require a second approver by environment. */
+  readonly fourEyesRequired: boolean;
+  readonly dataAsOf?: string;
+}
+
+export interface ApprovalRequest {
+  readonly reason: string;
+  readonly verificationEvidenceRef: string;
+  readonly secondApproverRef?: string;
+}
+
+export interface ApprovalResult {
+  readonly deviceId: string;
+  readonly lifecycleState: string;
+  readonly detail: string;
 }
 
 export interface CurrentAdmin {
@@ -94,6 +159,10 @@ export function classifyResponse<T>(
   if (status === 401) return { kind: "unauthenticated", reason };
   if (status === 403) return { kind: "denied", reason, message };
   if (status === 404) return { kind: "not_found" };
+  // 422 carries an actionable refusal from a governed door. Falling through to
+  // `unavailable` would replace "clear the open trust incident first" with "the
+  // service answered 422", which tells an operator nothing they can act on.
+  if (status === 422) return { kind: "refused", reason, message };
   return { kind: "unavailable", detail: `The service answered ${status}.` };
 }
 
@@ -108,6 +177,11 @@ export interface ManagementClient {
   getCurrentAdmin(): Promise<ManagementOutcome<CurrentAdmin>>;
   listDevices(): Promise<ManagementOutcome<FleetPage>>;
   getDevice(deviceId: string): Promise<ManagementOutcome<DeviceDetail>>;
+  listPendingRegistrations(): Promise<ManagementOutcome<PendingPage>>;
+  approveEnrollment(
+    deviceId: string,
+    input: ApprovalRequest,
+  ): Promise<ManagementOutcome<ApprovalResult>>;
 }
 
 export function createManagementClient(options: ManagementClientOptions): ManagementClient {
@@ -146,10 +220,63 @@ export function createManagementClient(options: ManagementClientOptions): Manage
     return classifyResponse<T>(response.status, body) as ManagementOutcome<T>;
   }
 
+  /**
+   * A mutation. Separate from `request` rather than a flag on it, because a
+   * function that can send a body is a function that can send one by accident on
+   * a read — and every other route on this surface must stay a GET.
+   */
+  async function post<T>(path: string, payload: unknown): Promise<ManagementOutcome<T>> {
+    const token = await options.accessToken();
+    if (token === null) {
+      return { kind: "unauthenticated", reason: "KLUY-AUTH-MISSING-TOKEN" };
+    }
+
+    let response: Response;
+    try {
+      response = await doFetch(`${options.baseUrl}/management/v1${path}`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+    } catch {
+      return { kind: "unavailable", detail: "The management service could not be reached." };
+    }
+
+    let body: unknown = null;
+    try {
+      body = await response.json();
+    } catch {
+      if (response.status === 200) {
+        return {
+          kind: "unavailable",
+          detail: "The management service returned an unusable reply.",
+        };
+      }
+    }
+
+    return classifyResponse<T>(response.status, body) as ManagementOutcome<T>;
+  }
+
   return {
     getCurrentAdmin: () => request<CurrentAdmin>("/me"),
     listDevices: () => request<FleetPage>("/devices"),
     getDevice: (deviceId: string) =>
       request<DeviceDetail>(`/devices/${encodeURIComponent(deviceId)}`),
+    listPendingRegistrations: () => request<PendingPage>("/devices-pending"),
+    approveEnrollment: (deviceId: string, input: ApprovalRequest) =>
+      post<ApprovalResult>(`/devices/${encodeURIComponent(deviceId)}/approve-enrollment`, {
+        reason: input.reason,
+        verificationEvidenceRef: input.verificationEvidenceRef,
+        // Omitted entirely when absent. Sending an empty string would look like a
+        // blank second approver rather than the absence of one, and the door must
+        // be able to tell those apart.
+        ...(input.secondApproverRef !== undefined && input.secondApproverRef.trim() !== ""
+          ? { secondApproverRef: input.secondApproverRef.trim() }
+          : {}),
+      }),
   };
 }

@@ -16,6 +16,18 @@ export default tseslint.config(
       "docs/generated/**",
       "supabase/generated/**",
       "**/*.gen.ts",
+      // GENERATED image closures, not source. `package-bootstrap-runtime.sh`
+      // does `rm -rf "$LIB_DIR"` and repopulates these from the agent's
+      // `dist/`, so the TypeScript they come from is already linted here. They
+      // are tracked deliberately — the image build must not need a TS toolchain
+      // — which is the only reason they are visible to eslint at all.
+      //
+      // Without this they report `no-undef` for `Buffer`, `fetch` and friends
+      // and duplicate every finding across three trees (pi-terminal, store-hub
+      // and each rootfs-overlay). `**/dist/**` above is ignored for exactly
+      // this reason; these ARE dist, copied into an overlay.
+      "**/*rootfs-overlay/**/lib/firstboot-agent/**",
+      "infra/*/out/**",
     ],
   },
   js.configs.recommended,
@@ -46,6 +58,21 @@ export default tseslint.config(
         module: "writable",
         exports: "writable",
         URL: "readonly",
+        // These are Node globals too, and omitting them made `no-undef` fire on
+        // correct code — `scripts/development/fleet-watch.mjs` failed solely
+        // because `setInterval`/`clearInterval` were undeclared here. Declaring
+        // what the runtime actually provides is not a relaxed rule; the rule was
+        // being fed a false picture of the environment.
+        Buffer: "readonly",
+        setTimeout: "readonly",
+        clearTimeout: "readonly",
+        setInterval: "readonly",
+        clearInterval: "readonly",
+        setImmediate: "readonly",
+        fetch: "readonly",
+        AbortController: "readonly",
+        TextEncoder: "readonly",
+        TextDecoder: "readonly",
       },
     },
     rules: {

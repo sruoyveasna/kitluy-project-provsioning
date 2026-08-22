@@ -238,6 +238,9 @@ export function createManagementRuntime(env: Env = process.env, max = 8): Manage
       // transaction on and enter `kitluy_hub_issuance_service` inside. `db` above
       // is a bare query handle and cannot do that.
       issuance: { pool },
+      // Device-enrollment approval likewise MUTATES through a governed door and
+      // needs a transaction it can enter `service_role` inside.
+      approval: { pool },
       // Asserted to `has_permission`; RLS-022 fails closed without it.
       environment: requireEnvironment(env),
     },

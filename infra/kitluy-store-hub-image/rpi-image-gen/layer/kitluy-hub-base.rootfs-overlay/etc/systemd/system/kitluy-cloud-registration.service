@@ -1,0 +1,34 @@
+[Unit]
+Description=KitLuy cloud registration client
+# Ordered after firstboot because registration proves possession of the key
+# firstboot creates; there is nothing to sign with until that has run.
+After=kitluy-firstboot.service network-online.target
+Wants=network-online.target
+Requires=kitluy-firstboot.service
+ConditionPathExists=/usr/lib/kitluy/cloud-registration
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/kitluy/cloud-registration
+User=root
+Restart=always
+RestartSec=30s
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictRealtime=yes
+CapabilityBoundingSet=
+# Writes registration-state.json and installation.json, and reads the identity
+# firstboot created. Nothing outside /var/lib/kitluy is writable to it.
+ReadWritePaths=/var/lib/kitluy
+StateDirectory=kitluy
+StateDirectoryMode=0750
+
+[Install]
+WantedBy=multi-user.target
