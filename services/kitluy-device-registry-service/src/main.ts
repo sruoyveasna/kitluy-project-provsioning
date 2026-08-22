@@ -25,6 +25,7 @@ import { EnrollmentComposition, type DevelopmentOpenEnrollment } from "./enrollm
 import { createEnrollmentRouter, DEVICE_ENROLLMENT_PREFIX } from "./enrollment-routes.js";
 import { HubPairingComposition } from "./hub-pairing-composition.js";
 import { createHubPairingRouter, HUB_PAIRING_PREFIX } from "./hub-pairing-routes.js";
+import { advanceDeviceTrust } from "./device-trust-advance.js";
 import { resolveEnrollmentTimeSigningKeyReference } from "./enrollment-time-signer.js";
 import { handleRequest } from "./http.js";
 import { createLapseWorkerLoop } from "./lapse-worker-runtime.js";
@@ -202,6 +203,18 @@ const hubPairingRouter = createHubPairingRouter({
     source: revocation.pool,
     logger: { info: (fields) => log.info("hub-pairing", fields) },
   }),
+  // AFTER a Hub pairs, try to advance it toward `active` (group 0198).
+  //
+  // Nothing in the product called `attempt_activate_device_v1` before this line
+  // existed, so every paired Hub rested at `awaiting_trust` for ever. It is a
+  // separate step, in its own transaction and its own identity, because group
+  // 0121's redemption deliberately stops where it does.
+  advanceTrust: (deviceRecordId) =>
+    advanceDeviceTrust(revocation.pool, {
+      deviceRecordId,
+      environment: trustEnvironment,
+      actorRef: "device/hub-pairing",
+    }),
   logger: { info: (fields) => log.info("hub-pairing-route", fields) },
 });
 

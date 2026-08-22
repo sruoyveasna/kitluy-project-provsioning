@@ -53,6 +53,7 @@ import type {
   HubPairingResultCode,
   PairedHubMaterial,
 } from "./hub-pairing-composition.js";
+import type { TrustAdvanceOutcome } from "./device-trust-advance.js";
 import type { SafeLogger } from "./provisioning-composition.js";
 import {
   BootstrapRateLimiter,
@@ -78,6 +79,13 @@ export interface HubPairingRouter {
 
 export interface HubPairingRouterDeps {
   readonly composition: HubPairingComposition;
+  /**
+   * Advances a freshly paired device toward `active`. OPTIONAL: when absent the
+   * device still pairs and is reported as awaiting trust, which is what happened
+   * for every Hub before group 0198. A pairing must never fail because the step
+   * after it is unconfigured.
+   */
+  readonly advanceTrust?: (deviceRecordId: string) => Promise<TrustAdvanceOutcome>;
   /** Injectable for tests; a real limiter with the default clock otherwise. */
   readonly rateLimiter?: BootstrapRateLimiter;
   readonly logger?: SafeLogger;
@@ -174,7 +182,11 @@ function refusal(result: HubPairingResultCode, correlationId: string): Bootstrap
   };
 }
 
-function paired(material: PairedHubMaterial, correlationId: string): BootstrapRouteResponse {
+function paired(
+  material: PairedHubMaterial,
+  correlationId: string,
+  advance?: TrustAdvanceOutcome,
+): BootstrapRouteResponse {
   return {
     status: 200,
     body: {
@@ -188,9 +200,22 @@ function paired(material: PairedHubMaterial, correlationId: string): BootstrapRo
       // Stated explicitly, and false. Pairing assigns; it does not activate.
       // Activation is certificate-backed and gated on BLK-005, so a Hub that
       // read `activated` as absent-and-therefore-fine would be wrong.
-      activated: material.activated,
+      // Reported from what the governed doors actually said, not a fixed
+      // sentence. Before group 0198 nothing advanced a paired device, so this
+      // always read "awaiting trust" -- true then, and a lie the moment
+      // activation started working.
+      activated: advance?.kind === "advanced",
+      lifecycleState:
+        advance === undefined || advance.kind === "failed" ? null : advance.lifecycleState,
+      trustedTime:
+        advance === undefined || advance.kind === "failed" ? null : advance.trustedTimeStatus,
+      // The governed refusal, verbatim. KLUY-DEVICE-NO-CERTIFICATE and
+      // KLUY-DEVICE-TIME-RESTRICTED demand completely different next actions.
+      activationRefusal: advance?.kind === "blocked" ? advance.refusalCode : null,
       detail:
-        "the Store Hub is assigned to its Store and awaiting trust; activation requires approved certificates",
+        advance?.kind === "advanced"
+          ? "the Store Hub is assigned to its Store and is active"
+          : "the Store Hub is assigned to its Store and is awaiting trust",
     },
   };
 }
@@ -289,7 +314,24 @@ export function createHubPairingRouter(deps: HubPairingRouterDeps): HubPairingRo
           correlationId: outcome.correlationId,
           deviceRecordId,
         });
-        return paired(outcome.data, responseCorrelation);
+        // PAIRING SUCCEEDED. Now try to advance the device, and report what
+        // actually happened -- including a refusal.
+        //
+        // Deliberately NOT allowed to change the pairing answer: the Hub IS
+        // assigned to its Store whether or not it can be activated yet, and
+        // turning a successful pair into an error because the next gate is shut
+        // would send an operator hunting a problem with their code.
+        const advance =
+          deps.advanceTrust === undefined ? undefined : await deps.advanceTrust(deviceRecordId);
+        if (advance !== undefined) {
+          deps.logger?.info({
+            event: "store-hub-trust-advance",
+            correlationId: outcome.correlationId,
+            result: advance.kind,
+            lifecycleState: advance.kind === "failed" ? "unknown" : advance.lifecycleState,
+          });
+        }
+        return paired(outcome.data, responseCorrelation, advance);
       }
       return refusal(outcome.result, responseCorrelation);
     },
