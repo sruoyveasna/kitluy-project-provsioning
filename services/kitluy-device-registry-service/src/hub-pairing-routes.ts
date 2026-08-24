@@ -212,6 +212,10 @@ function paired(
       // The governed refusal, verbatim. KLUY-DEVICE-NO-CERTIFICATE and
       // KLUY-DEVICE-TIME-RESTRICTED demand completely different next actions.
       activationRefusal: advance?.kind === "blocked" ? advance.refusalCode : null,
+      // Which certificate outcome the SEPARATE issuer reached (group 0199).
+      // Reported because "no certificate yet" and "certificate refused for a
+      // containment reason" are different problems for whoever is at the Hub.
+      certificate: advance === undefined || advance.kind === "failed" ? null : advance.certificate,
       detail:
         advance?.kind === "advanced"
           ? "the Store Hub is assigned to its Store and is active"

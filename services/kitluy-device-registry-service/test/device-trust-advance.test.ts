@@ -69,6 +69,7 @@ describe("a Hub that pairs AND activates", () => {
       kind: "advanced",
       lifecycleState: "active",
       trustedTimeStatus: "trusted",
+      certificate: "ISSUED",
     }).handle(request());
 
     expect(response.status).toBe(200);
@@ -85,6 +86,7 @@ describe("a Hub that pairs but cannot activate yet", () => {
       kind: "blocked",
       lifecycleState: "awaiting_trust",
       trustedTimeStatus: "trusted",
+      certificate: "REFUSED",
       refusalCode: "KLUY-DEVICE-NO-CERTIFICATE",
       detail: "no certificate",
     }).handle(request());
@@ -99,6 +101,7 @@ describe("a Hub that pairs but cannot activate yet", () => {
       kind: "blocked",
       lifecycleState: "awaiting_trust",
       trustedTimeStatus: "trusted",
+      certificate: "REFUSED",
       refusalCode: "KLUY-DEVICE-NO-CERTIFICATE",
       detail: "no certificate",
     }).handle(request());
@@ -114,6 +117,7 @@ describe("a Hub that pairs but cannot activate yet", () => {
       kind: "blocked",
       lifecycleState: "awaiting_trust",
       trustedTimeStatus: "restricted_forward_jump",
+      certificate: "NOT_ATTEMPTED",
       refusalCode: "KLUY-DEVICE-TIME-RESTRICTED",
       detail: "restricted",
     }).handle(request());

@@ -81,6 +81,12 @@ export const REGISTRY_ROLES = {
    *  surface whose caller is authorized by an eight-character code alone, and
    *  such a surface must never run as `service_role`, which holds BYPASSRLS. */
   hubPairing: "kitluy_hub_pairing_service",
+  /** Device activation composition (group 0198): trusted time + activation. */
+  activation: "kitluy_activation_service",
+  /** DEVELOPMENT certificate issuance (group 0199). Deliberately a DIFFERENT
+   *  identity from `activation`: the authority that mints an operational
+   *  credential must never be the authority that consumes it. */
+  certificateIssuer: "kitluy_device_certificate_issuer",
   /** A human acting under their own `auth.uid()` (group 0150/0152). */
   human: "authenticated",
 } as const;
@@ -153,6 +159,8 @@ export async function withServiceRole<T>(
     | "kitluy_edge_sync_service"
     | "kitluy_fleet_service"
     | "kitluy_hub_pairing_service"
+    | "kitluy_activation_service"
+    | "kitluy_device_certificate_issuer"
   >,
   fn: (client: pg.PoolClient) => Promise<T>,
 ): Promise<T> {

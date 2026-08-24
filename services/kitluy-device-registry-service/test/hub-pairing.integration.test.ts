@@ -136,10 +136,20 @@ async function releaseHub(deviceId: string): Promise<void> {
   // permits this one, so the reset is legal rather than smuggled past a guard.
   // Scoped to `awaiting_trust` so it can never disturb a device in any other
   // state, and to this suite's own fixtures by the caller.
+  // A fixture can now reach `active`, because activation started working
+  // (groups 0198/0199). Revoke the certificate first: leaving an active
+  // credential on a device walked back to `enrolled` would be an inconsistent
+  // state no governed path can produce, and the next run would inherit it.
+  await pool.query(
+    `update kitluy_devices.device_certificates
+        set status = 'revoked', revoked_at = now(), revocation_reason = 'fixture release'
+      where device_id = $1::uuid and status = 'active'`,
+    [deviceId],
+  );
   await pool.query(
     `update kitluy_devices.devices
         set lifecycle_state = 'enrolled'
-      where id = $1::uuid and lifecycle_state = 'awaiting_trust'`,
+      where id = $1::uuid and lifecycle_state in ('awaiting_trust', 'active')`,
     [deviceId],
   );
 }
