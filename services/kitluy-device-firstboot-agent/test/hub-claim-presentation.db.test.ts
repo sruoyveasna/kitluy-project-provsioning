@@ -121,13 +121,80 @@ async function doorExists(): Promise<boolean> {
 
 const ready = await doorExists();
 
-function randomHex(bytes: number): string {
-  return randomBytes(bytes).toString("hex");
+/**
+ * A REUSED fixture Hub for one test slot, released before use.
+ *
+ * ===========================================================================
+ * WHY NOT MINT A FRESH ONE EVERY RUN
+ * ===========================================================================
+ * The previous version did exactly that, and it was the right fix for the bug it
+ * solved: drawing from a shared pool made this suite pass once and then SKIP for
+ * ever, because a locked claim stays `issued` for good and a paired Hub keeps a
+ * live assignment. A skipped suite still reads as green, which is worse than a
+ * failing one.
+ *
+ * But minting per test traded that for unbounded growth. Every run created
+ * eleven devices, and after a fortnight of runs this suite alone accounted for
+ * 110 of the 490 devices in the development fleet — enough to make the Admin
+ * fleet screen useless for seeing a real device.
+ *
+ * So: a FIXED device per slot, resolved by asset tag, and RELEASED before each
+ * use. The suite stays repeatable and the fleet stops growing.
+ *
+ * `enroll_device_v1` is not idempotent — a second call with the same asset tag
+ * fails on `devices_asset_tag_key` — so the device is looked up first and only
+ * enrolled when genuinely absent.
+ */
+const FIXTURE_PREFIX = "PRES-FIXTURE";
+
+/**
+ * Close whatever a previous run left behind, so the device is claimable again.
+ *
+ * Both updates close a row rather than deleting one: `device_claims` and
+ * `device_assignments` are append-only by design, and every foreign key into
+ * `devices` is NO ACTION, so nothing here may be removed. Closing is the only
+ * honest reset, and it leaves the audit trail intact.
+ *
+ * `revoked_at` is set alongside the state because the schema insists on it
+ * (`device_assignments_revoked_cons`), and a state without its timestamp is not
+ * a revocation.
+ */
+async function releaseHub(db: Client, deviceId: string): Promise<void> {
+  await db.query(
+    `update kitluy_devices.device_claims
+        set state = 'revoked', revoked_at = now()
+      where device_id = $1::uuid and state = 'issued'`,
+    [deviceId],
+  );
+  await db.query(
+    `update kitluy_devices.device_assignments
+        set state = 'revoked', revoked_at = now()
+      where device_id = $1::uuid and state in ('pending_trust', 'active')`,
+    [deviceId],
+  );
 }
 
+let slot = 0;
+
 async function mintHub(db: Client): Promise<string> {
-  const fingerprint = randomHex(32);
-  const h = randomHex(24);
+  slot += 1;
+  const assetTag = `${FIXTURE_PREFIX}-${String(slot).padStart(2, "0")}`;
+
+  const { rows: found } = await db.query<{ id: string }>(
+    `select id from kitluy_devices.devices where asset_tag = $1`,
+    [assetTag],
+  );
+  const existing = found[0]?.id;
+  if (existing !== undefined) {
+    await releaseHub(db, existing);
+    return existing;
+  }
+
+  // First run on this database. Hardware signals are derived from the asset tag
+  // so they are stable across runs AND unique per slot: two devices sharing
+  // evidence is a security event (`KLUY-DEVICE-EVIDENCE-COLLISION`) that would
+  // quarantine the previous slot's Hub.
+  const h = createHash("sha256").update(assetTag).digest("hex");
   const signals = [
     { signal_type: "mac_address", signal_value: (h.slice(0, 12).match(/../g) ?? []).join(":") },
     { signal_type: "board_serial", signal_value: `BS-${h.slice(12, 28)}` },
@@ -139,12 +206,7 @@ async function mintHub(db: Client): Promise<string> {
        (select id from kitluy_devices.hardware_profiles where profile_key = $2 and is_active),
        now(), $3::text, 'ed25519', 'software', 'STATION-PRESENTATION-SUITE',
        'HET-MFG/presentation-suite', $4::jsonb, null) as device_id`,
-    [
-      `PRES-${fingerprint.slice(0, 10).toUpperCase()}`,
-      HUB_PROFILE_KEY,
-      fingerprint,
-      JSON.stringify(signals),
-    ],
+    [assetTag, HUB_PROFILE_KEY, h, JSON.stringify(signals)],
   );
   const id = rows[0]?.device_id;
   if (id === undefined) throw new Error("enroll_device_v1 returned no device id");
@@ -192,16 +254,19 @@ async function issueClaim(
   deviceId: string,
   code: string,
   ttlSeconds: number,
-): Promise<void> {
-  await db.query(
+): Promise<string> {
+  const { rows } = await db.query<{ id: string }>(
     `select kitluy_devices.create_device_claim_v1(
               $1::uuid, s.tenant_id, s.digital_store_id, s.store_location_id,
-              $2, $3, $4::integer, 'operator/presentation-suite')
+              $2, $3, $4::integer, 'operator/presentation-suite') as id
        from (select tenant_id, digital_store_id, store_location_id
                from kitluy_devices.device_claims
               order by created_at desc limit 1) s`,
     [deviceId, sha256(code), sha256(randomUUID()), ttlSeconds],
   );
+  const id = rows[0]?.id;
+  if (id === undefined) throw new Error("create_device_claim_v1 returned no claim");
+  return id;
 }
 
 describe.skipIf(!ready)("the code FORMAT is enforced, and folding is not repair", () => {
@@ -285,7 +350,7 @@ describe.skipIf(!ready)("the five-attempt budget", () => {
   it("emits the security event §6.1 mandates — once, on the transition", async () => {
     const db = await connect();
     const device = await mintHub(db);
-    await issueClaim(db, device, freshCode(), 900);
+    const claimId = await issueClaim(db, device, freshCode(), 900);
 
     for (const wrong of ["ZZZZ1111", "ZZZZ2222", "ZZZZ3333", "ZZZZ4444", "ZZZZ5555"]) {
       await present(db, device, wrong);
@@ -294,10 +359,10 @@ describe.skipIf(!ready)("the five-attempt budget", () => {
     const { rows } = await db.query<{ event_type: string; n: string }>(
       `select event_type, count(*) as n
          from kitluy_devices.device_claim_events
-        where device_id = $1::uuid
+        where claim_id = $1::uuid
           and event_type in ('CLAIM_FAILED_ATTEMPT','CLAIM_LOCKED')
         group by event_type`,
-      [device],
+      [claimId],
     );
     const byType = Object.fromEntries(rows.map((r) => [r.event_type, Number(r.n)]));
     expect(byType.CLAIM_FAILED_ATTEMPT).toBe(5);
@@ -309,7 +374,7 @@ describe.skipIf(!ready)("the five-attempt budget", () => {
   it("records MALFORMED and MISMATCH distinctly in the audit trail", async () => {
     const db = await connect();
     const device = await mintHub(db);
-    await issueClaim(db, device, freshCode(), 900);
+    const claimId = await issueClaim(db, device, freshCode(), 900);
 
     await present(db, device, "IOIO1234");
     await present(db, device, "ZZZZ1111");
@@ -317,9 +382,9 @@ describe.skipIf(!ready)("the five-attempt budget", () => {
     const { rows } = await db.query<{ reason: string }>(
       `select detail->>'reason' as reason
          from kitluy_devices.device_claim_events
-        where device_id = $1::uuid and event_type = 'CLAIM_FAILED_ATTEMPT'
+        where claim_id = $1::uuid and event_type = 'CLAIM_FAILED_ATTEMPT'
         order by occurred_at`,
-      [device],
+      [claimId],
     );
     expect(rows.map((r) => r.reason)).toEqual(["MALFORMED", "MISMATCH"]);
   });

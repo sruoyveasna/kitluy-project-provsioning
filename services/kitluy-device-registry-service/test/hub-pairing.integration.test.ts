@@ -89,16 +89,79 @@ interface Scope {
  */
 const HUB_PROFILE_KEY = "WS11-T001-HUB-PROBE";
 
-function randomHex(bytes: number): string {
-  return randomUUID()
-    .replace(/-/g, "")
-    .repeat(4)
-    .slice(0, bytes * 2);
+/**
+ * A REUSED fixture Hub for one test slot, released before use.
+ *
+ * Minting a fresh device per test made this suite repeatable, but it also grew
+ * the development fleet by seven devices on EVERY run — 81 of the 490 devices in
+ * the local fleet came from here alone, which is enough to make the Admin fleet
+ * screen useless for finding a real Pi.
+ *
+ * A fixed device per slot, released before use, keeps the repeatability without
+ * the growth. `enroll_device_v1` is not idempotent (a second call with the same
+ * asset tag violates `devices_asset_tag_key`), so the device is resolved first
+ * and only enrolled when genuinely absent.
+ */
+const FIXTURE_PREFIX = "PAIR-FIXTURE";
+let slot = 0;
+
+/**
+ * Close what a previous run left behind so the device is claimable again.
+ *
+ * Rows are CLOSED, never deleted: `device_claims` and `device_assignments` are
+ * append-only, and every foreign key into `devices` is NO ACTION. `revoked_at`
+ * is set with the state because `device_assignments_revoked_cons` requires it —
+ * a state without its timestamp is not a revocation.
+ */
+async function releaseHub(deviceId: string): Promise<void> {
+  await pool.query(
+    `update kitluy_devices.device_claims
+        set state = 'revoked', revoked_at = now()
+      where device_id = $1::uuid and state = 'issued'`,
+    [deviceId],
+  );
+  await pool.query(
+    `update kitluy_devices.device_assignments
+        set state = 'revoked', revoked_at = now()
+      where device_id = $1::uuid and state in ('pending_trust', 'active')`,
+    [deviceId],
+  );
+  // Pairing legitimately advances the device to `awaiting_trust`, and the
+  // session door refuses anything that is not `enrolled`
+  // (`KLUY-HUBSESSION-DEVICE-INELIGIBLE`). There is no governed "un-pair" —
+  // rightly, because in the field a Hub that paired HAS paired — so a fixture
+  // that is to be reused has to be walked back explicitly.
+  //
+  // The transition is checked by `trg_devices_lifecycle_transition` and it
+  // permits this one, so the reset is legal rather than smuggled past a guard.
+  // Scoped to `awaiting_trust` so it can never disturb a device in any other
+  // state, and to this suite's own fixtures by the caller.
+  await pool.query(
+    `update kitluy_devices.devices
+        set lifecycle_state = 'enrolled'
+      where id = $1::uuid and lifecycle_state = 'awaiting_trust'`,
+    [deviceId],
+  );
 }
 
 async function mintHub(): Promise<string | null> {
-  const fingerprint = randomHex(32);
-  const h = randomHex(24);
+  slot += 1;
+  const assetTag = `${FIXTURE_PREFIX}-${String(slot).padStart(2, "0")}`;
+
+  const { rows: found } = await pool.query<{ id: string }>(
+    `select id from kitluy_devices.devices where asset_tag = $1`,
+    [assetTag],
+  );
+  const existing = found[0]?.id;
+  if (existing !== undefined) {
+    await releaseHub(existing);
+    return existing;
+  }
+
+  // Signals derived from the asset tag: stable across runs, unique per slot.
+  // Two devices sharing evidence is a security event that would quarantine the
+  // previous slot's Hub (`KLUY-DEVICE-EVIDENCE-COLLISION`).
+  const h = createHash("sha256").update(assetTag).digest("hex");
   const signals = [
     { signal_type: "mac_address", signal_value: (h.slice(0, 12).match(/../g) ?? []).join(":") },
     { signal_type: "board_serial", signal_value: `BS-${h.slice(12, 28)}` },
@@ -110,12 +173,7 @@ async function mintHub(): Promise<string | null> {
        (select id from kitluy_devices.hardware_profiles where profile_key = $2 and is_active),
        now(), $3::text, 'ed25519', 'software', 'STATION-PAIRING-SUITE',
        'HET-MFG/pairing-suite', $4::jsonb, null) as device_id`,
-    [
-      `PAIR-${fingerprint.slice(0, 10).toUpperCase()}`,
-      HUB_PROFILE_KEY,
-      fingerprint,
-      JSON.stringify(signals),
-    ],
+    [assetTag, HUB_PROFILE_KEY, h, JSON.stringify(signals)],
   );
   return rows[0]?.device_id ?? null;
 }
