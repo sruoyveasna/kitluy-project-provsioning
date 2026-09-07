@@ -27,6 +27,9 @@ export default tseslint.config(
       // and each rootfs-overlay). `**/dist/**` above is ignored for exactly
       // this reason; these ARE dist, copied into an overlay.
       "**/*rootfs-overlay/**/lib/firstboot-agent/**",
+      // The Device Shell's compiled app, same reason: vite/tsc output that the
+      // packager deletes and repopulates on every build.
+      "**/*rootfs-overlay/**/lib/device-shell/**",
       // The Store Hub agent BUNDLE, for the same reason and one more.
       //
       // `dist-bundle/hub-agent.mjs` is esbuild output: the whole dependency
