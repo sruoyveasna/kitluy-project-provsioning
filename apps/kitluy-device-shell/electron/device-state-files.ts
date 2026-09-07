@@ -1,12 +1,18 @@
 /**
  * Read-only readers for the device's own state, gathered into a `ShellSnapshot`.
  *
- * The shell runs UNPRIVILEGED and never reads a private key or writes anything
- * under `/var/lib/kitluy`. It parses the same display-state JSON the firstboot
- * agent writes (`registration-state.json`, `pairing-state.json`,
- * `bootstrap-state.json`) plus sysfs link state and `/proc/net/route`. An absent
- * or unparsable file reads as the earliest/safest value — exactly as the agent's
- * own readers do — so a corrupt file can never wedge the screen.
+ * The shell runs UNPRIVILEGED and never reads a private key. It parses the same
+ * display-state JSON the firstboot agent writes (`registration-state.json`,
+ * `pairing-state.json`, `bootstrap-state.json`) plus sysfs link state and
+ * `/proc/net/route`. An absent or unparsable file reads as the earliest/safest
+ * value — exactly as the agent's own readers do — so a corrupt file can never
+ * wedge the screen.
+ *
+ * READS everything under `/var/lib/kitluy`; WRITES only inside
+ * `/var/lib/kitluy/terminal`, which is the kiosk user's own directory and the
+ * only path `kitluy-terminal-session.service` grants it. The agent's files stay
+ * root-owned and are read here, never written — see `terminal-assignment.ts` for
+ * why the terminal records its seat separately from the Store Hub's console.
  *
  * Paths are parameterised (`roots`) so this is testable off-device against a
  * fixture tree, and the drift test pins these paths against the agent's exported
@@ -14,7 +20,9 @@
  */
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { readTerminalAssignment } from "./terminal-assignment.js";
 import type {
+  AssignmentView,
   NetworkState,
   PairingPhase,
   PairingView,
@@ -155,12 +163,31 @@ export function readNetwork(roots: DeviceRoots = DEFAULT_ROOTS): NetworkState {
   return { hasLink, hasRoute };
 }
 
+/**
+ * The terminal's own seat, from the kiosk user's directory.
+ *
+ * Parameterised on `stateDir` like the others so the fixture tree can carry one;
+ * on a device this resolves to `/var/lib/kitluy/terminal/assignment.json`.
+ */
+export function readAssignment(stateDir = DEFAULT_ROOTS.stateDir): AssignmentView | null {
+  const raw = readTerminalAssignment(join(stateDir, "terminal", "assignment.json"));
+  if (raw === null) return null;
+  return {
+    deviceRecordId: raw.deviceRecordId,
+    activated: raw.activated === true,
+    digitalStoreReference: raw.digitalStoreReference,
+    storeLocationReference: raw.storeLocationReference,
+    physicalTerminalLabel: raw.physicalTerminalLabel,
+  };
+}
+
 export function readSnapshot(roots: DeviceRoots = DEFAULT_ROOTS): ShellSnapshot {
   const registration = readRegistration(roots.stateDir);
   const deviceRecordId = readDeviceRecordId(roots.stateDir);
   return {
     registration,
     pairing: readPairing(roots.stateDir),
+    assignment: readAssignment(roots.stateDir),
     network: readNetwork(roots),
     ...(registration?.keyFingerprint === undefined
       ? {}

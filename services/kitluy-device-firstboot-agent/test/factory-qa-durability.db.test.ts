@@ -247,7 +247,19 @@ describe.skipIf(!reachable)("durable factory QA survives a process restart", () 
 
     const eligibility = await readProvisioningEligibility(db, fx.deviceRecordId);
     expect(eligibility.eligible).toBe(false);
-    expect(eligibility.reasons.join(" ")).toMatch(/no factory QA execution is recorded/);
+    // WORDED BY 0214, NOT 0188.
+    //
+    // 0188 said "no factory QA execution is recorded for the current
+    // enrollment". 0214 folded QA and HET approval into ONE predicate, so the
+    // sentence became "no passed factory QA execution and no HET approval
+    // evidence for the current enrollment (production requires factory QA)".
+    // The property under test did not change — absence is still a denial — so
+    // the assertion is re-pointed at the current predicate rather than the
+    // retired prose, and matched on the two facts it must state rather than on
+    // the whole sentence, which is presentation.
+    const reasons = eligibility.reasons.join(" ");
+    expect(reasons).toMatch(/factory QA/);
+    expect(reasons).toMatch(/no passed factory QA execution/);
   });
 });
 

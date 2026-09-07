@@ -50,6 +50,23 @@ export interface PairingView {
   readonly deviceRecordId?: string;
 }
 
+/**
+ * The seat a paired terminal holds, as the shell reads it back.
+ *
+ * Mirrors `electron/terminal-assignment.ts`. This is the TERMINAL's own record,
+ * written into the kiosk user's directory, and it is a different file from the
+ * Store Hub's `pairing-state.json` for the reason recorded there: the Hub's
+ * console runs as root and this shell deliberately does not.
+ */
+export interface AssignmentView {
+  readonly deviceRecordId: string;
+  /** False until trust is advanced. Pairing alone never makes this true. */
+  readonly activated: boolean;
+  readonly digitalStoreReference: string;
+  readonly storeLocationReference: string;
+  readonly physicalTerminalLabel: string;
+}
+
 export interface NetworkState {
   /** A cable or associated Wi-Fi — a physical link exists. */
   readonly hasLink: boolean;
@@ -66,6 +83,8 @@ export interface NetworkState {
 export interface ShellSnapshot {
   readonly registration: RegistrationView | null;
   readonly pairing: PairingView | null;
+  /** The terminal's own seat, absent until it pairs. */
+  readonly assignment?: AssignmentView | null;
   readonly network: NetworkState;
   /** This device's identity key fingerprint, to test `registrationBelongsTo`. */
   readonly keyFingerprint?: string;
@@ -110,6 +129,15 @@ export function registrationBelongsTo(
 ): boolean {
   if (registration === null || keyFingerprint === undefined) return false;
   return registration.keyFingerprint === keyFingerprint;
+}
+
+/** Mirror of `assignmentBelongsTo` in electron/terminal-assignment.ts. */
+export function assignmentBelongsTo(
+  assignment: AssignmentView | null | undefined,
+  deviceRecordId: string | undefined,
+): boolean {
+  if (assignment === null || assignment === undefined || deviceRecordId === undefined) return false;
+  return assignment.deviceRecordId === deviceRecordId;
 }
 
 /** Mirror of the agent's `pairingBelongsTo`. */
@@ -168,9 +196,17 @@ export function deriveScreen(snapshot: ShellSnapshot | null): ShellScreen {
     case "TRUST_REVIEW_REQUIRED":
       return { kind: "halted", reason: "trust_review", deviceLabel };
     case "APPROVED": {
+      // TWO WAYS TO BE ASSIGNED, because two devices record it differently.
+      //
+      // A Store Hub's root console writes `pairing-state.json`; this terminal's
+      // unprivileged shell writes its own `assignment.json`. Both mean the cloud
+      // created an assignment for THIS board, and either is enough. Both are
+      // checked against the device record id, so a card copied from another
+      // board shows the keypad rather than someone else's Store.
       const paired =
-        snapshot.pairing?.phase === "PAIRED" &&
-        pairingBelongsTo(snapshot.pairing, snapshot.deviceRecordId);
+        (snapshot.pairing?.phase === "PAIRED" &&
+          pairingBelongsTo(snapshot.pairing, snapshot.deviceRecordId)) ||
+        assignmentBelongsTo(snapshot.assignment, snapshot.deviceRecordId);
       return paired
         ? { kind: "assigned", deviceLabel }
         : { kind: "approved_unassigned", deviceLabel };

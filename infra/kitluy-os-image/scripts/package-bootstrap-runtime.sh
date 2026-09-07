@@ -63,6 +63,17 @@ DEVICE_MODULES=(
   bin/firstboot-identity bin/health-reporter bin/update-bootstrap
   bin/cloud-registration
   bin/bootstrap-ui
+  # Terminal pairing. The Device Shell loads this client from the installed
+  # closure rather than bundling a second copy of the wire contract — the
+  # agent's is the one with the drift test against the registry route. Shipping
+  # it here is what makes `PAIRING_TRANSPORT_UNAVAILABLE` a real answer on an
+  # image that lacks it rather than a silent failure on one that should have it.
+  #
+  # `pairing-state` rides along because the client imports its PairingPhase for
+  # `phaseForRefusal`. The import is type-only and erases, so the closure check
+  # would not demand it; it is listed so the module is present if a later caller
+  # needs the values rather than the type.
+  adapters/http-terminal-pairing-client pairing-state
 )
 rm -rf "$LIB_DIR"
 mkdir -p "$LIB_DIR"

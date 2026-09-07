@@ -9,8 +9,17 @@ import type { ShellSnapshot } from "./model/shell-state.js";
 
 /** The result of asking the main process to submit a code. */
 export interface SubmitResult {
-  /** In this slice always `PAIRING_NOT_AVAILABLE_IN_THIS_BUILD`. */
+  /**
+   * `PAIRED`, or a refusal code: the registry's own (`CODE_REFUSED`, `LOCKED`,
+   * `ALREADY_ASSIGNED`, …), or one raised before the network
+   * (`CODE_MALFORMED`, `NO_DEVICE_RECORD`, `PAIRING_TRANSPORT_UNAVAILABLE`).
+   * Rendered to the person at the Pi; never treated as authority.
+   */
   readonly status: string;
+  /** True when presenting the same code again could still succeed. */
+  readonly retryable?: boolean;
+  /** The server's safe operator sentence. Never contains the code. */
+  readonly message?: string;
 }
 
 export interface KitluyShellBridge {
