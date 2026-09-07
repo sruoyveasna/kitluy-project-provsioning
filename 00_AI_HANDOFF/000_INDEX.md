@@ -4,6 +4,17 @@ Read the newest relevant handoff before starting work. Naming:
 `YYYY-MM-DD__<AREA>__<TASK-ID>__<SLUG>__AI-HANDOFF.md` under the matching
 subfolder (repository/ shared/ apps/ services/ data/ infrastructure/ reviews/).
 
+## The Pi Terminal image has a screen that can take a pairing code: cage, a pinned Electron, and the display owner flipped (2026-09-07)
+
+Record: [`apps/2026-09-07__APPS__KL-P1-TERM-SHELL-003__DEVICE-SHELL-IMAGE-INTEGRATION__AI-HANDOFF.md`](apps/2026-09-07__APPS__KL-P1-TERM-SHELL-003__DEVICE-SHELL-IMAGE-INTEGRATION__AI-HANDOFF.md)
+· **PARTIAL** · Slice 1B Milestone C · no hardware run · built with `--no-interactive-access`, so THIS artifact must not be flashed
+
+Until now the image had no surface that accepts input: the only screen was text on tty1, and the graphical Device Shell existed only in the repository. It is now in the image. `cage` — a kiosk compositor that shows one application with no desktop behind it — runs Electron `38.8.6` arm64, which is **fetched and checksum-verified** rather than committed (289 MB of somebody else's binary does not belong in every clone), pinned in `rpi-image-gen/electron.pin` the way `upstream.pin` pins the builder. `kitluy-device-shell.service` takes the display and `kitluy-bootstrap-screen.service` is displaced but deliberately KEPT: it needs no compositor, no GPU and no Electron, so it is the surface that still works on a board where the shell cannot start.
+
+Two things that would have been silent failures on a counter: `fonts-khmeros`, because the shell is Khmer-default and without it the first screen an installer sees is a row of empty boxes; and `XDG_RUNTIME_DIR` from `RuntimeDirectory=` rather than `/run/user`, which `ProtectHome=yes` makes inaccessible — the combination the retired labwc session unit carried and never ran with.
+
+A full image WAS built (QEMU cross-build, exit 0, 8.9 GB raw / 734 MB compressed) and inspected: `image-contents` **83/0/1** against that rootfs — Electron present and confirmed `aarch64`, `cage` installed, app/main/preload/renderer present, no source maps, `chrome-sandbox` setuid root, a Khmer font present, the text screen present-but-disabled. systemd-runtime 171/0 (was 140), device-shell 70/70, and the three new layer gates are mutation-tested (drop the Khmer font, drop cage, drop one Electron library — each fails). **Not run:** no card was flashed and no Electron process has ever started (this workstation is x86_64); every library package name resolved and installed, but whether the set is complete for this binary is unproven until a board boots.
+
 ## A Pi Terminal can present a pairing code: the transport exists, and the shell can read the state it renders (2026-09-07)
 
 Record: [`apps/2026-09-07__APPS__KL-P1-TERM-SHELL-002__DEVICE-SHELL-TERMINAL-PAIRING-TRANSPORT__AI-HANDOFF.md`](apps/2026-09-07__APPS__KL-P1-TERM-SHELL-002__DEVICE-SHELL-TERMINAL-PAIRING-TRANSPORT__AI-HANDOFF.md)

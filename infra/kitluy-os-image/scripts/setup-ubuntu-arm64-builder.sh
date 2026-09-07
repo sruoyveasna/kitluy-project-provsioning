@@ -76,7 +76,7 @@ KITLUY_RIG_HOST_PACKAGES=(
   python3 python3-yaml python3-debian dpkg-dev
   # build category — image assembly
   mmdebstrap debian-archive-keyring podman uidmap dbus-user-session
-  zip dosfstools e2fsprogs rsync curl mtools pv btrfs-progs
+  zip unzip dosfstools e2fsprogs rsync curl mtools pv btrfs-progs
   dctrl-tools uuid-runtime fdisk python3-jsonschema cryptsetup
   # build category — upstream's from-source package buildsystem
   python3-pip make build-essential autoconf automake libtool

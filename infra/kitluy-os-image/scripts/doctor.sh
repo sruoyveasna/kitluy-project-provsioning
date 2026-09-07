@@ -155,6 +155,10 @@ REQUIRED_TOOLS=(
   mmdebstrap dpkg-architecture python3 rsync curl grep make
   mkfs.vfat mkfs.ext4 mkfs.btrfs fdisk veritysetup uuidgen
   mtools pv zip newuidmap autoconf automake autopoint flex gettext pkg-config
+  # unzip: the pinned Electron runtime ships as a .zip, and fetch-electron.sh
+  # unpacks it. Without this the terminal build fails AFTER downloading 100 MB,
+  # which is a slow way to learn that a package is missing.
+  unzip
 )
 MISSING=()
 for t in "${REQUIRED_TOOLS[@]}"; do

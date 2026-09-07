@@ -47,6 +47,24 @@ playwright-report/
 test-results/
 dist-electron/
 
+# ...EXCEPT the Device Shell as the IMAGE ships it.
+#
+# `<layer>.rootfs-overlay/` is not build scratch — it is the tree rpi-image-gen
+# bakes onto the card, and this repository commits packaged output there: the
+# firstboot agent's JS closure has been tracked that way since it existed, and
+# `scripts/verification/secret-scan.mjs` records the convention in as many words.
+# The Device Shell's compiled app is the same kind of artifact and belongs under
+# the same rule, or a clean clone builds an image whose screen is simply missing
+# — silently, because the unit's ConditionPathExists makes an absent shell look
+# like a quiet boot rather than a broken one.
+#
+# The directory is re-included before its contents: git cannot re-include a file
+# whose parent directory is still excluded.
+!infra/kitluy-os-image/rpi-image-gen/layer/*.rootfs-overlay/usr/lib/kitluy/lib/device-shell/dist/
+!infra/kitluy-os-image/rpi-image-gen/layer/*.rootfs-overlay/usr/lib/kitluy/lib/device-shell/dist/**
+!infra/kitluy-os-image/rpi-image-gen/layer/*.rootfs-overlay/usr/lib/kitluy/lib/device-shell/dist-electron/
+!infra/kitluy-os-image/rpi-image-gen/layer/*.rootfs-overlay/usr/lib/kitluy/lib/device-shell/dist-electron/**
+
 # Store Hub local development backups (WS-09) — binary pg_dump artifacts.
 # Backup/restore is exercised by `pnpm hub:db:backup` / `hub:db:restore`;
 # the dumps themselves are disposable local evidence, never committed.

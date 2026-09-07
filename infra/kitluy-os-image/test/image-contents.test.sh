@@ -103,6 +103,32 @@ COMPONENTS="$(node -e '
 [[ -n "$COMPONENTS" ]] || { printf 'the manifest declares no pi-terminal components\n' >&2; exit 2; }
 
 # ---------------------------------------------------------------------------
+# 0. IS THIS ROOTFS OLDER THAN THE SOURCE IT IS BEING JUDGED AGAINST?
+# ---------------------------------------------------------------------------
+# A stale rootfs fails honestly — it really does not contain what the manifest
+# now declares — but "absent from the built rootfs" reads like a packaging defect
+# when the actual answer is "nobody has rebuilt since this was added". Saying so
+# once, at the top, is the difference between a five-minute rebuild and an
+# afternoon spent looking for a bug that is not there.
+# COMPARED AGAINST A FILE THE BUILD WROTE, NOT THE ROOTFS DIRECTORY.
+#
+# The directory's own mtime comes from the base extraction and can be a month
+# older than the build that filled it — measured here as 2026-08-10 on a rootfs
+# built 2026-09-07 — so comparing against it reports EVERY rootfs as stale, and a
+# staleness warning that is always on is one nobody reads. `image.env` is written
+# by the kitluy-base layer during the build, so its mtime is the build.
+BUILD_STAMP="${ROOTFS}/etc/kitluy/image.env"
+NEWEST_SOURCE=""
+[[ -f "$BUILD_STAMP" ]] && NEWEST_SOURCE="$(find "${ROOT}/runtime-manifest.json" "${ROOT}/rpi-image-gen" \
+                   -type f -newer "$BUILD_STAMP" -print -quit 2>/dev/null || true)"
+if [[ -n "$NEWEST_SOURCE" ]]; then
+  printf '\n  NOTE: this rootfs is OLDER than the image source.\n'
+  printf '        e.g. %s\n' "${NEWEST_SOURCE#"${ROOT}/"}"
+  printf '        Failures below may simply mean the image has not been rebuilt:\n'
+  printf '          bash %s/scripts/build-rpi-image.sh --profile pi-terminal ...\n\n' "${ROOT##*/}"
+fi
+
+# ---------------------------------------------------------------------------
 # 1. Every declared component is actually in the image
 # ---------------------------------------------------------------------------
 while IFS='|' read -r id executable unit enabled envfiles kind; do
@@ -345,6 +371,73 @@ if [[ -f "$WPA" ]] && ! grep -qE '^\s*psk=' "$WPA"; then
   ok "the seeded Wi-Fi configuration carries no secret"
 else
   bad "the seeded Wi-Fi configuration carries no secret" "missing, or carries a PSK"
+fi
+
+# ---------------------------------------------------------------------------
+# THE DEVICE SHELL, IN THE IMAGE THAT WAS ACTUALLY BUILT
+# ---------------------------------------------------------------------------
+# The overlay suites prove the SOURCE is right. None of them can see the Electron
+# runtime, because it is fetched at build time and deliberately never committed —
+# so this is the only place the image's user interface is checked at all. D-05
+# was exactly this gap in a different component: unit, source and advert all
+# present, and no card ever carried the binary.
+SHELL_APP="${ROOTFS}/usr/lib/kitluy/lib/device-shell"
+
+if [[ -f "${SHELL_APP}/package.json" ]]; then
+  ok "device shell: the app is in the image"
+  APP_MAIN="$(node -e 'process.stdout.write(require(process.argv[1]).main||"")' "${SHELL_APP}/package.json" 2>/dev/null)"
+  [[ -n "$APP_MAIN" && -f "${SHELL_APP}/${APP_MAIN}" ]] \
+    && ok "device shell: its declared main is in the image (${APP_MAIN})" \
+    || bad "device shell: its declared main is in the image" "package.json names '${APP_MAIN}', which is absent — Electron exits at startup"
+  [[ -f "${SHELL_APP}/dist-electron/electron/preload.cjs" ]] \
+    && ok "device shell: the preload bridge is in the image" \
+    || bad "device shell: the preload bridge is in the image" "the keypad would submit nowhere"
+  [[ -f "${SHELL_APP}/dist/index.html" ]] \
+    && ok "device shell: the renderer bundle is in the image" \
+    || bad "device shell: the renderer bundle is in the image" "the window would load nothing"
+  find "${SHELL_APP}" -name '*.map' 2>/dev/null | grep -q . \
+    && bad "device shell: no source maps reached the card" "the original sources ship with the image" \
+    || ok "device shell: no source maps reached the card"
+else
+  bad "device shell: the app is in the image" "no ${SHELL_APP#"$ROOTFS"}/package.json in the built rootfs"
+fi
+
+# The compositor the launcher execs. Absent, the unit start-loops on exit 127.
+[[ -x "${ROOTFS}/usr/bin/cage" ]] \
+  && ok "device shell: the cage kiosk compositor is installed" \
+  || bad "device shell: the cage kiosk compositor is installed" "the launcher execs /usr/bin/cage"
+
+# THE RUNTIME, AND THE ARCHITECTURE IT WAS BUILT FOR.
+# An x86 Electron unpacks perfectly on the build host and fails only on the Pi.
+ELECTRON_BIN="${ROOTFS}/usr/lib/kitluy/electron/electron"
+if [[ -x "$ELECTRON_BIN" ]]; then
+  ok "device shell: the pinned Electron runtime is in the image"
+  if command -v file >/dev/null 2>&1; then
+    case "$(file -b "$ELECTRON_BIN")" in
+      *aarch64*) ok "device shell: the Electron runtime is aarch64" ;;
+      *) bad "device shell: the Electron runtime is aarch64" "$(file -b "$ELECTRON_BIN" | cut -c1-60)" ;;
+    esac
+  fi
+  # Chromium's sandbox helper must be setuid root. Without it the renderer runs
+  # unsandboxed, or Electron refuses to start and says so only in the journal.
+  SANDBOX="${ROOTFS}/usr/lib/kitluy/electron/chrome-sandbox"
+  if [[ -f "$SANDBOX" ]]; then
+    [[ "$(stat -c '%a' "$SANDBOX")" == "4755" ]] \
+      && ok "device shell: chrome-sandbox is setuid root, so the renderer stays sandboxed" \
+      || bad "device shell: chrome-sandbox is setuid root" "mode $(stat -c '%a' "$SANDBOX")"
+  fi
+else
+  bad "device shell: the pinned Electron runtime is in the image" \
+      "no executable at /usr/lib/kitluy/electron/electron — the screen would never start"
+fi
+
+# THE KHMER FONT. The shell is Khmer-default; without a Khmer face the first
+# screen an installer sees is a row of empty boxes.
+if find "${ROOTFS}/usr/share/fonts" -iname '*khmer*' -o -iname '*Khmer*' 2>/dev/null | grep -q .; then
+  ok "device shell: a Khmer font reached the image, so the default locale renders"
+else
+  bad "device shell: a Khmer font reached the image" \
+      "the Khmer-default UI would render as empty boxes on a real terminal"
 fi
 
 printf '\n  %d passed, %d failed, %d skipped\n\n' "$PASS" "$FAIL" "$SKIP"

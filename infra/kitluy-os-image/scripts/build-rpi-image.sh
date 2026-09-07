@@ -170,6 +170,28 @@ else
   fi
 fi
 
+# --- Electron runtime ---------------------------------------------------------
+# The Device Shell is an Electron application and Debian ships no Electron, so
+# the runtime is an external pinned dependency: fetched, checksum-verified and
+# unpacked by `fetch-electron.sh`, then handed to the layer as an IGconf
+# override. Downloading it here rather than inside a layer hook keeps
+# verification in ONE place — a hook that fetched its own copy would be a second,
+# unverified path to the same 289 MB binary.
+#
+# Skipped with --skip-packaging for the same reason packaging is: that flag means
+# "build from the overlay as it stands". The unit's ConditionPathExists then
+# leaves the shell inactive and the device shows the text screen, rather than
+# restart-looping against a runtime that is not there.
+ELECTRON_DIR=""
+if [[ "$PROFILE" == "pi-terminal" && "$SKIP_PACKAGING" != "yes" ]]; then
+  log "resolving the pinned Electron runtime"
+  if ! ELECTRON_DIR="$(bash "${SCRIPT_DIR}/fetch-electron.sh")"; then
+    die "could not obtain the pinned Electron runtime — the Device Shell would be absent from this image.
+  Re-run with network access, or with --skip-packaging to build without it."
+  fi
+  log "electron runtime: ${ELECTRON_DIR}"
+fi
+
 # --- Pinned upstream builder --------------------------------------------------
 [[ -f "$PIN_FILE" ]] || die "missing ${PIN_FILE}"
 # shellcheck disable=SC1090
@@ -351,6 +373,10 @@ else
   warn "no --registration-url given: this image cannot register itself to the"
   warn "  cloud, so Factory Enrollment can never begin. The rootfs is read-only,"
   warn "  so rebuild with --registration-url."
+fi
+
+if [[ -n "$ELECTRON_DIR" ]]; then
+  RIG_OVERRIDES+=("IGconf_kitluy_electron_dir=${ELECTRON_DIR}")
 fi
 
 if [[ -n "$HARDWARE_PROFILE_KEY" ]]; then

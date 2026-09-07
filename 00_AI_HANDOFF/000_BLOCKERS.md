@@ -2,6 +2,23 @@
 
 > **2026-08-06 WS-11 closeout errata note (BLK-007 disposition):** **BLK-007 REMAINS OPEN** — but its remaining content is now precisely bounded: **41 non-WS-11 security-plan registry rows** still cite the missing `kitluy-testing-and-evidence-system-v1.0.0` document (KLREQ-008). This remainder is **NON-BLOCKING to the completed WS-11 scope** (every executed WS-11 security family is bound to a file, a command and a result in `docs/security/kitluy-security-test-plan-phase1-v1.0.0.md`) and **MUST BE ASSIGNED to the relevant future workstreams** that own those rows rather than carried as WS-11 debt. Companion records in the same errata: owner decision **KLD-2026-08-06-WS11-CLOCK-001** (challenge time authority, zero lower-bound grace, 300-second receipt-ingestion allowance with quarantine) and the T008 commit-count correction (NINE commits, not ten — T008 final handoff §10).
 
+> **2026-09-07 note — the Terminal PIN is NOT the pairing code, and it is not built.**
+> Two different secrets at two different rungs of `LADDER_RUNGS`, and only the first
+> exists. The **pairing code** (8-character Crockford base32, issued by the Partner,
+> short-lived and one-time) tells a Pi which Store it belongs to; it is rung 3
+> (`redeemed`) and was delivered by KL-P1-TERM-SHELL-002/003. The **4-digit Terminal
+> PIN** is rung 7 (`pinSet`) — physical terminal access control, created twice by the
+> user after the application installs, never stored raw, verified OFFLINE by the Store
+> Hub against a salted Argon2id-class verifier with Hub-side brute-force controls and a
+> governed Partner reset (KLD-2026-09-03-TERMINAL-PROVISIONING-001 §10–§14, LOCKED).
+> Nothing of it exists: no verifier, no migration, no screen — only the Partner Portal's
+> display label `rungPinSet`. Because §10 states a terminal must not become fully
+> operational until PIN setup succeeds, rung 8 (`active`) is unreachable without it.
+> It also sits behind rung 6 (`appInstalled`), which is also not built. Registered in
+> the evidence register as **SPECIFIED — NOT BUILT**; parked by the owner on 2026-09-07
+> to finish the Device Shell image integration first. This is a RECORD, not a new BLK
+> item, and no BLK state changed.
+
 > **2026-08-01 status note:** WS-11-T003 **Step 4** is closed as IMPLEMENTED-IN-DEV WITH RECORDED ENVIRONMENT CONDITION and **WS-11-T003 overall is COMPLETED-IN-DEV** (all six blockers and the job-governor leak closed; canonical 12/13 with only the pre-existing CRLF format condition; all reviewer findings dispositioned). No BLK item below changed state: BLK-005 (PKI/HSM, KLRISK-DEVICE-003 remains OPEN), BLK-006 (production values), BLK-007 (canonical test plans) remain as recorded. **KLRISK-DEVICE-012** (migration-0137 abandoned-key destruction unreachable at confirm; superseded-key destruction proven) is registered in the decision register as a future additive fix, outside Step 4. WS-11-T004 is the next permitted identifier; its title is unresolved from the current register (separate discovery package required). Full record: `shared/2026-08-01__SHARED__WS-11-T003-STEP4__RUNTIME-ENFORCEMENT-AND-REVIEW-REMEDIATION__AI-HANDOFF.md` (FORMAL CLOSURE section).
 
 > **2026-08-05 status note:** **WS-11-T004 is COMPLETE — IMPLEMENTED-IN-DEV** (terminal provisioning, activation, LAN mTLS transport, signed discovery, Hub-local pairing, terminal receipt persistence and receipt replication). **No BLK item below changed state.** What T004 proved about them: **BLK-005** remains the pilot/production gate and was re-proven fail-closed inside `assert_pki_configuration_approved` on a reset from zero — every certificate exercised is development-only and minted per test run, and whole-file encryption for the terminal-local store (SQLCipher) remains BLK-005 deployment material. **BLK-006** now gates three named things rather than one: the authenticated Hub→cloud ACTIVATION bridge (the shipped gateway fails closed as a retryable 503), the cloud PRODUCER that mints and signs the credential-projection delivery (the Hub consumer is built and proven), and the signed Hub→cloud transport that would carry a pairing-receipt batch (the cloud ingestion is built and proven). **BLK-007** is untouched. Full record: `shared/2026-08-05__SHARED__WS-11-T004__FINAL-CLOSEOUT__AI-HANDOFF.md`.

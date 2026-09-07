@@ -27,11 +27,22 @@
 # session follows the platform rather than carrying an X11 stack alongside it.
 # `device-user-admin` is reused from upstream for the unprivileged session user
 # instead of declaring a competing one.
+#
+# TWO COMPOSITORS, ON PURPOSE
+# ---------------------------
+# `cage` shows exactly ONE application, full screen, with no desktop behind it,
+# and it is what the Device Shell runs under: on a shop counter, a general
+# compositor is a way out of the application. `labwc` stays for the governed POS
+# release, which is a real desktop-class app. Shipping both costs a few
+# megabytes and avoids a second image.
 mmdebstrap:
   packages:
     # Wayland compositor stack. labwc is the Raspberry Pi OS Bookworm default
     # on Pi 5; seatd//libinput carry the input foundation for touchscreens.
     - labwc
+    # The kiosk compositor the Device Shell runs under: one application, full
+    # screen, nothing behind it.
+    - cage
     - wlr-randr
     - seatd
     - libinput-tools
@@ -41,6 +52,44 @@ mmdebstrap:
     # configuration, never assumed by the image.
     - cups
     - libcups2
+
+    # ELECTRON'S SHARED LIBRARIES.
+    #
+    # The runtime itself is fetched and checksum-verified (rpi-image-gen/
+    # electron.pin), but it is dynamically linked and Debian must supply what it
+    # links against. A missing one of these does not fail the build — it fails on
+    # the Pi, at first boot, with a loader error on a screen nobody can read.
+    # Chromium links the X11 client libraries even when it renders under Wayland.
+    - libnss3
+    - libnspr4
+    - libatk1.0-0
+    - libatk-bridge2.0-0
+    - libatspi2.0-0
+    - libgtk-3-0
+    - libgbm1
+    - libdrm2
+    - libxkbcommon0
+    - libpango-1.0-0
+    - libcairo2
+    - libasound2
+    - libexpat1
+    - libxcb1
+    - libx11-6
+    - libxcomposite1
+    - libxdamage1
+    - libxext6
+    - libxfixes3
+    - libxrandr2
+
+    # FONTS, AND THIS ONE IS NOT COSMETIC.
+    #
+    # The Device Shell is Khmer-default: its headline, its status lines and its
+    # keypad labels are Khmer. Without a Khmer face the first screen a Cambodian
+    # installer sees is a row of empty boxes — the application working perfectly
+    # and communicating nothing. DejaVu carries the Latin fallback for the asset
+    # tag and the code itself.
+    - fonts-khmeros
+    - fonts-dejavu-core
 
   customize-hooks:
     - install -d "$1/var/lib/kitluy/terminal"
@@ -52,8 +101,8 @@ mmdebstrap:
     # for every terminal in the fleet.
     - |
       cat > "$1/etc/kitluy/terminal.env" <<'EOF'
-      KITLUY_KIOSK_RUNTIME=wayland/labwc
-      KITLUY_KIOSK_COMPOSITOR=labwc
+      KITLUY_KIOSK_RUNTIME=wayland/cage
+      KITLUY_KIOSK_COMPOSITOR=cage
       KITLUY_MDNS_SERVICE=_kitluy-edge._tcp.local
       KITLUY_HUB_MANUAL_ENDPOINT_ALLOWED=fallback-only
       KITLUY_PERIPHERAL_SUPPORT=printer scanner customer-display cash-drawer
@@ -72,3 +121,36 @@ mmdebstrap:
             "$1/var/lib/kitluy/terminal/assignment.json" \
             "$1/var/lib/kitluy/terminal/configuration.json" \
             "$1/var/lib/kitluy/terminal/vertical-template.json"
+    # THE ELECTRON RUNTIME.
+    #
+    # Fetched and checksum-verified on the build host by
+    # `scripts/fetch-electron.sh`, which hands the verified directory here as
+    # IGconf_kitluy_electron_dir. Copied, never downloaded from inside this hook:
+    # verification belongs in one place, and a hook that fetched its own copy
+    # would be a second, unverified path to the same binary.
+    #
+    # ABSENT IS NOT AN ERROR. An image can be built without the shell while it is
+    # being worked on, and `kitluy-device-shell.service` carries
+    # ConditionPathExists for exactly that — the device sits quietly on the text
+    # screen instead of restart-looping. `image-contents.test.sh` is what refuses
+    # when the manifest CLAIMS the runtime is there and the rootfs disagrees.
+    - |
+      if [ -n "${IGconf_kitluy_electron_dir:-}" ]; then
+        if [ ! -x "${IGconf_kitluy_electron_dir}/electron" ]; then
+          echo "REFUSED: IGconf_kitluy_electron_dir='${IGconf_kitluy_electron_dir}' has no executable electron" >&2
+          exit 1
+        fi
+        install -d "$1/usr/lib/kitluy/electron"
+        cp -a "${IGconf_kitluy_electron_dir}/." "$1/usr/lib/kitluy/electron/"
+        chmod 0755 "$1/usr/lib/kitluy/electron/electron"
+        # chrome-sandbox must be setuid root for Chromium's sandbox helper. The
+        # alternative is --no-sandbox, which turns off the one boundary the
+        # renderer has.
+        if [ -f "$1/usr/lib/kitluy/electron/chrome-sandbox" ]; then
+          chown 0:0 "$1/usr/lib/kitluy/electron/chrome-sandbox"
+          chmod 4755 "$1/usr/lib/kitluy/electron/chrome-sandbox"
+        fi
+        echo "installed Electron from ${IGconf_kitluy_electron_dir}"
+      else
+        echo "NOTE: no IGconf_kitluy_electron_dir — the Device Shell will not start on this image" >&2
+      fi

@@ -32,6 +32,9 @@ BUILD="${ROOT}/scripts/build-image.sh"
 LAYER_DIR="${ROOT}/rpi-image-gen/layer"
 MANIFEST="${ROOT}/runtime-manifest.json"
 BASE_LAYER="${LAYER_DIR}/kitluy-base.yaml"
+TERMINAL_LAYER="${LAYER_DIR}/kitluy-pi-terminal.yaml"
+SRC="${ROOT}/rpi-image-gen"
+REPO_ROOT="$(cd "${ROOT}/../.." && pwd)"
 BASE_OVERLAY="${LAYER_DIR}/kitluy-base.rootfs-overlay"
 TERMINAL_OVERLAY="${LAYER_DIR}/kitluy-pi-terminal.rootfs-overlay"
 TMP="$(mktemp -d)"
@@ -411,55 +414,95 @@ for layer in "$BASE_LAYER"; do
   fi
 done
 
-# A unit that claims tty1 must displace getty, be enabled in the overlay that
-# defines it, and have a satisfiable ConditionPathExists.
+# THE DISPLAY HAS EXACTLY ONE OWNER, AND THE MANIFEST NAMES IT.
+#
+# "Claims the console" used to mean one thing — `TTYPath=/dev/tty1`, because the
+# only surface was a text screen. The Device Shell claims the DISPLAY instead:
+# cage takes the DRM device and never opens a tty, so a TTYPath-only rule would
+# have looked straight past the unit that actually owns the screen and declared
+# the image ownerless.
+#
+# What both mechanisms share is the thing that matters — they must displace
+# getty, or a login prompt no one can satisfy prints over the product. So a
+# claimant is a unit that sets TTYPath=/dev/tty1 OR conflicts with getty@tty1,
+# and the invariant is that exactly ONE of them is enabled.
+#
+# Being defined and NOT enabled is legitimate and is not a defect: the text
+# screen stays in the image as the recovery surface for a board where the
+# compositor cannot start, and the labwc session stays for the governed POS
+# release. Only the enabled set is constrained.
+CONSOLE_CLAIMANTS=""
 for overlay_unit in "${BASE_OVERLAY}"/etc/systemd/system/kitluy-*.service \
                     "${TERMINAL_OVERLAY}"/etc/systemd/system/kitluy-*.service; do
   [[ -f "$overlay_unit" ]] || continue
-  grep -q 'TTYPath=/dev/tty1' "$overlay_unit" || continue
+  grep -qE 'TTYPath=/dev/tty1|Conflicts=.*getty@tty1' "$overlay_unit" || continue
   name="$(basename "$overlay_unit")"
   overlay_root="${overlay_unit%/etc/systemd/system/*}"
+  CONSOLE_CLAIMANTS="${CONSOLE_CLAIMANTS} ${name}"
 
   if grep -q 'Conflicts=.*getty@tty1' "$overlay_unit"; then
     ok "${name}: conflicts with getty@tty1"
   else
-    bad "${name}: conflicts with getty@tty1" "claims tty1 without displacing getty"
+    bad "${name}: conflicts with getty@tty1" "claims the console without displacing getty"
   fi
 
-  if [[ -L "${overlay_root}/etc/systemd/system/multi-user.target.wants/${name}" || -e "${overlay_root}/etc/systemd/system/multi-user.target.wants/${name}" ]]; then
-    ok "${name}: enabled in the overlay that defines it"
-  else
-    bad "${name}: enabled in the overlay that defines it" \
-        "defines a tty1 console the image never enables — getty keeps tty1"
-  fi
-
-  guard="$(grep -oE '^ConditionPathExists=.*' "$overlay_unit" | cut -d= -f2-)"
-  if [[ -n "$guard" ]]; then
-    if [[ -e "${overlay_root}${guard}" ]]; then
-      ok "${name}: its ConditionPathExists target is shipped"
+  # Every ConditionPathExists must be satisfiable, not just the first: the shell
+  # guards on its launcher AND on the Electron runtime, and a unit skipped for a
+  # guard nobody checked is the D-27 shape — silently inactive, no error anywhere.
+  while IFS= read -r guard; do
+    [[ -n "$guard" ]] || continue
+    # The Electron runtime is fetched at build time and is deliberately not in any
+    # overlay; image-contents.test.sh asserts it against the BUILT rootfs instead.
+    if [[ "$guard" == /usr/lib/kitluy/electron/* ]]; then
+      ok "${name}: guard ${guard} is the pinned runtime (asserted against the built rootfs)"
+    elif [[ -e "${overlay_root}${guard}" ]]; then
+      ok "${name}: its ConditionPathExists target is shipped (${guard})"
     else
       bad "${name}: its ConditionPathExists target is shipped" \
-          "guard ${guard} is absent, so the unit is skipped and getty keeps tty1"
+          "guard ${guard} is absent, so the unit is skipped and getty keeps the console"
     fi
-  fi
+  done <<< "$(grep -oE '^ConditionPathExists=.*' "$overlay_unit" | cut -d= -f2-)"
 done
 
-# Exactly ONE unit owns tty1, and it is the one the manifest names.
-TTY1_OWNERS="$(grep -l 'TTYPath=/dev/tty1' "${BASE_OVERLAY}"/etc/systemd/system/kitluy-*.service \
-                       "${TERMINAL_OVERLAY}"/etc/systemd/system/kitluy-*.service 2>/dev/null | xargs -r -n1 basename)"
+# At least one claimant must exist, or the image has no product on its screen.
+if [[ -n "${CONSOLE_CLAIMANTS// /}" ]]; then
+  ok "the image defines a console/display surface"
+else
+  bad "the image defines a console/display surface" "no unit claims the screen at all"
+fi
+
+# Exactly ONE claimant is enabled, and it is the one the manifest names.
+#
+# Two enabled claimants is not a cosmetic problem: both would start, both would
+# Conflicts= the other, and systemd would stop one to start the other in a loop
+# whose visible symptom is a flickering screen in a shop.
 MANIFEST_OWNER="$(node -e 'const m=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.stdout.write((m.tty1&&m.tty1.owner)||"")' "$MANIFEST" 2>/dev/null)"
-enabled_tty1=""
-for u in $TTY1_OWNERS; do
+enabled_console=""
+for u in $CONSOLE_CLAIMANTS; do
   for overlay in "$BASE_OVERLAY" "$TERMINAL_OVERLAY"; do
-    [[ -L "${overlay}/etc/systemd/system/multi-user.target.wants/${u}" || -e "${overlay}/etc/systemd/system/multi-user.target.wants/${u}" ]] && enabled_tty1="${enabled_tty1} ${u}"
+    [[ -L "${overlay}/etc/systemd/system/multi-user.target.wants/${u}" || -e "${overlay}/etc/systemd/system/multi-user.target.wants/${u}" ]] && enabled_console="${enabled_console} ${u}"
   done
 done
-enabled_tty1="${enabled_tty1# }"
-if [[ "$enabled_tty1" == "$MANIFEST_OWNER" && -n "$MANIFEST_OWNER" ]]; then
-  ok "exactly one enabled unit owns tty1, and the manifest names it (${MANIFEST_OWNER})"
+enabled_console="${enabled_console# }"
+if [[ "$enabled_console" == "$MANIFEST_OWNER" && -n "$MANIFEST_OWNER" ]]; then
+  ok "exactly one enabled unit owns the display, and the manifest names it (${MANIFEST_OWNER})"
 else
-  bad "exactly one enabled unit owns tty1, and the manifest names it" \
-      "manifest owner='${MANIFEST_OWNER}' enabled tty1 units='${enabled_tty1}'"
+  bad "exactly one enabled unit owns the display, and the manifest names it" \
+      "manifest owner='${MANIFEST_OWNER}' enabled claimants='${enabled_console}'"
+fi
+
+# The unit the manifest displaced must still be DEFINED. It is the surface an
+# operator falls back to when the compositor cannot start — no GPU, no seat, no
+# Electron — and deleting it would leave such a board with a blank screen and no
+# way to read its own registration state.
+PREVIOUS_OWNER="$(node -e 'const m=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.stdout.write((m.tty1&&m.tty1.previousOwner)||"")' "$MANIFEST" 2>/dev/null)"
+if [[ -n "$PREVIOUS_OWNER" ]]; then
+  if [[ -f "${BASE_OVERLAY}/etc/systemd/system/${PREVIOUS_OWNER}" || -f "${TERMINAL_OVERLAY}/etc/systemd/system/${PREVIOUS_OWNER}" ]]; then
+    ok "the displaced console surface is still defined for recovery (${PREVIOUS_OWNER})"
+  else
+    bad "the displaced console surface is still defined for recovery" \
+        "${PREVIOUS_OWNER} was removed, so a board that cannot start the shell shows nothing"
+  fi
 fi
 
 # ============================================================================
@@ -591,6 +634,141 @@ if [[ "$SHARED_MODE" == "0751" ]]; then
   ok "the shared state directory mode matches the Store Hub image (0751)"
 else
   bad "the shared state directory mode matches the Store Hub image (0751)" "mode is ${SHARED_MODE}"
+fi
+
+# ============================================================================
+# THE DEVICE SHELL (Slice 1B image integration)
+# ============================================================================
+# Everything here fails the same way if it is wrong: not at build time, but on a
+# Pi 5 on a counter, with a black screen and a loader error nobody can read.
+SHELL_UNIT="${TERMINAL_OVERLAY}/etc/systemd/system/kitluy-device-shell.service"
+SHELL_SHIM="${TERMINAL_OVERLAY}/usr/lib/kitluy/device-shell"
+SHELL_APP="${TERMINAL_OVERLAY}/usr/lib/kitluy/lib/device-shell"
+ELECTRON_PIN="${SRC}/electron.pin"
+
+# --- The compositor the shim actually execs ---------------------------------
+# The shim runs `/usr/bin/cage`. If the layer does not install it, the unit
+# starts, the shim exits 127, and Restart=always turns that into a loop.
+if grep -qE '^\s+- cage\s*$' "$TERMINAL_LAYER"; then
+  ok "device shell: the cage kiosk compositor is declared"
+else
+  bad "device shell: the cage kiosk compositor is declared" \
+      "the shim execs /usr/bin/cage and nothing installs it"
+fi
+
+if [[ -x "$SHELL_SHIM" ]] && grep -q '/usr/bin/cage' "$SHELL_SHIM"; then
+  ok "device shell: the launcher execs cage, not a general compositor"
+else
+  bad "device shell: the launcher execs cage, not a general compositor" \
+      "a desktop compositor on a shop counter is a way out of the application"
+fi
+
+# --- Electron's shared libraries --------------------------------------------
+# Electron is dynamically linked and Debian supplies what it links against.
+# Chromium links the X11 client libraries even when it renders under Wayland.
+MISSING_LIBS=""
+for lib in libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libatspi2.0-0 \
+           libgtk-3-0 libgbm1 libdrm2 libxkbcommon0 libpango-1.0-0 libcairo2 \
+           libasound2 libexpat1 libxcb1 libx11-6 libxcomposite1 libxdamage1 \
+           libxext6 libxfixes3 libxrandr2; do
+  grep -qE "^\s+- ${lib}\s*$" "$TERMINAL_LAYER" || MISSING_LIBS="${MISSING_LIBS} ${lib}"
+done
+if [[ -z "$MISSING_LIBS" ]]; then
+  ok "device shell: every Electron shared library is declared"
+else
+  bad "device shell: every Electron shared library is declared" "missing:${MISSING_LIBS}"
+fi
+
+# --- Fonts, which are not cosmetic here -------------------------------------
+# The shell is Khmer-default. Without a Khmer face the first screen a Cambodian
+# installer sees is a row of empty boxes: the application working perfectly and
+# communicating nothing.
+if grep -qE '^\s+- fonts-khmeros\s*$' "$TERMINAL_LAYER"; then
+  ok "device shell: a Khmer font is installed, so the default locale renders"
+else
+  bad "device shell: a Khmer font is installed, so the default locale renders" \
+      "the Khmer-default UI would render as empty boxes"
+fi
+if grep -qE '^\s+- fonts-dejavu-core\s*$' "$TERMINAL_LAYER"; then
+  ok "device shell: a Latin fallback font is installed (asset tag, pairing code)"
+else
+  bad "device shell: a Latin fallback font is installed (asset tag, pairing code)" "absent"
+fi
+
+# --- The application itself --------------------------------------------------
+if [[ -f "${SHELL_APP}/package.json" ]]; then
+  ok "device shell: the app manifest is packaged"
+  APP_MAIN="$(node -e 'process.stdout.write(require(process.argv[1]).main||"")' "${SHELL_APP}/package.json" 2>/dev/null)"
+  if [[ -n "$APP_MAIN" && -f "${SHELL_APP}/${APP_MAIN}" ]]; then
+    ok "device shell: the declared main (${APP_MAIN}) is present"
+  else
+    bad "device shell: the declared main is present" \
+        "package.json names '${APP_MAIN}', which was not packaged — Electron would exit at startup"
+  fi
+  if [[ "$(node -e 'process.stdout.write(require(process.argv[1]).type||"")' "${SHELL_APP}/package.json" 2>/dev/null)" == "module" ]]; then
+    ok "device shell: the app is marked ESM, matching its compiled output"
+  else
+    bad "device shell: the app is marked ESM, matching its compiled output" \
+        "the emitted main uses import/export; without \"type\": \"module\" Node reads it as CommonJS and it dies on its first import"
+  fi
+else
+  bad "device shell: the app manifest is packaged" "no package.json at ${SHELL_APP#"$ROOT/"}"
+fi
+
+# The preload is the ONLY bridge between the renderer and the main process. Its
+# absence does not break the build; it breaks the keypad, at a counter.
+if [[ -f "${SHELL_APP}/dist-electron/electron/preload.cjs" ]]; then
+  ok "device shell: the preload bridge is packaged, and is .cjs"
+else
+  bad "device shell: the preload bridge is packaged, and is .cjs" \
+      "a sandboxed preload cannot load ESM; without it the keypad submits nowhere"
+fi
+if [[ -f "${SHELL_APP}/dist/index.html" ]]; then
+  ok "device shell: the renderer bundle is packaged"
+else
+  bad "device shell: the renderer bundle is packaged" "the window would load nothing"
+fi
+# Source maps hand anyone holding the card the original sources, and are dead
+# weight on an appliance.
+if find "$SHELL_APP" -name '*.map' 2>/dev/null | grep -q .; then
+  bad "device shell: no source maps are shipped" "$(find "$SHELL_APP" -name '*.map' | wc -l) map file(s) packaged"
+else
+  ok "device shell: no source maps are shipped"
+fi
+
+# --- The pinned runtime ------------------------------------------------------
+if [[ -f "$ELECTRON_PIN" ]]; then
+  ok "device shell: the Electron runtime is pinned"
+  PIN_SHA="$(sed -n 's/^KITLUY_ELECTRON_SHA256="\(.*\)"/\1/p' "$ELECTRON_PIN")"
+  PIN_VER="$(sed -n 's/^KITLUY_ELECTRON_VERSION="\(.*\)"/\1/p' "$ELECTRON_PIN")"
+  if [[ "$PIN_SHA" =~ ^[0-9a-f]{64}$ ]]; then
+    ok "device shell: the pin carries a real sha256, not a placeholder"
+  else
+    bad "device shell: the pin carries a real sha256, not a placeholder" "got '${PIN_SHA}'"
+  fi
+
+  # THE DRIFT THAT MATTERS. The app is built and tested against one Electron and
+  # the image ships another: every API difference between them becomes a defect
+  # that reproduces only on hardware.
+  APP_ELECTRON="$(node -e 'process.stdout.write((require(process.argv[1]).devDependencies||{}).electron||"")' \
+                   "${REPO_ROOT}/apps/kitluy-device-shell/package.json" 2>/dev/null)"
+  if [[ -n "$APP_ELECTRON" && "$APP_ELECTRON" == "$PIN_VER" ]]; then
+    ok "device shell: the image pin and the app agree on Electron ${PIN_VER}"
+  else
+    bad "device shell: the image pin and the app agree on Electron" \
+        "pin=${PIN_VER} app=${APP_ELECTRON}"
+  fi
+
+  # The build must actually be able to reach the fetcher, and the fetcher must
+  # refuse a bad digest rather than unpack it.
+  if grep -q 'fetch-electron.sh' "${ROOT}/scripts/build-rpi-image.sh"; then
+    ok "device shell: the build resolves the pinned runtime"
+  else
+    bad "device shell: the build resolves the pinned runtime" \
+        "nothing invokes fetch-electron.sh, so the image ships no Electron"
+  fi
+else
+  bad "device shell: the Electron runtime is pinned" "no electron.pin"
 fi
 
 printf '\n  %d passed, %d failed\n\n' "$PASS" "$FAIL"

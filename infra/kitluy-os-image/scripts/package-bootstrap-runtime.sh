@@ -151,6 +151,68 @@ find "$LIB_DIR" -type d -exec chmod 0755 {} +
 echo "packaged $(find "$LIB_DIR" -name '*.js' | wc -l) js files into ${LIB_DIR#"$REPO"/}"
 
 # ---------------------------------------------------------------------------
+# THE DEVICE SHELL APPLICATION
+# ---------------------------------------------------------------------------
+# The graphical first-boot surface: `apps/kitluy-device-shell`, built output
+# only. Committed to the overlay like the firstboot closure, and for the same
+# reason — the image needs it and it is our own source, 272 KB of it.
+#
+# THE ELECTRON RUNTIME IS NOT HERE. That is 289 MB of somebody else's binary and
+# it is fetched and checksum-verified at build time by `fetch-electron.sh`, then
+# installed by the layer. Committing it would put a quarter-gigabyte artifact
+# into every clone.
+#
+# `main` is REWRITTEN rather than copied: the source package.json carries
+# devDependencies, scripts and a workspace-relative dependency graph, none of
+# which mean anything on a Pi and all of which would be a second, misleading
+# description of the app. The image gets a manifest that says exactly what
+# Electron needs to resolve — the entry, and that it is ESM.
+SHELL_SRC="${REPO}/apps/kitluy-device-shell"
+SHELL_DIR="${TERMINAL_OVERLAY}/usr/lib/kitluy/lib/device-shell"
+
+if [[ -d "${SHELL_SRC}/dist" && -d "${SHELL_SRC}/dist-electron" ]]; then
+  rm -rf "$SHELL_DIR"
+  mkdir -p "$SHELL_DIR"
+  cp -a "${SHELL_SRC}/dist" "${SHELL_SRC}/dist-electron" "$SHELL_DIR/"
+  # Source maps are a development aid; on an appliance they are dead weight and
+  # they hand anyone with the card the original sources.
+  find "$SHELL_DIR" -name '*.map' -delete
+
+  SHELL_VERSION="$(node -e "console.log(require('${SHELL_SRC}/package.json').version)")"
+  SHELL_MAIN="$(node -e "console.log(require('${SHELL_SRC}/package.json').main)")"
+  [[ -f "${SHELL_DIR}/${SHELL_MAIN}" ]] \
+    || { echo "REFUSED: the shell's declared main (${SHELL_MAIN}) was not packaged" >&2; exit 10; }
+  cat > "${SHELL_DIR}/package.json" <<EOF
+{
+  "name": "kitluy-device-shell",
+  "version": "${SHELL_VERSION}",
+  "private": true,
+  "type": "module",
+  "main": "${SHELL_MAIN}"
+}
+EOF
+
+  # The preload is CommonJS by extension (.cjs) because a sandboxed preload does
+  # not load ESM. Losing it does not break the build — it breaks the bridge, at
+  # runtime, on a shop counter, with a blank keypad and no error the installer
+  # can read.
+  [[ -f "${SHELL_DIR}/dist-electron/electron/preload.cjs" ]] \
+    || { echo "REFUSED: the Device Shell preload was not packaged" >&2; exit 11; }
+  [[ -f "${SHELL_DIR}/dist/index.html" ]] \
+    || { echo "REFUSED: the Device Shell renderer bundle was not packaged" >&2; exit 12; }
+
+  find "$SHELL_DIR" -type f -exec chmod 0644 {} +
+  find "$SHELL_DIR" -type d -exec chmod 0755 {} +
+  echo "packaged the Device Shell ($(du -sh "$SHELL_DIR" | cut -f1)) into ${SHELL_DIR#"$REPO"/}"
+else
+  # NOT a build failure: an image can legitimately be built without the shell
+  # while it is being worked on, and the unit's ConditionPathExists keeps such a
+  # device quiet rather than restart-looping. The manifest cross-check below is
+  # what refuses if the manifest CLAIMS the shell is there.
+  echo "NOTE: no built Device Shell at apps/kitluy-device-shell/dist — run 'pnpm --filter @kitluy-apps/kitluy-device-shell build' to include it" >&2
+fi
+
+# ---------------------------------------------------------------------------
 # THE MANIFEST CROSS-CHECK. What was declared is what was packaged.
 # ---------------------------------------------------------------------------
 # For every component of this image's profile:
@@ -181,6 +243,22 @@ for (const c of m.components || []) {
     if (c.executable) problems.push(`${c.id}: a governed release declares no executable in the image`);
   } else if (kind === "package") {
     /* provided by the distribution; the layer declaration is asserted by the tests */
+  } else if (kind === "pinned-download") {
+    /* Fetched and checksum-verified at build time, installed by the layer, so it is
+       NOT in any overlay and cannot be checked here. What IS checkable here is that
+       the manifest and the pin file agree — a version that drifted between them would
+       otherwise be found only by someone reading both. The binary itself is asserted
+       against the BUILT rootfs by image-contents.test.sh. */
+    const pin = c.source.pin && path.join(path.dirname(manifestPath), c.source.pin);
+    if (!pin || !fs.existsSync(pin)) problems.push(`${c.id}: pin file ${c.source.pin} is missing`);
+    else {
+      const text = fs.readFileSync(pin, "utf8");
+      const pinned = (k) => (text.match(new RegExp(`^${k}="([^"]*)"`, "m")) || [])[1];
+      if (c.source.version && pinned("KITLUY_ELECTRON_VERSION") !== c.source.version)
+        problems.push(`${c.id}: manifest version ${c.source.version} but the pin says ${pinned("KITLUY_ELECTRON_VERSION")}`);
+      if (c.source.sha256 && pinned("KITLUY_ELECTRON_SHA256") !== c.source.sha256)
+        problems.push(`${c.id}: manifest sha256 and the pin file disagree`);
+    }
   } else if (c.executable) {
     const shim = inOverlay(c.executable);
     if (!shim) problems.push(`${c.id}: ${c.executable} is not in any overlay`);

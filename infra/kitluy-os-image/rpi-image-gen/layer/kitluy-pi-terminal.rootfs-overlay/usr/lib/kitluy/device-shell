@@ -1,0 +1,32 @@
+#!/bin/sh
+# The Pi Terminal Device Shell: the graphical first-boot surface, full screen.
+#
+# cage is a kiosk compositor — it shows ONE application, full screen, with no
+# desktop, no launcher, no window decorations and no way to switch away. That is
+# the whole reason it is here instead of labwc: labwc is a general compositor,
+# and a general compositor on a shop counter is a way out of the application.
+#
+# --ozone-platform=wayland is passed explicitly. Electron 38 usually picks
+# Wayland on its own; saying so removes the case where it silently falls back to
+# X11, finds no display, and exits with a message about DISPLAY that describes
+# nothing an installer can act on.
+#
+# The app directory carries its own package.json whose `main` names the entry,
+# so Electron is handed a directory and resolves the rest itself.
+set -eu
+
+ELECTRON=/usr/lib/kitluy/electron/electron
+APP=/usr/lib/kitluy/lib/device-shell
+
+# Fail with the reason rather than with a stack trace from cage. The unit's
+# ConditionPathExists already keeps a normal boot from getting here, so this is
+# for the hand-started case during support.
+[ -x "$ELECTRON" ] || { echo "no Electron runtime at $ELECTRON" >&2; exit 1; }
+[ -f "$APP/package.json" ] || { echo "no Device Shell app at $APP" >&2; exit 1; }
+
+# --sandbox is Electron's own; the CHROMIUM sandbox needs either a setuid helper
+# or user namespaces. The image allows unprivileged user namespaces, so the
+# default sandbox works and is NOT disabled here — a kiosk that renders remote
+# nothing still parses local HTML and JS, and turning the renderer sandbox off
+# would trade the one boundary Chromium gives us for a startup convenience.
+exec /usr/bin/cage -- "$ELECTRON" --ozone-platform=wayland "$APP"
