@@ -186,20 +186,29 @@ else
 
   # Config keys must be ones the pinned builder actually consumes. Inventing a
   # key is silent: an unknown key is ignored and the image is quietly wrong.
-  # The reference corpus is every config the pinned tree ships — top-level
-  # config/, the worked examples and the test configurations. Using only
-  # config/*.yaml would reject `layer.custom` and `image.compression`, which
-  # are real keys demonstrated in examples/.
-  # The DOCUMENTED corpus counts too. `ssh: pubkey_only: y` is shown in the
-  # pinned tree's getting_started.adoc and docs/config/index.adoc but appears in
-  # no shipped example config, so a corpus built from examples alone rejected a
-  # key the builder demonstrably consumes (docs/layer/openssh-server.html names
-  # IGconf_ssh_pubkey_only). Documentation files are read for the same
-  # two-level key shape; they can only ADD allowed keys, never remove one.
-  UP_CONFIG_KEYS="$(grep -rhoE '^[a-z_]+:|^  [a-z_]+:' \
-    "$UP"/config/*.yaml "$UP"/examples/*/config/*.yaml "$UP"/test/configurations/config/*.yaml \
-    "$UP"/getting_started.adoc "$UP"/docs/config/*.adoc \
-    2>/dev/null | tr -d ' :' | sort -u)"
+  #
+  # TWO SOURCES, AND THE SECOND IS THE AUTHORITATIVE ONE.
+  #
+  # Example configs show what somebody happened to write. What the builder
+  # ACCEPTS is declared by each layer's META block: `X-Env-VarPrefix: ssh`
+  # names the section and `X-Env-Var-pubkey_only:` names the key within it.
+  # Reading only the examples rejected `ssh.pubkey_only` as unknown, which is
+  # wrong: v2.7.0 implements it in layer/net-misc/openssh-server.yaml, and a
+  # built rootfs carries the /etc/ssh/sshd_config.d/01pubkey-only.conf it
+  # writes. A gate that fails on a correct config teaches people to skip it.
+  #
+  # The example corpus is still read, because it covers keys consumed by the
+  # runner rather than by a layer (`layer.custom`, `image.compression`), which
+  # have no META declaration anywhere.
+  UP_CONFIG_KEYS="$(
+    grep -rhoE '^[a-z_]+:|^  [a-z_]+:' \
+      "$UP"/config/*.yaml "$UP"/examples/*/config/*.yaml "$UP"/test/configurations/config/*.yaml \
+      "$UP"/getting_started.adoc "$UP"/docs/config/*.adoc \
+      2>/dev/null | tr -d ' :'
+    grep -rhoE '^# X-Env-VarPrefix: [a-z_]+|^# X-Env-Var-[a-z_]+:' "$UP"/layer 2>/dev/null \
+      | sed -E 's/^# X-Env-VarPrefix: //; s/^# X-Env-Var-//; s/:$//'
+  )"
+  UP_CONFIG_KEYS="$(printf '%s\n' "$UP_CONFIG_KEYS" | sort -u)"
   BADKEY=""
   for c in "${CONFIGS[@]}"; do
     while read -r key; do

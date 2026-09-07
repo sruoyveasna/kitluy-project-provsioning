@@ -1,14 +1,37 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToString } from "react-dom/server";
 import { App, PRODUCT_NAME } from "../src/App.js";
 import { MESSAGES } from "../src/messages.js";
 
+/**
+ * STATE THE PREMISE, DO NOT INHERIT IT.
+ *
+ * The comment below used to say "no `VITE_KITLUY_*` variables exist under the
+ * test runner". That is true in CI and false on any workstation carrying an
+ * `.env.local`: Vitest loads Vite's env files, so `resolvePortalRuntime`
+ * returned `ready` and this suite rendered the sign-in form it exists to forbid.
+ * The guard failed loudly in the one place it was least needed and not at all
+ * where it was.
+ *
+ * Blanking the three values states the unconfigured case instead of hoping for
+ * it. `readPortalConfig` treats an empty string as absent, so this is a genuinely
+ * unconfigured deployment rather than a stand-in for one.
+ */
+beforeEach(() => {
+  vi.stubEnv("VITE_KITLUY_SUPABASE_URL", "");
+  vi.stubEnv("VITE_KITLUY_SUPABASE_PUBLISHABLE_KEY", "");
+  vi.stubEnv("VITE_KITLUY_MANAGEMENT_API_URL", "");
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe(`${PRODUCT_NAME} shell smoke test`, () => {
   /**
-   * No `VITE_KITLUY_*` variables exist under the test runner, so the portal is
-   * unconfigured here — and that is the case worth asserting. It must render the
-   * REASON rather than a blank page or, worse, a pairing form that would send a
-   * request nowhere.
+   * The portal is unconfigured here (see the stubs above), and that is the case
+   * worth asserting. It must render the REASON rather than a blank page or,
+   * worse, a pairing form that would send a request nowhere.
    */
   it("renders without crashing and fails closed when unconfigured", () => {
     const html = renderToString(<App />);

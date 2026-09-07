@@ -64,9 +64,22 @@ import type {
 export const PRODUCT_NAME = "kitluy-admin-pwa-portal" as const;
 export { MESSAGES };
 
-/** Vite injects `import.meta.env`; a non-browser host simply has none. */
+/**
+ * Vite injects `import.meta.env`; a non-browser host simply has none.
+ *
+ * READ IT AS `import.meta.env`, NOT THROUGH A CAST ON `import.meta`.
+ *
+ * This was `(import.meta as unknown as { env?: BrowserEnv }).env`, and the
+ * parentheses were load-bearing in the worst way: Vite rewrites the literal
+ * token `import.meta.env`, and a cast wrapping `import.meta` is not that token,
+ * so the access silently escaped the rewrite and reached the raw object. The
+ * portal still worked, but nothing could substitute the environment for a test —
+ * `vi.stubEnv` patches what Vite hands the module, which this never read. The
+ * unconfigured-deployment smoke test therefore passed only where no `.env.local`
+ * existed. Keep the cast on the RESULT, never on `import.meta`.
+ */
 function browserEnv(): BrowserEnv {
-  return (import.meta as unknown as { env?: BrowserEnv }).env ?? {};
+  return (import.meta.env ?? {}) as unknown as BrowserEnv;
 }
 
 function currentHash(): string {
