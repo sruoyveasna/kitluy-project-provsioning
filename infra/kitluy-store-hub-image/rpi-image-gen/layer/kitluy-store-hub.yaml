@@ -49,6 +49,35 @@ mmdebstrap:
       # build time, so the runtime has to resolve one. No value is written rather
       # than a wrong one: a wrong value in a golden image is one somebody later
       # trusts.
+
+      # --- What bin/hub-agent.ts reads at startup --------------------------
+      #
+      # NOT A CREDENTIAL. `--auth=peer` over a UNIX socket: the cluster is
+      # created with `listen_addresses = ''` and authenticates by kernel-verified
+      # uid, so this DSN carries a username and no password, and would be useless
+      # off the board even if it leaked.
+      #
+      # The literal `localhost` is load-bearing. `hubDatabaseUrl()` refuses any
+      # DSN not containing `localhost` or `127.0.0.1` (KL-INF-P1-037, owner-
+      # locked) — a socket DSN without it fails closed at startup, which reads as
+      # a Hub bug rather than the guard doing its job.
+      KITLUY_HUB_DB_URL=postgresql://postgres@localhost/kitluy_hub?host=/run/postgresql
+
+      # What migration set THIS release expects. Absent, the agent reports
+      # SCHEMA-AHEAD against any real database and refuses — correctly, since a
+      # Hub that cannot state its expectations must not serve.
+      HUB_MIGRATION_MANIFEST=/usr/lib/kitluy/hub-migration-manifest.json
+      HUB_DATA_PATH=/var/lib/kitluy/hub
+      HUB_STORAGE_POSTURE_PATH=/var/lib/kitluy/storage-posture
+
+      # THE TERMINAL-FACING TLS IDENTITY. Paths only — no key material is in this
+      # image, and these files do not exist until the device has registered,
+      # paired and adopted an operational certificate. Until then `loadTlsMaterial`
+      # reports KLUY-HUB-TLS-MISSING and the Hub does not serve, which is the
+      # intended state of an unprovisioned board.
+      HUB_TLS_KEY_PATH=/var/lib/kitluy/operational/operational-tls.key.pem
+      HUB_TLS_CERT_PATH=/var/lib/kitluy/operational/operational-tls.crt.pem
+      HUB_DEVICE_CA_PATH=/var/lib/kitluy/operational/operational-tls.chain.pem
       EOF
     # The Hub ADVERTISES; terminals listen. The service name is locked by the
     # bootstrap contract (KLD-2026-08-06-WS12-T001-EDGE-BOOTSTRAP-001) and must

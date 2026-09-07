@@ -15,5 +15,20 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     fileParallelism: false,
+    env: {
+      // THE DEVELOPER DEFAULT LIVES HERE, NOT IN SHIPPED SOURCE.
+      //
+      // `hub-database.ts` used to carry it, which put a DSN with an inline
+      // password into the Raspberry Pi image and gave a misconfigured Hub a
+      // silent fallback to whatever answered on 54322. It now fails closed, so
+      // the convenience of "just run pnpm test" belongs here — where it reaches
+      // tests and nothing else.
+      //
+      // An explicitly-set value always wins, so pointing the suites at another
+      // cluster stays a matter of exporting the variable.
+      KITLUY_HUB_DB_URL:
+        process.env.KITLUY_HUB_DB_URL ??
+        "postgresql://postgres:postgres@127.0.0.1:54322/kitluy_hub_local",
+    },
   },
 });

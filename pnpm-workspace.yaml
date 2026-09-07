@@ -27,3 +27,9 @@ catalog:
   "@types/pg": "^8.11.10"
   node-forge: "^1.4.0"
   "@types/node-forge": "^1.3.14"
+  # Bundles the Store Hub agent into ONE file for the Raspberry Pi image. The
+  # image ships no node_modules (package-bootstrap-runtime.sh asserts it), and
+  # the Hub agent — unlike the firstboot agent — has 16 workspace dependencies
+  # plus `pg`, so a file-copy closure cannot package it. Build tooling only:
+  # nothing esbuild produces carries esbuild into the image.
+  esbuild: "^0.25.12"

@@ -64,35 +64,70 @@ grant usage on schema kitluy_devices to kitluy_activation_service;
 -- 0193 met with redemption and issuance, and solved the same way: a definer owned
 -- by `postgres`, whose body is one call.
 --
--- The bridge decides NOTHING. Every source, the environment and the correlation
--- id are arguments; the floor, the tolerance and the status all stay in group
--- 0123 where they belong.
+-- =============================================================================
+-- R-1: THE CALLER MAY REQUEST TRUSTED TIME. IT MAY NEVER SUPPLY THE VALUE.
+-- =============================================================================
+-- This bridge SHIPPED taking three caller-supplied timestamps:
+--
+--   p_valid_rtc_time, p_authenticated_network_time, p_valid_signed_token_time
+--
+-- and forwarding them verbatim into the authority. An external security review
+-- demonstrated the consequence by passing `now() + 3650 days` as authoritative
+-- time. The floor is MONOTONIC by design, so the device's trusted-time floor was
+-- permanently advanced ten years into the future, after which every real
+-- observation reads as `restricted_clock_rollback` and certificate issuance,
+-- activation and renewal all refuse — with no rollback path, because a rollback
+-- path is exactly what the monotonic floor exists to forbid.
+--
+-- The parameters were the whole defect. A privilege bridge that accepts a
+-- timestamp is a bridge that delegates the trust decision to its caller, and no
+-- amount of care in the caller can make that structurally safe: the caller is
+-- application code and the floor is a security control.
+--
+-- So the timestamps are GONE from the boundary. `now()` is evaluated INSIDE this
+-- definer body, which runs as `postgres` inside the database — the trust
+-- boundary itself. A caller can ask for trusted time to be established. It has
+-- no way to say what that time is.
+--
+-- The other two sources are passed as NULL and have no parameter either:
+--   * RTC        — the control plane cannot speak for a device's hardware clock.
+--   * signed token — nothing in this path verifies a signature, and an
+--                  unverified token offered as verified is the same defect again.
+-- When those sources become real they arrive through their OWN verified path,
+-- never as an argument to this function.
+--
+-- The floor, the tolerance, the anomaly classification and the status all remain
+-- in group 0123. This bridge still decides nothing — it now also CARRIES nothing.
+drop function if exists kitluy_devices.establish_device_trusted_time_v1(
+  uuid, text, timestamptz, timestamptz, timestamptz, uuid);
+
 create or replace function kitluy_devices.establish_device_trusted_time_v1(
   p_device_id uuid,
   p_environment text,
-  p_valid_rtc_time timestamptz,
-  p_authenticated_network_time timestamptz,
-  p_valid_signed_token_time timestamptz,
-  p_correlation_id uuid
+  p_correlation_id uuid default null
 ) returns kitluy_devices.trusted_time_outcome
 language sql
 security definer
 set search_path = pg_catalog, kitluy_devices, kitluy_ops, extensions
 as $$
   select kitluy_devices.evaluate_trusted_time_v1(
-           p_device_id, p_environment, p_valid_rtc_time,
-           p_authenticated_network_time, p_valid_signed_token_time, p_correlation_id)
+           p_device_id,
+           p_environment,
+           null,   -- RTC: not the control plane's to claim
+           now(),  -- the ONLY authoritative value, generated INSIDE this boundary
+           null,   -- signed token: nothing here can verify one
+           coalesce(p_correlation_id, gen_random_uuid()))
 $$;
 
 comment on function kitluy_devices.establish_device_trusted_time_v1 is
-  'Group 0198. A SECURITY DEFINER privilege bridge to evaluate_trusted_time_v1 (0123), which is not a definer and therefore requires its caller to hold direct table privileges. Exists so the activation composition can establish a device''s trusted time while holding NO table access of its own. Adds no authority and no time source: the floor, the tolerance, the anomaly classification and the status all remain in group 0123. Granted to kitluy_activation_service ONLY.';
+  'Group 0198, R-1 repaired. A SECURITY DEFINER privilege bridge to evaluate_trusted_time_v1 (0123), which is not a definer and therefore requires its caller to hold direct table privileges. Exists so the activation composition can establish a device''s trusted time while holding NO table access of its own. It takes NO timestamp: the authoritative value is now() evaluated inside this definer body, inside the trust boundary. The shipped version accepted three caller-supplied timestamps and an external review advanced a device floor ten years into the future through them, which is unrecoverable against a monotonic floor. A caller may REQUEST establishment; it may never PROVIDE the value. Granted to kitluy_activation_service ONLY.';
 
-alter function kitluy_devices.establish_device_trusted_time_v1(uuid, text, timestamptz, timestamptz, timestamptz, uuid)
+alter function kitluy_devices.establish_device_trusted_time_v1(uuid, text, uuid)
   owner to postgres;
-revoke all on function kitluy_devices.establish_device_trusted_time_v1(uuid, text, timestamptz, timestamptz, timestamptz, uuid) from public;
-revoke all on function kitluy_devices.establish_device_trusted_time_v1(uuid, text, timestamptz, timestamptz, timestamptz, uuid) from anon;
-revoke all on function kitluy_devices.establish_device_trusted_time_v1(uuid, text, timestamptz, timestamptz, timestamptz, uuid) from authenticated;
-grant execute on function kitluy_devices.establish_device_trusted_time_v1(uuid, text, timestamptz, timestamptz, timestamptz, uuid)
+revoke all on function kitluy_devices.establish_device_trusted_time_v1(uuid, text, uuid) from public;
+revoke all on function kitluy_devices.establish_device_trusted_time_v1(uuid, text, uuid) from anon;
+revoke all on function kitluy_devices.establish_device_trusted_time_v1(uuid, text, uuid) from authenticated;
+grant execute on function kitluy_devices.establish_device_trusted_time_v1(uuid, text, uuid)
   to kitluy_activation_service;
 
 -- -----------------------------------------------------------------------------
@@ -184,8 +219,24 @@ begin
     raise exception 'KLUY-MIGRATION-0198: the trusted-time bridge is not a definer owned by postgres'
       using errcode = 'P0001';
   end if;
-  if has_function_privilege('anon', 'kitluy_devices.establish_device_trusted_time_v1(uuid, text, timestamptz, timestamptz, timestamptz, uuid)', 'execute')
-     or has_function_privilege('authenticated', 'kitluy_devices.establish_device_trusted_time_v1(uuid, text, timestamptz, timestamptz, timestamptz, uuid)', 'execute') then
+
+  -- R-1, ASSERTED STRUCTURALLY RATHER THAN REVIEWED.
+  -- No overload of the bridge may accept a timestamp. This is the invariant the
+  -- external review broke: a caller that can hand this definer a value chooses
+  -- the trusted-time floor, and the floor is monotonic, so the damage is
+  -- permanent. Checked against pg_proc so a future edit that re-adds a
+  -- timestamp parameter fails the migration instead of shipping.
+  if exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'kitluy_devices'
+       and p.proname = 'establish_device_trusted_time_v1'
+       and 'pg_catalog.timestamptz'::regtype = any (p.proargtypes::oid[])) then
+    raise exception 'KLUY-MIGRATION-0198: R-1 — the trusted-time bridge accepts a caller-supplied timestamp'
+      using errcode = 'P0001';
+  end if;
+
+  if has_function_privilege('anon', 'kitluy_devices.establish_device_trusted_time_v1(uuid, text, uuid)', 'execute')
+     or has_function_privilege('authenticated', 'kitluy_devices.establish_device_trusted_time_v1(uuid, text, uuid)', 'execute') then
     raise exception 'KLUY-MIGRATION-0198: a browser-reachable role can establish trusted time'
       using errcode = 'P0001';
   end if;

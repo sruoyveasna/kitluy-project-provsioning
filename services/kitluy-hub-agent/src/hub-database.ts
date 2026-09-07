@@ -23,9 +23,29 @@ import { createHash } from "node:crypto";
 
 export const HUB_DB_URL_ENV = "KITLUY_HUB_DB_URL";
 
-/** Development default: a SEPARATE database in the local Postgres instance. */
-export const DEFAULT_LOCAL_HUB_DB_URL =
-  "postgresql://postgres:postgres@127.0.0.1:54322/kitluy_hub_local";
+/**
+ * THERE IS NO DEFAULT DSN, AND THAT IS DELIBERATE.
+ *
+ * This module used to export
+ * `DEFAULT_LOCAL_HUB_DB_URL = "postgresql://postgres:postgres@127.0.0.1:54322/…"`,
+ * which `hubDatabaseUrl()` fell back to. Two things were wrong with it.
+ *
+ * First, it shipped. `bin/hub-agent.ts` reaches this module, so the literal
+ * was bundled into `/usr/lib/kitluy/lib/hub-agent/main.mjs` on the flashable
+ * image, where `scan-image-secrets.sh` correctly failed it as a database URL
+ * with an inline password. An appliance in a shop has no business carrying a
+ * developer's DSN, secret or not.
+ *
+ * Second, and worse, it was a SILENT FALLBACK. A Hub whose `KITLUY_HUB_DB_URL`
+ * was missing or misspelled would not fail — it would quietly dial
+ * 127.0.0.1:54322 and report whatever answered. On a workstation running
+ * several stacks that port belongs to whichever one claimed it first; on this
+ * machine it is another ecosystem's database entirely.
+ *
+ * So an unset variable is now a refusal, like every other missing configuration
+ * value in this runtime. The image sets it in `/etc/kitluy/hub.env`; the test
+ * suites set it in `vitest.config.ts`.
+ */
 
 /** Schema contract §2, verbatim and exhaustive. */
 export const CANONICAL_EDGE_SCHEMAS = [
@@ -142,7 +162,14 @@ export const HUB_IDEMPOTENCY_ERRORS = {
 // Local-only connection guard (KL-INF-P1-037, OWNER-LOCKED).
 // ---------------------------------------------------------------------------
 export function hubDatabaseUrl(env: NodeJS.ProcessEnv = process.env): string {
-  const url = env[HUB_DB_URL_ENV] ?? DEFAULT_LOCAL_HUB_DB_URL;
+  const url = env[HUB_DB_URL_ENV];
+  if (url === undefined || url.trim() === "") {
+    throw new Error(
+      `${HUB_DB_URL_ENV} is not set. A Hub connects to the database it was told to and ` +
+        "never to a default: a silent fallback points a Store's authority at whatever " +
+        "happens to answer on a well-known port. Fail closed.",
+    );
+  }
   if (!/localhost|127\.0\.0\.1/.test(url)) {
     throw new Error(
       `${HUB_DB_URL_ENV} must point at a local development database (KL-INF-P1-037).`,

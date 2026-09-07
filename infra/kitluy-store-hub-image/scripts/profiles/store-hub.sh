@@ -17,31 +17,23 @@ kitluy_profile_store_hub_compose() {
   # Local PostgreSQL data directory lives on the encrypted data partition.
   install -d -m 0700 "${root}/var/lib/kitluy/hub/postgresql"
 
-  cat > "${unit_dir}/kitluy-hub-agent.service" <<'EOF'
-[Unit]
-# GOVERNED RELEASE UNIT — defined here, NOT enabled. The Hub agent binary is
-# delivered by the governed release system; enabling it in the golden image
-# would restart-loop against an absent executable.
-Description=KitLuy Store Hub agent (LAN /edge/v1 API, sync, local authority)
-After=network-online.target postgresql.service kitluy-enrollment-agent.service
-Wants=network-online.target
-Requires=postgresql.service
-
-[Service]
-Type=simple
-EnvironmentFile=/etc/kitluy/image.env
-EnvironmentFile=/etc/kitluy/hub.env
-ExecStart=/usr/lib/kitluy/hub-agent
-Restart=always
-RestartSec=10s
-ProtectSystem=strict
-ProtectHome=yes
-NoNewPrivileges=yes
-ReadWritePaths=/var/lib/kitluy
-
-[Install]
-WantedBy=multi-user.target
-EOF
+  # THE HUB AGENT UNIT IS NOT DEFINED HERE ANY MORE — BRINGUP-003.
+  #
+  # It used to be, and that WAS the structural defect. This profile is sourced
+  # only by `build-image.sh`, which refuses to emit an .img (exit 3). The real
+  # builder, `build-rpi-image.sh`, drives rpi-image-gen layers and never sourced
+  # this file. So the Hub agent's unit existed exclusively in the build path that
+  # cannot produce a card, while every flashable image shipped without it — and
+  # went on advertising `_kitluy-edge._tcp` on 7443 regardless.
+  #
+  # The unit now lives once, in the canonical overlay that BOTH paths consume:
+  #   kitluy-hub-base.rootfs-overlay/etc/systemd/system/kitluy-hub-agent.service
+  # `base.sh` copies that overlay into the staged tree, so re-declaring it here
+  # would overwrite the real one with a stale copy — which is precisely what
+  # `systemd-runtime.test.sh`'s byte-for-byte check caught.
+  #
+  # The version deleted from here also carried `Requires=postgresql.service`,
+  # which could never have worked: that unit is masked to /dev/null.
 
   # mDNS advertisement. Terminals listen for exactly this service name; it is
   # locked by the bootstrap contract and must not be renamed here.

@@ -57,7 +57,7 @@ import {
 } from "../src/revocation-snapshot-builder.js";
 import type { DeviceRevocationRuntime } from "../src/composition.js";
 
-const LOCAL_DSN = "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
+const LOCAL_DSN = "postgresql://postgres:postgres@127.0.0.1:54392/postgres";
 const RUN = randomUUID().slice(0, 8);
 
 /**

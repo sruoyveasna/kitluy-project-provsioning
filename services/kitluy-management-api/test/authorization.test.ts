@@ -17,11 +17,10 @@ import {
 } from "../src/authorization.js";
 import {
   deriveFreshness,
-  evaluateProvisioningReadiness,
+  toProvisioningReadiness,
   getFleetDevice,
   listFleet,
   UNRULED_FRESHNESS_POLICY,
-  type FleetDeviceDto,
 } from "../src/fleet.js";
 
 const USER = "b145d533-b905-47fc-a551-8ad07ecfe39b";
@@ -332,54 +331,24 @@ describe("freshness truthfulness", () => {
   });
 });
 
-describe("provisioning readiness (derived, never stored)", () => {
-  const base: FleetDeviceDto = {
-    deviceId: "d",
-    deviceReference: "KL-1",
-    deviceClass: "store_hub",
-    hardwareProfile: "P",
-    lifecycle: "enrolled",
-    trustLevel: null,
-    certificateStatus: null,
-    assignmentState: null,
-    tenantReference: null,
-    digitalStoreReference: null,
-    locationReference: null,
-    terminalAssignmentCount: 0,
-    openIncidentCount: 0,
-    lastSeenAt: null,
-    fleetStatus: null,
-    freshness: "NEVER_SEEN",
-    requiresAttention: false,
-  };
-
-  it("an enrolled unassigned device is eligible", () => {
-    expect(evaluateProvisioningReadiness(base).eligible).toBe(true);
+describe("provisioning readiness comes from the door, and fails closed", () => {
+  it("passes the door's verdict through, reasons verbatim", () => {
+    expect(toProvisioningReadiness({ eligible: true, reasons: [] })).toEqual({
+      eligible: true,
+      reasons: [],
+    });
+    expect(
+      toProvisioningReadiness({ eligible: false, reasons: ["no factory QA execution"] }),
+    ).toEqual({ eligible: false, reasons: ["no factory QA execution"] });
   });
 
-  const denied: ReadonlyArray<readonly [string, Partial<FleetDeviceDto>, string]> = [
-    ["quarantined", { lifecycle: "quarantined" }, "forbidden"],
-    ["restricted_investigation", { lifecycle: "restricted_investigation" }, "forbidden"],
-    ["retired", { lifecycle: "retired" }, "forbidden"],
-    ["open incident", { openIncidentCount: 1 }, "incident"],
-    ["revoked certificate", { certificateStatus: "revoked" }, "revoked"],
-    ["already assigned", { assignmentState: "active" }, "already holds"],
-  ];
+  it("refuses when the door returned no verdict", () => {
+    const r = toProvisioningReadiness(undefined);
+    expect(r.eligible).toBe(false);
+    expect(r.reasons).toHaveLength(1);
+  });
 
-  for (const [label, override, needle] of denied) {
-    it(`refuses provisioning: ${label}`, () => {
-      const r = evaluateProvisioningReadiness({ ...base, ...override });
-      expect(r.eligible).toBe(false);
-      expect(r.reasons.join(" ")).toContain(needle);
-    });
-  }
-
-  it("the two real quarantined/investigation cloud devices are both refused", () => {
-    expect(
-      evaluateProvisioningReadiness({ ...base, lifecycle: "restricted_investigation" }).eligible,
-    ).toBe(false);
-    expect(evaluateProvisioningReadiness({ ...base, lifecycle: "quarantined" }).eligible).toBe(
-      false,
-    );
+  it("never reads a null verdict as eligible", () => {
+    expect(toProvisioningReadiness({ eligible: null, reasons: null }).eligible).toBe(false);
   });
 });

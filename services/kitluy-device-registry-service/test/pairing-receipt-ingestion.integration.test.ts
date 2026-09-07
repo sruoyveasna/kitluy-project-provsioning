@@ -30,7 +30,7 @@ import {
 } from "../src/pairing-receipt-ingestion.js";
 import type { SafeLogger } from "../src/pairing-receipt-ingestion.js";
 
-const DSN = "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
+const DSN = "postgresql://postgres:postgres@127.0.0.1:54392/postgres";
 const RUN = randomUUID().slice(0, 8);
 const TENANT = "00000000-0000-4000-8000-000000000011";
 const STORE = "00000000-0000-4000-8000-000000000015";

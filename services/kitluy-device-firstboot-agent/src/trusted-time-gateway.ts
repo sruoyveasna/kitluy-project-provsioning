@@ -47,7 +47,20 @@ export type TrustedTimeStatus =
   | "restricted_no_trusted_source";
 
 export type TrustedTimeSource =
-  "rtc" | "authenticated_network" | "signed_cloud_token" | "persisted_floor" | "none";
+  | "rtc"
+  | "authenticated_network"
+  | "signed_cloud_token"
+  | "persisted_floor"
+  | "none"
+  /**
+   * Added by migration group 0200. `now()` read INSIDE the database, requested
+   * by `establish_device_trusted_time_v1` and never supplied by any caller. A
+   * device never offers it — but a device that READS its own trusted-time state
+   * will see it there, because the cloud path is what establishes trusted time
+   * for a paired Hub. Omitting it here would make `readTrustedTimeState` return
+   * a value its own type says is impossible.
+   */
+  | "cloud_authoritative";
 
 /** A hardware clock reading. Mirrors `RtcTimeReading` in @kitluy/device-identity. */
 export interface RtcReading {

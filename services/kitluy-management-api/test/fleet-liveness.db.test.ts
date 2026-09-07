@@ -27,7 +27,7 @@ import {
 import { deriveFreshness, getFleetDevice, type FreshnessPolicy } from "../src/fleet.js";
 
 const DB_URL =
-  process.env.KITLUY_M1_DB_URL ?? "postgresql://postgres:postgres@127.0.0.1:54402/postgres";
+  process.env.KITLUY_M1_DB_URL ?? "postgresql://postgres:postgres@127.0.0.1:54392/postgres";
 
 /** The clean development Store Hub created by the firstboot E2E suite. */
 const HUB_ASSET_TAG_PREFIX = "DEV-HUB-";

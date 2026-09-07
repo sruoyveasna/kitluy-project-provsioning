@@ -23,7 +23,18 @@
 # nothing to show until that application exists.
 [Unit]
 Description=KitLuy unassigned-terminal status screen (console)
-After=kitluy-firstboot.service
+# THE TTY1 OWNER OF THIS SLICE. It shows Factory Enrollment truth — device id,
+# "Waiting for approval" or "Approved", and Store always Unassigned — and takes
+# no input. runtime-manifest.json names kitluy-terminal-session.service as its
+# declared SUCCESSOR: the graphical Device Shell slice gives that unit the wants
+# symlink and a Conflicts= on this one, removes this unit's symlink, and swaps
+# the two `enabled` flags. Until then this screen is the product on tty1.
+#
+# Ordered after cloud registration so the first paint already reflects the
+# registration agent's first pass rather than an empty state file; ordering
+# only, never Requires= — the screen must still come up when the network is
+# down, and say so.
+After=kitluy-firstboot.service kitluy-cloud-registration.service
 # The status screen OWNS tty1. Without this, getty prints a login prompt over
 # it and an operator sees a login they can never satisfy — root is locked and
 # `pi` is password-disabled by design.

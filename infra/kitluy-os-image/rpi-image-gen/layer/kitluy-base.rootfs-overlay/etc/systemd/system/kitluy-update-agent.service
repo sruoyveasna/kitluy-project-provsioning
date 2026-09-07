@@ -1,6 +1,6 @@
 [Unit]
 Description=KitLuy release/update bootstrap agent
-After=kitluy-enrollment-agent.service network-online.target
+After=kitluy-firstboot.service network-online.target
 Wants=network-online.target
 Requires=kitluy-firstboot.service
 ConditionPathExists=/usr/lib/kitluy/update-agent
@@ -24,7 +24,16 @@ RestrictRealtime=yes
 CapabilityBoundingSet=
 ReadWritePaths=/var/lib/kitluy/update
 StateDirectory=kitluy
-StateDirectoryMode=0750
+# 0751 — the SAME value every KitLuy unit sharing /var/lib/kitluy declares.
+#
+# systemd re-applies StateDirectoryMode on every start, so units that disagree
+# leave the directory's mode to boot order. The Store Hub image settled on 0751
+# because postgres must TRAVERSE /var/lib/kitluy to reach its cluster; the
+# terminal carries no database, but the value is kept identical so the
+# agreement test and both images stay on one convention. `x` without `r`
+# grants traversal only: /var/lib/kitluy still cannot be listed by others, and
+# identity/ and the other state directories stay 0700.
+StateDirectoryMode=0751
 
 [Install]
 WantedBy=multi-user.target

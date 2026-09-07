@@ -40,7 +40,7 @@ import {
 import { runFactoryQa, validateHardwareManifest, type HardwareSignal } from "../src/factory.js";
 
 const DB_URL =
-  process.env.KITLUY_M1_DB_URL ?? "postgresql://postgres:postgres@127.0.0.1:54402/postgres";
+  process.env.KITLUY_M1_DB_URL ?? "postgresql://postgres:postgres@127.0.0.1:54392/postgres";
 
 /** The one clean development Store Hub. Fixed seed = one device, not one per run. */
 const HUB_SEED = "kitluy-dev-store-hub-m1-001";
@@ -444,10 +444,18 @@ describe.skipIf(!reachable)("Hub activation — the canonical attempt, and its e
     );
     expect(Number(pki[0]?.n ?? 0)).toBe(1);
 
+    // ENTERED EXPLICITLY. Group 0206 (finding C-4) cut `service_role`'s inherited
+    // membership of `kitluy_activation_service`, so activation is now a
+    // capability a caller ENTERS rather than one the connection silently
+    // carries. `set local role` dies with the transaction, exactly as it does in
+    // the product's `withServiceRole()`.
+    await db.query("begin");
+    await db.query("set local role kitluy_activation_service");
     const { rows } = await db.query<{ outcome: string }>(
       `select kitluy_devices.attempt_activate_device_v1($1::uuid, 'development', $2::text)::text as outcome`,
       [hub.deviceRecordId, "admin/m1-dev-provisioning"],
     );
+    await db.query("commit");
     const outcome = String(rows[0]?.outcome ?? "");
     // eslint-disable-next-line no-console -- this verdict IS the deliverable
     console.log(`[activation] attempt_activate_device_v1 -> ${outcome}`);

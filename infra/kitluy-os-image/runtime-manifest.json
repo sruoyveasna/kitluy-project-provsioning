@@ -1,0 +1,160 @@
+{
+  "$comment": [
+    "THE ONE DECLARATION OF WHAT A FLASHABLE PI TERMINAL IMAGE CONTAINS.",
+    "",
+    "Mirrors infra/kitluy-store-hub-image/runtime-manifest.json, and exists for",
+    "the same reason: the terminal tree had two build paths that disagreed, and",
+    "nothing reconciled them. A component declared here and not packaged fails",
+    "the build; a component packaged and not declared is invisible to the tests.",
+    "",
+    "Three consumers read this file, which is what keeps them from drifting:",
+    "  1. scripts/package-bootstrap-runtime.sh -- packages what is declared here",
+    "  2. test/image-contents.test.sh          -- inspects a BUILT rootfs for it",
+    "  3. test/systemd-runtime.test.sh         -- cross-checks enablement",
+    "",
+    "FACTORY ENROLLMENT IS THE TERMINAL'S FIRST STAGE (KLD-2026-09-03-",
+    "FACTORY-ENROLLMENT-001). The image carries the bootstrap runtime only:",
+    "identity, cloud registration, health, update, host keys and a status",
+    "screen. It carries NO Store authority of any kind -- no Hub agent, no",
+    "database, no business application -- and the `retired` list below is",
+    "asserted absent by every test that reads this file.",
+    "",
+    "NOTHING PER-DEVICE BELONGS IN AN IMAGE. No device key, certificate, tenant,",
+    "store, location, staff record, machine-id or SSH host key is declared here."
+  ],
+  "schemaVersion": 1,
+  "profiles": ["pi-terminal"],
+  "components": [
+    {
+      "id": "firstboot-identity",
+      "profiles": ["pi-terminal"],
+      "executable": "/usr/lib/kitluy/firstboot-identity",
+      "unit": "kitluy-firstboot.service",
+      "enabled": true,
+      "source": {
+        "kind": "closure",
+        "package": "@kitluy-services/kitluy-device-firstboot-agent",
+        "entry": "bin/firstboot-identity"
+      }
+    },
+    {
+      "id": "cloud-registration",
+      "$comment": [
+        "Factory Enrollment. The device announces itself and waits for an",
+        "explicit Admin approval; no answer on this path makes it `enrolled`."
+      ],
+      "profiles": ["pi-terminal"],
+      "executable": "/usr/lib/kitluy/cloud-registration",
+      "unit": "kitluy-cloud-registration.service",
+      "enabled": true,
+      "source": {
+        "kind": "closure",
+        "package": "@kitluy-services/kitluy-device-firstboot-agent",
+        "entry": "bin/cloud-registration"
+      },
+      "environmentFiles": ["/etc/kitluy/image.env"]
+    },
+    {
+      "id": "health-reporter",
+      "profiles": ["pi-terminal"],
+      "executable": "/usr/lib/kitluy/health-reporter",
+      "unit": "kitluy-health-reporter.service",
+      "enabled": true,
+      "source": {
+        "kind": "closure",
+        "package": "@kitluy-services/kitluy-device-firstboot-agent",
+        "entry": "bin/health-reporter"
+      }
+    },
+    {
+      "id": "update-agent",
+      "profiles": ["pi-terminal"],
+      "executable": "/usr/lib/kitluy/update-agent",
+      "unit": "kitluy-update-agent.service",
+      "enabled": true,
+      "source": {
+        "kind": "closure",
+        "package": "@kitluy-services/kitluy-device-firstboot-agent",
+        "entry": "bin/update-bootstrap"
+      }
+    },
+    {
+      "id": "ssh-hostkeys",
+      "$comment": [
+        "Clone hygiene, second half: the image ships no host keys, so a per-device",
+        "set is generated at first boot from the distribution's ssh-keygen."
+      ],
+      "profiles": ["pi-terminal"],
+      "executable": "/usr/bin/ssh-keygen",
+      "unit": "kitluy-ssh-hostkeys.service",
+      "enabled": true,
+      "source": { "kind": "package", "package": "openssh-server" }
+    },
+    {
+      "id": "bootstrap-screen",
+      "$comment": [
+        "The tty1 status screen: device id, KitLuy registration state (waiting",
+        "for approval / approved), Store always Unassigned. Text mode in this",
+        "slice; the graphical Device Shell replaces it (see `tty1` below)."
+      ],
+      "profiles": ["pi-terminal"],
+      "executable": "/usr/lib/kitluy/terminal-bootstrap-ui",
+      "unit": "kitluy-bootstrap-screen.service",
+      "enabled": true,
+      "source": {
+        "kind": "closure",
+        "package": "@kitluy-services/kitluy-device-firstboot-agent",
+        "entry": "bin/bootstrap-ui"
+      },
+      "environmentFiles": ["/etc/kitluy/image.env"]
+    },
+    {
+      "id": "terminal-session",
+      "$comment": [
+        "Defined, NOT enabled. The Wayland session unit stays in the image as the",
+        "declared successor of the text screen on tty1, and is switched on by the",
+        "Device Shell slice, not before: it failed on the first real terminal boot",
+        "(2026-08-13) because nothing existed for the compositor to show."
+      ],
+      "profiles": ["pi-terminal"],
+      "executable": "/usr/lib/kitluy/terminal-session",
+      "unit": "kitluy-terminal-session.service",
+      "enabled": false,
+      "source": { "kind": "overlay" }
+    },
+    {
+      "id": "terminal-client",
+      "$comment": [
+        "GOVERNED APPLICATION RELEASE (KLD-2026-08-11-DEVICE-BOOTSTRAP-RUNTIME-001).",
+        "The unit is defined so the release need not invent one, and carries no",
+        "executable here: the business application is never part of the image."
+      ],
+      "profiles": ["pi-terminal"],
+      "unit": "kitluy-terminal-client.service",
+      "enabled": false,
+      "source": { "kind": "governed-release" }
+    }
+  ],
+  "retired": [
+    {
+      "unit": "kitluy-enrollment-agent.service",
+      "executable": "/usr/lib/kitluy/enrollment-agent",
+      "modules": ["bin/enrollment-bootstrap", "adapters/http-enrollment-client"],
+      "reason": "The flash-time ticket path enrolled a device straight to `enrolled` with no Admin decision, which the Factory Enrollment rule forbids; its identity also included the SD card. Cloud registration is the terminal's one identity path."
+    }
+  ],
+  "storeAuthorityMustBeAbsent": [
+    "/etc/systemd/system/kitluy-hub-agent.service",
+    "/usr/lib/kitluy/hub-agent",
+    "/usr/lib/kitluy/hub-migrations",
+    "/usr/lib/kitluy/hub-storage-provision",
+    "/usr/lib/kitluy/hub-database-provision",
+    "/etc/kitluy/hub.env",
+    "/etc/avahi/services/kitluy-edge.service"
+  ],
+  "tty1": {
+    "owner": "kitluy-bootstrap-screen.service",
+    "successor": "kitluy-terminal-session.service",
+    "$comment": "The Device Shell slice flips these: the successor gains its wants symlink and Conflicts= on the owner, the owner loses its symlink, and the two `enabled` flags above swap."
+  }
+}

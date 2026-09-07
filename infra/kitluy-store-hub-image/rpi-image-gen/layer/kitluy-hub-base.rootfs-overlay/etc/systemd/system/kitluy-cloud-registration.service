@@ -28,7 +28,19 @@ CapabilityBoundingSet=
 # firstboot created. Nothing outside /var/lib/kitluy is writable to it.
 ReadWritePaths=/var/lib/kitluy
 StateDirectory=kitluy
-StateDirectoryMode=0750
+# 0751, NOT 0750/0700 — the LAST digit is load-bearing.
+#
+# PostgreSQL runs as the `postgres` user, and its cluster lives on the
+# encrypted volume mounted at /var/lib/kitluy/hub. Reaching it means
+# TRAVERSING /var/lib/kitluy, and `postgres` is neither the owner nor in the
+# group — so without the final execute bit initdb fails with
+# "could not access directory ... Permission denied" on a directory it owns.
+# Every unit that declares this StateDirectory must agree, because systemd
+# re-applies the mode on each start and the strictest one would win back.
+#
+# `x` without `r` grants TRAVERSAL ONLY: /var/lib/kitluy still cannot be
+# listed by others, and identity/, operational/ and the rest stay 0700.
+StateDirectoryMode=0751
 
 [Install]
 WantedBy=multi-user.target

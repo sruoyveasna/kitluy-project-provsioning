@@ -43,15 +43,52 @@
  * Not the time source, not the key, not the serial, not the validity window, not
  * the issuing CA. The device offers nothing — a Pi 5 has no battery-backed RTC
  * and holds no signed time token — so the only source is the control plane's own
- * clock, offered as `authenticated_network`. That is explicitly NOT a production
- * source: it carries no signature a device could verify offline, and production
- * needs NTS or a signed `trusted_time_bootstrap` token, both still unimplemented
- * and neither weakened here. The environment is passed to the governed doors,
- * which refuse pilot and production themselves.
+ * clock, read as `cloud_authoritative` INSIDE the database (group 0200).
+ *
+ * It does not decide WHAT TIME IT IS either, and that is R-1. The shipped
+ * version passed `now()` into a `p_authenticated_network_time` parameter on the
+ * governed bridge. An external security review passed `now() + 3650 days`
+ * through that same parameter and permanently advanced a device's trusted-time
+ * floor a decade into the future; because the floor is monotonic, every later
+ * observation reads as `restricted_clock_rollback` and certificate issuance,
+ * activation and renewal all refuse with no recovery. Group 0198 removed the
+ * timestamps from the boundary, so this layer can REQUEST trusted time and has
+ * no way to supply its value.
+ *
+ * `cloud_authoritative` is explicitly NOT a production source: it carries no
+ * signature a device could verify offline, and production needs NTS or a signed
+ * `trusted_time_bootstrap` token, both still unimplemented and neither weakened
+ * here. The environment is passed to the governed doors, which refuse pilot and
+ * production themselves.
  */
 import type pg from "pg";
 
+import type { HardwareTrustLevel } from "@kitluy/device-identity";
+
 import { REGISTRY_ROLES, withServiceRole } from "./database.js";
+import { issueFirstOperationalCertificate } from "./first-operational-issuance.js";
+
+/**
+ * What the DEVICE contributes to its own certificate.
+ *
+ * The operational private key is generated on the Hub and never leaves it, so
+ * this layer cannot manufacture these values on the device's behalf — that is
+ * the whole point of proof of possession. They arrive from the device and are
+ * carried through unchanged.
+ */
+export interface OperationalCertificateRequest {
+  readonly assignmentGeneration: number;
+  readonly hardwareTrustLevel: HardwareTrustLevel;
+  /** The PUBLIC half. The private half stays on the Hub. */
+  readonly operationalPublicKeyPem: string;
+  readonly operationalKeyHandle: string;
+  /** `kitluy.csr.v1`, signed by the device under the key above. */
+  readonly proofOfPossession: Uint8Array;
+  readonly requestId: string;
+  readonly nonce: string;
+  readonly correlationId: string;
+  readonly requestedAt: Date;
+}
 
 export type TrustAdvanceOutcome =
   | {
@@ -59,7 +96,10 @@ export type TrustAdvanceOutcome =
       /** Where the device actually landed. `active` only when everything held. */
       readonly lifecycleState: string;
       readonly trustedTimeStatus: string;
-      /** `ISSUED` first time, `ALREADY_ISSUED` on a retry. */
+      /**
+       * `ISSUED` first time, `REPLAYED` on a retry, `CSR_REQUIRED` when the
+       * device has not yet presented a key, or the verbatim refusal code.
+       */
       readonly certificate: string;
     }
   | {
@@ -82,9 +122,6 @@ interface ActivationRow {
   refusal_code: string | null;
   refusal_message: string | null;
 }
-interface IssuanceRow {
-  result: { outcome?: string; refusal_code?: string } | null;
-}
 
 /**
  * Establish trusted time, issue a development certificate, then activate.
@@ -99,7 +136,13 @@ export async function advanceDeviceTrust(
     readonly deviceRecordId: string;
     readonly environment: string;
     readonly actorRef: string;
+    /**
+     * Absent until the device asks. Pairing itself cannot supply it: the Hub
+     * generates its operational key at firstboot and proves possession then.
+     */
+    readonly operationalRequest?: OperationalCertificateRequest;
   },
+  env: NodeJS.ProcessEnv = process.env,
 ): Promise<TrustAdvanceOutcome> {
   let trustedTimeStatus = "unknown";
   let certificate = "NOT_ATTEMPTED";
@@ -108,31 +151,85 @@ export async function advanceDeviceTrust(
     // --- 1. Trusted time, as the activation identity -------------------------
     trustedTimeStatus = await withServiceRole(pool, REGISTRY_ROLES.activation, async (c) => {
       const { rows } = await c.query<TrustedTimeRow>(
-        `select (kitluy_devices.establish_device_trusted_time_v1(
-                   $1::uuid, $2::text, null, now(), null, gen_random_uuid())).*`,
+        // FROM-clause form, deliberately — the same rule `trusted-time-gateway.ts`
+        // records for the identical function, and reintroduced here when this
+        // caller was written.
+        //
+        // `select (fn(...)).*` expands the composite by re-evaluating the
+        // function ONCE PER FIELD. `trusted_time_outcome` has seven fields, so
+        // this ran the governed door SEVEN times per pairing: seven trusted-time
+        // evaluations, seven `device_trusted_time_events` rows and seven
+        // different `gen_random_uuid()` correlation ids for one event, with the
+        // reported `status` taken from a later call that already saw the floor
+        // its own earlier call had advanced. An audit trail that multiplies a
+        // security decision by seven cannot be reconciled against what happened.
+        //
+        // Called in FROM it is evaluated exactly once. (Measured on this
+        // schema: SELECT-list form -> 7 executions, FROM form -> 1.)
+        // THE CALLER NAMES NO TIME. R-1: this call used to hand the door
+        // `now()` in a `p_authenticated_network_time` parameter, and an external
+        // review passed `now() + 3650 days` through the same parameter to
+        // advance a device's floor ten years — permanently, because the floor is
+        // monotonic. The parameters are gone from the boundary (group 0198); the
+        // authoritative value is read inside the database. This layer can ask
+        // for trusted time and cannot say what it is.
+        `select status
+           from kitluy_devices.establish_device_trusted_time_v1(
+                  $1::uuid, $2::text, gen_random_uuid()
+                )`,
         [input.deviceRecordId, input.environment],
       );
       return rows[0]?.status ?? "unknown";
     });
 
-    // --- 2. Certificate, as the ISSUER identity ------------------------------
-    // A separate transaction because it is a separate authority. See the header.
-    certificate = await withServiceRole(pool, REGISTRY_ROLES.certificateIssuer, async (c) => {
-      const { rows } = await c.query<IssuanceRow>(
-        `select kitluy_devices.issue_development_device_certificate_v1(
-                  $1::uuid, $2::text, $3::text) as result`,
-        [input.deviceRecordId, input.environment, input.actorRef],
+    // --- 2. Certificate, THROUGH THE GOVERNED COMPOSITION -------------------
+    // This step used to call `issue_development_device_certificate_v1`, which
+    // writes a METADATA-ONLY `device_certificates` row: a status, a window and a
+    // fingerprint, but no `certificate_pem`, no `certificate_sha256` and no
+    // `credential_id`. Nothing a TLS stack can present, and nothing bound to the
+    // governed credential it claimed to represent.
+    //
+    // Group 0201 made activation verify the ARTIFACT and its credential linkage,
+    // so that row can no longer satisfy activation — and its `status = 'active'`
+    // would occupy `device_certificates_one_active_uq` against the real
+    // certificate. Keeping the call would not merely be useless, it would block
+    // the genuine issuance. It is therefore gone from this path rather than
+    // retained beside it.
+    //
+    // Issuance now needs something only the DEVICE can produce, and that is not
+    // an obstacle to route around: a certificate is a statement about a key, and
+    // a control plane that generated that key would be certifying itself. With
+    // no request, this layer does not fabricate one — it reports that the device
+    // has not asked yet and lets activation refuse for the true reason.
+    if (input.operationalRequest === undefined) {
+      certificate = "CSR_REQUIRED";
+    } else {
+      const issued = await issueFirstOperationalCertificate(
+        pool,
+        {
+          deviceRecordId: input.deviceRecordId,
+          environment: input.environment,
+          trustedTimeStatus,
+          actorRef: input.actorRef,
+          ...input.operationalRequest,
+        },
+        env,
       );
-      const r = rows[0]?.result;
-      return r?.outcome === "REFUSED"
-        ? (r.refusal_code ?? "REFUSED")
-        : (r?.outcome ?? "NO_OUTCOME");
-    });
+      // Verbatim, like every other refusal on this path.
+      certificate = issued.outcome === "REFUSED" ? issued.refusalCode : issued.outcome;
+    }
 
     // --- 3. Activation, back as the activation identity ----------------------
     const act = await withServiceRole(pool, REGISTRY_ROLES.activation, async (c) => {
       const { rows } = await c.query<ActivationRow>(
-        `select (kitluy_devices.attempt_activate_device_v1($1::uuid, $2::text, $3::text)).*`,
+        // FROM-clause form, for the reason recorded on the trusted-time call
+        // above. `activation_outcome` has six fields, so the SELECT-list form
+        // ATTEMPTED ACTIVATION SIX TIMES per pairing — six passes through the
+        // only reachable activation path, each committing its own evidence
+        // event, and the returned `outcome` and `lifecycle_state` read from two
+        // different attempts.
+        `select outcome, lifecycle_state, refusal_code, refusal_message
+           from kitluy_devices.attempt_activate_device_v1($1::uuid, $2::text, $3::text)`,
         [input.deviceRecordId, input.environment, input.actorRef],
       );
       return rows[0];

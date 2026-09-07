@@ -118,7 +118,7 @@ import {
   type EmergencyActor,
 } from "./support/emergency-success-fixture.js";
 
-const LOCAL_DSN = "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
+const LOCAL_DSN = "postgresql://postgres:postgres@127.0.0.1:54392/postgres";
 const HUB_DSN = "postgresql://postgres:postgres@127.0.0.1:54322/kitluy_hub_local";
 const ENV = { DEVICE_REGISTRY_DATABASE_URL: LOCAL_DSN, KITLUY_ENV: "local" } as const;
 const RUN = randomUUID().slice(0, 8);

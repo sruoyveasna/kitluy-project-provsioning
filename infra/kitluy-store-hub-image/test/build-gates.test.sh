@@ -92,7 +92,7 @@ fi
 
 # --- Shared base composition ------------------------------------------------
 for profile in hub term; do
-  for unit in kitluy-firstboot.service kitluy-enrollment-agent.service \
+  for unit in kitluy-firstboot.service \
               kitluy-health-reporter.service kitluy-update-agent.service; do
     if [[ -f "${TMP}/${profile}/rootfs/etc/systemd/system/${unit}" ]]; then
       ok "${profile}: base unit ${unit} present"
@@ -100,6 +100,15 @@ for profile in hub term; do
       bad "${profile}: base unit ${unit} present" "missing"
     fi
   done
+  # The flash-time ticket agent is RETIRED from the Hub image (plan §5.3): its
+  # identity included the SD card, so a re-flashed board minted a SECOND device
+  # and the duplicate-evidence tripwire contained both (2026-08-31). Cloud
+  # registration is the Hub's one identity path.
+  if [[ -f "${TMP}/${profile}/rootfs/etc/systemd/system/kitluy-enrollment-agent.service" ]]; then
+    bad "${profile}: ticket enrollment agent stays out" "a new SD card would mint a second device"
+  else
+    ok "${profile}: ticket enrollment agent stays out"
+  fi
   if [[ -f "${TMP}/${profile}/rootfs/etc/ssh/sshd_config.d/60-kitluy-hardening.conf" ]]; then
     ok "${profile}: ssh hardening present"
   else
@@ -107,13 +116,15 @@ for profile in hub term; do
   fi
 done
 
-# --- Ordering: identity before enrollment -----------------------------------
-# Enrollment has nothing to prove possession of until identity exists.
-if grep -q 'Before=kitluy-enrollment-agent.service' \
-     "${TMP}/hub/rootfs/etc/systemd/system/kitluy-firstboot.service"; then
-  ok "firstboot identity is ordered before enrollment"
+# --- Ordering: identity before registration ----------------------------------
+# Registration has nothing to prove possession of until identity exists. The
+# invariant used to be asserted as firstboot Before= the ticket agent; with
+# that agent retired, the surviving consumer carries the ordering itself.
+if grep -q 'After=kitluy-firstboot.service' \
+     "${TMP}/hub/rootfs/etc/systemd/system/kitluy-cloud-registration.service"; then
+  ok "firstboot identity is ordered before cloud registration"
 else
-  bad "firstboot identity is ordered before enrollment" "ordering absent"
+  bad "firstboot identity is ordered before cloud registration" "ordering absent"
 fi
 
 # --- Profile separation -----------------------------------------------------

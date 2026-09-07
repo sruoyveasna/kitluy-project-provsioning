@@ -224,6 +224,20 @@ on conflict do nothing;
 -- ---------------------------------------------------------------------------
 -- 4. Actors (§6.1 staff_cache). Authorized actors carry the CANONICAL dotted
 --    logical profiles; the unauthorized actor carries none and is disabled.
+--
+--    `offline_valid_until` IS RELATIVE, AND THAT IS DELIBERATE.
+--
+--    It read '2026-08-27T00:00:00Z' until BRINGUP-003, which meant these
+--    fixtures silently stopped working on 27 August: every command by an
+--    authorized actor refused with EDGE_PERMISSION_DENIED "permission
+--    projection expired". Nobody noticed, because the suites that use them
+--    skip whenever no Hub database is reachable — and none was, until now.
+--
+--    Every OTHER timestamp in this file is deliberately fixed: they record
+--    events that happened, and a fixture whose history moves is a fixture that
+--    cannot be reasoned about. This one is different in kind. It expresses "a
+--    projection that is currently valid", which is a statement about now, so
+--    pinning it to a date was always going to expire.
 -- ---------------------------------------------------------------------------
 insert into edge_identity.staff_cache
   (actor_id, tenant_id, digital_store_id, location_id, display_name,
@@ -234,23 +248,23 @@ values
    'e0000000-0000-4000-8000-000000000001', 'e0000000-0000-4000-8000-000000000002',
    'e0000000-0000-4000-8000-000000000003', 'Demo Cashier Sokha',
    decode('a1a1a1a1', 'hex'), 7, array['laundry.t1.intake_cashier'],
-   '2026-08-27T00:00:00Z', false, '2026-07-27T00:00:00Z'),
+   now() + interval '30 days', false, '2026-07-27T00:00:00Z'),
   ('e0000000-0000-4000-8000-000000000041',
    'e0000000-0000-4000-8000-000000000001', 'e0000000-0000-4000-8000-000000000002',
    'e0000000-0000-4000-8000-000000000003', 'Demo Ready Staff Dara',
    decode('a2a2a2a2', 'hex'), 7, array['laundry.t3.ready_scan_in'],
-   '2026-08-27T00:00:00Z', false, '2026-07-27T00:00:00Z'),
+   now() + interval '30 days', false, '2026-07-27T00:00:00Z'),
   ('e0000000-0000-4000-8000-000000000042',
    'e0000000-0000-4000-8000-000000000001', 'e0000000-0000-4000-8000-000000000002',
    'e0000000-0000-4000-8000-000000000003', 'Demo Pickup Staff Chanda',
    decode('a3a3a3a3', 'hex'), 7, array['laundry.t4.pickup_scan_out'],
-   '2026-08-27T00:00:00Z', false, '2026-07-27T00:00:00Z'),
+   now() + interval '30 days', false, '2026-07-27T00:00:00Z'),
   ('e0000000-0000-4000-8000-000000000043',
    'e0000000-0000-4000-8000-000000000001', 'e0000000-0000-4000-8000-000000000002',
    'e0000000-0000-4000-8000-000000000003', 'Demo Store Manager Vuthy',
    decode('a4a4a4a4', 'hex'), 7,
    array['laundry.t1.intake_cashier', 'laundry.t3.ready_scan_in', 'laundry.t4.pickup_scan_out'],
-   '2026-08-27T00:00:00Z', false, '2026-07-27T00:00:00Z'),
+   now() + interval '30 days', false, '2026-07-27T00:00:00Z'),
   -- PERSONA: unauthorized actor — disabled, no logical profile at all.
   ('e0000000-0000-4000-8000-000000000044',
    'e0000000-0000-4000-8000-000000000001', 'e0000000-0000-4000-8000-000000000002',

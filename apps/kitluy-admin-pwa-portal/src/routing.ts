@@ -13,6 +13,9 @@ export type Route =
    * job: a person works through it with hardware in front of them. */
   | { readonly kind: "pending" }
   | { readonly kind: "device"; readonly deviceId: string }
+  /** Digital Stores: the list, and the create screen (owner decision v2.0.0 §2). */
+  | { readonly kind: "stores" }
+  | { readonly kind: "store_new" }
   | { readonly kind: "unknown"; readonly path: string };
 
 export const DEFAULT_ROUTE: Route = { kind: "devices" };
@@ -39,6 +42,10 @@ export function parseRoute(hash: string): Route {
   if (segments.length === 0) return DEFAULT_ROUTE;
   if (segments.length === 1 && segments[0] === "login") return { kind: "login" };
   if (segments.length === 1 && segments[0] === "pending") return { kind: "pending" };
+  if (segments[0] === "stores") {
+    if (segments.length === 1) return { kind: "stores" };
+    if (segments.length === 2 && segments[1] === "new") return { kind: "store_new" };
+  }
   if (segments[0] === "devices") {
     if (segments.length === 1) return { kind: "devices" };
     if (segments.length === 2) {
@@ -58,6 +65,10 @@ export function routeHref(route: Route): string {
       return "#/pending";
     case "device":
       return `#/devices/${encodeURIComponent(route.deviceId)}`;
+    case "stores":
+      return "#/stores";
+    case "store_new":
+      return "#/stores/new";
     case "unknown":
       return `#${route.path}`;
   }

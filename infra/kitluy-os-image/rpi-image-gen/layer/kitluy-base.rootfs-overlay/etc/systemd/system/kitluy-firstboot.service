@@ -1,8 +1,14 @@
 [Unit]
 Description=KitLuy first-boot device identity
 Documentation=00_AI_HANDOFF/edge-platform/27_SYSTEMD_RUNTIME_RECONCILIATION.md
-# Identity must exist before anything can prove possession of it.
-Before=kitluy-enrollment-agent.service
+# Identity must exist before anything can prove possession of it. Every
+# consumer (cloud registration, the status screen) orders itself After= this
+# unit, so no Before= is needed here. The flash-time ticket agent this once
+# ordered before is RETIRED from the Pi Terminal image: under the Factory
+# Enrollment rule (KLD-2026-09-03-FACTORY-ENROLLMENT-001) a device reaches
+# `enrolled` only through an explicit Admin approval, and the ticket path landed
+# it there with no human decision. Its identity also included the SD card, so a
+# re-flashed board minted a SECOND device (observed on a Hub, 2026-08-31).
 After=local-fs.target
 ConditionPathExists=/usr/lib/kitluy/firstboot-identity
 
@@ -25,7 +31,16 @@ CapabilityBoundingSet=
 # The identity directory is the ONLY path this unit may write.
 ReadWritePaths=/var/lib/kitluy/identity
 StateDirectory=kitluy/identity
-StateDirectoryMode=0700
+# 0751 — the SAME value every KitLuy unit sharing /var/lib/kitluy declares.
+#
+# systemd re-applies StateDirectoryMode on every start, so units that disagree
+# leave the directory's mode to boot order. The Store Hub image settled on 0751
+# because postgres must TRAVERSE /var/lib/kitluy to reach its cluster; the
+# terminal carries no database, but the value is kept identical so the
+# agreement test and both images stay on one convention. `x` without `r`
+# grants traversal only: /var/lib/kitluy still cannot be listed by others, and
+# identity/ and the other state directories stay 0700.
+StateDirectoryMode=0751
 
 [Install]
 WantedBy=multi-user.target

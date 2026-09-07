@@ -28,8 +28,26 @@ import {
 } from "../src/trusted-time-gateway.js";
 import type { HardwareSignal } from "../src/factory.js";
 
+/**
+ * THE CANONICAL DEVELOPMENT TARGET, WHICH IS POSTGRESQL 17.
+ *
+ * This defaulted to port 54402 — the `kitluy-repo15` container, PostgreSQL 15.8,
+ * migration head `20260810120000` (group 0188) with 87 of 99 migrations applied
+ * and neither `kitluy_activation_service` nor `kitluy_device_certificate_issuer`
+ * existing at all. That environment was superseded on 2026-08-10 when the chain
+ * was proven against PostgreSQL 17.6 chosen to match the canonical cloud
+ * project's exact image tag (`30_CLEAN_PG17_CANONICAL_CHAIN_PROOF.md`), and it
+ * has not moved since.
+ *
+ * The three failures this file carried were entirely environmental: eleven
+ * migrations of trusted-time and activation work simply were not there. Against
+ * the canonical target the same eleven assertions pass unchanged.
+ *
+ * `KITLUY_M1_DB_URL` still overrides, so a deliberate run against another target
+ * costs one environment variable.
+ */
 const DB_URL =
-  process.env.KITLUY_M1_DB_URL ?? "postgresql://postgres:postgres@127.0.0.1:54402/postgres";
+  process.env.KITLUY_M1_DB_URL ?? "postgresql://postgres:postgres@127.0.0.1:54392/postgres";
 
 /** The clean development Store Hub from the provisioning E2E suite. */
 const HUB_SEED = "kitluy-dev-store-hub-m1-001";
@@ -146,6 +164,41 @@ describe("only validated readings may be offered as trusted-time sources", () =>
 // Establishment, restart, rollback, advancement
 // ---------------------------------------------------------------------------
 
+/**
+ * Bring the shared Hub fixture's floor to the present through the GOVERNED path
+ * before the device-side assertions run.
+ *
+ * WHY THIS IS NEEDED, AND WHY IT IS NOT A WORKAROUND
+ * --------------------------------------------------
+ * `controlPlaneNetworkTime` offers the control-plane clock as
+ * `authenticated_network` — a DEVICE-CLASS source, and since group 0200 a
+ * device-class source may not close a gap wider than
+ * `trusted_time_max_forward_jump_seconds` (3600). That is deliberate: a device's
+ * own clock is exactly what an attacker controls.
+ *
+ * So a long-lived shared fixture rots. Left alone, this file passes when its
+ * fixture was minted minutes ago and fails an hour later, which is the worst
+ * kind of red — one that arrives without a change.
+ *
+ * The fix is to model what the PRODUCT does. A cloud-connected Hub re-establishes
+ * through `establish_device_trusted_time_v1`, the SECURITY DEFINER bridge that
+ * reads the database's own clock and takes no timestamp from anyone. Running it
+ * here puts the fixture in the state a real paired Hub is in, and the assertions
+ * below then test what they were written to test: the device-side gateway's
+ * transport, not the anomaly model. The anomaly model is proven separately and
+ * adversarially in
+ * `services/kitluy-device-registry-service/test/trusted-time-staleness.integration.test.ts`.
+ *
+ * Nothing here writes a floor. The bridge is the only thing that moves it, and
+ * it moves it forward only.
+ */
+async function reanchorThroughGovernedBridge(db: DatabaseHandle, id: string): Promise<void> {
+  await db.query(
+    `select kitluy_devices.establish_device_trusted_time_v1($1::uuid, $2::text, gen_random_uuid())`,
+    [id, ENVIRONMENT],
+  );
+}
+
 describe.skipIf(!reachable)("trusted time — establishment and security invariants", () => {
   it("a device offering NO source stays untrusted and is refused activation", async () => {
     const db = await connect();
@@ -171,6 +224,7 @@ describe.skipIf(!reachable)("trusted time — establishment and security invaria
   it("a valid authenticated source establishes the floor", async () => {
     const db = await connect();
     const id = await hubId(db);
+    await reanchorThroughGovernedBridge(db, id);
 
     const network = await controlPlaneNetworkTime(db);
     expect(network.authenticated).toBe(true);
@@ -337,14 +391,23 @@ describe.skipIf(!reachable)("Hub activation, once trusted time is established", 
   it("no longer refuses for KLUY-DEVICE-TIME-UNTRUSTED", async () => {
     const db = await connect();
     const id = await hubId(db);
+    await reanchorThroughGovernedBridge(db, id);
 
     const state = await readTrustedTimeState(db, id);
     expect(state?.status).toBe("trusted");
 
+    // ENTERED EXPLICITLY. Group 0206 (finding C-4) cut `service_role`'s inherited
+    // membership of `kitluy_activation_service`, so activation is now a
+    // capability a caller ENTERS rather than one the connection silently
+    // carries. `set local role` dies with the transaction, exactly as it does in
+    // the product's `withServiceRole()`.
+    await db.query("begin");
+    await db.query("set local role kitluy_activation_service");
     const { rows } = await db.query<{ outcome: string }>(
       `select kitluy_devices.attempt_activate_device_v1($1::uuid, $2::text, $3::text)::text as outcome`,
       [id, ENVIRONMENT, "admin/trusted-time-task"],
     );
+    await db.query("commit");
     const outcome = String(rows[0]?.outcome ?? "");
     // eslint-disable-next-line no-console -- the verdict IS the deliverable
     console.log(`[activation] ${outcome}`);

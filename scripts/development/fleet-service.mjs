@@ -64,6 +64,7 @@ import pg from "pg";
 import {
   ALLOWED_HOSTED_DEV,
   isLocalUrl,
+  canonicalHostedConnection,
   deriveProjectRef,
 } from "../database/hosted-dev-target.mjs";
 
@@ -190,7 +191,15 @@ function lanAddress() {
  * A client library works against both, and needs no psql on the host (there is
  * none).
  */
-const db = new pg.Client({ connectionString: dsn, connectionTimeoutMillis: 15000 });
+// D-20: for a HOSTED target, connect to the VALIDATED components rather than
+// to the original string — `?host=`/`?port=` in a DSN is re-read by pg and
+// overrides the authority section. The local branch keeps its plain string:
+// a local stack is not a hosted target. Environment gating here is D-19 and
+// is deliberately unchanged.
+const dbOptions = targetIsLocal
+  ? { connectionString: dsn }
+  : { ...canonicalHostedConnection(dsn).connectionConfig };
+const db = new pg.Client({ ...dbOptions, connectionTimeoutMillis: 15000 });
 try {
   await db.connect();
 } catch (error) {
@@ -377,8 +386,18 @@ process.stdout.write(
     "That address is THIS workstation. The device calls it; this service writes",
     `to ${targetIsLocal ? "the local database" : "the dev cloud project"}. The device never talks to a database itself.`,
     "",
-    "Open enrollment is ON: a card with no ticket enrolls, and copies of that",
-    "card enroll too. Development only.",
+    // ANNOUNCED EITHER WAY. KLD-2026-08-12-DEV-OPEN-ENROLLMENT-001 §5.3 requires
+    // an open deployment to say so; a CLOSED one must be just as visible, or an
+    // operator debugging a refused card cannot tell which mode they are in.
+    ...(args.includes("--no-open-enrollment")
+      ? [
+          "Open enrollment is OFF: a card with no ticket is REFUSED. Devices must",
+          "register with the cloud and be approved before they can enroll.",
+        ]
+      : [
+          "Open enrollment is ON: a card with no ticket enrolls, and copies of that",
+          "card enroll too. Development only.",
+        ]),
     "",
     "",
   ].join("\n"),
@@ -404,7 +423,20 @@ const child = spawn(
       DEVICE_ENROLLMENT_TIME_SIGNING_KEY_ENV: "KITLUY_DEV_ENROLLMENT_TIME_KEY",
       DEVICE_ENROLLMENT_TIME_SIGNING_KEY_ID: "dev-enrollment-time",
       DEVICE_ENROLLMENT_TIME_SIGNING_KEY_VERSION: "1",
-      KITLUY_DEV_OPEN_ENROLLMENT: "true",
+      // OPEN ENROLLMENT, NOW OPT-OUT.
+      //
+      // Open enrollment mints a NEW device identity for any card that presents
+      // no ticket. That is what makes a cloned SD card "just work" — and it is
+      // also how ONE board booted from TWO cards ends up with two identities,
+      // which the clone-detection control then quarantines. It also lets the
+      // enrollment agent win the race against cloud registration, so the
+      // register -> HET approval path never gets exercised.
+      //
+      // `--no-open-enrollment` turns it off, leaving registration as the only
+      // admission path. Default is unchanged.
+      ...(args.includes("--no-open-enrollment")
+        ? {}
+        : { KITLUY_DEV_OPEN_ENROLLMENT: "true" }),
       KITLUY_DEV_ENROLLMENT_STATION: fixtures.station,
       KITLUY_DEV_ENROLLMENT_PROFILE_TERMINAL: profileIds.terminal,
       // Without this a Store Hub is refused with TICKET_REFUSED — the class has

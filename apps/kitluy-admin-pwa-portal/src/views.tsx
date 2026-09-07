@@ -13,6 +13,8 @@ import { DataSurface, kitluyTokens } from "@kitluy/web-ui";
 import {
   holdsPermission,
   PERMISSION_FLEET_ENROLLMENT_APPROVE,
+  PERMISSION_PARTNERS_READ,
+  PERMISSION_STORE_CREATE,
   type AccessState,
 } from "./access.js";
 import {
@@ -24,20 +26,24 @@ import {
   hubAssignmentSummary,
   lifecycleLabel,
   summariseFleet,
+  terminalAssignmentSummary,
   anyDeviceHasReported,
   sortForOperator,
   type FleetSummary,
   type DeviceClassFilter,
 } from "./device-presentation.js";
 import type {
+  CreateStoreResult,
   DeviceDetail,
   FleetDeviceView,
   FleetPage,
   PendingPage,
   PendingRegistrationView,
+  StoreCreationOptions,
+  StoreListPage,
 } from "./management-client.js";
 import { t, type MessageKey } from "./messages.js";
-import { routeHref } from "./routing.js";
+import { routeHref, type Route } from "./routing.js";
 import { FAILURE_MESSAGE, type SignInState } from "./sign-in.js";
 
 // ---------------------------------------------------------------------------
@@ -62,58 +68,69 @@ export function LoginView(props: {
   };
 
   return (
-    <section aria-label="sign-in">
-      <h1>{t(locale, "signIn")}</h1>
-      <p>{t(locale, "boundary")}</p>
+    <section aria-label="sign-in" className="kl-login">
+      <div className="kl-card" style={{ width: "100%", maxWidth: 420 }}>
+        <div className="kl-card-body">
+          <div className="kl-page-head">
+            <h1>{t(locale, "signIn")}</h1>
+            <p>{t(locale, "boundary")}</p>
+          </div>
 
-      {props.notice !== undefined ? (
-        <p role="status" data-notice={props.notice}>
-          {t(locale, props.notice)}
-        </p>
-      ) : null}
+          {props.notice !== undefined ? (
+            <div className="kl-notice kl-notice-warn" role="status" data-notice={props.notice}>
+              {t(locale, props.notice)}
+            </div>
+          ) : null}
 
-      <form onSubmit={submit}>
-        <p>
-          <label htmlFor="email">{t(locale, "email")}</label>
-          <br />
-          <input
-            id="email"
-            name="email"
-            type="email"
-            autoComplete="username"
-            value={email}
-            disabled={submitting}
-            onChange={(event) => setEmail(event.target.value)}
-          />
-        </p>
-        <p>
-          <label htmlFor="password">{t(locale, "password")}</label>
-          <br />
-          <input
-            id="password"
-            name="password"
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            disabled={submitting}
-            onChange={(event) => setPassword(event.target.value)}
-          />
-        </p>
+          <form onSubmit={submit}>
+            <div className="kl-field">
+              <label htmlFor="email">{t(locale, "email")}</label>
+              <input
+                className="kl-input"
+                id="email"
+                name="email"
+                type="email"
+                autoComplete="username"
+                value={email}
+                disabled={submitting}
+                onChange={(event) => setEmail(event.target.value)}
+              />
+            </div>
+            <div className="kl-field">
+              <label htmlFor="password">{t(locale, "password")}</label>
+              <input
+                className="kl-input"
+                id="password"
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                disabled={submitting}
+                onChange={(event) => setPassword(event.target.value)}
+              />
+            </div>
 
-        {state.kind === "failed" ? (
-          <p
-            role="alert"
-            data-sign-in-failure={state.failure}
-            style={{ color: kitluyTokens.colorDanger }}
-          >
-            {t(locale, FAILURE_MESSAGE[state.failure])}
-          </p>
-        ) : null}
+            {state.kind === "failed" ? (
+              <div
+                className="kl-notice kl-notice-critical"
+                role="alert"
+                data-sign-in-failure={state.failure}
+              >
+                {t(locale, FAILURE_MESSAGE[state.failure])}
+              </div>
+            ) : null}
 
-        <button type="submit" disabled={submitting} data-state={state.kind}>
-          {submitting ? t(locale, "signingIn") : t(locale, "signIn")}
-        </button>
-      </form>
+            <button
+              className="kl-btn kl-btn-primary"
+              type="submit"
+              disabled={submitting}
+              data-state={state.kind}
+            >
+              {submitting ? t(locale, "signingIn") : t(locale, "signIn")}
+            </button>
+          </form>
+        </div>
+      </div>
     </section>
   );
 }
@@ -122,32 +139,131 @@ export function LoginView(props: {
 // Shell
 // ---------------------------------------------------------------------------
 
+/** A sidebar link. Highlighted (`aria-current="page"`) when its route is live. */
+function NavItem(props: {
+  href: string;
+  label: string;
+  icon: ReactNode;
+  active: boolean;
+}): JSX.Element {
+  return (
+    <a className="kl-nav-item" href={props.href} aria-current={props.active ? "page" : undefined}>
+      <span className="kl-ic" aria-hidden="true">
+        {props.icon}
+      </span>
+      {props.label}
+    </a>
+  );
+}
+
+const ICON_FLEET = (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <rect x="3" y="4" width="18" height="12" rx="2" />
+    <path d="M8 20h8M12 16v4" />
+  </svg>
+);
+const ICON_PENDING = (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 7v5l3 2" />
+  </svg>
+);
+const ICON_STORES = (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M4 9h16l-1-4H5L4 9z" />
+    <path d="M5 9v10h14V9M9 19v-5h6v5" />
+  </svg>
+);
+const ICON_NEW_STORE = (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 8v8M8 12h8" />
+  </svg>
+);
+
+/**
+ * The left sidebar. Two groups: the fleet (devices, and the approval queue for
+ * whoever can approve) and the business (Digital Stores, and their creation for
+ * whoever can create one).
+ *
+ * Every link is PRESENTATION only — the API re-decides authority on each request
+ * and refuses anyone who reaches a route without the permission (CLAUDE.md hard
+ * rule 7). Gating a link merely avoids offering an operator a dead end.
+ */
 export function AdminNav(props: {
   locale: KitluyLocale;
   access: AccessState;
-  onSignOut: () => void;
-  onLocale: (locale: KitluyLocale) => void;
+  route: Route;
 }): JSX.Element {
-  const { locale } = props;
+  const { locale, access, route } = props;
+  const canApprove = holdsPermission(access, PERMISSION_FLEET_ENROLLMENT_APPROVE);
+  const canReadStores = holdsPermission(access, PERMISSION_PARTNERS_READ);
+  const canCreateStore = holdsPermission(access, PERMISSION_STORE_CREATE);
   return (
-    <nav aria-label="admin" style={{ display: "flex", gap: "12px", alignItems: "baseline" }}>
-      <a href={routeHref({ kind: "devices" })}>{t(locale, "devices")}</a>
-      {/* Shown only to an Admin who holds the approval permission. This is
-          PRESENTATION only — the API re-decides authority on every request, and a
-          person who reaches the route without the permission is refused there
-          (CLAUDE.md hard rule 7). Hiding it merely avoids offering a dead end. */}
-      {holdsPermission(props.access, PERMISSION_FLEET_ENROLLMENT_APPROVE) ? (
-        <a href={routeHref({ kind: "pending" })}>{t(locale, "pendingNav")}</a>
+    <nav aria-label="admin" className="kl-nav">
+      <div className="kl-nav-label">{t(locale, "navFleet")}</div>
+      <NavItem
+        href={routeHref({ kind: "devices" })}
+        label={t(locale, "devices")}
+        icon={ICON_FLEET}
+        active={route.kind === "devices" || route.kind === "device"}
+      />
+      {canApprove ? (
+        <NavItem
+          href={routeHref({ kind: "pending" })}
+          label={t(locale, "pendingNav")}
+          icon={ICON_PENDING}
+          active={route.kind === "pending"}
+        />
       ) : null}
-      <span style={{ flex: 1 }} />
-      <button onClick={() => props.onLocale("km-KH")} aria-pressed={locale === "km-KH"}>
-        ខ្មែរ
-      </button>
-      <button onClick={() => props.onLocale("en-US")} aria-pressed={locale === "en-US"}>
-        English
-      </button>
-      {props.access.kind === "granted" ? (
-        <button onClick={props.onSignOut}>{t(locale, "signOut")}</button>
+      {canReadStores || canCreateStore ? (
+        <>
+          <div className="kl-nav-label">{t(locale, "navBusiness")}</div>
+          {canReadStores ? (
+            <NavItem
+              href={routeHref({ kind: "stores" })}
+              label={t(locale, "storesNav")}
+              icon={ICON_STORES}
+              active={route.kind === "stores"}
+            />
+          ) : null}
+          {canCreateStore ? (
+            <NavItem
+              href={routeHref({ kind: "store_new" })}
+              label={t(locale, "newStoreNav")}
+              icon={ICON_NEW_STORE}
+              active={route.kind === "store_new"}
+            />
+          ) : null}
+        </>
       ) : null}
     </nav>
   );
@@ -216,6 +332,46 @@ function HubAssignmentCell(props: { device: FleetDeviceView; locale: KitluyLocal
 }
 
 /**
+ * A Terminal's place in the four stages: unassigned, assigned and awaiting
+ * activation, active. The Store label and the profile count sit under the
+ * word so an operator sees WHICH shop and HOW MANY roles without opening the
+ * row. An unknown assignment state is printed verbatim.
+ */
+function TerminalAssignmentCell(props: {
+  device: FleetDeviceView;
+  locale: KitluyLocale;
+}): JSX.Element {
+  const summary = terminalAssignmentSummary(props.device);
+  if (summary === null) return <>—</>;
+  if (summary.kind === "unassigned") {
+    return (
+      <span data-terminal-assignment="unassigned">{t(props.locale, "terminalUnassigned")}</span>
+    );
+  }
+  if (summary.kind === "other") {
+    return <span data-terminal-assignment="other">{summary.state}</span>;
+  }
+  return (
+    <span data-terminal-assignment={summary.kind}>
+      {t(props.locale, summary.kind === "active" ? "terminalActive" : "terminalAssignedAwaiting")}
+      <br />
+      <small style={{ color: kitluyTokens.colorMuted }}>
+        {`${summary.profiles} ${t(props.locale, "terminalProfiles")}`}
+        {summary.store === null ? "" : ` · ${summary.store}`}
+      </small>
+    </span>
+  );
+}
+
+/** One cell for the assignment column, whichever class the device is. */
+function AssignmentCell(props: { device: FleetDeviceView; locale: KitluyLocale }): JSX.Element {
+  if (props.device.deviceClass === "store_hub") {
+    return <HubAssignmentCell device={props.device} locale={props.locale} />;
+  }
+  return <TerminalAssignmentCell device={props.device} locale={props.locale} />;
+}
+
+/**
  * A single counted fact about the fleet.
  *
  * The `urgent` variant is reserved for counts that mean a PERSON is being waited
@@ -228,38 +384,22 @@ function StatTile(props: {
   href?: string;
 }): JSX.Element {
   const tone = props.tone ?? "plain";
-  const color =
-    tone === "urgent"
-      ? kitluyTokens.colorPrimary
-      : tone === "bad"
-        ? kitluyTokens.colorDanger
-        : kitluyTokens.colorText;
+  const className =
+    tone === "urgent" ? "kl-tile kl-accent" : tone === "bad" ? "kl-tile kl-critical" : "kl-tile";
 
   const body = (
     <>
-      <div style={{ fontSize: "1.75rem", fontWeight: 700, color, lineHeight: 1.1 }}>
-        {props.value}
-      </div>
-      <div style={{ fontSize: ".85rem", color: kitluyTokens.colorMuted }}>{props.label}</div>
+      <div className="kl-n">{props.value}</div>
+      <div className="kl-l">{props.label}</div>
     </>
   );
 
-  const style = {
-    border: `1px solid ${kitluyTokens.colorMuted}33`,
-    borderRadius: kitluyTokens.radius,
-    padding: ".75rem .9rem",
-    minWidth: "8.5rem",
-    textDecoration: "none",
-    display: "block",
-    color: "inherit",
-  } as const;
-
   return props.href === undefined ? (
-    <div style={style} data-stat={props.label}>
+    <div className={className} data-stat={props.label}>
       {body}
     </div>
   ) : (
-    <a style={style} href={props.href} data-stat={props.label}>
+    <a className={className} href={props.href} data-stat={props.label}>
       {body}
     </a>
   );
@@ -280,10 +420,7 @@ export function FleetSummaryBar(props: {
 }): JSX.Element {
   const { locale, summary } = props;
   return (
-    <div
-      aria-label="fleet-summary"
-      style={{ display: "flex", gap: ".6rem", flexWrap: "wrap", margin: "0 0 1rem" }}
-    >
+    <div aria-label="fleet-summary" className="kl-tiles" style={{ margin: "0 0 1rem" }}>
       <StatTile label={t(locale, "summaryTotal")} value={summary.total} />
       <StatTile
         label={t(locale, "summaryAwaiting")}
@@ -303,6 +440,7 @@ export function FleetSummaryBar(props: {
         value={summary.contained}
         tone={summary.contained > 0 ? "bad" : "plain"}
       />
+      <StatTile label={t(locale, "summaryAssignedAwaiting")} value={summary.assignedAwaiting} />
       <StatTile label={t(locale, "summaryHubs")} value={summary.hubs} />
     </div>
   );
@@ -362,7 +500,9 @@ export function DeviceListView(props: {
   if (page.devices.length === 0) {
     return (
       <section aria-label="devices">
-        <h1>{t(locale, "devices")}</h1>
+        <div className="kl-page-head">
+          <h1>{t(locale, "devices")}</h1>
+        </div>
         <DataSurface state="empty" />
       </section>
     );
@@ -374,7 +514,9 @@ export function DeviceListView(props: {
 
   return (
     <section aria-label="devices">
-      <h1>{t(locale, "devices")}</h1>
+      <div className="kl-page-head">
+        <h1>{t(locale, "devices")}</h1>
+      </div>
 
       <FleetSummaryBar locale={locale} summary={summary} canApprove={canApprove} />
 
@@ -385,11 +527,11 @@ export function DeviceListView(props: {
         <p
           role="status"
           data-action-needed={summary.awaitingApproval}
+          className="kl-notice"
           style={{
-            border: `1px solid ${kitluyTokens.colorPrimary}`,
-            borderLeft: `4px solid ${kitluyTokens.colorPrimary}`,
-            borderRadius: kitluyTokens.radius,
-            padding: ".8rem 1rem",
+            background: "var(--kl-accent-subtle)",
+            color: "var(--kl-text)",
+            borderLeft: "3px solid var(--kl-accent)",
             margin: "0 0 1rem",
           }}
         >
@@ -420,111 +562,86 @@ export function DeviceListView(props: {
         </p>
       )}
 
-      <p>
-        <label htmlFor="device-class">{t(locale, "showClass")}</label>{" "}
+      <div className="kl-field" style={{ maxWidth: 300 }}>
+        <label htmlFor="device-class">{t(locale, "showClass")}</label>
         <select
+          className="kl-select"
           id="device-class"
           value={classFilter}
           onChange={(e) => setClassFilter(e.target.value as DeviceClassFilter)}
         >
           <option value="all">{t(locale, "classAll")}</option>
           <option value="store_hub">{t(locale, "classStoreHub")}</option>
-          <option value="pi_terminal">{t(locale, "classPiTerminal")}</option>
+          <option value="terminal">{t(locale, "classTerminal")}</option>
         </select>
         {classFilter === "all" ? null : (
-          <>
-            {" "}
-            <small role="note">{t(locale, "filteredFromPage")}</small>
-          </>
+          <small className="kl-muted" role="note">
+            {t(locale, "filteredFromPage")}
+          </small>
         )}
-      </p>
+      </div>
 
       {visible.length === 0 ? (
         <p role="note">{t(locale, "noneOfClass")}</p>
       ) : (
-        <table style={{ borderCollapse: "collapse", width: "100%" }}>
-          <thead>
-            <tr>
-              <th scope="col" style={TH}>
-                {t(locale, "devices")}
-              </th>
-              <th scope="col" style={TH}>
-                {t(locale, "statusColumn")}
-              </th>
-              <th scope="col" style={TH}>
-                {t(locale, "assignment")}
-              </th>
-              <th scope="col" style={TH}>
-                {t(locale, "reporting")}
-              </th>
-              <th scope="col" style={TH}>
-                {t(locale, "openIncidents")}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {sortForOperator(visible).map((device) => (
-              <tr key={device.deviceId} data-device-condition={deviceCondition(device)}>
-                <td style={TD}>
-                  <a href={routeHref({ kind: "device", deviceId: device.deviceId })}>
-                    {device.deviceReference}
-                  </a>
-                  <br />
-                  <small style={{ color: kitluyTokens.colorMuted }}>{device.deviceClass}</small>
-                </td>
-                <td style={TD}>
-                  <StatusPill device={device} locale={locale} />
-                </td>
-                <td
-                  style={TD}
-                  data-hub-serving={hubAssignmentSummary(device)?.serving ?? undefined}
-                >
-                  <HubAssignmentCell device={device} locale={locale} />
-                </td>
-                <td style={TD}>
-                  {device.lastSeenAt === null
-                    ? t(locale, "neverReported")
-                    : freshnessLabel(device.freshness, locale)}
-                </td>
-                <td style={TD}>
-                  {device.openIncidentCount > 0 ? (
-                    <strong style={{ color: kitluyTokens.colorDanger }}>
-                      {device.openIncidentCount}
-                    </strong>
-                  ) : (
-                    device.openIncidentCount
-                  )}
-                </td>
+        <div className="kl-table-wrap">
+          <table className="kl-table">
+            <thead>
+              <tr>
+                <th scope="col">{t(locale, "devices")}</th>
+                <th scope="col">{t(locale, "statusColumn")}</th>
+                <th scope="col">{t(locale, "assignment")}</th>
+                <th scope="col">{t(locale, "reporting")}</th>
+                <th scope="col">{t(locale, "openIncidents")}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {sortForOperator(visible).map((device) => (
+                <tr key={device.deviceId} data-device-condition={deviceCondition(device)}>
+                  <td>
+                    <a href={routeHref({ kind: "device", deviceId: device.deviceId })}>
+                      {device.deviceReference}
+                    </a>
+                    <br />
+                    <small style={{ color: kitluyTokens.colorMuted }}>{device.deviceClass}</small>
+                  </td>
+                  <td>
+                    <StatusPill device={device} locale={locale} />
+                  </td>
+                  <td data-hub-serving={hubAssignmentSummary(device)?.serving ?? undefined}>
+                    <AssignmentCell device={device} locale={locale} />
+                  </td>
+                  <td>
+                    {device.lastSeenAt === null
+                      ? t(locale, "neverReported")
+                      : freshnessLabel(device.freshness, locale)}
+                  </td>
+                  <td>
+                    {device.openIncidentCount > 0 ? (
+                      <strong style={{ color: kitluyTokens.colorDanger }}>
+                        {device.openIncidentCount}
+                      </strong>
+                    ) : (
+                      device.openIncidentCount
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   );
 }
 
-const TH = {
-  textAlign: "left",
-  padding: ".5rem .6rem",
-  borderBottom: `2px solid ${kitluyTokens.colorMuted}44`,
-  fontSize: ".8rem",
-  textTransform: "uppercase",
-  letterSpacing: ".04em",
-  color: kitluyTokens.colorMuted,
-  fontWeight: 500,
-} as const;
-
-const TD = {
-  padding: ".65rem .6rem",
-  borderBottom: `1px solid ${kitluyTokens.colorMuted}22`,
-  verticalAlign: "top",
-} as const;
-
 function Field(props: { label: string; children: ReactNode }): JSX.Element {
   return (
-    <p>
-      <strong>{props.label}:</strong> {props.children}
+    <p style={{ display: "flex", flexWrap: "wrap", gap: "0 12px", margin: "0 0 10px" }}>
+      <strong style={{ minWidth: 150, color: "var(--kl-text-muted)", fontWeight: 600 }}>
+        {props.label}
+      </strong>
+      <span>{props.children}</span>
     </p>
   );
 }
@@ -539,42 +656,66 @@ export function DeviceDetailView(props: {
 
   return (
     <section aria-label="device">
-      <p>
+      <p style={{ margin: "0 0 12px" }}>
         <a href={routeHref({ kind: "devices" })}>← {t(locale, "back")}</a>
       </p>
-      <h1>{device.deviceReference}</h1>
+      <div className="kl-page-head">
+        <h1 className="kl-mono">{device.deviceReference}</h1>
+      </div>
 
-      <p data-condition={condition} style={{ color: conditionColor(condition), fontWeight: 700 }}>
-        {conditionLabel(condition, locale)}
-      </p>
+      <div className="kl-card" style={{ marginBottom: 16 }}>
+        <div className="kl-card-body">
+          <p
+            data-condition={condition}
+            style={{ color: conditionColor(condition), fontWeight: 700, margin: "0 0 12px" }}
+          >
+            {conditionLabel(condition, locale)}
+          </p>
 
-      <Field label={t(locale, "lifecycle")}>{device.lifecycle}</Field>
-      <Field label={t(locale, "lastSeen")}>
-        {freshnessLabel(device.freshness, locale)}
-        {device.lastSeenAt !== null ? ` · ${device.lastSeenAt}` : ""}
-      </Field>
-      <Field label={t(locale, "openIncidents")}>{device.openIncidentCount}</Field>
+          {/* The plain words AND the raw enum: the words are what an operator
+              reads, the enum is what they quote back over the phone. */}
+          <Field label={t(locale, "lifecycle")}>
+            {lifecycleLabel(device.lifecycle, locale)} <code>{device.lifecycle}</code>
+          </Field>
+          <Field label={t(locale, "assignment")}>
+            <AssignmentCell device={device} locale={locale} />
+          </Field>
+          <Field label={t(locale, "lastSeen")}>
+            {freshnessLabel(device.freshness, locale)}
+            {device.lastSeenAt !== null ? ` · ${device.lastSeenAt}` : ""}
+          </Field>
+          <Field label={t(locale, "openIncidents")}>{device.openIncidentCount}</Field>
 
-      <p role="note">
-        {t(
-          locale,
-          props.detail.freshnessPolicyRuled ? "freshnessDevelopmentDefault" : "freshnessUnruled",
-        )}
-      </p>
+          <p role="note" className="kl-muted" style={{ margin: 0 }}>
+            {t(
+              locale,
+              props.detail.freshnessPolicyRuled
+                ? "freshnessDevelopmentDefault"
+                : "freshnessUnruled",
+            )}
+          </p>
+        </div>
+      </div>
 
-      <h2>{t(locale, provisioning.eligible ? "provisioningEligible" : "provisioningRefused")}</h2>
-      {provisioning.reasons.length > 0 ? (
-        <ul data-provisioning="refused">
-          {provisioning.reasons.map((reason) => (
-            <li key={reason}>{reason}</li>
-          ))}
-        </ul>
-      ) : null}
-      {/* Issuance is a governed mutation and is deliberately not reachable
-          from this slice — saying so is better than an inert button. */}
-      <p>
-        <em>{t(locale, "provisioningNotHere")}</em>
-      </p>
+      <div className="kl-card">
+        <div className="kl-card-body">
+          <h2 style={{ margin: "0 0 10px", fontSize: 16 }}>
+            {t(locale, provisioning.eligible ? "provisioningEligible" : "provisioningRefused")}
+          </h2>
+          {provisioning.reasons.length > 0 ? (
+            <ul data-provisioning="refused">
+              {provisioning.reasons.map((reason) => (
+                <li key={reason}>{reason}</li>
+              ))}
+            </ul>
+          ) : null}
+          {/* Issuance is a governed mutation and is deliberately not reachable
+              from this slice — saying so is better than an inert button. */}
+          <p className="kl-muted" style={{ margin: 0 }}>
+            <em>{t(locale, "provisioningNotHere")}</em>
+          </p>
+        </div>
+      </div>
     </section>
   );
 }
@@ -593,8 +734,8 @@ export function DeviceDetailView(props: {
 function Evidence(props: { label: string; value: string | number | null }): JSX.Element {
   return (
     <>
-      <dt style={{ color: kitluyTokens.colorMuted }}>{props.label}</dt>
-      <dd style={{ margin: "0 0 0.5rem 0", fontFamily: "monospace" }}>
+      <dt style={{ color: "var(--kl-text-muted)", fontSize: 12 }}>{props.label}</dt>
+      <dd className="kl-mono" style={{ margin: "0 0 0.5rem 0" }}>
         {props.value === null || props.value === "" ? "—" : String(props.value)}
       </dd>
     </>
@@ -652,39 +793,54 @@ export function ApprovalForm(props: {
   // no explanation is how an operator concludes the portal is broken.
   if (!device.approvable) {
     return (
-      <p role="status" data-blocked="true" style={{ color: kitluyTokens.colorMuted }}>
-        <strong>{t(locale, "approveBlocked")}:</strong> {device.blockingReasons.join(" · ")}
+      <p role="status" data-blocked="true" className="kl-notice kl-notice-warn">
+        <span>
+          <strong>{t(locale, "approveBlocked")}:</strong> {device.blockingReasons.join(" · ")}
+        </span>
       </p>
     );
   }
 
   return (
     <form onSubmit={submit} aria-label={`approve-${device.deviceId}`}>
-      <label>
-        {t(locale, "approveReason")}
-        <input value={reason} onChange={(e) => setReason(e.target.value)} required name="reason" />
-      </label>
-      <label>
-        {t(locale, "approveEvidence")}
+      <div className="kl-field">
+        <label htmlFor={`approve-reason-${device.deviceId}`}>{t(locale, "approveReason")}</label>
         <input
+          className="kl-input"
+          id={`approve-reason-${device.deviceId}`}
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          required
+          name="reason"
+        />
+      </div>
+      <div className="kl-field">
+        <label htmlFor={`approve-evidence-${device.deviceId}`}>
+          {t(locale, "approveEvidence")}
+        </label>
+        <input
+          className="kl-input"
+          id={`approve-evidence-${device.deviceId}`}
           value={evidence}
           onChange={(e) => setEvidence(e.target.value)}
           required
           name="verificationEvidenceRef"
         />
-      </label>
+      </div>
       {props.fourEyesRequired ? (
-        <label>
-          {t(locale, "approveSecond")}
+        <div className="kl-field">
+          <label htmlFor={`approve-second-${device.deviceId}`}>{t(locale, "approveSecond")}</label>
           <input
+            className="kl-input"
+            id={`approve-second-${device.deviceId}`}
             value={second}
             onChange={(e) => setSecond(e.target.value)}
             required
             name="secondApproverRef"
           />
-        </label>
+        </div>
       ) : null}
-      <button type="submit" disabled={!ready || props.busy}>
+      <button type="submit" disabled={!ready || props.busy} className="kl-btn kl-btn-primary">
         {props.busy ? t(locale, "approving") : t(locale, "approveAction")}
       </button>
     </form>
@@ -714,12 +870,14 @@ export function PendingApprovalsView(props: {
 
   return (
     <section aria-label="pending-approvals">
-      <h1>{t(locale, "pendingTitle")}</h1>
-      <p>{t(locale, "pendingIntro")}</p>
+      <div className="kl-page-head">
+        <h1>{t(locale, "pendingTitle")}</h1>
+        <p>{t(locale, "pendingIntro")}</p>
+      </div>
 
       {!props.canApprove ? (
-        <p role="status" data-notice="approveNotPermitted">
-          {t(locale, "approveNotPermitted")}
+        <p role="status" data-notice="approveNotPermitted" className="kl-notice kl-notice-warn">
+          <span>{t(locale, "approveNotPermitted")}</span>
         </p>
       ) : null}
 
@@ -734,76 +892,437 @@ export function PendingApprovalsView(props: {
         <article
           key={device.deviceId}
           data-device-id={device.deviceId}
-          style={{
-            border: `1px solid ${kitluyTokens.colorMuted}`,
-            borderRadius: kitluyTokens.radius,
-            padding: "1rem",
-            marginBottom: "1rem",
-          }}
+          className="kl-card"
+          style={{ marginBottom: "1rem" }}
         >
-          <h2 style={{ fontFamily: "monospace" }}>{device.deviceReference}</h2>
+          <div className="kl-card-body">
+            <h2 className="kl-mono" style={{ marginTop: 0, fontSize: 16 }}>
+              {device.deviceReference}
+            </h2>
 
-          <dl>
-            <Evidence label={t(locale, "pendingHostname")} value={device.reportedHostname} />
-            <Evidence label={t(locale, "pendingBoardSerial")} value={device.claimedBoardSerial} />
-            <Evidence label={t(locale, "pendingSocSerial")} value={device.claimedSocSerial} />
-            <Evidence label={t(locale, "pendingMac")} value={device.claimedMacAddress} />
-            <Evidence label={t(locale, "pendingProfile")} value={device.hardwareProfile} />
-            <Evidence
-              label={t(locale, "pendingGeneration")}
-              value={device.installationGeneration}
-            />
-            <Evidence
-              label={t(locale, "pendingFingerprint")}
-              value={device.registrationKeyFingerprint}
-            />
-            <Evidence label={t(locale, "pendingFirstSeen")} value={device.firstSeenAt} />
-            <Evidence
-              label={t(locale, "pendingLastRegistration")}
-              value={device.lastRegistrationAt}
-            />
-            {/* The device id is shown because contract §9 makes it the one
+            <dl>
+              <Evidence label={t(locale, "pendingHostname")} value={device.reportedHostname} />
+              <Evidence label={t(locale, "pendingBoardSerial")} value={device.claimedBoardSerial} />
+              <Evidence label={t(locale, "pendingSocSerial")} value={device.claimedSocSerial} />
+              <Evidence label={t(locale, "pendingMac")} value={device.claimedMacAddress} />
+              <Evidence label={t(locale, "pendingProfile")} value={device.hardwareProfile} />
+              <Evidence
+                label={t(locale, "pendingGeneration")}
+                value={device.installationGeneration}
+              />
+              <Evidence
+                label={t(locale, "pendingFingerprint")}
+                value={device.registrationKeyFingerprint}
+              />
+              <Evidence label={t(locale, "pendingFirstSeen")} value={device.firstSeenAt} />
+              <Evidence
+                label={t(locale, "pendingLastRegistration")}
+                value={device.lastRegistrationAt}
+              />
+              {/* The device id is shown because contract §9 makes it the one
                 identifier a pending device receives — it is what an operator on
                 the phone can quote back. */}
-            <Evidence label="device id" value={device.deviceId} />
-          </dl>
+              <Evidence label="device id" value={device.deviceId} />
+            </dl>
 
-          {device.suspectedCredentialReuse ? (
-            <p role="alert" data-alert="credential-reuse" style={{ fontWeight: 700 }}>
-              {t(locale, "pendingCredentialReuse")}
-            </p>
-          ) : null}
+            {device.suspectedCredentialReuse ? (
+              <p role="alert" data-alert="credential-reuse" style={{ fontWeight: 700 }}>
+                {t(locale, "pendingCredentialReuse")}
+              </p>
+            ) : null}
 
-          {device.openIncidents.length > 0 ? (
-            <ul data-incidents={device.openIncidents.length}>
-              {device.openIncidents.map((incident) => (
-                <li key={`${incident.incidentType}-${incident.detectedAt}`}>
-                  <strong>{incident.severity}</strong> {incident.incidentType}
-                  {incident.detail === null ? null : ` — ${incident.detail}`}
-                </li>
-              ))}
-            </ul>
-          ) : null}
+            {device.openIncidents.length > 0 ? (
+              <ul data-incidents={device.openIncidents.length}>
+                {device.openIncidents.map((incident) => (
+                  <li key={`${incident.incidentType}-${incident.detectedAt}`}>
+                    <strong>{incident.severity}</strong> {incident.incidentType}
+                    {incident.detail === null ? null : ` — ${incident.detail}`}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
 
-          {props.notice !== undefined && props.notice.deviceId === device.deviceId ? (
-            <p role="alert" data-approval-notice={device.deviceId}>
-              {props.notice.message}
-            </p>
-          ) : null}
+            {props.notice !== undefined && props.notice.deviceId === device.deviceId ? (
+              <p role="alert" data-approval-notice={device.deviceId}>
+                {props.notice.message}
+              </p>
+            ) : null}
 
-          {props.canApprove ? (
-            <ApprovalForm
-              locale={locale}
-              device={device}
-              fourEyesRequired={page.fourEyesRequired}
-              busy={props.busyDeviceId === device.deviceId}
-              onApprove={(input) => props.onApprove(device.deviceId, input)}
-            />
-          ) : null}
+            {props.canApprove ? (
+              <ApprovalForm
+                locale={locale}
+                device={device}
+                fourEyesRequired={page.fourEyesRequired}
+                busy={props.busyDeviceId === device.deviceId}
+                onApprove={(input) => props.onApprove(device.deviceId, input)}
+              />
+            ) : null}
+          </div>
         </article>
       ))}
 
       {page.truncated ? <p role="status">{t(locale, "truncated")}</p> : null}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Digital Stores (owner decision v2.0.0 §2: the Admin creates the Store)
+// ---------------------------------------------------------------------------
+
+export function StoreListView(props: { locale: KitluyLocale; page: StoreListPage }): JSX.Element {
+  const { locale, page } = props;
+  return (
+    <section aria-label="stores">
+      <div className="kl-page-head">
+        <h1>{t(locale, "storesTitle")}</h1>
+      </div>
+      {page.stores.length === 0 ? (
+        <div className="kl-card">
+          <div className="kl-card-body">
+            <DataSurface state="empty" />
+            <p className="kl-muted">{t(locale, "storesNone")}</p>
+          </div>
+        </div>
+      ) : (
+        <div className="kl-card">
+          <div className="kl-card-body kl-tight">
+            <div className="kl-table-wrap">
+              <table className="kl-table">
+                <thead>
+                  <tr>
+                    <th scope="col">{t(locale, "storeCode")}</th>
+                    <th scope="col">{t(locale, "storeName")}</th>
+                    <th scope="col">{t(locale, "storeTenant")}</th>
+                    <th scope="col">{t(locale, "storeVertical")}</th>
+                    <th scope="col">{t(locale, "storeStatus")}</th>
+                    <th scope="col">{t(locale, "storeLocations")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {page.stores.map((store) => (
+                    <tr key={store.digitalStoreId} data-store={store.storeCode}>
+                      <td className="kl-mono" style={{ fontWeight: 600 }}>
+                        {store.storeCode}
+                      </td>
+                      <td>{store.name}</td>
+                      <td>{store.tenantReference}</td>
+                      <td>{store.primaryVerticalCode}</td>
+                      <td data-store-status={store.status}>
+                        <span className="kl-badge kl-badge-neutral">{store.status}</span>
+                      </td>
+                      <td>
+                        {store.locations.length === 0
+                          ? t(locale, "storeNoLocations")
+                          : store.locations
+                              .map((l) => `${l.locationCode} — ${l.name} (${l.operatingStatus})`)
+                              .join(" · ")}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+      {page.truncated ? (
+        <p role="alert" className="kl-muted">
+          {t(locale, "truncated")}
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+/**
+ * The create form. Ready-gated like `ApprovalForm`: the submit stays disabled
+ * until a Tenant, a code, a name, an ACTIVE vertical and a reason exist, and a
+ * second approver when the SERVER says the environment needs one.
+ */
+export function StoreCreateView(props: {
+  locale: KitluyLocale;
+  options: StoreCreationOptions;
+  canCreate: boolean;
+  busy: boolean;
+  notice:
+    | { readonly kind: "created"; readonly result: CreateStoreResult }
+    | { readonly kind: "refused"; readonly reason: string; readonly message: string }
+    | null;
+  onCreate: (input: {
+    tenantId: string;
+    storeCode: string;
+    name: string;
+    primaryVerticalCode: string;
+    reason: string;
+    grantExistingPartnerStaff: boolean;
+    firstLocation?: { locationCode: string; name: string; addressLine1?: string; city?: string };
+    secondApproverRef?: string;
+  }) => void;
+}): JSX.Element {
+  const { locale, options } = props;
+  const firstActive = options.verticals.find((v) => v.status === "ACTIVE");
+  const [tenantId, setTenantId] = useState(options.tenants[0]?.tenantId ?? "");
+  const [storeCode, setStoreCode] = useState("");
+  const [name, setName] = useState("");
+  const [vertical, setVertical] = useState(firstActive?.code ?? "");
+  const [locationCode, setLocationCode] = useState("");
+  const [locationName, setLocationName] = useState("");
+  const [address, setAddress] = useState("");
+  const [city, setCity] = useState("");
+  const [grant, setGrant] = useState(true);
+  const [reason, setReason] = useState("");
+  const [second, setSecond] = useState("");
+
+  const tenant = options.tenants.find((tn) => tn.tenantId === tenantId);
+  const verticalActive = options.verticals.some(
+    (v) => v.code === vertical && v.status === "ACTIVE",
+  );
+  const locationHalfFilled = (locationCode.trim() === "") !== (locationName.trim() === "");
+  const ready =
+    tenantId !== "" &&
+    /^[A-Za-z0-9][A-Za-z0-9-]{2,39}$/.test(storeCode.trim()) &&
+    name.trim() !== "" &&
+    verticalActive &&
+    reason.trim() !== "" &&
+    !locationHalfFilled &&
+    (!options.fourEyesRequired || second.trim() !== "");
+
+  const submit = (event: FormEvent): void => {
+    event.preventDefault();
+    if (!ready || props.busy) return;
+    props.onCreate({
+      tenantId,
+      storeCode: storeCode.trim(),
+      name: name.trim(),
+      primaryVerticalCode: vertical,
+      reason: reason.trim(),
+      grantExistingPartnerStaff: grant,
+      ...(locationCode.trim() !== "" && locationName.trim() !== ""
+        ? {
+            firstLocation: {
+              locationCode: locationCode.trim(),
+              name: locationName.trim(),
+              ...(address.trim() === "" ? {} : { addressLine1: address.trim() }),
+              ...(city.trim() === "" ? {} : { city: city.trim() }),
+            },
+          }
+        : {}),
+      ...(options.fourEyesRequired ? { secondApproverRef: second.trim() } : {}),
+    });
+  };
+
+  if (!props.canCreate) {
+    return (
+      <section aria-label="store-create">
+        <div className="kl-page-head">
+          <h1>{t(locale, "newStoreTitle")}</h1>
+        </div>
+        <div className="kl-card">
+          <div className="kl-card-body">
+            <p role="status" data-notice="storeCreateNotPermitted" className="kl-muted">
+              {t(locale, "storeCreateNotPermitted")}
+            </p>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section aria-label="store-create">
+      <div className="kl-page-head">
+        <h1>{t(locale, "newStoreTitle")}</h1>
+        <p>{t(locale, "newStoreIntro")}</p>
+      </div>
+
+      {props.notice?.kind === "created" ? (
+        <div
+          className="kl-notice kl-notice-good"
+          data-store-created={props.notice.result.digitalStoreId}
+          style={{ marginBottom: 16 }}
+        >
+          <div>
+            <strong>{t(locale, "storeCreatedDone")}</strong> {props.notice.result.detail}
+            <br />
+            {t(locale, "auditEventId")}:{" "}
+            <span className="kl-mono">{props.notice.result.auditEventId}</span>
+            <br />
+            <a href={routeHref({ kind: "stores" })}>{t(locale, "viewStores")}</a>
+          </div>
+        </div>
+      ) : null}
+      {props.notice?.kind === "refused" ? (
+        <div
+          className="kl-notice kl-notice-critical"
+          role="alert"
+          data-store-refused={props.notice.reason}
+          style={{ marginBottom: 16 }}
+        >
+          {props.notice.message}
+        </div>
+      ) : null}
+
+      <div className="kl-card" style={{ maxWidth: 620 }}>
+        <div className="kl-card-body">
+          <form onSubmit={submit} aria-label="create-store">
+            <div className="kl-field">
+              <label htmlFor="store-tenant">{t(locale, "fieldTenant")}</label>
+              <select
+                className="kl-select"
+                id="store-tenant"
+                name="tenantId"
+                value={tenantId}
+                disabled={props.busy}
+                onChange={(e) => setTenantId(e.target.value)}
+              >
+                {options.tenants.map((tn) => (
+                  <option key={tn.tenantId} value={tn.tenantId}>
+                    {`${tn.tenantCode} — ${tn.displayName}${
+                      tn.partnerVerificationStatus === null
+                        ? ""
+                        : ` (${tn.partnerVerificationStatus})`
+                    }`}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="kl-field">
+              <label htmlFor="store-code">{t(locale, "fieldStoreCode")}</label>
+              <input
+                className="kl-input"
+                id="store-code"
+                name="storeCode"
+                value={storeCode}
+                disabled={props.busy}
+                onChange={(e) => setStoreCode(e.target.value)}
+              />
+              <span className="kl-hint">{t(locale, "fieldStoreCodeRule")}</span>
+            </div>
+            <div className="kl-field">
+              <label htmlFor="store-name">{t(locale, "fieldStoreName")}</label>
+              <input
+                className="kl-input"
+                id="store-name"
+                name="name"
+                value={name}
+                disabled={props.busy}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </div>
+            <div className="kl-field">
+              <label htmlFor="store-vertical">{t(locale, "fieldVertical")}</label>
+              <select
+                className="kl-select"
+                id="store-vertical"
+                name="primaryVerticalCode"
+                value={vertical}
+                disabled={props.busy}
+                onChange={(e) => setVertical(e.target.value)}
+              >
+                {options.verticals.map((v) => (
+                  <option key={v.code} value={v.code} disabled={v.status !== "ACTIVE"}>
+                    {`${v.labels[locale] ?? v.code}${
+                      v.status === "ACTIVE" ? "" : ` — ${t(locale, "verticalNotActive")}`
+                    }`}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <fieldset className="kl-fieldset kl-field">
+              <legend>{t(locale, "fieldFirstLocation")}</legend>
+              <div className="kl-field">
+                <label htmlFor="location-code">{t(locale, "fieldLocationCode")}</label>
+                <input
+                  className="kl-input"
+                  id="location-code"
+                  name="locationCode"
+                  value={locationCode}
+                  disabled={props.busy}
+                  onChange={(e) => setLocationCode(e.target.value)}
+                />
+              </div>
+              <div className="kl-field">
+                <label htmlFor="location-name">{t(locale, "fieldLocationName")}</label>
+                <input
+                  className="kl-input"
+                  id="location-name"
+                  name="locationName"
+                  value={locationName}
+                  disabled={props.busy}
+                  onChange={(e) => setLocationName(e.target.value)}
+                />
+              </div>
+              <div className="kl-field">
+                <label htmlFor="location-address">{t(locale, "fieldAddress")}</label>
+                <input
+                  className="kl-input"
+                  id="location-address"
+                  name="addressLine1"
+                  value={address}
+                  disabled={props.busy}
+                  onChange={(e) => setAddress(e.target.value)}
+                />
+              </div>
+              <div className="kl-field" style={{ marginBottom: 0 }}>
+                <label htmlFor="location-city">{t(locale, "fieldCity")}</label>
+                <input
+                  className="kl-input"
+                  id="location-city"
+                  name="city"
+                  value={city}
+                  disabled={props.busy}
+                  onChange={(e) => setCity(e.target.value)}
+                />
+              </div>
+            </fieldset>
+            <div className="kl-field">
+              <label className="kl-check" style={{ padding: 0 }}>
+                <input
+                  type="checkbox"
+                  name="grantExistingPartnerStaff"
+                  checked={grant}
+                  disabled={props.busy}
+                  onChange={(e) => setGrant(e.target.checked)}
+                />
+                {t(locale, "fieldGrantPartnerStaff")}
+              </label>
+              <span className="kl-hint" data-partner-staff={tenant?.partnerStaffCount ?? 0}>
+                {tenant === undefined || tenant.partnerStaffCount === 0
+                  ? t(locale, "partnerStaffNone")
+                  : `${tenant.partnerStaffCount} ${t(locale, "partnerStaffCount")}`}
+              </span>
+            </div>
+            <div className="kl-field">
+              <label htmlFor="store-reason">{t(locale, "fieldReason")}</label>
+              <input
+                className="kl-input"
+                id="store-reason"
+                name="reason"
+                value={reason}
+                disabled={props.busy}
+                onChange={(e) => setReason(e.target.value)}
+              />
+            </div>
+            {options.fourEyesRequired ? (
+              <div className="kl-field">
+                <label htmlFor="store-second">{t(locale, "approveSecond")}</label>
+                <input
+                  className="kl-input"
+                  id="store-second"
+                  name="secondApproverRef"
+                  value={second}
+                  disabled={props.busy}
+                  onChange={(e) => setSecond(e.target.value)}
+                />
+              </div>
+            ) : null}
+            <button type="submit" disabled={!ready || props.busy} className="kl-btn kl-btn-primary">
+              {props.busy ? t(locale, "creatingStore") : t(locale, "createStoreAction")}
+            </button>
+          </form>
+        </div>
+      </div>
     </section>
   );
 }

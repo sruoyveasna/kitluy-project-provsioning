@@ -1,0 +1,128 @@
+{
+  "$comment": [
+    "THE ONE DECLARATION OF WHAT A FLASHABLE STORE HUB IMAGE CONTAINS.",
+    "",
+    "It exists because the repository had two build paths that disagreed, and",
+    "nothing reconciled them. `scripts/profiles/store-hub.sh` defined a Hub agent",
+    "unit, but it is sourced only by `build-image.sh`, which refuses to emit an",
+    ".img. The real builder, `build-rpi-image.sh`, never sourced it. So the Hub",
+    "agent existed in the build path that cannot produce a card, and was absent",
+    "from the one that can -- while the image still advertised _kitluy-edge._tcp",
+    "on 7443. The Pi advertised a service that could not exist.",
+    "",
+    "Three consumers read this file, which is what keeps them from drifting:",
+    "  1. scripts/package-bootstrap-runtime.sh -- packages what is declared here",
+    "  2. test/image-contents.test.sh          -- inspects a BUILT rootfs for it",
+    "  3. test/systemd-runtime.test.sh         -- cross-checks enablement",
+    "",
+    "Adding a component to the image means adding it HERE. A component declared",
+    "and not packaged fails the build; a component packaged and not declared is",
+    "invisible to the tests, which is the failure mode this file removes.",
+    "",
+    "NOTHING PER-DEVICE BELONGS IN AN IMAGE. No device key, certificate, tenant,",
+    "store, location, staff record, machine-id or SSH host key is declared here,",
+    "and test/systemd-runtime.test.sh asserts their absence independently."
+  ],
+  "schemaVersion": 1,
+  "profiles": ["store-hub"],
+  "components": [
+    {
+      "id": "firstboot-identity",
+      "profiles": ["store-hub"],
+      "executable": "/usr/lib/kitluy/firstboot-identity",
+      "unit": "kitluy-firstboot.service",
+      "enabled": true,
+      "source": { "kind": "closure", "package": "@kitluy-services/kitluy-device-firstboot-agent" }
+    },
+    {
+      "id": "cloud-registration",
+      "profiles": ["store-hub"],
+      "executable": "/usr/lib/kitluy/cloud-registration",
+      "unit": "kitluy-cloud-registration.service",
+      "enabled": true,
+      "source": { "kind": "closure", "package": "@kitluy-services/kitluy-device-firstboot-agent" },
+      "environmentFiles": ["/etc/kitluy/image.env"]
+    },
+    {
+      "id": "hub-pairing-ui",
+      "profiles": ["store-hub"],
+      "executable": "/usr/lib/kitluy/hub-pairing-ui",
+      "unit": "kitluy-hub-pairing.service",
+      "enabled": true,
+      "source": { "kind": "closure", "package": "@kitluy-services/kitluy-device-firstboot-agent" },
+      "environmentFiles": ["/etc/kitluy/image.env"]
+    },
+    {
+      "id": "operational-tls",
+      "profiles": ["store-hub"],
+      "executable": "/usr/lib/kitluy/operational-tls",
+      "unit": "kitluy-operational-tls.service",
+      "enabled": true,
+      "source": { "kind": "closure", "package": "@kitluy-services/kitluy-device-firstboot-agent" }
+    },
+    {
+      "id": "health-reporter",
+      "profiles": ["store-hub"],
+      "executable": "/usr/lib/kitluy/health-reporter",
+      "unit": "kitluy-health-reporter.service",
+      "enabled": true,
+      "source": { "kind": "closure", "package": "@kitluy-services/kitluy-device-firstboot-agent" }
+    },
+    {
+      "id": "update-agent",
+      "profiles": ["store-hub"],
+      "executable": "/usr/lib/kitluy/update-agent",
+      "unit": "kitluy-update-agent.service",
+      "enabled": true,
+      "source": { "kind": "closure", "package": "@kitluy-services/kitluy-device-firstboot-agent" }
+    },
+    {
+      "id": "hub-storage-provision",
+      "profiles": ["store-hub"],
+      "executable": "/usr/lib/kitluy/hub-storage-provision",
+      "unit": "kitluy-hub-storage.service",
+      "enabled": true,
+      "source": { "kind": "overlay" }
+    },
+    {
+      "id": "hub-database-provision",
+      "profiles": ["store-hub"],
+      "executable": "/usr/lib/kitluy/hub-database-provision",
+      "unit": "kitluy-hub-database.service",
+      "enabled": true,
+      "source": { "kind": "overlay" }
+    },
+    {
+      "id": "hub-agent",
+      "$comment": [
+        "THE STORE HUB ITSELF: the LAN /edge/v1 API on 7443, local authority,",
+        "sync. Absent from every flashable image before BRINGUP-003 -- the",
+        "defect this manifest exists to make impossible.",
+        "",
+        "`kind: bundle` and not `closure` because this package has 16 workspace",
+        "dependencies plus `pg`, and the image ships no node_modules. esbuild",
+        "resolves the graph at build time into one file."
+      ],
+      "profiles": ["store-hub"],
+      "executable": "/usr/lib/kitluy/hub-agent",
+      "unit": "kitluy-hub-agent.service",
+      "enabled": true,
+      "source": {
+        "kind": "bundle",
+        "package": "@kitluy-services/kitluy-hub-agent",
+        "buildScript": "build:bundle",
+        "artifact": "dist-bundle/hub-agent.mjs",
+        "installTo": "/usr/lib/kitluy/lib/hub-agent/main.mjs"
+      },
+      "environmentFiles": ["/etc/kitluy/image.env", "/etc/kitluy/hub.env"]
+    }
+  ],
+  "dataAssets": [
+    {
+      "id": "hub-migrations",
+      "path": "/usr/lib/kitluy/hub-migrations",
+      "manifest": "/usr/lib/kitluy/hub-migration-manifest.json",
+      "source": "hub/migrations"
+    }
+  ]
+}

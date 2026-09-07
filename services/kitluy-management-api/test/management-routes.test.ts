@@ -46,6 +46,8 @@ const ROW = {
   tenant_id: null,
   digital_store_id: null,
   store_location_id: null,
+  digital_store_label: null,
+  location_label: null,
   terminal_assignment_count: 0,
   open_incident_count: 0,
   last_observed_at: null,
@@ -71,6 +73,24 @@ function db(
       }
       if (text.includes("device_fleet_status")) {
         return { rows: fleetRows as unknown as R[] };
+      }
+      if (text.includes("evaluate_provisioning_eligibility_v1")) {
+        // The single predicate (group 0214), answered the way the door would
+        // for the fixture row: enrolled is eligible, a containment state is not.
+        const lifecycle = String(fleetRows[0]?.lifecycle_state ?? "");
+        const eligible = lifecycle === "enrolled";
+        return {
+          rows: [
+            {
+              eligible,
+              reasons: eligible
+                ? []
+                : [
+                    `lifecycle is '${lifecycle}'; only an 'enrolled' or 'awaiting_trust' device may enter provisioning`,
+                  ],
+            },
+          ] as unknown as R[],
+        };
       }
       return { rows: [] as unknown as R[] };
     },

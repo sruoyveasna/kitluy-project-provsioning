@@ -1,0 +1,31 @@
+{
+  "name": "@kitluy-apps/kitluy-device-shell",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pi Terminal Device Shell — the neutral graphical first-boot surface (kiosk Electron/Wayland) that shows registration state and, once approved, takes a pairing code. Carries no Store authority and no path to a business app before activation (owner decision v2.0.0 §4–§5).",
+  "type": "module",
+  "main": "dist-electron/electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && tsc -p tsconfig.electron.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist dist-electron"
+  },
+  "dependencies": {
+    "@kitluy/localization": "workspace:*",
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  },
+  "devDependencies": {
+    "@kitluy-services/kitluy-device-firstboot-agent": "workspace:*",
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "catalog:",
+    "electron": "38.8.6",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  }
+}

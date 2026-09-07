@@ -15,6 +15,7 @@ import {
   conditionLabel,
   deviceCondition,
   filterByClass,
+  terminalAssignmentSummary,
   freshnessLabel,
   hubAssignmentSummary,
   sortForOperator,
@@ -40,6 +41,8 @@ const DEVICE: FleetDeviceView = {
   tenantReference: null,
   digitalStoreReference: null,
   locationReference: null,
+  digitalStoreLabel: null,
+  locationLabel: null,
   terminalAssignmentCount: 0,
   openIncidentCount: 0,
   lastSeenAt: null,
@@ -356,12 +359,12 @@ describe("the Store Hub view", () => {
   const device = (over: Partial<FleetDeviceView>): FleetDeviceView => ({ ...DEVICE, ...over });
 
   it("shows every device when the filter is off", () => {
-    const all = [device({}), device({ deviceClass: "pi_terminal", deviceId: "t" })];
+    const all = [device({}), device({ deviceClass: "terminal", deviceId: "t" })];
     expect(filterByClass(all, "all")).toHaveLength(2);
   });
 
   it("narrows to Store Hubs, which is the question asked when a shop is stuck", () => {
-    const all = [device({}), device({ deviceClass: "pi_terminal", deviceId: "t" })];
+    const all = [device({}), device({ deviceClass: "terminal", deviceId: "t" })];
     const hubs = filterByClass(all, "store_hub");
     expect(hubs).toHaveLength(1);
     expect(hubs[0]?.deviceId).toBe(DEVICE.deviceId);
@@ -370,7 +373,7 @@ describe("the Store Hub view", () => {
   it("returns nothing rather than everything when no device matches", () => {
     // Falling back to the unfiltered list would silently answer a different
     // question than the operator asked.
-    expect(filterByClass([device({ deviceClass: "pi_terminal" })], "store_hub")).toHaveLength(0);
+    expect(filterByClass([device({ deviceClass: "terminal" })], "store_hub")).toHaveLength(0);
   });
 
   it("reports a Hub as SERVING only when its assignment is active", () => {
@@ -386,6 +389,45 @@ describe("the Store Hub view", () => {
   });
 
   it("refuses to describe a Terminal in Hub terms", () => {
-    expect(hubAssignmentSummary(device({ deviceClass: "pi_terminal" }))).toBeNull();
+    expect(hubAssignmentSummary(device({ deviceClass: "terminal" }))).toBeNull();
+  });
+});
+
+describe("a Terminal's assignment, in the four owner-locked stages", () => {
+  const terminal = (over: Partial<FleetDeviceView>): FleetDeviceView => ({
+    ...DEVICE,
+    deviceClass: "terminal",
+    ...over,
+  });
+
+  it("refuses to describe a Hub in Terminal terms", () => {
+    expect(terminalAssignmentSummary(DEVICE)).toBeNull();
+  });
+
+  it("reads an unassigned Terminal as unassigned", () => {
+    expect(terminalAssignmentSummary(terminal({}))).toEqual({ kind: "unassigned" });
+  });
+
+  it("reads pending_trust as ASSIGNED, awaiting activation — with the Store and the profiles", () => {
+    const s = terminalAssignmentSummary(
+      terminal({
+        assignmentState: "pending_trust",
+        terminalAssignmentCount: 2,
+        digitalStoreLabel: "DEMO-LAUNDRY-001 — Demo Laundry",
+      }),
+    );
+    expect(s).toEqual({
+      kind: "assigned_awaiting",
+      profiles: 2,
+      store: "DEMO-LAUNDRY-001 — Demo Laundry",
+    });
+  });
+
+  it("reads active as active, and anything else verbatim", () => {
+    expect(terminalAssignmentSummary(terminal({ assignmentState: "active" }))?.kind).toBe("active");
+    expect(terminalAssignmentSummary(terminal({ assignmentState: "revoked" }))).toEqual({
+      kind: "other",
+      state: "revoked",
+    });
   });
 });

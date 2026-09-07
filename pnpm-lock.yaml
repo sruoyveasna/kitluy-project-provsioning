@@ -30,6 +30,9 @@ catalogs:
     electron:
       specifier: ^33.3.1
       version: 33.4.11
+    esbuild:
+      specifier: ^0.25.12
+      version: 0.25.12
     next:
       specifier: 14.2.35
       version: 14.2.35
@@ -65,9 +68,15 @@ importers:
       '@eslint/js':
         specifier: ^9.17.0
         version: 9.39.5
+      '@types/node-forge':
+        specifier: 'catalog:'
+        version: 1.3.14
       eslint:
         specifier: ^9.17.0
         version: 9.39.5
+      node-forge:
+        specifier: 'catalog:'
+        version: 1.4.0
       pg:
         specifier: 'catalog:'
         version: 8.22.0
@@ -198,6 +207,46 @@ importers:
         specifier: 'catalog:'
         version: 2.1.9(@types/node@26.1.1)(terser@5.49.0)
 
+  apps/kitluy-device-shell:
+    dependencies:
+      '@kitluy/localization':
+        specifier: workspace:*
+        version: link:../../packages/localization
+      react:
+        specifier: 'catalog:'
+        version: 18.3.1
+      react-dom:
+        specifier: 'catalog:'
+        version: 18.3.1(react@18.3.1)
+    devDependencies:
+      '@kitluy-services/kitluy-device-firstboot-agent':
+        specifier: workspace:*
+        version: link:../../services/kitluy-device-firstboot-agent
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.20.1
+      '@types/react':
+        specifier: 'catalog:'
+        version: 18.3.31
+      '@types/react-dom':
+        specifier: 'catalog:'
+        version: 18.3.7(@types/react@18.3.31)
+      '@vitejs/plugin-react':
+        specifier: 'catalog:'
+        version: 4.7.0(vite@6.4.3(@types/node@22.20.1)(terser@5.49.0)(yaml@2.9.0))
+      electron:
+        specifier: 38.8.6
+        version: 38.8.6
+      typescript:
+        specifier: 'catalog:'
+        version: 5.7.3
+      vite:
+        specifier: 'catalog:'
+        version: 6.4.3(@types/node@22.20.1)(terser@5.49.0)(yaml@2.9.0)
+      vitest:
+        specifier: 'catalog:'
+        version: 2.1.9(@types/node@22.20.1)(terser@5.49.0)
+
   apps/kitluy-partner-app:
     dependencies:
       '@kitluy/localization':
@@ -222,6 +271,9 @@ importers:
 
   apps/kitluy-partner-pwa-portal:
     dependencies:
+      '@kitluy-verticals/phase1-laundry':
+        specifier: workspace:*
+        version: link:../../verticals/phase1-laundry
       '@kitluy/feature-flags':
         specifier: workspace:*
         version: link:../../packages/feature-flags
@@ -489,6 +541,8 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: 5.7.3
+
+  packages/dev-database: {}
 
   packages/device-identity:
     dependencies:
@@ -1095,9 +1149,15 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 22.20.1
+      '@types/node-forge':
+        specifier: 'catalog:'
+        version: 1.3.14
       '@types/pg':
         specifier: 'catalog:'
         version: 8.20.0
+      node-forge:
+        specifier: 'catalog:'
+        version: 1.4.0
       pg:
         specifier: 'catalog:'
         version: 8.22.0
@@ -1125,13 +1185,22 @@ importers:
       '@kitluy/shared-config':
         specifier: workspace:*
         version: link:../../packages/shared-config
+      node-forge:
+        specifier: 'catalog:'
+        version: 1.4.0
       pg:
         specifier: 'catalog:'
         version: 8.22.0
     devDependencies:
+      '@kitluy-services/kitluy-device-firstboot-agent':
+        specifier: workspace:*
+        version: link:../kitluy-device-firstboot-agent
       '@types/node':
         specifier: 'catalog:'
         version: 22.20.1
+      '@types/node-forge':
+        specifier: 'catalog:'
+        version: 1.3.14
       '@types/pg':
         specifier: 'catalog:'
         version: 8.20.0
@@ -1274,6 +1343,9 @@ importers:
       '@types/pg':
         specifier: 'catalog:'
         version: 8.20.0
+      esbuild:
+        specifier: 'catalog:'
+        version: 0.25.12
       node-forge:
         specifier: 'catalog:'
         version: 1.4.0
@@ -3492,6 +3564,11 @@ packages:
 
   electron@33.4.11:
     resolution: {integrity: sha512-xmdAs5QWRkInC7TpXGNvzo/7exojubk+72jn1oJL7keNeIlw7xNglf8TGtJtkR4rWC5FJq0oXiIXPS9BcK2Irg==}
+    engines: {node: '>= 12.20.55'}
+    hasBin: true
+
+  electron@38.8.6:
+    resolution: {integrity: sha512-lyBhcVi9QYAZL6FO6r5twAWAjWnYomo3iVDvrb5SJZlq928BGemHOKG0tPIq41NOLaCu9f3XdEEjMkjQPjprRg==}
     engines: {node: '>= 12.20.55'}
     hasBin: true
 
@@ -7238,6 +7315,14 @@ snapshots:
     dependencies:
       '@electron/get': 2.0.3
       '@types/node': 20.19.43
+      extract-zip: 2.0.1
+    transitivePeerDependencies:
+      - supports-color
+
+  electron@38.8.6:
+    dependencies:
+      '@electron/get': 2.0.3
+      '@types/node': 22.20.1
       extract-zip: 2.0.1
     transitivePeerDependencies:
       - supports-color

@@ -18424,4 +18424,326 @@ exception when others then
   raise;
 end $$;
 
+
+-- ============================================================================
+-- SECTION 58 — physical terminals and terminal pairing sessions (migration
+-- 0213) and the single provisioning-eligibility predicate (migration 0214).
+--
+-- Proved here: the four tables exist under forced row security with no
+-- browser-role reach; the two identities hold exactly their named doors and no
+-- table access; an Admin-approved terminal (approval evidence in development)
+-- is eligible under 0214 where an unapproved one is not; a seat is defined
+-- with a generated name and a validated role set; a session opens only with an
+-- active Store Hub; the code resolves the session ALONE; consumption creates
+-- exactly one pending_trust assignment, one terminal assignment per role,
+-- binds the seat and consumes the session; a wrong code spends nothing and a
+-- wrong device spends an attempt.
+-- ============================================================================
+do $section58$
+declare
+  v_tenant uuid := '00000000-0000-4000-8000-000000000011';
+  v_store uuid := '00000000-0000-4000-8000-000000000015';
+  v_location uuid := '00000000-0000-4000-8000-000000000018';
+  v_hub_profile uuid;
+  v_term_profile uuid;
+  v_hub uuid;
+  v_term uuid;
+  v_hub_assignment uuid;
+  v_seat uuid;
+  v_r jsonb;
+  v_code text := 'K7M4P2Q9';
+  v_digest text;
+  v_tbl text;
+  v_eligible boolean;
+  v_reasons text[];
+  v_count integer;
+begin
+  -- 58.1 structure and reach.
+  foreach v_tbl in array array['physical_terminals', 'physical_terminal_roles',
+                               'terminal_pairing_sessions', 'physical_terminal_events'] loop
+    if not exists (
+      select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+       where n.nspname = 'kitluy_devices' and c.relname = v_tbl
+         and c.relrowsecurity and c.relforcerowsecurity) then
+      raise exception 'ASSERT FAIL 58: % missing or not under forced row security', v_tbl;
+    end if;
+    if has_table_privilege('anon', 'kitluy_devices.' || v_tbl, 'SELECT')
+       or has_table_privilege('authenticated', 'kitluy_devices.' || v_tbl, 'SELECT')
+       or has_table_privilege('kitluy_terminal_issuance_service', 'kitluy_devices.' || v_tbl, 'SELECT')
+       or has_table_privilege('kitluy_terminal_pairing_service', 'kitluy_devices.' || v_tbl, 'SELECT') then
+      raise exception 'ASSERT FAIL 58: a browser or runtime identity can read %', v_tbl;
+    end if;
+  end loop;
+  if has_function_privilege('authenticated', 'kitluy_devices.define_physical_terminal_v1(uuid, uuid, text, text[], text)', 'execute')
+     or has_function_privilege('anon', 'kitluy_devices.evaluate_terminal_pairing_session_v1(text, uuid, text)', 'execute')
+     or has_function_privilege('kitluy_terminal_issuance_service', 'kitluy_devices.consume_terminal_pairing_session_v1(uuid, uuid, text)', 'execute')
+     or has_function_privilege('kitluy_terminal_pairing_service', 'kitluy_devices.open_terminal_pairing_session_v1(uuid, text, integer, text)', 'execute') then
+    raise exception 'ASSERT FAIL 58: a door is reachable by the wrong identity';
+  end if;
+  if not exists (
+    select 1 from kitluy_auth.role_permission_grants g
+      join kitluy_auth.role_templates rt on rt.id = g.role_template_id
+      join kitluy_auth.permissions p on p.id = g.permission_id
+     where rt.role_key = 'DIGITAL_STORE_STAFF' and p.permission_key = 'fleet.terminal_pairing_code.issue') then
+    raise exception 'ASSERT FAIL 58: DIGITAL_STORE_STAFF does not hold fleet.terminal_pairing_code.issue';
+  end if;
+
+  -- 58.2 fixtures: an ACTIVE Hub at the scope (projection written directly —
+  -- activation is proven elsewhere), and one approved terminal.
+  -- Self-sufficient fixtures: both probe profiles are created here if absent,
+  -- so this section also runs standalone against a stack that never saw the
+  -- earlier sections (both local stacks on 2026-09-04).
+  insert into kitluy_devices.hardware_profiles
+    (profile_key, display_name, device_class, manufacturer, model_identifier, required_signal_types, certification_status)
+  values ('WS11-T001-HUB-PROBE', 'WS-11-T001 assertion Store Hub profile', 'store_hub', 'ASSERTION-FIXTURE', 'PROBE-1',
+          array['mac_address', 'board_serial', 'storage_serial']::kitluy_devices.hardware_signal_type[], 'CERTIFIED')
+  on conflict (profile_key) do nothing;
+  select id into v_hub_profile from kitluy_devices.hardware_profiles where profile_key = 'WS11-T001-HUB-PROBE';
+  insert into kitluy_devices.hardware_profiles
+    (profile_key, display_name, device_class, manufacturer, model_identifier, required_signal_types, certification_status)
+  values ('WS11-PT-TERMINAL-PROBE', 'WS-11 assertion Pi Terminal profile', 'terminal', 'ASSERTION-FIXTURE', 'PROBE-PT',
+          array['mac_address', 'board_serial', 'storage_serial']::kitluy_devices.hardware_signal_type[], 'CERTIFIED')
+  on conflict (profile_key) do nothing;
+  select id into v_term_profile from kitluy_devices.hardware_profiles where profile_key = 'WS11-PT-TERMINAL-PROBE';
+
+  v_hub := kitluy_devices.enroll_device_v1(
+    'S58-HUB-' || gen_random_uuid(), v_hub_profile, now(),
+    encode(sha256(convert_to('s58-hub-' || gen_random_uuid(), 'UTF8')), 'hex'),
+    'ed25519', 'software', 'STATION-S58', 'OP-S58',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'f8:58:' || substr(md5(random()::text),1,6)),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-s58-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-s58-' || gen_random_uuid())));
+  perform kitluy_devices.create_device_claim_v1(v_hub, v_tenant, v_store, v_location,
+    encode(sha256(convert_to('s58-tok', 'UTF8')), 'hex'),
+    encode(sha256(convert_to('s58-pay', 'UTF8')), 'hex'), 900, 'OP-S58');
+  v_hub_assignment := kitluy_devices.redeem_device_claim_v1(
+    encode(sha256(convert_to('s58-tok', 'UTF8')), 'hex'),
+    encode(sha256(convert_to('s58-pay', 'UTF8')), 'hex'), v_hub, 'HUB-S58');
+  insert into kitluy_devices.device_assignment_projections
+    (device_id, assignment_id, assignment_generation, tenant_id, digital_store_id, store_location_id,
+     terminal_profile_keys, environment)
+  values (v_hub, v_hub_assignment, 1, v_tenant, v_store, v_location, '{}', 'development')
+  on conflict (device_id) do nothing;
+
+  v_term := kitluy_devices.enroll_device_v1(
+    'S58-TERM-' || gen_random_uuid(), v_term_profile, now(),
+    encode(sha256(convert_to('s58-term-' || gen_random_uuid(), 'UTF8')), 'hex'),
+    'ed25519', 'software', 'STATION-S58', 'OP-S58',
+    jsonb_build_array(
+      jsonb_build_object('signal_type', 'mac_address',   'signal_value', 'f8:59:' || substr(md5(random()::text),1,6)),
+      jsonb_build_object('signal_type', 'board_serial',  'signal_value', 'board-s58t-' || gen_random_uuid()),
+      jsonb_build_object('signal_type', 'storage_serial','signal_value', 'nvme-s58t-' || gen_random_uuid())));
+
+  -- 58.3 the 0214 predicate: no QA and no approval evidence -> ineligible;
+  -- approval evidence in development -> eligible.
+  select eligible, reasons into v_eligible, v_reasons
+    from kitluy_devices.evaluate_provisioning_eligibility_v1(v_term);
+  if v_eligible then
+    raise exception 'ASSERT FAIL 58: an unapproved, untested terminal read as eligible';
+  end if;
+  insert into kitluy_devices.device_lifecycle_events
+    (device_id, from_state, to_state, reason_code, actor_ref, detail)
+  values (v_term, 'manufactured', 'enrolled', 'HET_HARDWARE_VERIFIED_AND_APPROVED', 'OP-S58',
+          jsonb_build_object('environment', 'development', 'reason', 'section 58'));
+  select eligible, reasons into v_eligible, v_reasons
+    from kitluy_devices.evaluate_provisioning_eligibility_v1(v_term);
+  if not v_eligible then
+    raise exception 'ASSERT FAIL 58: an Admin-approved development terminal is not eligible: %', v_reasons;
+  end if;
+
+  -- 58.4 the seat: generated name, validated roles, wrong vertical refused.
+  v_r := kitluy_devices.define_physical_terminal_v1(v_store, v_location, null,
+           array['retail.t1.cashier'], 'partner/s58');
+  if v_r->>'refusal_code' <> 'KLUY-PHYSTERM-ROLE-VERTICAL' then
+    raise exception 'ASSERT FAIL 58: a role from another vertical was accepted: %', v_r;
+  end if;
+  v_r := kitluy_devices.define_physical_terminal_v1(v_store, v_location, null,
+           array['laundry.t1.intake_cashier', 'laundry.t2.customer_display'], 'partner/s58');
+  if v_r->>'outcome' <> 'DEFINED' or (v_r->>'label') !~ '^Terminal [0-9]+$' then
+    raise exception 'ASSERT FAIL 58: seat definition with a generated name failed: %', v_r;
+  end if;
+  v_seat := (v_r->>'physical_terminal_id')::uuid;
+
+  -- 58.5 the session, then the code alone.
+  v_digest := encode(sha256(convert_to(v_code, 'UTF8')), 'hex');
+  v_r := kitluy_devices.open_terminal_pairing_session_v1(v_seat, v_digest, 900, 'partner/s58');
+  -- The session names AN active Hub at the scope. A long-lived stack may hold
+  -- an earlier projected Hub at the same scope, and the door picks the earliest
+  -- projection; what matters is that it is a projected store_hub HERE.
+  if v_r->>'outcome' <> 'OPENED' or not exists (
+    select 1 from kitluy_devices.device_assignment_projections p
+      join kitluy_devices.devices d on d.id = p.device_id and d.device_class = 'store_hub'
+     where p.device_id = (v_r->>'store_hub_device_id')::uuid
+       and p.digital_store_id = v_store and p.store_location_id = v_location) then
+    raise exception 'ASSERT FAIL 58: session did not open against an active Hub at the scope: %', v_r;
+  end if;
+  set local role kitluy_terminal_pairing_service;
+  v_r := kitluy_devices.evaluate_terminal_pairing_session_v1('ZZZZ1111', v_term, 'device/s58');
+  if v_r->>'refusal_code' <> 'KLUY-TERMSESSION-INVALID' then
+    raise exception 'ASSERT FAIL 58: a wrong code was not refused as invalid: %', v_r;
+  end if;
+  v_r := kitluy_devices.evaluate_terminal_pairing_session_v1(v_code, v_hub, 'device/s58');
+  if v_r->>'refusal_code' <> 'KLUY-TERMSESSION-DEVICE-INELIGIBLE' then
+    raise exception 'ASSERT FAIL 58: a Store Hub presenting a terminal code was not refused: %', v_r;
+  end if;
+  v_r := kitluy_devices.evaluate_terminal_pairing_session_v1(lower(v_code), v_term, 'device/s58');
+  if v_r->>'outcome' <> 'MATCH_READY' or (v_r->>'digital_store_id')::uuid <> v_store
+     or v_r->'terminal_profile_keys' <> '["laundry.t1.intake_cashier", "laundry.t2.customer_display"]'::jsonb then
+    raise exception 'ASSERT FAIL 58: the right code from the approved terminal did not match: %', v_r;
+  end if;
+  v_r := kitluy_devices.consume_terminal_pairing_session_v1((v_r->>'session_id')::uuid, v_term, 'device/s58');
+  if v_r->>'outcome' <> 'CONSUMED' or v_r->>'lifecycle_state' <> 'awaiting_trust' then
+    raise exception 'ASSERT FAIL 58: consumption failed: %', v_r;
+  end if;
+  reset role;
+
+  -- 58.6 what consumption left behind.
+  select count(*) into v_count from kitluy_devices.device_assignments
+   where device_id = v_term and state = 'pending_trust';
+  if v_count <> 1 then
+    raise exception 'ASSERT FAIL 58: expected one pending_trust assignment, found %', v_count;
+  end if;
+  select count(*) into v_count from kitluy_devices.device_terminal_assignments
+   where device_id = v_term and state = 'pending_trust';
+  if v_count <> 2 then
+    raise exception 'ASSERT FAIL 58: expected two terminal assignments, found %', v_count;
+  end if;
+  if (select lifecycle_state from kitluy_devices.devices where id = v_term) <> 'awaiting_trust' then
+    raise exception 'ASSERT FAIL 58: the paired terminal is not awaiting_trust';
+  end if;
+  if (select bound_device_id from kitluy_devices.physical_terminals where id = v_seat) <> v_term then
+    raise exception 'ASSERT FAIL 58: the seat is not bound to the paired terminal';
+  end if;
+  select count(*) into v_count from kitluy_devices.terminal_pairing_sessions
+   where physical_terminal_id = v_seat and state = 'consumed' and paired_device_id = v_term;
+  if v_count <> 1 then
+    raise exception 'ASSERT FAIL 58: the session was not consumed against the terminal';
+  end if;
+  if (select failed_attempt_count from kitluy_devices.terminal_pairing_sessions
+       where physical_terminal_id = v_seat and state = 'consumed') <> 1 then
+    raise exception 'ASSERT FAIL 58: the Hub presentation did not spend exactly one attempt';
+  end if;
+  select count(*) into v_count from kitluy_devices.physical_terminal_events
+   where physical_terminal_id = v_seat
+     and event_type in ('DEFINED', 'SESSION_OPENED', 'SESSION_FAILED_ATTEMPT', 'SESSION_CONSUMED', 'DEVICE_BOUND');
+  if v_count <> 5 then
+    raise exception 'ASSERT FAIL 58: expected five seat events, found %', v_count;
+  end if;
+  begin
+    delete from kitluy_devices.physical_terminal_events where physical_terminal_id = v_seat;
+    raise exception 'ASSERT FAIL 58: the seat event log accepted a delete';
+  exception when others then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+  end;
+
+  raise notice 'PASS section 58: physical terminals + terminal pairing sessions (0213) and the single eligibility predicate (0214): forced RLS, no browser reach, identities hold only their doors, approval evidence counts in development, generated name, vertical-checked roles, session opens against the active Hub, code resolves alone, wrong code unspent, wrong device spends one, consumption = one assignment + two terminal assignments + bound seat + consumed session, events append-only';
+exception when others then
+  begin
+    reset role;
+  exception when others then null;
+  end;
+  raise;
+end $section58$;
+
+
+-- ============================================================================
+-- SECTION 59 — Digital Store creation (migration 0215).
+--
+-- Proved here: the door is reachable by service_role and by no browser role;
+-- HET_PLATFORM_ADMIN holds store.digital_store.create and DIGITAL_STORE_STAFF
+-- does not; a Store is created in DRAFT under the Tenant with its first
+-- Location and link, an audit row, and a digital_store scope for the Tenant's
+-- existing Partner staff; a ROADMAP vertical, a duplicate code, a blank reason
+-- and a pilot request without a second approver are refused.
+-- ============================================================================
+do $section59$
+declare
+  v_tenant uuid := '00000000-0000-4000-8000-000000000011';
+  v_actor uuid := '00000000-0000-4000-8000-000000000001';
+  v_r jsonb;
+  v_store uuid;
+  v_refused integer := 0;
+  v_code text := 'S59-' || upper(substr(md5(random()::text), 1, 8));
+begin
+  if has_function_privilege('authenticated', 'kitluy_core.create_digital_store_v1(uuid, text, text, text, jsonb, uuid, text, text, boolean, text)', 'execute')
+     or has_function_privilege('anon', 'kitluy_core.create_digital_store_v1(uuid, text, text, text, jsonb, uuid, text, text, boolean, text)', 'execute') then
+    raise exception 'ASSERT FAIL 59: a browser role can create a Digital Store';
+  end if;
+  if exists (
+    select 1 from kitluy_auth.role_permission_grants g
+      join kitluy_auth.role_templates rt on rt.id = g.role_template_id
+      join kitluy_auth.permissions p on p.id = g.permission_id
+     where rt.role_key = 'DIGITAL_STORE_STAFF' and p.permission_key = 'store.digital_store.create') then
+    raise exception 'ASSERT FAIL 59: a Partner role holds Store creation';
+  end if;
+
+  set local role service_role;
+  v_r := kitluy_core.create_digital_store_v1(v_tenant, v_code, 'Section 59 Store', 'laundry',
+           '{"location_code": "S59L", "name": "Section 59 Location"}'::jsonb,
+           v_actor, 'section 59', 'development', true, null);
+  if v_r->>'outcome' <> 'CREATED' or v_r->>'status' <> 'DRAFT' or v_r->>'store_location_id' is null then
+    raise exception 'ASSERT FAIL 59: creation did not return a DRAFT Store with its Location: %', v_r;
+  end if;
+  v_store := (v_r->>'digital_store_id')::uuid;
+
+  begin
+    perform kitluy_core.create_digital_store_v1(v_tenant, v_code, 'Again', 'laundry', null, v_actor, 'dup', 'development', false, null);
+    raise exception 'ASSERT FAIL 59: a duplicate store code was accepted';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-STORE-CODE-TAKEN%' then raise exception 'ASSERT FAIL 59: wrong sentinel for a duplicate code: %', sqlerrm; end if;
+    v_refused := v_refused + 1;
+  end;
+  begin
+    perform kitluy_core.create_digital_store_v1(v_tenant, v_code || '-B', 'Roadmap', 'grocery', null, v_actor, 'roadmap', 'development', false, null);
+    raise exception 'ASSERT FAIL 59: a ROADMAP vertical was accepted';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-STORE-VERTICAL-NOT-ACTIVE%' then raise exception 'ASSERT FAIL 59: wrong sentinel for a roadmap vertical: %', sqlerrm; end if;
+    v_refused := v_refused + 1;
+  end;
+  begin
+    perform kitluy_core.create_digital_store_v1(v_tenant, v_code || '-C', 'No reason', 'laundry', null, v_actor, '  ', 'development', false, null);
+    raise exception 'ASSERT FAIL 59: a blank reason was accepted';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-STORE-NO-REASON%' then raise exception 'ASSERT FAIL 59: wrong sentinel for a blank reason: %', sqlerrm; end if;
+    v_refused := v_refused + 1;
+  end;
+  begin
+    perform kitluy_core.create_digital_store_v1(v_tenant, v_code || '-D', 'Pilot', 'laundry', null, v_actor, 'pilot', 'pilot', false, null);
+    raise exception 'ASSERT FAIL 59: pilot creation without a second approver was accepted';
+  exception when raise_exception then
+    if sqlerrm like 'ASSERT FAIL%' then raise; end if;
+    if sqlerrm not like '%KLUY-STORE-FOUR-EYES-REQUIRED%' then raise exception 'ASSERT FAIL 59: wrong sentinel for four-eyes: %', sqlerrm; end if;
+    v_refused := v_refused + 1;
+  end;
+  reset role;
+
+  if not exists (select 1 from kitluy_core.digital_stores where id = v_store and tenant_id = v_tenant and status = 'DRAFT' and primary_vertical_code = 'LAUNDRY') then
+    raise exception 'ASSERT FAIL 59: the Store row is not as returned';
+  end if;
+  if not exists (select 1 from kitluy_core.store_locations sl join kitluy_core.digital_store_location_links l on l.store_location_id = sl.id where sl.digital_store_id = v_store and l.digital_store_id = v_store) then
+    raise exception 'ASSERT FAIL 59: the first Location or its link is missing';
+  end if;
+  if not exists (select 1 from kitluy_audit.audit_logs where action = 'digital_store.created' and resource_id = v_store and actor_id = v_actor and permission_key = 'store.digital_store.create') then
+    raise exception 'ASSERT FAIL 59: no audit row for the creation';
+  end if;
+  if (v_r->>'partner_staff_granted')::integer <> (
+       select count(*) from kitluy_auth.assignment_scopes s where s.scope_type = 'digital_store' and s.scope_id = v_store) then
+    raise exception 'ASSERT FAIL 59: the granted scope count disagrees with the rows written';
+  end if;
+  if v_refused <> 4 then
+    raise exception 'ASSERT FAIL 59: expected 4 refusals, got %', v_refused;
+  end if;
+  raise notice 'PASS section 59: Digital Store creation (0215): Admin-only door, DRAFT Store + first Location + link + audit row + Partner staff scope, duplicate code / roadmap vertical / blank reason / pilot without second approver refused';
+exception when others then
+  begin
+    reset role;
+  exception when others then null;
+  end;
+  raise;
+end $section59$;
+
 rollback;

@@ -65,6 +65,24 @@ DEVICE_MODULES=(
   # shim and no unit to run it, so it was dead weight. The Hub's screen is
   # bin/hub-pairing-ui, which renders the owner decision §2.3 layout and prompts.
   bin/hub-pairing-ui
+  # THE WI-FI FALLBACK. `network.js` is the only module that runs an external
+  # command, and it runs every one of them through execFile with an argv ARRAY:
+  # an SSID is attacker-chosen text broadcast by anyone with a radio, and a
+  # shell-string command would execute it. `bin/network-ui.js` is the screen the
+  # pairing console shows when — and only when — there is no usable link.
+  network bin/network-ui
+  # THE OPERATIONAL TLS IDENTITY. The Hub generates an RSA-2048 key locally,
+  # persists the request identity BEFORE asking, signs kitluy.csr.v1, verifies
+  # the returned certificate against the PINNED development root with
+  # node:crypto, and adopts atomically with the manifest committed last.
+  #
+  # node-forge is deliberately absent: it is a TEST-only dependency used to mint
+  # hostile fixtures, and `node:crypto` can parse and verify X.509 even though it
+  # cannot issue it. The device only ever needs the verifying half.
+  operational-key operational-csr-bytes operational-credential-state
+  operational-certificate-verification operational-tls-client
+  adapters/http-operational-certificate-client
+  bin/operational-tls
 )
 rm -rf "$LIB_DIR"
 mkdir -p "$LIB_DIR"
@@ -180,3 +198,69 @@ else
   echo "REFUSED: no Hub migration set at ${HUB_MIGRATIONS_SRC#"$REPO"/}" >&2
   exit 4
 fi
+
+# -----------------------------------------------------------------------------
+# The Store Hub agent, BUNDLED.
+# -----------------------------------------------------------------------------
+# Everything above ships a file CLOSURE: `dist/*.js` copied one by one, valid
+# only because the firstboot agent declares zero runtime dependencies (asserted
+# at line 153). The Hub agent cannot meet that bar — 16 workspace dependencies
+# plus `pg` — and the image ships no node_modules. So it is bundled at build time
+# into one file instead, which keeps the no-node_modules contract intact.
+#
+# THIS IS THE STEP WHOSE ABSENCE WAS D-05. The agent's source, its unit and its
+# avahi advert all existed; only this did not, so every flashable card advertised
+# `_kitluy-edge._tcp` on 7443 with nothing behind it. `runtime-manifest.json`
+# declares the component and `test/image-contents.test.sh` inspects the built
+# rootfs for it, so the two can no longer drift apart silently.
+MANIFEST="${ROOT}/runtime-manifest.json"
+[[ -f "$MANIFEST" ]] || { echo "REFUSED: no runtime manifest at ${MANIFEST#"$REPO"/}" >&2; exit 6; }
+
+HUB_AGENT_SRC="${REPO}/services/kitluy-hub-agent/dist-bundle/hub-agent.mjs"
+HUB_AGENT_DST="${BASE_OVERLAY}/usr/lib/kitluy/lib/hub-agent/main.mjs"
+
+if [[ ! -f "$HUB_AGENT_SRC" ]]; then
+  echo "REFUSED: ${HUB_AGENT_SRC#"$REPO"/} is absent — run 'pnpm --filter @kitluy-services/kitluy-hub-agent build:bundle' first." >&2
+  exit 7
+fi
+
+mkdir -p "$(dirname "$HUB_AGENT_DST")"
+cp "$HUB_AGENT_SRC" "$HUB_AGENT_DST"
+chmod 0644 "$HUB_AGENT_DST"
+
+# LOADS, not merely exists. The firstboot closure is import()-ed above for the
+# same reason: a bundle that parses on the build host but throws on first import
+# would restart-loop on a Pi in a shop, and the message would be a stack trace in
+# a journal nobody is watching.
+#
+# The module is imported for its side-effect-free top level ONLY. `main()` is
+# invoked at import, so the child is given a database URL that cannot resolve and
+# is expected to reach the KLUY-HUB-DB-UNREACHABLE refusal and exit 0 — the
+# agent's designed "configured not to serve" outcome.
+if ! KITLUY_HUB_DB_URL="postgresql://postgres@127.0.0.1:1/kitluy_packaging_probe" \
+     node "$HUB_AGENT_DST" >/dev/null 2>&1; then
+  echo "REFUSED: the packaged Hub agent bundle does not load and refuse cleanly." >&2
+  echo "  Re-run with output:  node ${HUB_AGENT_DST}" >&2
+  exit 8
+fi
+
+# The manifest is the authority on where the shim points. Checking it here means
+# a rename in the manifest that nobody applied to the overlay fails the build.
+node -e '
+  const fs = require("fs");
+  const manifest = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  const hub = (manifest.components || []).find((c) => c.id === "hub-agent");
+  if (!hub) { console.error("REFUSED: runtime-manifest.json declares no hub-agent component."); process.exit(9); }
+  const expected = hub.source && hub.source.installTo;
+  if (expected !== "/usr/lib/kitluy/lib/hub-agent/main.mjs") {
+    console.error(`REFUSED: the manifest installs hub-agent to ${expected}, which is not where this script puts it.`);
+    process.exit(9);
+  }
+  const shim = fs.readFileSync(process.argv[2], "utf8");
+  if (!shim.includes(expected)) {
+    console.error(`REFUSED: /usr/lib/kitluy/hub-agent does not exec ${expected}.`);
+    process.exit(9);
+  }
+' "$MANIFEST" "${BASE_OVERLAY}/usr/lib/kitluy/hub-agent"
+
+echo "packaged hub agent: $(( $(stat -c '%s' "$HUB_AGENT_DST") / 1024 )) KiB bundle -> ${HUB_AGENT_DST#"$REPO"/}"

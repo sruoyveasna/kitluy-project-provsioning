@@ -1,0 +1,16 @@
+#!/bin/sh
+# KitLuy operational TLS identity client.
+#
+# The Hub generates an RSA-2048 key locally, persists its request identity BEFORE
+# asking the cloud, signs kitluy.csr.v1, verifies the returned certificate
+# against the PINNED development root, and adopts it atomically.
+#
+# The private key is created here and NEVER leaves this device. It is not in the
+# golden image, it does not enter a request body, and it is not in any log line.
+#
+# WAITING IS A HEALTHY STATE. An unpaired Hub, or one whose Store network is not
+# up yet, is doing exactly the right thing — so this runs as a loop and must
+# never be read as a boot failure. Once ADOPTED it exits immediately and makes no
+# network call on any later boot.
+set -eu
+exec /usr/bin/node /usr/lib/kitluy/lib/firstboot-agent/bin/operational-tls.js "$@"

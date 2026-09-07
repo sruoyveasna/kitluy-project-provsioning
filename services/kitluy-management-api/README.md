@@ -3,11 +3,12 @@
 Governed Management API — Admin, Chain and Partner back-office contracts and approved private integrations (RB v4 §10.1)
 
 **Status:** runtime kernel (health/readiness/version, config validation,
-graceful shutdown) and the three governed Admin READ routes below are BUILT and
-TESTED, including against the real development cloud project. No mutation
-route exists. The entry in the implementation status and evidence register has
-**not** been advanced yet — that requires the recorded evidence chain, and this
-line is a description of the code, not a register claim.
+graceful shutdown), the governed Admin READ routes, two Admin/Partner
+mutations proven on hardware (Store Hub pairing-code issuance, device-enrollment
+approval) and, since 2026-09-04, the Partner terminal provisioning routes
+(group 0213) are BUILT and TESTED. The implementation status and evidence
+register carries the evidence chain per route; this line is a description of
+the code, not a register claim.
 
 ## Ownership
 
@@ -31,10 +32,30 @@ Platform / API governance
   No specific permission; the caller must be an ACTIVE Admin.
 - `GET /management/v1/devices` — governed fleet read model (implemented).
   Requires `fleet.read`.
-- `GET /management/v1/devices/:id` — one device plus DERIVED provisioning
-  readiness (implemented). Requires `fleet.read`.
-- Remaining business contracts: placeholders pending the canonical
-  specification pack — see `docs/services/` and the source-of-truth index.
+- `GET /management/v1/devices/:id` — one device, its provisioning readiness
+  from the single database predicate (`evaluate_provisioning_eligibility_v1`,
+  group 0214) and its assignment context in words (Store, Location, roles,
+  seat). Requires `fleet.read`.
+- `GET /management/v1/devices-pending` and
+  `POST /management/v1/devices/:id/approve-enrollment` — the verify-and-approve
+  queue and decision. Require `fleet.device_enrollment.approve`.
+- `GET /management/v1/partner/stores` — the Partner's Stores and Locations,
+  each with its vertical and its Store Hub readiness. Requires
+  `fleet.hub_pairing_code.issue`.
+- `POST /management/v1/hub-pairing-codes` and
+  `GET /management/v1/hub-pairing-codes/:sessionId` — Store Hub pairing
+  session issuance and status. Require `fleet.hub_pairing_code.issue`.
+- **Pi Terminal provisioning (group 0213), all requiring
+  `fleet.terminal_pairing_code.issue` and the Store:**
+  `GET /management/v1/partner/stores/:storeId/terminals` (the named seats),
+  `POST /management/v1/partner/terminals` (define a seat with a role set;
+  name optional), `POST /management/v1/partner/terminals/:id/roles`,
+  `POST /management/v1/terminal-pairing-sessions` (one code, shown once, no
+  QR), `GET /management/v1/terminal-pairing-sessions/:id`,
+  `POST /management/v1/terminal-pairing-sessions/:id/cancel`. A seat or
+  session in another Partner's Store is reported as absent. Unknown fields
+  are refused. The Tenant is never accepted from a request.
+- Every route is declared in `openapi.yaml`.
 
 ## Authorization model
 
@@ -55,9 +76,16 @@ Owner decision **OD-ADMIN-FLEET-001**: `kitluy_devices` stays CLOSED to
 browsers. No `SELECT TO authenticated` grant is added to any device relation;
 this service is the only fleet read path.
 
-Owner decision **OD-ADMIN-PROVISION-001**: provisioning reuses the existing
-canonical `fleet.device_provisioning_code.issue` permission (migration 0163).
-No second provisioning key exists. Issuance itself is **not** implemented here.
+Owner decision **OD-ADMIN-PROVISION-001**: HET-issued provisioning codes reuse
+the canonical `fleet.device_provisioning_code.issue` permission (migration
+0163); issuance through that chain is **not** implemented here. Partner-driven
+terminal pairing is a different authority with its own key,
+`fleet.terminal_pairing_code.issue` (migration 0213, granted to
+`DIGITAL_STORE_STAFF`), because the 0163 door has no Store-scope conjunct and
+must never be reachable by a Partner. Partner routes decide the permission and
+the Store scope as two separate questions (`authorizePartnerRequest`), then
+reach the governed door as `kitluy_terminal_issuance_service`, which holds no
+table access.
 
 ## Configuration
 

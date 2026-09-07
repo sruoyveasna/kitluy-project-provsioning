@@ -31,6 +31,23 @@ mmdebstrap:
     # terminal listens for it; both sides need the resolver.
     - avahi-daemon
     - libnss-mdns
+    # WI-FI ASSOCIATION ONLY (owner decision 2026-08-24 §7).
+    #
+    # The active network stack is systemd-networkd and Ethernet DHCP already
+    # works; the ONLY missing capability is that nothing on this image can
+    # associate with an access point. `02-wlan0.network` has shipped since the
+    # rpi device layer generated it, so `wlan0` has always been ready to take a
+    # DHCP lease and has never been able to reach a state where it could.
+    #
+    # NetworkManager was rejected for this milestone: it would replace the
+    # network ACTIVATOR to obtain a capability that is missing at a lower layer,
+    # which is a larger change and a larger attack surface for no gain here.
+    #
+    # `iw` is not a dependency of the code — `wpa_cli` does the scanning — but it
+    # is what a technician needs on tty2 when a radio misbehaves, and finding a
+    # Hub with no way to inspect its own adapter costs a site visit.
+    - wpasupplicant
+    - iw
     # Storage and integrity tooling for the A/B + encrypted-data layout.
     - cryptsetup
     - e2fsprogs
@@ -87,6 +104,21 @@ mmdebstrap:
     - install -d -m 0700 "$1/var/lib/kitluy/enrollment"
     - install -d -m 0700 "$1/var/lib/kitluy/health"
     - install -d -m 0700 "$1/var/lib/kitluy/update"
+    # THE OPERATIONAL TLS CREDENTIAL DIRECTORY.
+    #
+    # Created EMPTY and 0700. The build places nothing here — not a key, not a
+    # certificate, not a request identity. All of it is generated on the device
+    # after boot, which is the entire point of proof of possession: a golden
+    # image carrying an operational key would give every Hub flashed from it the
+    # same identity, and the first one to activate would own all of them.
+    #
+    # kitluy-operational-tls.service runs ProtectSystem=strict with
+    # ReadWritePaths=/var/lib/kitluy, and systemd refuses to start a unit whose
+    # ReadWritePaths does not exist (226/NAMESPACE, before ExecStart). That is
+    # exactly how the enrollment, health and update agents crash-looped from the
+    # first real Pi boot on 2026-08-13 — so this directory is created here rather
+    # than left to first use.
+    - install -d -m 0700 "$1/var/lib/kitluy/operational"
     # THE KIOSK USER, CREATED AT BUILD TIME.
     #
     # `etc/sysusers.d/60-kitluy-terminal.conf` declares this user, and
@@ -122,7 +154,21 @@ mmdebstrap:
       KITLUY_ENROLLMENT_BASE_URL=
       KITLUY_REGISTRATION_URL=
       KITLUY_HARDWARE_PROFILE_KEY=
-      KITLUY_ENVIRONMENT=development
+      # DELIBERATELY EMPTY. The builder must state the environment explicitly.
+      #
+      # This read `development`, and that was an IMPLICIT SECURITY DEFAULT: the
+      # builder never passed IGconf_kitluy_environment, so every image ever
+      # produced declared itself a development device by omission — and two
+      # security paths key on this value. DEVELOPMENT-UNBOUND storage (a LUKS
+      # key NOT bound to the board) and the development LAN listener both open
+      # only when it reads `development`. A value nobody chose was authorising
+      # both.
+      #
+      # Empty means the readers see `unknown` (`${VAR:-unknown}` fires on empty
+      # as well as unset, and `readImageEnv` returns undefined for empty), and
+      # every development escape path REFUSES. The assertion further down makes
+      # a build that forgot to supply one fail rather than ship this.
+      KITLUY_ENVIRONMENT=
       KITLUY_DEFAULT_TIMEZONE=Asia/Phnom_Penh
       KITLUY_DEFAULT_LOCALES=km-KH,en-US
       KITLUY_BASE_PINNED=no
@@ -163,10 +209,98 @@ mmdebstrap:
         sed -i "s|^KITLUY_DEVICE_CLASS=.*|KITLUY_DEVICE_CLASS=${IGconf_kitluy_device_class}|" \
           "$1/etc/kitluy/image.env"
       fi
+      # THE ENVIRONMENT IS REQUIRED, VALIDATED, AND ASSERTED.
+      #
+      # Not "injected if supplied", like the values above. Those are addresses:
+      # a missing one produces a device that says it is unconfigured. This one
+      # gates DEVELOPMENT-UNBOUND storage and the development listener, so a
+      # missing one used to produce a device that quietly enabled both.
       if [ -n "${IGconf_kitluy_environment:-}" ]; then
+        case "${IGconf_kitluy_environment}" in
+          local|development|staging|pilot|production|disaster_recovery) ;;
+          *)
+            echo "REFUSED: KITLUY_ENVIRONMENT='${IGconf_kitluy_environment}' is not a KitLuy environment" >&2
+            exit 1
+            ;;
+        esac
         sed -i "s|^KITLUY_ENVIRONMENT=.*|KITLUY_ENVIRONMENT=${IGconf_kitluy_environment}|" \
           "$1/etc/kitluy/image.env"
       fi
+      # Fail the BUILD, not the boot. An image with no environment is one whose
+      # security posture nobody stated; shipping it and letting the device refuse
+      # at 03:00 moves a knowable build error into a shop.
+      baked="$(sed -n 's/^KITLUY_ENVIRONMENT=//p' "$1/etc/kitluy/image.env")"
+      if [ -z "$baked" ]; then
+        echo "REFUSED: this image declares no KITLUY_ENVIRONMENT." >&2
+        echo "  Pass --environment to build-rpi-image.sh. It is not defaulted:" >&2
+        echo "  DEVELOPMENT-UNBOUND storage and the development LAN listener both key on it." >&2
+        exit 1
+      fi
+    # THE PINNED DEVELOPMENT ROOT DIGEST.
+    #
+    # The Hub verifies its operational certificate against a PINNED root. A chain
+    # that verifies internally proves only that it is SELF-CONSISTENT — an
+    # attacker supplies a whole consistent chain of their own — so the pin is the
+    # only thing that makes it OURS. Without it, check 6 of the firstboot
+    # verification cannot be made and the device would be trusting whatever
+    # arrived.
+    #
+    # A SHA-256 of a public certificate. Not key material: it authorises nothing,
+    # decrypts nothing, signs nothing. `assert-no-dev-pki.mjs` exempts this exact
+    # path when the file contains nothing but a digest, and reports the same
+    # digest anywhere else — that narrowness is asserted by its own test.
+    #
+    # Injected at BUILD time from the operator's environment, never committed:
+    # the repository must not carry development CA material, which is the whole
+    # reason that guard exists.
+    - |
+      if [ -n "${IGconf_kitluy_development_root_sha256:-}" ]; then
+        printf '%s\n' "${IGconf_kitluy_development_root_sha256}" \
+          > "$1/etc/kitluy/development-root.sha256"
+        chmod 0644 "$1/etc/kitluy/development-root.sha256"
+      else
+        # ABSENT IS SAFE, and deliberately not fatal to the build. A Hub with no
+        # pin REFUSES to adopt any certificate ("blocked: no development root
+        # pin") rather than adopting an unverified one, so an image built without
+        # it is inert on this path rather than dangerous. A build that failed
+        # here would also make the image unbuildable on any machine without the
+        # development PKI, which is every CI runner.
+        echo "kitluy: no development root pin supplied; the Hub will refuse to adopt a certificate" >&2
+      fi
+    # =========================================================================
+    # THE APPLIANCE CLOCK READS Asia/Phnom_Penh, AND NOBODY IS ASKED.
+    # =========================================================================
+    # `KITLUY_DEFAULT_TIMEZONE=Asia/Phnom_Penh` has been in image.env since the
+    # file existed and is read by NO code. The built artifact carried
+    # /etc/localtime -> Europe/London and /etc/timezone = Europe/London, which is
+    # the Debian default nobody chose — so every journal line, every `date` a
+    # technician ran on tty2 and every local-time rendering on the console was
+    # seven hours out for a Cambodian shop.
+    #
+    # There is no timezone-selection step and there must never be one (owner
+    # decision 2026-08-24 §3): the installer is not asked, and the Store Location
+    # already owns the business timezone in the control plane.
+    #
+    # WHAT THIS IS NOT
+    # ----------------
+    # This is the APPLIANCE and BUSINESS presentation clock. It is NOT the
+    # trusted-time authority and it does not touch it. Trusted time is
+    # `kitluy_devices.evaluate_trusted_time_core_v1`, established server-side
+    # against the control plane's own clock, and it is stored and compared in
+    # UTC/timestamptz throughout. A device's local timezone cannot move a trusted
+    # floor by a second, and nothing here gives it a way to try.
+    #
+    # /etc is EROFS at runtime, so this must be baked here where it is still
+    # writable — the same constraint that moved the kiosk user into the build.
+    - |
+      TZ="${IGconf_kitluy_timezone:-Asia/Phnom_Penh}"
+      if [ ! -f "$1/usr/share/zoneinfo/$TZ" ]; then
+        echo "KLUY-IMAGE: unknown timezone $TZ" >&2
+        exit 1
+      fi
+      printf '%s\n' "$TZ" > "$1/etc/timezone"
+      ln -sf "/usr/share/zoneinfo/$TZ" "$1/etc/localtime"
+      sed -i "s|^KITLUY_DEFAULT_TIMEZONE=.*|KITLUY_DEFAULT_TIMEZONE=$TZ|" "$1/etc/kitluy/image.env"
     # CLONE HYGIENE (mission §15). A golden image must not carry a machine
     # identity, or every device flashed from it enrolls as the same device.
     # Truncating rather than deleting makes systemd regenerate a unique
@@ -231,6 +365,93 @@ mmdebstrap:
       NAutoVTs=0
       ReserveVT=0
       EOF
+    # =========================================================================
+    # ETHERNET IS PREFERRED. THE KERNEL DECIDES, NOT A PROGRAM.
+    # =========================================================================
+    # The rpi device layer generates 01-eth0.network and 02-wlan0.network with
+    # nothing but `DHCP=yes`, which leaves two questions unanswered:
+    #
+    #   1. With BOTH links up, which default route wins? Undefined — whichever
+    #      lease landed last. A Hub that silently moved its Store traffic onto
+    #      shop Wi-Fi because someone re-plugged a switch is a support call
+    #      nobody can reproduce.
+    #   2. `systemd-networkd-wait-online` is enabled and, by default, waits for
+    #      EVERY managed link. `wlan0` on a wired-only install never becomes
+    #      routable, so every unit ordered after `network-online.target` waits
+    #      out its timeout on every single boot.
+    #
+    # RouteMetric answers the first in the routing table, where the answer
+    # survives a reboot with nothing running and no daemon to consult.
+    # RequiredForOnline answers the second.
+    #
+    # These OVERWRITE the generated files rather than adding a drop-in: the
+    # generated content is two lines and duplicating it here is clearer than a
+    # `.d` fragment that silently depends on what upstream wrote.
+    - |
+      cat > "$1/etc/systemd/network/01-eth0.network" <<'EOF'
+      [Match]
+      Name=eth0
+
+      [Network]
+      DHCP=yes
+
+      [DHCPv4]
+      # Lower metric wins. Ethernet is the canonical Store Hub installation.
+      RouteMetric=100
+
+      [Link]
+      # A wired Hub must not report itself online before its cable is usable.
+      RequiredForOnline=yes
+      EOF
+    - |
+      cat > "$1/etc/systemd/network/02-wlan0.network" <<'EOF'
+      [Match]
+      Name=wlan0
+
+      [Network]
+      DHCP=yes
+
+      [DHCPv4]
+      # Higher metric: Wi-Fi carries Store traffic only when Ethernet cannot.
+      # When a cable is restored the kernel moves back to eth0 on its own, and
+      # the saved Wi-Fi is left in place as the fallback it is.
+      RouteMetric=600
+
+      [Link]
+      # THE BOOT-DELAY FIX. Without this, a wired-only Hub waits out
+      # systemd-networkd-wait-online's timeout on every boot because wlan0 never
+      # becomes routable. Nothing that matters is ordered behind Wi-Fi.
+      RequiredForOnline=no
+      EOF
+    # =========================================================================
+    # WHERE THE SHOP'S WI-FI PASSWORD LIVES.
+    # =========================================================================
+    # In wpa_supplicant's own configuration file, 0600 and root-owned — the
+    # operating system's credential store. It is never written into KitLuy
+    # state, KitLuy JSON, an audit record, a pairing record, a log line or
+    # telemetry, and the console derives the key with the passphrase on STDIN so
+    # it never appears in a process table either.
+    #
+    # The file SEEDED here contains no network and therefore no secret: a
+    # ctrl_interface so `wpa_cli` can reach the daemon, and `update_config=1`.
+    # The image stays zero-secret and `scan-image-secrets.sh` stays green.
+    #
+    # /etc/wpa_supplicant is declared SLOT-SHARED in slot-shared.d — see that
+    # file for why per-slot would lose the shop's Wi-Fi on every A/B update.
+    - |
+      install -d -m 0700 "$1/etc/wpa_supplicant"
+      cat > "$1/etc/wpa_supplicant/wpa_supplicant-wlan0.conf" <<'EOF'
+      ctrl_interface=/run/wpa_supplicant
+      update_config=1
+      EOF
+      chmod 0600 "$1/etc/wpa_supplicant/wpa_supplicant-wlan0.conf"
+    # The supplicant runs for wlan0 whenever the adapter exists. Debian's
+    # template unit already binds to the interface, so a board without a radio
+    # simply never starts it rather than failing.
+    - |
+      install -d "$1/etc/systemd/system/multi-user.target.wants"
+      ln -sf /lib/systemd/system/wpa_supplicant@.service \
+        "$1/etc/systemd/system/multi-user.target.wants/wpa_supplicant@wlan0.service"
     # A crypto library's own TEST VECTORS, which are 2.8 MB of PEM-shaped
     # fixtures — a third of the package — that nothing on a Hub ever executes.
     #

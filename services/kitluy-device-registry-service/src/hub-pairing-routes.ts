@@ -103,6 +103,10 @@ const CANONICAL_ERROR: Readonly<Record<HubPairingResultCode, KitluyErrorCode>> =
   CODE_REFUSED: "SCOPE_PERMISSION_DENIED",
   LOCKED: "SCOPE_PERMISSION_DENIED",
   REDEMPTION_REFUSED: "RESOURCE_VERSION_CONFLICT",
+  // A conflict with the device's CURRENT state, exactly like a version conflict:
+  // the request was well formed and the authority was genuine, and the resource
+  // is not in a state that can accept it.
+  ALREADY_ASSIGNED: "RESOURCE_VERSION_CONFLICT",
   REQUEST_INVALID: "VALIDATION_FAILED",
   INTERNAL_ERROR: "INTERNAL_ERROR",
 };
@@ -117,6 +121,10 @@ const SAFE_MESSAGE: Readonly<Record<HubPairingResultCode, string>> = {
   CODE_REFUSED: "that pairing code is not valid for this device",
   LOCKED: "too many failed attempts; ask for a new pairing code",
   REDEMPTION_REFUSED: "the pairing code could not be redeemed; ask for a new one",
+  // Deliberately does NOT say "ask for a new one". Nothing about this refusal is
+  // about the code, and a new one is refused identically at the same door.
+  ALREADY_ASSIGNED:
+    "this device is already assigned to a Store; its assignment must be revoked before it can pair again",
   REQUEST_INVALID: "the request was malformed",
   INTERNAL_ERROR: "the pairing service is unavailable",
 };

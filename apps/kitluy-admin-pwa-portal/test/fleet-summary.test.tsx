@@ -23,6 +23,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   anyDeviceHasReported,
+  KNOWN_LIFECYCLES,
   lifecycleLabel,
   summariseFleet,
 } from "../src/device-presentation.js";
@@ -42,6 +43,8 @@ function device(over: Partial<FleetDeviceView> = {}): FleetDeviceView {
     tenantReference: null,
     digitalStoreReference: null,
     locationReference: null,
+    digitalStoreLabel: null,
+    locationLabel: null,
     terminalAssignmentCount: 0,
     openIncidentCount: 0,
     lastSeenAt: null,
@@ -70,9 +73,29 @@ describe("plain words instead of the database enum", () => {
     expect(lifecycleLabel("manufactured", "km-KH")).not.toBe("manufactured");
   });
 
-  it("translates the states an operator actually meets", () => {
-    expect(lifecycleLabel("enrolled", "en-US")).toBe("Approved");
+  it("keeps the four owner-locked stages apart", () => {
+    // Factory Enrollment §7: NEW → APPROVED → ASSIGNED → ACTIVE must never
+    // collapse. "Approved" alone read as "ready"; an assigned Terminal read as
+    // the raw `awaiting_trust`.
+    expect(lifecycleLabel("enrolled", "en-US")).toBe("Approved, not assigned to a Store");
+    expect(lifecycleLabel("awaiting_trust", "en-US")).toBe(
+      "Assigned to a Store, awaiting activation",
+    );
+    expect(lifecycleLabel("active", "en-US")).toBe("Active");
     expect(lifecycleLabel("quarantined", "en-US")).toBe("Quarantined");
+  });
+
+  it("has a label for every value of the lifecycle enum, in both locales", () => {
+    // Nine values in `kitluy_devices.device_lifecycle_state`. A tenth added to
+    // the enum without a label here would reach the screen raw.
+    expect(KNOWN_LIFECYCLES).toHaveLength(9);
+    expect(KNOWN_LIFECYCLES).toContain("awaiting_trust");
+    expect(KNOWN_LIFECYCLES).toContain("restricted_investigation");
+    for (const value of KNOWN_LIFECYCLES) {
+      expect(lifecycleLabel(value, "en-US")).not.toBe(value);
+      expect(lifecycleLabel(value, "km-KH")).not.toBe(value);
+      expect(lifecycleLabel(value, "km-KH")).not.toBe(lifecycleLabel(value, "en-US"));
+    }
   });
 
   it("shows an unknown state verbatim rather than inventing a friendly word", () => {
@@ -90,6 +113,16 @@ describe("the summary counts what needs a person", () => {
     ]);
     expect(s.awaitingApproval).toBe(2);
     expect(s.total).toBe(3);
+  });
+
+  it("counts the PAIRED / ASSIGNED stage on its own", () => {
+    const s = summariseFleet([
+      device({ lifecycle: "awaiting_trust", deviceClass: "terminal", deviceReference: "A" }),
+      device({ lifecycle: "enrolled", deviceClass: "terminal", deviceReference: "B" }),
+      device({ lifecycle: "manufactured", deviceReference: "C" }),
+    ]);
+    expect(s.assignedAwaiting).toBe(1);
+    expect(s.awaitingApproval).toBe(1);
   });
 
   it("counts incidents and containment separately", () => {

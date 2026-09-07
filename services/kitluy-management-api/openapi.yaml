@@ -273,12 +273,397 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+  /management/v1/partner/stores:
+    get:
+      operationId: listPartnerStores
+      summary: The Stores and Locations a Partner may provision devices for
+      description: >-
+        Requires `fleet.hub_pairing_code.issue`. Names are read as the actor
+        under row-level security, so this can never list a Store the actor does
+        not hold. Each Store carries its primary vertical code and, when the
+        terminal dependency is wired, the readiness of its Store Hub
+        (`active`, `pending_trust` or `none`); an absent `hub` means not
+        reported, which a client must fail closed on.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: The Partner's Stores
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [stores, count]
+                properties:
+                  stores:
+                    type: array
+                    items: { $ref: "#/components/schemas/PartnerStore" }
+                  count: { type: integer }
+                  dataAsOf: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "503": { $ref: "#/components/responses/NotConfigured" }
+  /management/v1/hub-pairing-codes:
+    post:
+      operationId: openHubPairingSession
+      summary: Open a Store Hub pairing session for one Store and Location
+      description: >-
+        The code belongs to the Store; any enrolled Store Hub may use it. Returned
+        once; only its digest is stored. Opening a session revokes any session
+        already open for the same Store. Unknown fields are refused.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [digitalStoreId, storeLocationId]
+              properties:
+                digitalStoreId: { type: string, format: uuid }
+                storeLocationId: { type: string, format: uuid }
+      responses:
+        "201":
+          description: The session and its one-time code
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PairingCodeIssued" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { description: No such Store or Location }
+        "422": { description: Refused by validation or by the governed door }
+        "503": { $ref: "#/components/responses/NotConfigured" }
+  /management/v1/hub-pairing-codes/{sessionId}:
+    get:
+      operationId: readHubPairingSession
+      summary: What became of a Store Hub pairing session
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The session status. A session belonging to another Partner is reported as absent.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PairingSessionStatus" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { description: No such pairing session }
+  /management/v1/partner/stores/{storeId}/terminals:
+    get:
+      operationId: listPhysicalTerminals
+      summary: The named terminal seats of one Store
+      description: >-
+        Requires `fleet.terminal_pairing_code.issue` and the Store. Each seat
+        carries its role set, the device bound to it (if any) and its latest
+        pairing session.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: storeId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The seats
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [terminals, count]
+                properties:
+                  terminals:
+                    type: array
+                    items: { $ref: "#/components/schemas/PhysicalTerminal" }
+                  count: { type: integer }
+                  dataAsOf: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "503": { $ref: "#/components/responses/NotConfigured" }
+  /management/v1/partner/terminals:
+    post:
+      operationId: definePhysicalTerminal
+      summary: Define a named terminal seat with a role set in one of the Partner's Stores
+      description: >-
+        The name is optional; a blank name is generated (`Terminal N`). Role keys
+        have the structural shape `vertical.tN.role` and must belong to the
+        Store's vertical. The Tenant is never accepted; the door derives it.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [digitalStoreId, storeLocationId, terminalProfileKeys]
+              properties:
+                digitalStoreId: { type: string, format: uuid }
+                storeLocationId: { type: string, format: uuid }
+                label: { type: string, maxLength: 64 }
+                terminalProfileKeys:
+                  type: array
+                  minItems: 1
+                  maxItems: 8
+                  items: { type: string }
+      responses:
+        "201":
+          description: The seat
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [terminal]
+                properties:
+                  terminal: { $ref: "#/components/schemas/PhysicalTerminal" }
+                  dataAsOf: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { description: No such Store or Location }
+        "422": { description: Refused by validation or by the governed door }
+        "503": { $ref: "#/components/responses/NotConfigured" }
+  /management/v1/partner/terminals/{terminalId}/roles:
+    post:
+      operationId: setPhysicalTerminalRoles
+      summary: Replace a seat's role set
+      description: >-
+        Refused while a pairing session is open for the seat, or while a device
+        holds the assignment the seat produced. A seat in another Partner's
+        Store is reported as absent.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: terminalId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [terminalProfileKeys]
+              properties:
+                terminalProfileKeys:
+                  type: array
+                  minItems: 1
+                  maxItems: 8
+                  items: { type: string }
+      responses:
+        "200":
+          description: The seat after the change
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [terminal]
+                properties:
+                  terminal: { $ref: "#/components/schemas/PhysicalTerminal" }
+                  dataAsOf: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { description: No such terminal }
+        "422": { description: Refused by validation or by the governed door }
+        "503": { $ref: "#/components/responses/NotConfigured" }
+  /management/v1/terminal-pairing-sessions:
+    post:
+      operationId: openTerminalPairingSession
+      summary: Open a pairing session for one terminal seat and receive its code once
+      description: >-
+        One code, fifteen minutes, five attempts, single use. Opening a session
+        supersedes any open session for the same seat. Refused without an active
+        Store Hub at the seat's Location, without roles, or while a device holds
+        the seat. There is no QR: the installer types the code on the Pi.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [physicalTerminalId]
+              properties:
+                physicalTerminalId: { type: string, format: uuid }
+      responses:
+        "201":
+          description: The session and its one-time code
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TerminalPairingCodeIssued" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { description: No such terminal }
+        "422": { description: Refused by validation or by the governed door }
+        "503": { $ref: "#/components/responses/NotConfigured" }
+  /management/v1/terminal-pairing-sessions/{sessionId}:
+    get:
+      operationId: readTerminalPairingSession
+      summary: What became of a terminal pairing session
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The session status. A session belonging to another Partner is reported as absent.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TerminalPairingSessionStatus" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { description: No such pairing session }
+        "503": { $ref: "#/components/responses/NotConfigured" }
+  /management/v1/terminal-pairing-sessions/{sessionId}/cancel:
+    post:
+      operationId: cancelTerminalPairingSession
+      summary: Close an open terminal pairing session early
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        "200":
+          description: The session's state after the request
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sessionId, outcome, state]
+                properties:
+                  sessionId: { type: string, format: uuid }
+                  outcome: { type: string, enum: [cancelled, already_closed, unknown] }
+                  state: { type: string }
+                  dataAsOf: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { description: No such pairing session }
+        "503": { $ref: "#/components/responses/NotConfigured" }
+
+  /management/v1/digital-stores:
+    get:
+      operationId: listDigitalStores
+      summary: Every Digital Store with its Tenant in words (Admin)
+      description: Requires `partners.read`.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: The Stores
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [stores, count]
+                properties:
+                  stores:
+                    type: array
+                    items: { $ref: "#/components/schemas/DigitalStore" }
+                  count: { type: integer }
+                  limit: { type: integer }
+                  truncated: { type: boolean }
+                  dataAsOf: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+    post:
+      operationId: createDigitalStore
+      summary: An Admin creates a Digital Store under a Tenant
+      description: >-
+        Requires `store.digital_store.create`. The Store is created in DRAFT with
+        one primary vertical from the reference registry, optionally its first
+        Location in the same transaction, optionally visible to the Tenant's
+        existing Partner staff, with one audit row. Pilot and production require
+        a second, different approver (see `fourEyesRequired` on the options
+        route). The actor is the token's subject; unknown fields are refused.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [tenantId, storeCode, name, primaryVerticalCode, reason]
+              properties:
+                tenantId: { type: string, format: uuid }
+                storeCode: { type: string, maxLength: 40 }
+                name: { type: string, maxLength: 120 }
+                primaryVerticalCode: { type: string }
+                reason: { type: string, maxLength: 200 }
+                grantExistingPartnerStaff: { type: boolean }
+                secondApproverRef: { type: string }
+                firstLocation:
+                  type: object
+                  additionalProperties: false
+                  required: [locationCode, name]
+                  properties:
+                    locationCode: { type: string, maxLength: 40 }
+                    name: { type: string, maxLength: 120 }
+                    addressLine1: { type: string }
+                    city: { type: string }
+      responses:
+        "201":
+          description: The Store, with its audit event id
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DigitalStoreCreated" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { description: No such Tenant }
+        "422": { description: Refused by validation or by the governed door }
+        "503": { $ref: "#/components/responses/NotConfigured" }
+  /management/v1/digital-stores/options:
+    get:
+      operationId: storeCreationOptions
+      summary: What the create-Store form needs
+      description: Requires `store.digital_store.create`. Tenants with their Partner verification status and existing Partner staff count; the vertical registry verbatim; whether this environment requires a second approver.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: The options
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StoreCreationOptions" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+
 components:
   responses:
     Unauthenticated:
       description: >-
         No bearer token, or a token the auth server did not accept. Fails
         closed: an unreachable auth server is also a refusal.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    NotConfigured:
+      description: This deployment is not wired for the route (503, never 404)
       content:
         application/json:
           schema: { $ref: "#/components/schemas/ErrorEnvelope" }
@@ -405,3 +790,185 @@ components:
         reasons:
           type: array
           items: { type: string }
+    PartnerStore:
+      type: object
+      required: [digitalStoreId, digitalStoreReference, locations]
+      properties:
+        digitalStoreId: { type: string, format: uuid }
+        digitalStoreReference: { type: string, description: "store_code — name" }
+        vertical: { type: [string, "null"], description: The Store's primary vertical code, verbatim }
+        locations:
+          type: array
+          items:
+            type: object
+            required: [storeLocationId, locationReference]
+            properties:
+              storeLocationId: { type: string, format: uuid }
+              locationReference: { type: string }
+        hub:
+          type: object
+          description: Store Hub readiness; absent when not reported
+          required: [deviceReference, state]
+          properties:
+            deviceReference: { type: [string, "null"] }
+            state: { type: string, description: "active · pending_trust · none, or the stored state verbatim" }
+    PairingCodeIssued:
+      type: object
+      required: [code, sessionId, expiresAt, ttlSeconds, showOnce]
+      properties:
+        code: { type: string, description: Shown once; only its digest is stored }
+        sessionId: { type: string, format: uuid }
+        expiresAt: { type: string, format: date-time }
+        ttlSeconds: { type: integer }
+        showOnce: { type: boolean }
+        detail: { type: string }
+    PairingSessionStatus:
+      type: object
+      required: [sessionId, state, paired, locked, expiresAt]
+      properties:
+        sessionId: { type: string, format: uuid }
+        state: { type: string, description: "open · consumed · revoked · expired · locked" }
+        paired: { type: boolean }
+        pairedAt: { type: [string, "null"], format: date-time }
+        pairedDeviceId: { type: [string, "null"], format: uuid }
+        pairedDeviceReference: { type: [string, "null"] }
+        failedAttemptCount: { type: integer }
+        locked: { type: boolean }
+        expiresAt: { type: string, format: date-time }
+        dataAsOf: { type: string, format: date-time }
+    PhysicalTerminal:
+      type: object
+      required: [physicalTerminalId, digitalStoreId, storeLocationId, label, terminalProfileKeys, boundDevice, lastSession, createdAt]
+      properties:
+        physicalTerminalId: { type: string, format: uuid }
+        digitalStoreId: { type: string, format: uuid }
+        storeLocationId: { type: string, format: uuid }
+        locationReference: { type: [string, "null"] }
+        label: { type: string }
+        terminalProfileKeys: { type: array, items: { type: string } }
+        boundDevice:
+          type: [object, "null"]
+          properties:
+            deviceId: { type: string, format: uuid }
+            deviceReference: { type: string }
+            lifecycle: { type: string }
+            assignmentState: { type: [string, "null"] }
+        lastSession:
+          type: [object, "null"]
+          properties:
+            sessionId: { type: string, format: uuid }
+            state: { type: string }
+            expiresAt: { type: string, format: date-time }
+            pairedAt: { type: [string, "null"], format: date-time }
+            failedAttemptCount: { type: integer }
+            locked: { type: boolean }
+        createdAt: { type: string, format: date-time }
+    TerminalPairingCodeIssued:
+      type: object
+      required: [code, sessionId, expiresAt, ttlSeconds, showOnce, physicalTerminalId, label, terminalProfileKeys]
+      properties:
+        code: { type: string, description: Shown once; only its digest is stored. No QR is offered. }
+        sessionId: { type: string, format: uuid }
+        expiresAt: { type: string, format: date-time }
+        ttlSeconds: { type: integer }
+        showOnce: { type: boolean }
+        physicalTerminalId: { type: string, format: uuid }
+        label: { type: string }
+        terminalProfileKeys: { type: array, items: { type: string } }
+        storeHubReference: { type: [string, "null"] }
+        environment: { type: [string, "null"] }
+        detail: { type: string }
+    TerminalPairingSessionStatus:
+      type: object
+      required: [sessionId, physicalTerminalId, state, paired, expired, locked, expiresAt, terminalProfileKeys]
+      properties:
+        sessionId: { type: string, format: uuid }
+        physicalTerminalId: { type: string, format: uuid }
+        state: { type: string, description: "open · consumed · revoked · expired · locked" }
+        paired: { type: boolean }
+        expired: { type: boolean, description: Derived from the server clock for an open session past its deadline }
+        pairedAt: { type: [string, "null"], format: date-time }
+        pairedDeviceId: { type: [string, "null"], format: uuid }
+        pairedDeviceReference: { type: [string, "null"] }
+        failedAttemptCount: { type: integer }
+        locked: { type: boolean }
+        expiresAt: { type: string, format: date-time }
+        terminalProfileKeys: { type: array, items: { type: string } }
+        dataAsOf: { type: string, format: date-time }
+    AssignmentContext:
+      type: object
+      description: Where an assigned device is, in words. Null on the device detail when unassigned.
+      required: [assignmentState, terminalProfileKeys]
+      properties:
+        assignmentState: { type: string }
+        tenantReference: { type: [string, "null"] }
+        digitalStoreReference: { type: [string, "null"] }
+        locationReference: { type: [string, "null"] }
+        terminalProfileKeys: { type: array, items: { type: string } }
+        physicalTerminalId: { type: [string, "null"], format: uuid }
+        physicalTerminalLabel: { type: [string, "null"] }
+    DigitalStore:
+      type: object
+      required: [digitalStoreId, storeCode, name, primaryVerticalCode, status, tenantId, tenantReference, locations, createdAt]
+      properties:
+        digitalStoreId: { type: string, format: uuid }
+        storeCode: { type: string }
+        name: { type: string }
+        primaryVerticalCode: { type: string }
+        status: { type: string }
+        tenantId: { type: string, format: uuid }
+        tenantReference: { type: string }
+        locations:
+          type: array
+          items:
+            type: object
+            properties:
+              storeLocationId: { type: string, format: uuid }
+              locationCode: { type: string }
+              name: { type: string }
+              operatingStatus: { type: string }
+        createdAt: { type: string, format: date-time }
+    DigitalStoreCreated:
+      type: object
+      required: [digitalStoreId, storeCode, name, primaryVerticalCode, status, auditEventId, partnerStaffGranted]
+      properties:
+        digitalStoreId: { type: string, format: uuid }
+        storeCode: { type: string }
+        name: { type: string }
+        primaryVerticalCode: { type: string }
+        status: { type: string }
+        storeLocationId: { type: [string, "null"], format: uuid }
+        locationCode: { type: [string, "null"] }
+        partnerStaffGranted: { type: integer }
+        auditEventId: { type: string, format: uuid }
+        detail: { type: string }
+        dataAsOf: { type: string, format: date-time }
+    StoreCreationOptions:
+      type: object
+      required: [tenants, verticals, fourEyesRequired]
+      properties:
+        tenants:
+          type: array
+          items:
+            type: object
+            properties:
+              tenantId: { type: string, format: uuid }
+              tenantCode: { type: string }
+              displayName: { type: string }
+              status: { type: string }
+              partnerVerificationStatus: { type: [string, "null"] }
+              partnerStaffCount: { type: integer }
+        verticals:
+          type: array
+          items:
+            type: object
+            properties:
+              code: { type: string }
+              status: { type: string }
+              labels:
+                type: object
+                properties:
+                  km-KH: { type: [string, "null"] }
+                  en-US: { type: [string, "null"] }
+        fourEyesRequired: { type: boolean }
+        dataAsOf: { type: string, format: date-time }

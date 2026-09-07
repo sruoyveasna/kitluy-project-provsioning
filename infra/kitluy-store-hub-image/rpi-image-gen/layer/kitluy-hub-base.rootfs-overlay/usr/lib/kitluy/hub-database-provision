@@ -48,8 +48,39 @@ mountpoint -q "$DATA_VOLUME" \
 
 [ -x "${PG_BIN}/initdb" ] || die "PostgreSQL 15 is not installed at ${PG_BIN}"
 
-install -d -m 0755 "$SOCKET_DIR"
-chown postgres:postgres "$SOCKET_DIR"
+# THE SOCKET DIRECTORY, LEFT TO THE OS WHEN THE OS ALREADY MADE IT.
+#
+# postgresql-common ships a tmpfiles rule that creates /run/postgresql at boot
+# (mode 2775, owner postgres), and /run is a writable tmpfs even under
+# ProtectSystem=full. So it is created here ONLY when that has not happened, and
+# it is NEVER re-chmod'd. Forcing `install -d -m 0755` on the already-created
+# directory failed on a real Store Hub boot (2026-09-04) with
+#   install: cannot change permissions of '/run/postgresql': Operation not permitted
+# because the unit had it in ReadWritePaths= and systemd bind-mounts such a
+# path, so chmod of the mount root returns EPERM — and that one failure took the
+# whole Hub down (kitluy-hub-database then kitluy-hub-agent never started). The
+# unit no longer lists /run/postgresql for the same reason. The setgid bit
+# (2775) is preserved so sockets created there inherit the postgres group.
+if [ ! -d "$SOCKET_DIR" ]; then
+  install -d -m 2775 -o postgres -g postgres "$SOCKET_DIR"
+fi
+
+# THE CLUSTER IS OWNED BY `postgres`, AND `postgres` HAS TO REACH IT.
+#
+# /var/lib/kitluy is a systemd StateDirectory, and its units set the mode. When
+# that mode omitted the final execute bit, initdb failed with "could not access
+# directory /var/lib/kitluy/hub/postgresql/15/main: Permission denied" — on a
+# directory postgres owned — because it could not TRAVERSE the grandparent.
+# That cost a hardware bring-up cycle to diagnose, so it is repaired and
+# asserted here rather than assumed from a unit file that may be older than
+# this script.
+#
+# Traversal only: `chmod o+x` adds no read bit, so /var/lib/kitluy still cannot
+# be listed, and identity/ and operational/ remain 0700.
+chmod o+x /var/lib/kitluy 2>/dev/null || true
+if ! runuser -u postgres -- test -x "$DATA_VOLUME"; then
+  die "the postgres user cannot traverse ${DATA_VOLUME}; the cluster would be created where its own owner cannot reach it"
+fi
 
 # -----------------------------------------------------------------------------
 # 2. Create the cluster, once
@@ -78,8 +109,17 @@ fi
 # 3. Start it
 # -----------------------------------------------------------------------------
 if ! runuser -u postgres -- /bin/sh -c "${PG_BIN}/pg_ctl -D '${CLUSTER_DIR}' status" >/dev/null 2>&1; then
+  # The log goes INSIDE the cluster directory, not at the volume root.
+  #
+  # The volume root is the ext4 mount point, owned by root — so
+  # `-l ${DATA_VOLUME}/postgresql.log` made pg_ctl fail with "cannot create
+  # /var/lib/kitluy/hub/postgresql.log: Permission denied" and then "could not
+  # start server", which reads like a database fault rather than a
+  # file-permission one. The cluster directory is postgres-owned by
+  # construction, and keeping the log there also keeps it on the encrypted
+  # volume rather than somewhere a stray path might put it in clear.
   runuser -u postgres -- /bin/sh -c \
-    "${PG_BIN}/pg_ctl -D '${CLUSTER_DIR}' -l '${DATA_VOLUME}/postgresql.log' -w start" >/dev/null
+    "${PG_BIN}/pg_ctl -D '${CLUSTER_DIR}' -l '${CLUSTER_DIR}/postgresql.log' -w start" >/dev/null
   log "cluster started"
 fi
 
@@ -147,3 +187,43 @@ for file in "$MIGRATIONS_DIR"/*.sql; do
 done
 
 log "schema ready — ${applied} applied, ${skipped} already present"
+
+# -----------------------------------------------------------------------------
+# 5. A login the Hub agent can actually use
+# -----------------------------------------------------------------------------
+# THE MISSING LINK between "the cluster exists" and "the Hub can use it".
+#
+# The cluster is initialised `--auth=peer`, which authenticates by the OS user's
+# kernel-verified identity and requires a DATABASE ROLE OF THE SAME NAME.
+# `kitluy-hub-agent.service` runs as root, and no `root` role existed — so the
+# agent connected, was refused with "Peer authentication failed", and reported
+# KLUY-HUB-DB-UNREACHABLE against a database that was up and fully migrated.
+# That reads as a storage or migration fault and is nothing of the kind.
+#
+# Peer auth is kept precisely BECAUSE it needs no password: there is no
+# credential to bake into an image, rotate, or leak. What was missing was the
+# role, not a secret.
+#
+# The role carries NO privileges of its own. It is a doorway: the agent connects
+# as `root` and immediately SET ROLEs into the governed runtime roles, which is
+# where every grant actually lives (`hub/db.ts` assumeRole).
+AGENT_OS_USER="root"
+psql_as_postgres "-d ${HUB_DB} -c \"
+  do \\\$\\\$
+  begin
+    if not exists (select 1 from pg_roles where rolname = '${AGENT_OS_USER}') then
+      execute format('create role %I login', '${AGENT_OS_USER}');
+    end if;
+    -- Membership only. The governed roles hold the privileges; this grants the
+    -- right to become them, never a privilege directly.
+    if exists (select 1 from pg_roles where rolname = 'kitluy_hub_runtime') then
+      execute format('grant kitluy_hub_runtime to %I', '${AGENT_OS_USER}');
+    end if;
+    if exists (select 1 from pg_roles where rolname = 'kitluy_sync_worker') then
+      execute format('grant kitluy_sync_worker to %I', '${AGENT_OS_USER}');
+    end if;
+  end
+  \\\$\\\$;
+  grant connect on database ${HUB_DB} to ${AGENT_OS_USER};\"" >/dev/null
+
+log "agent login '${AGENT_OS_USER}' can assume the governed runtime roles"

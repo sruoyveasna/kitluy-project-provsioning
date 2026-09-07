@@ -11,7 +11,6 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   CANONICAL_EDGE_SCHEMAS,
-  DEFAULT_LOCAL_HUB_DB_URL,
   EDGE_DELIVERY_STATES,
   EDGE_RECONCILIATION_STATES,
   EXTERNAL_SYNC_STATUS_FUNCTION,
@@ -34,9 +33,12 @@ const REPO_ROOT = join(import.meta.dirname, "..", "..", "..");
 const MIGRATIONS_DIR = join(REPO_ROOT, "hub", "migrations");
 
 describe("local-only connection guard (KL-INF-P1-037)", () => {
-  it("defaults to the separate local Hub database", () => {
-    expect(hubDatabaseUrl({})).toBe(DEFAULT_LOCAL_HUB_DB_URL);
-    expect(DEFAULT_LOCAL_HUB_DB_URL).toContain("kitluy_hub_local");
+  it("refuses to invent a database when none is configured", () => {
+    // There is deliberately NO default. A silent fallback put a DSN with an
+    // inline password into the Raspberry Pi image, and pointed a misconfigured
+    // Hub at whatever answered on a well-known port.
+    expect(() => hubDatabaseUrl({})).toThrow(/is not set/);
+    expect(() => hubDatabaseUrl({ [HUB_DB_URL_ENV]: "   " })).toThrow(/is not set/);
   });
 
   it("accepts an explicit local override", () => {

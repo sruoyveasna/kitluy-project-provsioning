@@ -41,7 +41,12 @@ import { fileURLToPath } from "node:url";
 
 import pg from "pg";
 
-import { ALLOWED_HOSTED_DEV, deriveProjectRef } from "../database/hosted-dev-target.mjs";
+import {
+  ALLOWED_HOSTED_DEV,
+  HostedTargetRefusal,
+  assertHostedDevApiTarget,
+  assertHostedDevTarget,
+} from "../database/hosted-dev-target.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const CONFIG_DIR = resolve(REPO, "..", "..", "local-config", "het-kitluy-project");
@@ -64,10 +69,57 @@ if (projectRef === "" || supabaseUrl === "" || serviceRoleKey === "" || dbPasswo
   die("the credentials file is missing one of PROJECT_REF, URL, SERVICE_ROLE_KEY or DB_PASSWORD");
 }
 
-const dsn = `postgresql://postgres.${projectRef}:${encodeURIComponent(dbPassword)}@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres`;
-if (deriveProjectRef(dsn) !== ALLOWED_HOSTED_DEV.projectRef) {
-  die(`this seeds development identities and will only write to ${ALLOWED_HOSTED_DEV.projectRef}`);
+// =============================================================================
+// TARGET VALIDATION — BOTH DOORS, BEFORE ANY NETWORK I/O (finding D-18)
+// =============================================================================
+// This script writes to TWO destinations, and they used to be guarded very
+// differently:
+//
+//   1. a PostgreSQL DSN, checked only with `deriveProjectRef` — which proved
+//      the project reference but never the ENVIRONMENT, so nothing here refused
+//      pilot, staging or production;
+//   2. the Supabase Auth Admin API over HTTPS, which was NOT CHECKED AT ALL and
+//      is the FIRST network call the script makes. It carries the SERVICE-ROLE
+//      KEY in both `apikey` and `Authorization`, so a wrong `KITLUY_SUPABASE_URL`
+//      handed full database-bypass authority to whatever host it named.
+//
+// Both are now asserted through the ONE central guard before anything is dialled.
+// The environment is READ, never defaulted: an absent KITLUY_ENV refuses here
+// rather than resolving to the single value that is allowed to proceed.
+const environment = process.env.KITLUY_ENV?.trim() ?? "";
+if (environment === "") {
+  die(
+    "KITLUY_ENV is not set. This script writes to a hosted project and will not\n" +
+      "  assume an environment. Run it as:  KITLUY_ENV=development pnpm dev:seed:hosted-partner",
+  );
 }
+
+const dsn = `postgresql://postgres.${projectRef}:${encodeURIComponent(dbPassword)}@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres`;
+
+let apiTarget;
+let sqlTarget;
+try {
+  // The SQL door. Full canonical contract: scheme, exact host, session-mode
+  // port, database, username and project reference.
+  sqlTarget = assertHostedDevTarget({ dbUrl: dsn, environment, declaredProjectRef: projectRef });
+  // The API door. Validated as an ORIGIN, because that is what it is — and the
+  // returned origin is what the requests below are built from, so nothing the
+  // parser normalised away can be smuggled back in by string concatenation.
+  apiTarget = assertHostedDevApiTarget({
+    apiUrl: supabaseUrl,
+    environment,
+    declaredProjectRef: projectRef,
+  });
+} catch (error) {
+  // `die()` writes its own "REFUSED:" prefix and the guard's message carries
+  // one too; stripped so an operator does not read "REFUSED: REFUSED:".
+  if (error instanceof HostedTargetRefusal)
+    die(`${String(error.message).replace(/^REFUSED:\s*/, "")}\n  code: ${error.code}`);
+  throw error;
+}
+
+/** The VALIDATED origin. `supabaseUrl` is never used to build a request again. */
+const apiOrigin = apiTarget.origin;
 
 // Canonical fixture identities, matching `seed-hosted-dev-scope.mjs`.
 const STORE = "00000000-0000-4000-8000-000000000015";
@@ -82,10 +134,7 @@ async function findOrCreateUser() {
     "Content-Type": "application/json",
   };
 
-  const listed = await fetch(
-    `${supabaseUrl}/auth/v1/admin/users?page=1&per_page=200`,
-    { headers },
-  );
+  const listed = await fetch(`${apiOrigin}/auth/v1/admin/users?page=1&per_page=200`, { headers });
   if (!listed.ok) die(`could not list auth users (${listed.status})`);
   const { users } = await listed.json();
   const existing = users?.find((u) => u.email === PARTNER_EMAIL);
@@ -96,7 +145,7 @@ async function findOrCreateUser() {
   // 24 bytes of CSPRNG, base64url. This is a login credential for a development
   // control surface, so it is not a memorable string.
   const password = randomBytes(24).toString("base64url");
-  const created = await fetch(`${supabaseUrl}/auth/v1/admin/users`, {
+  const created = await fetch(`${apiOrigin}/auth/v1/admin/users`, {
     method: "POST",
     headers,
     body: JSON.stringify({ email: PARTNER_EMAIL, password, email_confirm: true }),
@@ -110,7 +159,8 @@ async function findOrCreateUser() {
 
 const user = await findOrCreateUser();
 
-const client = new pg.Client({ connectionString: dsn, connectionTimeoutMillis: 15000 });
+// D-20: the VALIDATED components, never the original string.
+const client = new pg.Client({ ...sqlTarget.connectionConfig, connectionTimeoutMillis: 15000 });
 await client.connect();
 try {
   await client.query("begin");
@@ -161,7 +211,9 @@ try {
   await client.query("commit");
 } catch (error) {
   await client.query("rollback").catch(() => undefined);
-  die(`could not grant the partner role.\n  ${error instanceof Error ? error.message : String(error)}`);
+  die(
+    `could not grant the partner role.\n  ${error instanceof Error ? error.message : String(error)}`,
+  );
 } finally {
   await client.end().catch(() => undefined);
 }

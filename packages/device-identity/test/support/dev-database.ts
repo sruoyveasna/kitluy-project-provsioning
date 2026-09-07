@@ -19,7 +19,7 @@ import pg from "pg";
 export const DEV_DB_URL_ENV = "KITLUY_DEV_DB_URL";
 
 /** Matches the local Supabase stack this repository runs against. */
-const DEFAULT_LOCAL_URL = "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
+const DEFAULT_LOCAL_URL = "postgresql://postgres:postgres@127.0.0.1:54392/postgres";
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "0.0.0.0"]);
 

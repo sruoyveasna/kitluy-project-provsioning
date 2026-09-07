@@ -24,7 +24,14 @@ LockPersonality=yes
 # The database is reachable over a UNIX socket only; it never listens on TCP, so
 # it needs no network at all.
 PrivateNetwork=yes
-ReadWritePaths=/var/lib/kitluy/hub /run/postgresql
+# NOT /run/postgresql: it is on the writable /run tmpfs and postgresql-common's
+# tmpfiles already creates it (mode 2775, owner postgres) before this unit runs.
+# Listing it here made systemd bind-mount the existing directory, and the
+# provision script's chmod of that mount root then failed with EPERM
+# (Operation not permitted) on real hardware, taking the whole Hub down
+# (2026-09-04). The provision script creates it only if absent and never
+# re-chmods it.
+ReadWritePaths=/var/lib/kitluy/hub
 Restart=no
 
 [Install]

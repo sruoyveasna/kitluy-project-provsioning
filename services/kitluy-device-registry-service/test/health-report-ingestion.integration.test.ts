@@ -14,7 +14,7 @@ import {
   type HealthReportEvent,
 } from "../src/health-report-ingestion.js";
 
-const DSN = "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
+const DSN = "postgresql://postgres:postgres@127.0.0.1:54392/postgres";
 
 async function reachable(): Promise<boolean> {
   const probe = new pg.Pool({ connectionString: DSN, max: 1, connectionTimeoutMillis: 2000 });

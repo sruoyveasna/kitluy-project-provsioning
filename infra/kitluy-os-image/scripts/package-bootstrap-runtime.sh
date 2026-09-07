@@ -10,17 +10,27 @@
 # unit or an executable of its own any more.
 #
 # The runtime itself is NOT re-implemented here. It is the compiled output of
-# services/kitluy-device-firstboot-agent, which owns firstboot identity,
-# enrollment bootstrap, health and update bootstrap and is covered by its own
-# test suite.
+# services/kitluy-device-firstboot-agent, which owns firstboot identity, cloud
+# registration, health and update bootstrap and the status screen, and is
+# covered by its own test suite.
+#
+# THE MANIFEST IS THE AUTHORITY. `runtime-manifest.json` declares every
+# component the flashable image carries; this script packages what it declares
+# and REFUSES when a declared executable is not in the overlay, when a retired
+# path is still present, or when Store-authority material has reached a
+# terminal overlay. A component that is packaged but not declared is invisible
+# to the tests, which is the failure mode the manifest exists to remove.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO="$(cd "${ROOT}/../.." && pwd)"
 AGENT="${REPO}/services/kitluy-device-firstboot-agent"
 BASE_OVERLAY="${ROOT}/rpi-image-gen/layer/kitluy-base.rootfs-overlay"
+TERMINAL_OVERLAY="${ROOT}/rpi-image-gen/layer/kitluy-pi-terminal.rootfs-overlay"
 LIB_DIR="${BASE_OVERLAY}/usr/lib/kitluy/lib/firstboot-agent"
+MANIFEST="${ROOT}/runtime-manifest.json"
 
+[[ -f "$MANIFEST" ]] || { echo "REFUSED: no runtime manifest at ${MANIFEST#"$REPO"/}" >&2; exit 6; }
 [[ -d "${AGENT}/dist" ]] || {
   echo "REFUSED: ${AGENT}/dist is absent — run 'pnpm --filter @kitluy-services/kitluy-device-firstboot-agent build' first." >&2
   exit 2
@@ -33,23 +43,26 @@ LIB_DIR="${BASE_OVERLAY}/usr/lib/kitluy/lib/firstboot-agent"
 # business carrying either, and the image zero-secret scanner correctly refuses
 # them. The fix is to ship less, not to loosen the scanner.
 #
-# This list is the transitive import closure of the five device entrypoints,
-# and `verify_closure` below fails the build if that ever stops being true.
+# This list is the transitive import closure of the device entrypoints, and
+# `verify_closure` below fails the build if that ever stops being true.
+#
+# NOT IN THIS LIST, DELIBERATELY: bin/enrollment-bootstrap, adapters/
+# http-enrollment-client and enrollment-pop-bytes — the flash-time ticket path.
+# It enrolled a device straight to `enrolled` with no Admin decision, which the
+# Factory Enrollment rule (KLD-2026-09-03-FACTORY-ENROLLMENT-001) forbids, and
+# `runtime-manifest.json` lists it under `retired`. Cloud registration is the
+# terminal's one identity path.
 DEVICE_MODULES=(
   version identity bootstrap-state
-  # image-env.js is the ONE reader of /etc/kitluy/image.env. Extracted from
-  # bin/enrollment-bootstrap so the Store Hub pairing console can share it;
-  # listed here because the emitted enrollment-bootstrap.js now imports it and
-  # `verify_closure` would otherwise fail the build.
+  # image-env.js is the ONE reader of /etc/kitluy/image.env.
   image-env
-  # enrollment.js is TYPES ONLY at runtime — the enrollment client imports its
-  # interfaces, which erase. It is listed because `verify_closure` reads the
-  # emitted imports, and the emitted enrollment-bootstrap.js does reference it.
-  enrollment enrollment-pop-bytes
   adapters/device-identity-store adapters/device-key-provider adapters/linux-hardware-probe
-  adapters/http-enrollment-client
-  bin/firstboot-identity bin/enrollment-bootstrap bin/health-reporter
-  bin/update-bootstrap bin/bootstrap-ui
+  # Cloud registration: the device announces itself and waits for Admin approval.
+  device-registration-bytes installation registration-state
+  adapters/http-registration-client
+  bin/firstboot-identity bin/health-reporter bin/update-bootstrap
+  bin/cloud-registration
+  bin/bootstrap-ui
 )
 rm -rf "$LIB_DIR"
 mkdir -p "$LIB_DIR"
@@ -125,3 +138,69 @@ fi
 find "$LIB_DIR" -type f -exec chmod 0644 {} +
 find "$LIB_DIR" -type d -exec chmod 0755 {} +
 echo "packaged $(find "$LIB_DIR" -name '*.js' | wc -l) js files into ${LIB_DIR#"$REPO"/}"
+
+# ---------------------------------------------------------------------------
+# THE MANIFEST CROSS-CHECK. What was declared is what was packaged.
+# ---------------------------------------------------------------------------
+# For every component of this image's profile:
+#   closure          -> its shim exists in an overlay, is executable, and execs
+#                       a bin/*.js that is in the closure just packaged;
+#   overlay          -> its executable exists in an overlay and is executable;
+#   package          -> nothing to package; the layer must declare the package
+#                       (asserted by systemd-runtime.test.sh);
+#   governed-release -> declares NO executable, and none is present.
+# Every unit named exists in an overlay, and `enabled` matches the presence of
+# its multi-user.target.wants symlink. Every `retired` path is ABSENT, and so is
+# every Store-authority path. Any mismatch REFUSES the build.
+node -e '
+const fs=require("fs"), path=require("path");
+const [manifestPath, libDir, ...overlays] = process.argv.slice(1);
+const m = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+const profile = (m.profiles || [])[0];
+const problems = [];
+// lstat, not existsSync: a wants entry is a SYMLINK, and following it would resolve an absolute target
+// against the build host instead of the image.
+const present = (p) => { try { fs.lstatSync(p); return true; } catch { return false; } };
+const inOverlay = (rel) => overlays.map((o) => path.join(o, rel)).find((p) => present(p));
+const isExec = (p) => { try { fs.accessSync(p, fs.constants.X_OK); return true; } catch { return false; } };
+for (const c of m.components || []) {
+  if (!(c.profiles || []).includes(profile)) continue;
+  const kind = c.source && c.source.kind;
+  if (kind === "governed-release") {
+    if (c.executable) problems.push(`${c.id}: a governed release declares no executable in the image`);
+  } else if (kind === "package") {
+    /* provided by the distribution; the layer declaration is asserted by the tests */
+  } else if (c.executable) {
+    const shim = inOverlay(c.executable);
+    if (!shim) problems.push(`${c.id}: ${c.executable} is not in any overlay`);
+    else if (!isExec(shim)) problems.push(`${c.id}: ${c.executable} is not executable`);
+    else if (kind === "closure") {
+      const text = fs.readFileSync(shim, "utf8");
+      const match = text.match(/\/usr\/lib\/kitluy\/lib\/firstboot-agent\/(bin\/[a-z0-9-]+)\.js/);
+      if (!match) problems.push(`${c.id}: shim ${c.executable} does not exec a packaged bin/*.js`);
+      else if (!fs.existsSync(path.join(libDir, `${match[1]}.js`))) problems.push(`${c.id}: shim execs ${match[1]}.js, which was not packaged`);
+      else if (c.source.entry && c.source.entry !== match[1]) problems.push(`${c.id}: manifest entry ${c.source.entry} but the shim execs ${match[1]}`);
+    }
+  }
+  if (c.unit) {
+    if (!inOverlay(path.join("etc/systemd/system", c.unit))) problems.push(`${c.id}: unit ${c.unit} is not in any overlay`);
+    const wants = inOverlay(path.join("etc/systemd/system/multi-user.target.wants", c.unit));
+    if (c.enabled && !wants) problems.push(`${c.id}: declared enabled, but no multi-user.target.wants symlink for ${c.unit}`);
+    if (!c.enabled && wants) problems.push(`${c.id}: declared NOT enabled, but ${c.unit} is wanted by multi-user.target`);
+  }
+}
+for (const r of m.retired || []) {
+  if (r.unit && inOverlay(path.join("etc/systemd/system", r.unit))) problems.push(`retired unit ${r.unit} is still in an overlay`);
+  if (r.unit && inOverlay(path.join("etc/systemd/system/multi-user.target.wants", r.unit))) problems.push(`retired unit ${r.unit} is still enabled`);
+  if (r.executable && inOverlay(r.executable)) problems.push(`retired executable ${r.executable} is still in an overlay`);
+  for (const mod of r.modules || []) if (fs.existsSync(path.join(libDir, `${mod}.js`))) problems.push(`retired module ${mod}.js was packaged`);
+}
+for (const p of m.storeAuthorityMustBeAbsent || []) {
+  if (inOverlay(p)) problems.push(`Store-authority path ${p} is present in a terminal overlay`);
+}
+if (problems.length) {
+  console.error("REFUSED: runtime-manifest.json and the overlay disagree:\n  " + problems.join("\n  "));
+  process.exit(9);
+}
+console.log(`manifest cross-check: ${(m.components || []).length} components, ${(m.retired || []).length} retired path(s) absent, Store authority absent`);
+' "$MANIFEST" "$LIB_DIR" "$BASE_OVERLAY" "$TERMINAL_OVERLAY"

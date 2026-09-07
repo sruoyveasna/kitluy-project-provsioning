@@ -102,9 +102,25 @@ an artifact is never attributed to the wrong profile.
 bash infra/kitluy-store-hub-image/scripts/doctor.sh              # host readiness
 bash infra/kitluy-store-hub-image/scripts/scan-image-secrets.sh <rootfs> [more...]
 bash infra/kitluy-store-hub-image/test/build-gates.test.sh
+bash infra/kitluy-store-hub-image/test/systemd-runtime.test.sh
+bash infra/kitluy-store-hub-image/test/storage-posture.test.sh
+bash infra/kitluy-store-hub-image/test/image-contents.test.sh    # needs a BUILT rootfs
 KITLUY_RIG_UPSTREAM=infra/kitluy-store-hub-image/build/upstream \
   bash infra/kitluy-store-hub-image/test/rpi-image-gen.test.sh
 ```
+
+`image-contents.test.sh` is the only suite that inspects the rootfs the builder
+actually produced, checked against `runtime-manifest.json`. Every other suite
+reads source files or the staged tree from `build-image.sh --stage-only`, and the
+gap between those and a flashed card is where D-05 lived: the Hub agent's source,
+its unit and its avahi advert all existed, every source-level check passed, and
+no card ever carried the binary. It SKIPS when no image has been built — treat a
+skipped run as no evidence (KLD-EVIDENCE-001), not as a pass.
+
+`storage-posture.test.sh` covers the four conditions that gate DEVELOPMENT-UNBOUND
+storage. That path uses an encryption key **not bound to the board**, so it is
+refused outside `development`; those assertions are the whole safety argument and
+are mutation-tested.
 
 `scan-image-secrets.sh` checks a **built** tree, which the overlay backstop in
 `lib/common.sh` cannot: it catches what the builder, a layer hook or an

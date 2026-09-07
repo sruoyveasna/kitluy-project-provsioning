@@ -45,6 +45,10 @@ export interface FleetDeviceView {
   readonly tenantReference: string | null;
   readonly digitalStoreReference: string | null;
   readonly locationReference: string | null;
+  /** `store_code — name`, the human label; null when unassigned or unknown. */
+  readonly digitalStoreLabel: string | null;
+  /** `location_code — name`; null when unassigned or unknown. */
+  readonly locationLabel: string | null;
   readonly terminalAssignmentCount: number;
   readonly openIncidentCount: number;
   readonly lastSeenAt: string | null;
@@ -124,6 +128,83 @@ export interface FleetPage {
   readonly dataAsOf?: string;
 }
 
+export interface StoreLocationView {
+  readonly storeLocationId: string;
+  readonly locationCode: string;
+  readonly name: string;
+  readonly operatingStatus: string;
+}
+
+export interface DigitalStoreView {
+  readonly digitalStoreId: string;
+  readonly storeCode: string;
+  readonly name: string;
+  readonly primaryVerticalCode: string;
+  readonly status: string;
+  readonly tenantId: string;
+  readonly tenantReference: string;
+  readonly locations: readonly StoreLocationView[];
+  readonly createdAt: string;
+}
+
+export interface StoreListPage {
+  readonly stores: readonly DigitalStoreView[];
+  readonly count: number;
+  readonly limit: number;
+  readonly truncated: boolean;
+  readonly dataAsOf?: string;
+}
+
+export interface TenantOption {
+  readonly tenantId: string;
+  readonly tenantCode: string;
+  readonly displayName: string;
+  readonly status: string;
+  readonly partnerVerificationStatus: string | null;
+  readonly partnerStaffCount: number;
+}
+
+export interface VerticalOption {
+  readonly code: string;
+  readonly status: string;
+  readonly labels: { readonly "km-KH": string | null; readonly "en-US": string | null };
+}
+
+export interface StoreCreationOptions {
+  readonly tenants: readonly TenantOption[];
+  readonly verticals: readonly VerticalOption[];
+  /** Told by the server so the form never hardcodes an environment rule. */
+  readonly fourEyesRequired: boolean;
+  readonly dataAsOf?: string;
+}
+
+export interface CreateStoreRequest {
+  readonly tenantId: string;
+  readonly storeCode: string;
+  readonly name: string;
+  readonly primaryVerticalCode: string;
+  readonly reason: string;
+  readonly grantExistingPartnerStaff: boolean;
+  readonly firstLocation?: {
+    readonly locationCode: string;
+    readonly name: string;
+    readonly addressLine1?: string;
+    readonly city?: string;
+  };
+  readonly secondApproverRef?: string;
+}
+
+export interface CreateStoreResult {
+  readonly digitalStoreId: string;
+  readonly storeCode: string;
+  readonly name: string;
+  readonly status: string;
+  readonly storeLocationId: string | null;
+  readonly partnerStaffGranted: number;
+  readonly auditEventId: string;
+  readonly detail: string;
+}
+
 export interface DeviceDetail {
   readonly device: FleetDeviceView;
   readonly provisioning: { readonly eligible: boolean; readonly reasons: readonly string[] };
@@ -155,7 +236,8 @@ export function classifyResponse<T>(
   const message =
     typeof errorBody.error?.message === "string" ? errorBody.error.message : "Access denied.";
 
-  if (status === 200) return { kind: "ok", value: body };
+  // Creates answer 201, as `/hub-pairing-codes` and `/digital-stores` do.
+  if (status === 200 || status === 201) return { kind: "ok", value: body };
   if (status === 401) return { kind: "unauthenticated", reason };
   if (status === 403) return { kind: "denied", reason, message };
   if (status === 404) return { kind: "not_found" };
@@ -182,6 +264,9 @@ export interface ManagementClient {
     deviceId: string,
     input: ApprovalRequest,
   ): Promise<ManagementOutcome<ApprovalResult>>;
+  listStores(): Promise<ManagementOutcome<StoreListPage>>;
+  getStoreCreationOptions(): Promise<ManagementOutcome<StoreCreationOptions>>;
+  createStore(input: CreateStoreRequest): Promise<ManagementOutcome<CreateStoreResult>>;
 }
 
 export function createManagementClient(options: ManagementClientOptions): ManagementClient {
@@ -209,7 +294,7 @@ export function createManagementClient(options: ManagementClientOptions): Manage
     try {
       body = await response.json();
     } catch {
-      if (response.status === 200) {
+      if (response.status === 200 || response.status === 201) {
         return {
           kind: "unavailable",
           detail: "The management service returned an unusable reply.",
@@ -250,7 +335,7 @@ export function createManagementClient(options: ManagementClientOptions): Manage
     try {
       body = await response.json();
     } catch {
-      if (response.status === 200) {
+      if (response.status === 200 || response.status === 201) {
         return {
           kind: "unavailable",
           detail: "The management service returned an unusable reply.",
@@ -278,5 +363,37 @@ export function createManagementClient(options: ManagementClientOptions): Manage
           ? { secondApproverRef: input.secondApproverRef.trim() }
           : {}),
       }),
+    listStores: () => request<StoreListPage>("/digital-stores"),
+    getStoreCreationOptions: () => request<StoreCreationOptions>("/digital-stores/options"),
+    // Optional members are OMITTED when blank, never sent as empty strings: the
+    // route refuses what it does not understand, and "" is not a Location.
+    createStore: (input: CreateStoreRequest) => {
+      const loc = input.firstLocation;
+      const firstLocation =
+        loc === undefined || loc.locationCode.trim() === "" || loc.name.trim() === ""
+          ? undefined
+          : {
+              locationCode: loc.locationCode.trim(),
+              name: loc.name.trim(),
+              ...(loc.addressLine1 !== undefined && loc.addressLine1.trim() !== ""
+                ? { addressLine1: loc.addressLine1.trim() }
+                : {}),
+              ...(loc.city !== undefined && loc.city.trim() !== ""
+                ? { city: loc.city.trim() }
+                : {}),
+            };
+      return post<CreateStoreResult>("/digital-stores", {
+        tenantId: input.tenantId,
+        storeCode: input.storeCode.trim(),
+        name: input.name.trim(),
+        primaryVerticalCode: input.primaryVerticalCode,
+        reason: input.reason.trim(),
+        grantExistingPartnerStaff: input.grantExistingPartnerStaff,
+        ...(firstLocation === undefined ? {} : { firstLocation }),
+        ...(input.secondApproverRef !== undefined && input.secondApproverRef.trim() !== ""
+          ? { secondApproverRef: input.secondApproverRef.trim() }
+          : {}),
+      });
+    },
   };
 }

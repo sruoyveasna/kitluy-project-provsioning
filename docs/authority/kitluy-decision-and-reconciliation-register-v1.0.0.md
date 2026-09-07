@@ -3645,6 +3645,208 @@ hosted state — this is the second time that has cost a session.
 
 ---
 
+## KLD-2026-08-26-ACTIVATION-ENFORCEMENT-001 — activation is enforced, not advisory (2026-08-26)
+
+**Closure state: DECIDED — owner remediation instruction, 2026-08-26, Phase 5.
+Built as migration group `0207`.**
+
+### Authority
+
+The independent Store Hub credential-path review of 2026-08-26, critical finding
+**C-5**:
+
+> *"`service_role` can currently execute UPDATE kitluy_devices.devices SET
+> lifecycle_state = 'active' and bypass the entire activation authority. This
+> makes certificate-backed activation advisory."*
+
+Reproduced on the development database before the fix: a device moved from
+`awaiting_trust` to `active` in one statement, with no trusted time, no
+credential, no certificate and no activation record.
+
+### Decision
+
+Two layers, and neither is redundant:
+
+1. **Privilege.** `service_role` loses INSERT, UPDATE and DELETE on
+   `kitluy_devices.devices` and keeps SELECT. Table privileges bind every
+   identity and — unlike row security — are NOT bypassed by `rolbypassrls`,
+   which `service_role` has.
+2. **A transition guard.** A BEFORE UPDATE trigger refuses any move INTO
+   `active` not made by `kitluy_activation_governor`. This covers roles that
+   legitimately hold UPDATE for other reasons (`kitluy_fleet_governor` moves
+   devices for containment and retirement) and whatever is granted UPDATE later
+   by someone who never read the migration.
+
+Layer 1 alone would leave every other UPDATE-holder able to activate; layer 2
+alone would leave `service_role` free to write every other column.
+
+### Who is allowed
+
+`activate_device_v1` is the only function in the schema that assigns
+`lifecycle_state = 'active'` to a device. It is SECURITY INVOKER, reached only
+through `attempt_activate_device_v1`, which is SECURITY DEFINER owned by
+`kitluy_activation_governor` — so `current_user` inside it is that governor.
+Determined by reading `pg_proc` for every function whose body assigns that
+state, not by assuming the list.
+
+### Why the revoke is authorised as destructive
+
+It withdraws write privileges that let the application connection identity
+bypass the activation authority entirely. No data is dropped, truncated or
+deleted, and SELECT is retained. The migration asserts on apply that
+`service_role` is left with SELECT only and that the activation governor still
+passes its own guard.
+
+---
+
+## KLD-2026-08-26-CREDENTIAL-PATH-SEPARATION-001 — the connection identity must enter a role (2026-08-26)
+
+**Closure state: DECIDED — owner remediation instruction, 2026-08-26, Phase 4.
+Built as migration group `0206`. Closes D-07.**
+
+### Authority
+
+The independent Store Hub credential-path review of 2026-08-26 returned
+**REJECTED** with critical finding **C-4**:
+
+> *"`service_role` effectively inherits kitluy_issuance_service,
+> kitluy_activation_service, kitluy_device_certificate_issuer. Therefore
+> database separation of duty is false. Application discipline via SET ROLE is
+> not sufficient."*
+
+The owner's instruction named the shape:
+
+> *"Use the established 0173-style pattern: service_role → NOINHERIT / NOLOGIN
+> governed hinge(s) → narrow service identities"*
+
+and the evidence standard:
+
+> *"Rewrite migration assertions so they inspect EFFECTIVE inherited authority,
+> not only direct grants through information_schema.role_table_grants."*
+
+### This was a known deferral, not a new discovery
+
+Group 0173 (2026-08-06) fixed exactly this shape for the provisioning composer
+and recorded the rest in its own header:
+
+> *"RECORDED, OUT OF SCOPE: `kitluy_issuance_service` (0127) and
+> `kitluy_worker_service` (0135) are granted to `service_role` the same way and
+> therefore share this inherited-privilege property."*
+
+D-07 has carried it since. Group 0206 discharges it for the credential path.
+
+### Decision
+
+Three NOINHERIT NOLOGIN hinges — `kitluy_issuance_gateway`,
+`kitluy_activation_gateway`, `kitluy_certificate_gateway` — each holding one
+service identity, with the direct memberships revoked from `service_role` and
+the hinges granted in their place.
+
+Three rather than one, so a later decision can withdraw a single capability
+without touching the others.
+
+`ALTER ROLE service_role NOINHERIT` is deliberately NOT used: it is a
+Supabase-owned role and the attribute would reach every unrelated membership it
+holds, including memberships this repository did not create and has not audited.
+That is 0173's reasoning and it has not changed.
+
+### Why the drop is authorised as destructive
+
+The three `REVOKE`s withdraw over-broad memberships and replace each with a
+strictly narrower path to the same capability. No data is dropped, truncated or
+deleted, and no capability is lost — only its automatic grant. The migration
+asserts on apply that each service identity still holds its own door and that
+`service_role` can still ENTER the roles, so a boundary that broke the product
+would fail at apply rather than in production.
+
+### Evidence standard changed with it
+
+Every assertion in 0206 uses `has_function_privilege`, which resolves
+inheritance. The `information_schema.role_table_grants` assertions used by
+earlier groups answered "was a grant written here?" and never "can this identity
+execute?" — and passed for months while the boundary did not exist.
+
+---
+
+## KLD-2026-08-26-FIRST-ISSUANCE-RECOVERY-001 — an abandoned generation key frees its slot (2026-08-26)
+
+**Closure state: DECIDED — owner remediation instruction, 2026-08-26, Phase 3.
+Built as migration group `0205`.**
+
+### Authority
+
+The independent Store Hub credential-path review of 2026-08-26 returned
+**REJECTED** with critical finding **C-3**:
+
+> *"A bad first request can consume generation 1 permanently before X.509
+> signing finishes."*
+
+The owner's remediation instruction authorised one of two shapes:
+
+> *"A. delay irreversible generation promotion/finalization until certificate
+> artifact exists; OR B. create a governed abandon/recovery transition for an
+> incomplete first issuance."*
+
+and constrained it:
+
+> *"Do not add an unsafe reset/backdoor. Recovery must remain auditable and
+> state-machine controlled."*
+
+### Decision
+
+**Shape B**, because the transition already existed and had never worked.
+
+`abandon_generation_key_v1` (group 0161, KLRISK-DEVICE-012) sets
+`state = 'abandoned'` on a generation key. `device_generation_keys` already
+carried `abandoned_at`, `abandon_reason` and an `abandoned` enum member. What
+made it inert was `device_generation_keys_gen_key`, a PLAIN unique index over
+`(device_record_id, environment, purpose, generation)`: an abandoned row still
+occupied the slot, so abandoning a key changed a status column and freed
+nothing.
+
+Group 0205 therefore:
+
+1. **Drops** the plain unique constraint `device_generation_keys_gen_key` and
+   replaces it with the partial unique index
+   `device_generation_keys_live_gen_key`, excluding `abandoned` and `destroyed`.
+2. Makes `register_generation_key_v1` skip abandoned and destroyed rows.
+3. Adds the guards `abandon_generation_key_v1` never had.
+
+### Why the drop is authorised as destructive
+
+Dropping the constraint is the whole repair, and it is a **widening**: every row
+that satisfied the old constraint satisfies the new index. Nothing is deleted,
+no column is removed, and no data is rewritten. The migration asserts on apply
+that the partial index exists and that the ABSOLUTE fingerprint uniqueness
+(`device_generation_keys_fingerprint_key`) is untouched — freeing a generation
+must never permit a key to be reused, on this device or any other.
+
+### The guards, because making abandonment effective makes it dangerous
+
+Before 0205 abandonment could not free a slot, so its missing checks were
+harmless. Afterwards, an unguarded abandon is a key-replacement backdoor:
+abandon the active generation, register a different key, and a caller holding
+only `kitluy_issuance_service` has swapped a device's identity.
+
+Abandonment is now refused when:
+
+- the generation already carries a certificate artifact
+  (`KLUY-KEY-ABANDON-REFUSED`);
+- the key is `active`;
+- the device is `active`.
+
+What remains reachable is exactly the C-3 case — a reservation that never became
+a certificate. The row is kept and carries its reason; a credential finalized
+for that generation but holding no artifact is superseded with it, so the
+credential head cannot point at a generation whose key is gone.
+
+### Not decided here
+
+Whether pilot or production may use the same recovery. BLK-005 blocks both, and
+the shape of a hardware-rooted recovery (TPM, secure element) is unresolved.
+
+---
+
 ## KLD-2026-08-17-DEVICE-REGISTRATION-APPROVAL-001 — a generic image may register; only HET may trust (2026-08-17)
 
 **Closure state: DECIDED — owner decision, plan v1.0.0. Database layer built as
@@ -4230,3 +4432,189 @@ number of reflashes, and the screen should say so without being re-taught.
 
 Related: `KLREC-2026-08-19-DEVICE-IDENTITY-PER-SLOT-001` records the same per-slot
 problem for the device's private key, which is more serious and equally unfixed.
+
+---
+
+## KLD-2026-09-03-TERMINAL-PROVISIONING-001 — Pi Terminal provisioning and device PIN, owner goal v2.0.0 (OWNER-LOCKED 2026-09-03)
+
+Record: `docs/decisions/kitluy-terminal-transport-and-pairing-completion-owner-decision-v2.0.0.md`.
+Supersedes `kitluy-terminal-transport-and-pairing-completion-owner-decision-v1.0.0.md`
+(KLD-2026-08-05-TERMINAL-TRANSPORT-001) as the current decision-family document;
+the v1.0.0 transport principles remain preserved unless v2.0.0 changes them.
+
+Locks: Admin creates the Digital Store; one generic Pi Terminal image; graphical
+first boot; Partner provisions from Provisioning → Terminals with a short-lived
+one-time pairing session; pairing determines Store, Location, Hub, terminal
+profile(s), vertical and required application; automatic signed application
+install (Hub-cached where practical); a 4-digit Terminal PIN created twice after
+provisioning, stored ONLY as a salted one-way verifier on the Store Hub, with
+Hub-side throttling and governed Partner reset; Hub-first LAN operation whether
+WAN is online or offline.
+
+Provenance: the owner supplied the document in-session on 2026-09-03; its
+arrows, check marks and box-drawing glyphs arrived as transfer-encoding damage
+and were restored from context (precedent KLREC-2026-08-11-EDGE-003). No wording
+was altered.
+
+Owner choices recorded during development planning the same day (plan
+`okay-i-think-you-graceful-pixel.md`, approved 2026-09-03): terminal pairing
+codes stay 8-character Crockford base32 (no contract change; the six-box screen
+is adapted to eight boxes); the device id is shown verbatim as generated
+(`KL-XXXXXXXX`), no class prefix; the Pi Terminal image tree is
+`infra/kitluy-os-image`, converted in place; Slice 1 hardware tests target the
+local stack.
+
+## KLD-2026-09-03-FACTORY-ENROLLMENT-001 — Factory Enrollment before Store pairing (OWNER-LOCKED 2026-09-03)
+
+Record: `docs/decisions/kitluy-factory-enrollment-lifecycle-owner-decision-v1.0.0.md`.
+Companion to KLD-2026-09-03-TERMINAL-PROVISIONING-001.
+
+Principle (verbatim): "Factory Enrollment makes the physical Raspberry Pi known
+and approved by KitLuy and eligible for provisioning only. It does not grant
+Store operational authority. Store Hub or Pi Terminal operational authority
+begins only after successful governed pairing, assignment, required
+credential/configuration delivery, and applicable activation steps."
+
+Repository mapping (verified 2026-09-03): NEW/UNAPPROVED = `manufactured`
+(`register_device_v1`, group 0197, answers `PENDING_APPROVAL`); ENROLLMENT
+APPROVED = `enrolled` (`approve_device_enrollment_v1`, group 0197: reason,
+verification evidence, actor, four-eyes outside development, only from
+`manufactured`); PAIRED/ASSIGNED = `awaiting_trust` (group 0121 claim and
+assignment doors; Hub pairing session consumption in group 0194 requires
+`enrolled`); ACTIVE = `active` (`attempt_activate_device_v1`; `enrolled → active`
+was removed in group 0121). The Hub agent refuses to serve without a pairing
+record and an operational certificate (`KLUY-HUB-EDGE-UNPAIRED`,
+`KLUY-HUB-EDGE-NO-CREDENTIAL`). No implementation was found that grants Store
+authority on enrollment alone.
+
+Deviations recorded for correction: (1) the Pi Terminal image tree still shipped
+the ticket-based self-enrollment path — see the reconciliation entry below;
+(2) three definitions of "provisioning eligible" disagree
+(`evaluate_provisioning_eligibility_v1` in group 0188 requires a factory QA
+record, `evaluateProvisioningReadiness` in `services/kitluy-management-api/src/fleet.ts`
+does not, the pairing doors check state only) — program task KL-PT-CLOUD-202,
+owner decision 8 pending; (3) the Admin Portal has no label for `awaiting_trust`
+— program task KL-PT-PORTAL-206.
+
+## KLREC-2026-09-03-OPEN-ENROLLMENT-VS-FACTORY-ENROLLMENT-001 — development open enrollment lands a device in `enrolled` with no Admin decision (2026-09-03)
+
+**Closure state: RESOLVED for the Pi Terminal image by KL-P1-IMAGE-TERMINAL-001; the earlier decision is superseded in part, not edited.**
+
+KLD-2026-08-12-DEV-OPEN-ENROLLMENT-001 ("flash one card, copy it, every Pi
+comes online by itself") has the service mint and redeem a flash-time ticket for
+a device that presents none, through `enroll_device_v1`, which moves the device
+`manufactured → enrolled` with no human approval. KLD-2026-09-03-FACTORY-
+ENROLLMENT-001 §1 requires that "Admin explicitly approves its
+registration/enrollment" before a device is `enrolled`, and §9 treats any path
+that grants that state without approval as a defect. The two conflict in the
+development environment; the later, owner-locked rule is the higher authority.
+
+What the conflict did and did not do: the ticket path produced "`enrolled`, no
+assignment, no Tenant, no Store, no vertical" (the 2026-08-12 record's own
+words), so it never granted Store authority; it collapsed the owner's first two
+states (NEW/UNAPPROVED and ENROLLMENT APPROVED). The terminal that booted on
+2026-08-13 reached `enrolled` this way.
+
+Resolution: the Pi Terminal image retires `kitluy-enrollment-agent.service`,
+its shim and its packaged modules, and packages `kitluy-cloud-registration`
+(self-registration → `manufactured` → explicit Admin approval), as the Store
+Hub image already did (D-27). `runtime-manifest.json` lists the ticket path under
+`retired` and every image test asserts its absence. The fleet service keeps
+`--no-open-enrollment` as the proven bring-up posture; the 2026-08-12 decision
+document is left as written and is superseded in part by this entry for both
+device images. The ticket mechanism (`pnpm device:prepare`) remains in the
+codebase for the pilot/production Option B path, as that decision's §2 records.
+
+## KLD-2026-09-04-TERMINAL-PROVISIONING-CLARIFICATIONS-001 — no QR, no login tooling, optional terminal name, Phase 2 order (OWNER 2026-09-04)
+
+Owner clarifications given while planning Phase 2 of the Pi Terminal
+provisioning program (plan file recorded under
+KLD-2026-09-03-TERMINAL-PROVISIONING-001), in answer to four planning
+questions:
+
+1. **No QR code.** A Pi Terminal has no camera; the installer types the
+   8-character pairing code. The words "code and/or QR" in owner decision
+   v2.0.0 §6 are satisfied by the code alone. No QR dependency, no QR payload
+   in any API response, no QR wording in the portals.
+2. **No login tooling.** Both PWAs already sign in against the local
+   `kitluy-fresh` stack; the Admin Portal approved the Store Hub there on
+   2026-08-31. The earlier note that "the local seed provides no login" is
+   stale for that stack. The Management API keeps its manual
+   `node dist/main.js` recipe.
+3. **Terminal name is optional** (v2.0.0 §6 step 5 "optionally"). A blank
+   name becomes `Terminal 1`, `Terminal 2`, … per Digital Store, unique per
+   Store case-insensitively, editable later.
+4. **Order of Phase 2:** 2A Admin Portal lifecycle labels and terminal
+   presentation → 2B cloud doors, registry route and Management API for
+   terminal pairing → 2C Partner Portal "Provisioning → Terminals" → 2D Admin
+   creates a Digital Store.
+
+Defaults applied by the program without a further owner ask (recorded so they
+can be overruled): physical terminal = one code, a role set (decision 4); the
+Store Hub must be ACTIVE at the same tenant/store/location before a terminal
+session opens; the new `kitluy_devices` planning tables carry no browser-role
+policies (OD-ADMIN-FLEET-001); Partner visibility of a newly created Store is
+an explicit Admin checkbox, on by default; `store.digital_store.create` is
+risk class HIGH; the Admin Stores list reuses `partners.read`; the Partner
+Portal's Hub pairing screen becomes the "Store Hub" tab under a per-store
+navigation and is the default landing.
+
+## KLD-2026-09-04-TERMINAL-PAIRING-DOORS-001 — how a Pi Terminal takes a named seat (program decisions, Slice 2B, 2026-09-04)
+
+Implements KLD-2026-09-03-TERMINAL-PROVISIONING-001 §6–§7 and
+KLD-2026-09-03-FACTORY-ENROLLMENT-001 §8 in migrations 0213 and 0214, the
+device registry route `POST /v1/terminal-pairing`, and the Management API
+Partner routes under `/management/v1/partner/terminals` and
+`/management/v1/terminal-pairing-sessions`. Decisions taken by the program
+under the owner's defaults, recorded so the owner can overrule any of them:
+
+1. **One Partner permission key, `fleet.terminal_pairing_code.issue`**
+   (CRITICAL, granted to `DIGITAL_STORE_STAFF`), gating define, set roles,
+   open, cancel and observe. `fleet.device_provisioning_code.issue` (0163) is
+   deliberately not handed to Partners: its door is executable by any
+   authenticated actor and has no Store-scope conjunct.
+2. **The Store Hub must be ACTIVE** (a `device_assignment_projections` row for
+   a `store_hub` at the same tenant/store/location) before a terminal session
+   opens, and still active when the code is presented and consumed.
+   `pending_trust` is not enough in any environment (v2.0.0 §3 step 6 before
+   step 8).
+3. **The Pi path is a new session model, not the 0162–0171 chain.** Those
+   doors issue one HET code per existing terminal assignment and need the
+   assignment id first; the owner rule is the reverse order and one code with
+   a role set. `terminal_pairing_sessions` mirrors the Hub session model
+   (0194) keyed by a named seat. The 0162 chain remains for HET-issued codes.
+4. **The assignment is created inside the consume door** through the 0121
+   doors unchanged (`create_device_claim_v1` → `redeem_device_claim_v1`,
+   which moves `enrolled → awaiting_trust`, → `assign_terminal_profile_v1`
+   per role), so every 0121 refusal, the generation model and the lifecycle
+   trigger stay authoritative and nothing is written to 0121 tables directly.
+5. **Only an Admin-approved device pairs**: the evaluate door requires class
+   `terminal`, lifecycle `enrolled` and the single eligibility predicate.
+6. **One eligibility predicate (0214, resolves reconciliation deviation 2):**
+   `evaluate_provisioning_eligibility_v1` accepts a passed factory QA
+   execution OR a `HET_HARDWARE_VERIFIED_AND_APPROVED` lifecycle event for the
+   current enrollment whose environment is development or pilot; production
+   still requires QA. The Management API stopped re-implementing the rule.
+7. **No browser-role policies on the new `kitluy_devices` tables**
+   (OD-ADMIN-FLEET-001). Partner reads go through the Management API with the
+   trusted identity after `authorizePartnerRequest`; not-yours is 404.
+8. **Roles are soft-removed, never deleted**, and cannot change while a
+   session is open or while a device holds the seat's assignment.
+9. **A physical terminal has no lifecycle state and no retire door yet**; the
+   label is optional and generated (`Terminal N`) when blank; unique per Store
+   case-insensitively.
+10. **Migration 0215 from the plan was folded into 0213** (seats and sessions
+    are one concern: the roles door needs the sessions table to refuse a
+    change while a code is live).
+11. **Applied to both local stacks by psql on 2026-09-04** (`kitluy-fresh`,
+    the hardware stack, and `kitluy-repo17`, the canonical test stack, which
+    was also caught up from 0203 to 0212 the same way) with ledger rows
+    recorded, because the repository's `db:apply` wrapper refused on a
+    diverged CLI migration history. Hosted deployment stays an owner-run task.
+
+Follow-ups recorded, not done: 18 ASN.1/X.509 helper functions in
+`kitluy_devices` are still executable by PUBLIC (pre-existing; the 0213
+guard counts granted capabilities only); 0163/0171 select "the Hub" without a
+`device_class` filter; an optional 0171 response extension with the §7
+context; a retire/replace door for physical terminals; the canonical
+migration manifest lags 0188+.

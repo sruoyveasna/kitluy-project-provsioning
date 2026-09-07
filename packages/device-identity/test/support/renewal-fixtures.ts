@@ -118,6 +118,137 @@ export async function expectRefused(
 // The governed issuance gateway, over a real transaction
 // ---------------------------------------------------------------------------
 
+/** Quote a role name for SET ROLE. Roles here are catalog values, never input. */
+function quoteRole(role: string): string {
+  return `"${role.replace(/"/g, '""')}"`;
+}
+
+/**
+ * Run `body` with the governed clock pinned to `instant`.
+ *
+ * ===========================================================================
+ * WHY THIS EXISTS
+ * ===========================================================================
+ * These fixtures build credentials whose validity window sits in the PAST, so
+ * the renewal-window, overlap and expiry suites have something aged to reason
+ * about. They used to do that by handing
+ * `prepare_device_credential_issuance_v1` a `trustedTime` of their choosing,
+ * which the door copied straight into `not_before`.
+ *
+ * That is finding C-2: the caller chose the certificate's validity anchor. It
+ * was not a fixture-only shortcut — the Hub reached the same parameter with its
+ * own `requestedAt`, so a device could date its own certificate. Group 0204
+ * closed it, and the fixtures can no longer assert an anchor.
+ *
+ * They can still MOVE THE CLOCK, through the one door built for it. Everything
+ * here is transaction-local: the policy row, the role, and the override all die
+ * with the surrounding transaction, which these suites already roll back. In a
+ * real database no `test_clock_policy` row exists, `test_clock_set_v1` is
+ * refused to every runtime, service and human identity including
+ * `service_role`, and `authoritative_now_v1` therefore returns the real clock.
+ *
+ * The distinction that matters: the caller still cannot NAME the anchor. It can
+ * only ask a governed, audited authority to shift time for one transaction in a
+ * database that has deliberately opted in.
+ */
+async function withGovernedClock<T>(
+  client: pg.PoolClient,
+  instant: Date | undefined,
+  body: () => Promise<T>,
+): Promise<T> {
+  if (instant === undefined) return body();
+  const savepoint = `clk_${randomUUID().replace(/-/g, "")}`;
+  // The caller is usually already inside `set local role kitluy_issuance_service`,
+  // and that role cannot reach `kitluy_ops` at all — nor should it: a service
+  // identity that could touch the clock policy would own the clock. So the role
+  // is stepped out of and put back exactly as it was found.
+  const roleRow = await client.query<{ role: string }>("select current_user as role");
+  const callerRole = roleRow.rows[0]?.role ?? "";
+  const restoreRole = async (): Promise<void> => {
+    if (callerRole !== "") {
+      await client.query(`set local role ${quoteRole(callerRole)}`);
+    }
+  };
+
+  // WHAT THIS FIXTURE INSTALLED, so it can remove exactly that and nothing else.
+  //
+  // An earlier version of this helper inserted the policy row and granted the
+  // harness role and never took either back. Both LEAKED into the development
+  // database: `kitluy_ops.test_clock_policy` ended up with a live row and
+  // `postgres` ended up holding the clock authority, which left the sanctioned
+  // test clock ENABLED — the precise condition group 0184's governance suite
+  // exists to refuse, and it duly failed.
+  //
+  // A fixture that enables a security control must disable it again, and must
+  // only remove what it added: another session's policy row is not ours to
+  // delete.
+  let installedPolicy = false;
+  let grantedHarness = false;
+
+  await client.query(`savepoint ${savepoint}`);
+  try {
+    await client.query("reset role");
+    const inserted = await client.query(
+      `insert into kitluy_ops.test_clock_policy (environment, enabled_by, decision_ref)
+       values ('test', 'device-identity-renewal-fixtures', $1)
+       on conflict do nothing
+       returning environment`,
+      ["KLD-2026-07-31-SECURITY-TEST-CLOCK-001"],
+    );
+    installedPolicy = (inserted.rowCount ?? 0) > 0;
+
+    // UNCONDITIONAL, and that is not laziness.
+    //
+    // The obvious guard — skip the grant when `pg_has_role(..., 'member')` is
+    // already true — is wrong here. A membership granted with `set_option =
+    // false` makes that predicate TRUE while `SET ROLE` remains forbidden, and
+    // `postgres`'s memberships in this database were granted exactly that way by
+    // `supabase_admin`. The guarded version skipped the grant and every fixture
+    // then died on "permission denied to set role".
+    //
+    // Granting again is idempotent and refreshes the set option, so it is simply
+    // always done — and always undone below.
+    await client.query(
+      `do $b$ begin execute format('grant kitluy_test_harness to %I', current_user); end $b$;`,
+    );
+    grantedHarness = true;
+
+    await client.query("set local role kitluy_test_harness");
+    await client.query(`select kitluy_ops.test_clock_set_v1($1::timestamptz)`, [instant]);
+    await restoreRole();
+    return await body();
+  } finally {
+    // Hand the clock back BEFORE anything else: clearing a transaction-local
+    // setting needs no privilege, and leaving it set would make every later
+    // statement in this transaction quietly run in the past.
+    await client
+      .query(`select set_config('kitluy.test_clock_instant', '', true)`)
+      .catch(() => undefined);
+    await client.query("reset role").catch(() => undefined);
+    // Remove ONLY what this call installed. The suite's own transaction is
+    // usually rolled back, but these fixtures are also used from committing
+    // paths, and a leaked clock policy is a real security regression rather than
+    // untidiness.
+    if (installedPolicy) {
+      await client
+        .query(
+          `delete from kitluy_ops.test_clock_policy
+            where environment = 'test' and enabled_by = 'device-identity-renewal-fixtures'`,
+        )
+        .catch(() => undefined);
+    }
+    if (grantedHarness) {
+      await client
+        .query(
+          `do $b$ begin execute format('revoke kitluy_test_harness from %I', current_user); end $b$;`,
+        )
+        .catch(() => undefined);
+    }
+    await restoreRole().catch(() => undefined);
+    await client.query(`release savepoint ${savepoint}`).catch(() => undefined);
+  }
+}
+
 export function pgIssuanceGateway(client: pg.PoolClient): GovernedIssuanceGateway {
   const call = async (sql: string, params: unknown[]): Promise<Record<string, unknown>> => {
     // Each governed call is its own TRANSACTION in production, so a refusal
@@ -126,18 +257,45 @@ export function pgIssuanceGateway(client: pg.PoolClient): GovernedIssuanceGatewa
     // expected refusal aborts every later assertion in the test.
     const savepoint = `iss_${randomUUID().replace(/-/g, "")}`;
     await client.query(`savepoint ${savepoint}`);
+    // ENTER THE ISSUANCE ROLE, as the product does.
+    //
+    // These calls used to run as plain `postgres` and worked, because `postgres`
+    // inherited `service_role` and `service_role` inherited
+    // `kitluy_issuance_service`. That chain is finding C-4, and group 0206 cut
+    // it: the connection identity must now enter a role to reach a governed
+    // door, exactly as `withServiceRole()` does in the registry service.
+    //
+    // `job-fixtures.ts` had already written down why this matters — "`postgres`
+    // inherits `service_role` and would mask a missing grant, which is exactly
+    // how a boundary test passes while the boundary is broken" — and it was
+    // right: every one of these calls was passing through a boundary that did
+    // not exist.
+    const roleRow = await client.query<{ role: string }>("select current_user as role");
+    const previousRole = roleRow.rows[0]?.role ?? "";
     try {
+      await client.query(`set local role ${TEST_ROLES.issuanceService}`);
       const result = await client.query<{ result: Record<string, unknown> }>(sql, params);
       await client.query(`release savepoint ${savepoint}`);
       return result.rows[0]?.result ?? {};
     } catch (error) {
       await client.query(`rollback to savepoint ${savepoint}`).catch(() => undefined);
       throw error;
+    } finally {
+      // The savepoint rollback above already restores the role on the failure
+      // path; this covers the success path, where the role would otherwise leak
+      // into the rest of the caller's transaction.
+      if (previousRole !== "") {
+        await client.query(`set local role ${quoteRole(previousRole)}`).catch(() => undefined);
+      }
     }
   };
   return {
     async prepare(input) {
-      const row = await call(
+      // The anchor comes from the DOOR now (group 0204). The fixture's
+      // `trustedTime` no longer sets `not_before`; it says WHEN this issuance is
+      // happening, and the governed clock makes that true for one statement.
+      const row = await withGovernedClock(client, input.trustedTime, () =>
+        call(
         `select kitluy_devices.prepare_device_credential_issuance_v1(
            $1,$2::uuid,$3,$4,$5::integer,$6,$7,$8,$9,$10,$11,$12::bytea,$13,$14,$15::timestamptz,$16,$17
          ) as result`,
@@ -160,6 +318,7 @@ export function pgIssuanceGateway(client: pg.PoolClient): GovernedIssuanceGatewa
           input.trustedTimeStatus,
           input.actorRef,
         ],
+        ),
       );
       return {
         outcome: row["outcome"] as "RESERVED" | "REPLAYED_RESERVATION" | "ALREADY_ISSUED",
@@ -347,6 +506,22 @@ export async function createIncumbentFixture(
     deviceRecordId,
     `HUB-${options.label}`,
   ]);
+
+  // TRUSTED TIME, ESTABLISHED FOR REAL.
+  //
+  // This fixture used to hand `prepare_device_credential_issuance_v1` the pair
+  // (`trustedTime`, `trustedTimeStatus: "trusted"`) for a device that had never
+  // established trusted time at all, and the door believed it — that is exactly
+  // finding C-2, and 160 assertions in this package were resting on it.
+  //
+  // Group 0204 makes the door read the DEVICE'S OWN trusted-time state instead
+  // of the caller's claim, so the fixture now has to satisfy the precondition
+  // rather than assert it. The value still comes from the control plane's own
+  // clock inside the governed door; nothing here names a time.
+  await client.query(
+    `select kitluy_devices.establish_device_trusted_time_v1($1::uuid, $2::text, gen_random_uuid())`,
+    [deviceRecordId, DEVELOPMENT],
+  );
 
   const assignment = await client.query<{ assignment_generation: number }>(
     "select assignment_generation from kitluy_devices.devices where id = $1",

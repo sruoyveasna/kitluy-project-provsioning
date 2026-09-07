@@ -23,7 +23,11 @@
 # (`ReadOnlyPaths=/var/lib/kitluy`), and pairing WRITES state.
 [Unit]
 Description=KitLuy Store Hub pairing console (tty1)
-After=kitluy-firstboot.service kitluy-enrollment-agent.service
+# After cloud registration, not the retired ticket agent: the console resolves
+# the pairable device id from registration-state.json, so starting before the
+# registration agent has even attempted would show "waiting" a beat longer than
+# necessary. (Ordering, not dependence — the console polls state files anyway.)
+After=kitluy-firstboot.service kitluy-cloud-registration.service
 # The console OWNS tty1. Without this, getty prints a login prompt over the
 # pairing screen and an operator sees a login they can never satisfy.
 Conflicts=getty@tty1.service
@@ -62,6 +66,16 @@ CapabilityBoundingSet=
 # re-present a claim the cloud has already consumed. Scoped to exactly the one
 # directory it owns state in.
 ReadWritePaths=/var/lib/kitluy
+# THE WI-FI FALLBACK NEEDS SOMEWHERE TO SAVE WHAT THE INSTALLER TYPED.
+#
+# ProtectSystem=strict makes the whole filesystem read-only to this unit, so
+# without this line the network screen would scan, prompt, accept a password and
+# then fail to write it — the worst possible order to fail in.
+#
+# /etc/wpa_supplicant is a slot-shared bind mount (slot-shared.d/61-kitluy-wifi),
+# so this grants write access to the shop's own network configuration and to
+# nothing else in /etc. The file inside stays 0600 and root-owned.
+ReadWritePaths=/etc/wpa_supplicant
 
 [Install]
 WantedBy=multi-user.target

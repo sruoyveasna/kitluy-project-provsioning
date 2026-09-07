@@ -208,7 +208,32 @@ export function createIssuanceGateway(deps: IssuanceGatewayDeps): GovernedIssuan
       if (r === undefined) {
         throw new Error("KLUY-ISSUE-FINALIZE-EMPTY: the governed door returned no credential");
       }
-      return r as unknown as FinalizedCredential;
+      // MAPPED, NOT CAST.
+      //
+      // `finalize_device_credential_issuance_v1` returns the database's own
+      // snake_case shape — `credential_id`, `serial_number`,
+      // `certificate_generation`, `not_before`, `not_after`. Casting that
+      // straight to the camelCase `FinalizedCredential` compiled cleanly and
+      // produced an object whose every field was `undefined`, because a cast
+      // asserts a shape rather than creating one.
+      //
+      // It survived because this gateway had never actually run: the first
+      // caller to read `credential.notBefore` got `undefined`, built
+      // `new Date(undefined)`, and the X.509 signing failed with an error whose
+      // text deliberately withholds its cause. `prepare` above maps its fields
+      // explicitly; this one did not.
+      const raw = r as Record<string, unknown>;
+      const text = (key: string): string | undefined =>
+        typeof raw[key] === "string" ? (raw[key] as string) : undefined;
+      return {
+        outcome: raw.outcome === "ALREADY_ISSUED" ? "ALREADY_ISSUED" : "ISSUED",
+        credentialId: text("credential_id") ?? "",
+        serialNumber: text("serial_number") ?? "",
+        certificateGeneration: Number(raw.certificate_generation ?? 0),
+        notBefore: text("not_before"),
+        notAfter: text("not_after"),
+        verificationBoundary: text("verification_boundary"),
+      };
     },
 
     async recordOrphanSignature(input): Promise<void> {

@@ -14,6 +14,26 @@ Documentation=00_AI_HANDOFF/edge-platform/27_SYSTEMD_RUNTIME_RECONCILIATION.md
 # regenerate_ssh_host_keys.service to inherit. This unit is that missing half.
 Before=ssh.service
 After=local-fs.target
+# PULL IN THE SHARED /etc/ssh MOUNT, BECAUSE NOTHING ELSE DOES.
+#
+# `slot-shared-generator` writes a .mount unit for every path declared in
+# slot-shared.d, but creates the local-fs.target.wants symlink ONCE, after both
+# its loops have finished, using the `unit_name` left over from the last
+# iteration. With 60-kitluy-ssh.conf and 61-kitluy-wifi.conf declared, wifi is
+# last — so `etc-wpa_supplicant.mount` is enabled and `etc-ssh.mount` is
+# generated and never started.
+#
+# The consequence is silent and total: /etc/ssh stays on the read-only erofs
+# rootfs, `ssh-keygen -A` below fails with EROFS, ssh.service's
+# `sshd -t` precondition fails for want of host keys, and the device is
+# unreachable over SSH for ever — the exact failure this unit exists to prevent.
+#
+# Requiring the mount here fixes it without patching the pinned upstream
+# generator: the unit is generated and valid, it simply needs a consumer. This
+# unit is already Before=ssh.service, so ordering the mount ahead of it covers
+# sshd as well.
+Requires=etc-ssh.mount
+After=etc-ssh.mount
 # ssh-keygen -A is itself a no-op for any key type already present, but this
 # keeps a normal boot from spawning the unit at all. A failed condition counts
 # as success, so ssh.service's Requires= is satisfied either way.

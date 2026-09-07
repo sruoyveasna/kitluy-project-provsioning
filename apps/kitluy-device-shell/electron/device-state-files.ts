@@ -1,0 +1,170 @@
+/**
+ * Read-only readers for the device's own state, gathered into a `ShellSnapshot`.
+ *
+ * The shell runs UNPRIVILEGED and never reads a private key or writes anything
+ * under `/var/lib/kitluy`. It parses the same display-state JSON the firstboot
+ * agent writes (`registration-state.json`, `pairing-state.json`,
+ * `bootstrap-state.json`) plus sysfs link state and `/proc/net/route`. An absent
+ * or unparsable file reads as the earliest/safest value — exactly as the agent's
+ * own readers do — so a corrupt file can never wedge the screen.
+ *
+ * Paths are parameterised (`roots`) so this is testable off-device against a
+ * fixture tree, and the drift test pins these paths against the agent's exported
+ * `*_STATE_PATH` constants.
+ */
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import type {
+  NetworkState,
+  PairingPhase,
+  PairingView,
+  RegistrationPhase,
+  RegistrationView,
+  ShellSnapshot,
+} from "../src/model/shell-state.js";
+
+export interface DeviceRoots {
+  /** Default `/var/lib/kitluy`. */
+  readonly stateDir: string;
+  /** Default `/sys/class/net`. */
+  readonly netDir: string;
+  /** Default `/proc/net/route`. */
+  readonly routePath: string;
+}
+
+export const DEFAULT_ROOTS: DeviceRoots = {
+  stateDir: "/var/lib/kitluy",
+  netDir: "/sys/class/net",
+  routePath: "/proc/net/route",
+};
+
+const REGISTRATION_PHASES: readonly RegistrationPhase[] = [
+  "NOT_REGISTERED",
+  "REGISTERING",
+  "AWAITING_APPROVAL",
+  "TRUST_REVIEW_REQUIRED",
+  "APPROVED",
+  "CONTAINED",
+  "UNREACHABLE",
+];
+
+const PAIRING_PHASES: readonly PairingPhase[] = [
+  "UNPAIRED",
+  "AWAITING_CODE",
+  "SUBMITTING",
+  "PAIRED",
+  "LOCKED",
+  "ALREADY_ASSIGNED",
+];
+
+function readObject(path: string): Record<string, unknown> | null {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+    return parsed !== null && typeof parsed === "object"
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function str(raw: Record<string, unknown>, key: string): string | undefined {
+  const value = raw[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+export function readRegistration(stateDir = DEFAULT_ROOTS.stateDir): RegistrationView | null {
+  const raw = readObject(join(stateDir, "registration-state.json"));
+  if (raw === null) return null;
+  const phase = raw.phase;
+  if (typeof phase !== "string" || !REGISTRATION_PHASES.includes(phase as RegistrationPhase)) {
+    return null;
+  }
+  const deviceId = str(raw, "deviceId");
+  const detail = str(raw, "detail");
+  const keyFingerprint = str(raw, "keyFingerprint");
+  return {
+    phase: phase as RegistrationPhase,
+    ...(deviceId === undefined ? {} : { deviceId }),
+    ...(detail === undefined ? {} : { detail }),
+    ...(keyFingerprint === undefined ? {} : { keyFingerprint }),
+  };
+}
+
+export function readPairing(stateDir = DEFAULT_ROOTS.stateDir): PairingView | null {
+  const raw = readObject(join(stateDir, "pairing-state.json"));
+  if (raw === null) return null;
+  const phase = raw.phase;
+  if (typeof phase !== "string" || !PAIRING_PHASES.includes(phase as PairingPhase)) {
+    return null;
+  }
+  const detail = str(raw, "detail");
+  const deviceRecordId = str(raw, "deviceRecordId");
+  return {
+    phase: phase as PairingPhase,
+    ...(detail === undefined ? {} : { detail }),
+    ...(deviceRecordId === undefined ? {} : { deviceRecordId }),
+  };
+}
+
+/** The server record id the pairing belongs to, from bootstrap-state.json. */
+export function readDeviceRecordId(stateDir = DEFAULT_ROOTS.stateDir): string | undefined {
+  const raw = readObject(join(stateDir, "bootstrap-state.json"));
+  return raw === null ? undefined : str(raw, "deviceRecordId");
+}
+
+/**
+ * Network readiness: a link exists if any real interface (not `lo`) reports
+ * `operstate=up`; a route exists if `/proc/net/route` has a default entry
+ * (destination `00000000`). Both fail safe to `false`.
+ */
+export function readNetwork(roots: DeviceRoots = DEFAULT_ROOTS): NetworkState {
+  let hasLink = false;
+  try {
+    for (const iface of readdirSync(roots.netDir)) {
+      if (iface === "lo") continue;
+      try {
+        const state = readFileSync(join(roots.netDir, iface, "operstate"), "utf8").trim();
+        if (state === "up") {
+          hasLink = true;
+          break;
+        }
+      } catch {
+        /* interface without operstate — skip */
+      }
+    }
+  } catch {
+    /* no netDir — hasLink stays false */
+  }
+
+  let hasRoute = false;
+  try {
+    const table = readFileSync(roots.routePath, "utf8").split("\n").slice(1);
+    for (const line of table) {
+      const fields = line.split(/\s+/);
+      // fields[1] is the destination in little-endian hex; "00000000" = default.
+      if (fields[1] === "00000000") {
+        hasRoute = true;
+        break;
+      }
+    }
+  } catch {
+    /* no route file — hasRoute stays false */
+  }
+
+  return { hasLink, hasRoute };
+}
+
+export function readSnapshot(roots: DeviceRoots = DEFAULT_ROOTS): ShellSnapshot {
+  const registration = readRegistration(roots.stateDir);
+  const deviceRecordId = readDeviceRecordId(roots.stateDir);
+  return {
+    registration,
+    pairing: readPairing(roots.stateDir),
+    network: readNetwork(roots),
+    ...(registration?.keyFingerprint === undefined
+      ? {}
+      : { keyFingerprint: registration.keyFingerprint }),
+    ...(deviceRecordId === undefined ? {} : { deviceRecordId }),
+  };
+}

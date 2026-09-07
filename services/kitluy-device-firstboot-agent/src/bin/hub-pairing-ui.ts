@@ -52,6 +52,8 @@
  */
 import { createInterface } from "node:readline/promises";
 
+import { awaitNetwork, type ConsoleIo } from "./network-ui.js";
+
 import { readBootstrapState, type BootstrapState } from "../bootstrap-state.js";
 import { readImageEnv } from "../image-env.js";
 import {
@@ -63,6 +65,7 @@ import {
 import {
   readRegistrationState,
   registrationHeadline,
+  registrationPhaseLabel,
   type RegistrationState,
 } from "../registration-state.js";
 
@@ -146,7 +149,12 @@ export function render(
       ? "Assigned (awaiting trust)"
       : pairing?.phase === "LOCKED"
         ? "Unassigned (code locked)"
-        : "Unassigned";
+        : // The cloud holds a live assignment this installation has no record of
+          // — a re-flashed card on a board that already paired. "Unassigned"
+          // here would be the screen contradicting the fleet.
+          pairing?.phase === "ALREADY_ASSIGNED"
+          ? "Assigned (must be unassigned to re-pair)"
+          : "Unassigned";
 
   // KitLuy registration is a THIRD axis, not a step on the fleet line: a board
   // can be registered and unapproved, or approved and unpaired. Rendered as its
@@ -182,26 +190,6 @@ export function render(
     ...registrationNote,
     ...(message === undefined ? [] : [`  ${message}`, ""]),
   ].join("\n");
-}
-
-/** Short status word for the KitLuy row. The headline carries the explanation. */
-function registrationPhaseLabel(phase: RegistrationState["phase"]): string {
-  switch (phase) {
-    case "NOT_REGISTERED":
-      return "Not registered";
-    case "REGISTERING":
-      return "Registering";
-    case "AWAITING_APPROVAL":
-      return "Waiting for approval";
-    case "TRUST_REVIEW_REQUIRED":
-      return "Trust review required";
-    case "APPROVED":
-      return "Approved";
-    case "CONTAINED":
-      return "Stopped by KitLuy";
-    case "UNREACHABLE":
-      return "No connection";
-  }
 }
 
 /**
@@ -247,7 +235,17 @@ export function resolvePairableDeviceId(
 export function interpret(
   attempt: PairingAttempt,
   deviceRecordId: string,
-): { readonly message: string; readonly state: PairingState | null; readonly done: boolean } {
+): {
+  readonly message: string;
+  readonly state: PairingState | null;
+  readonly done: boolean;
+  /**
+   * How long to leave the outcome on the screen before prompting again.
+   * Omitted means the default. A refusal whose remedy is a phone call to
+   * KitLuy needs longer on the wall than one whose remedy is retyping.
+   */
+  readonly holdSeconds?: number;
+} {
   const now = new Date().toISOString();
 
   if (attempt.status === 200 && attempt.result === undefined) {
@@ -303,11 +301,64 @@ export function interpret(
         done: true,
       };
 
+    /**
+     * DELIBERATELY NAMES THE SECOND CAUSE, BECAUSE THE SERVER CANNOT.
+     *
+     * `CODE_REFUSED` collapses two very different situations, and the collapse
+     * is correct: `evaluate_hub_pairing_session_v1` (0194) refuses a wrong code
+     * and an ineligible device with the same external code ON PURPOSE, because
+     * `KLUY-HUBSESSION-DEVICE-INELIGIBLE` is only returned when the code MATCHED
+     * — reporting it distinctly would hand any device an oracle for discovering
+     * live pairing codes.
+     *
+     * But the console is not the server, and it leaks nothing by describing what
+     * a refusal CAN mean. A Store Hub that has paired before is
+     * `awaiting_trust`, not `enrolled`, so the gate refuses it however perfect
+     * the code is — and the old single sentence sent the installer to retype,
+     * then to fetch new codes, spending the five-attempt budget of each one.
+     * That is the loop a re-flashed Hub was stuck in: the board is resolved from
+     * hardware evidence, not storage, so a new SD card does not make it a new
+     * device.
+     */
     case "CODE_REFUSED":
       return {
-        message: "That pairing code is not valid for this device. Check it and try again.",
+        message:
+          "That pairing code was not accepted for this device. Check it and try again.\n" +
+          "  If the code is definitely correct and this Hub has paired before (for example\n" +
+          "  after replacing the SD card), it must be unassigned in KitLuy first.",
         state: null,
         done: false,
+      };
+
+    /**
+     * The device already holds a live assignment, so nothing typed here can
+     * work. The wrong advice — the advice this console gave before — is "get a
+     * new pairing code": codes are Store-scoped sessions that issue happily,
+     * and every one is refused by `create_device_claim_v1` at redemption.
+     *
+     * This is the ordinary state of a re-flashed Store Hub. The board is
+     * resolved from hardware evidence, not from storage, so a new SD card is a
+     * new INSTALLATION of the same DEVICE, and that device's assignment from
+     * its first pairing is still live in the cloud.
+     *
+     * `done: false` on purpose: the recovery is a governed cloud-side
+     * revocation, and when it lands the operator types a code on THIS screen.
+     * Returning would exit into a `Restart=always` loop and throw the message
+     * away every few seconds.
+     */
+    case "ALREADY_ASSIGNED":
+      return {
+        message:
+          "This Hub is already assigned to a Store in KitLuy, so a pairing code cannot be redeemed for it.\n" +
+          "  A new code will NOT help. Ask KitLuy to unassign this device, then pair again.",
+        state: {
+          phase: "ALREADY_ASSIGNED",
+          detail: "the cloud holds a live Store assignment for this device",
+          deviceRecordId,
+          updatedAt: now,
+        },
+        done: false,
+        holdSeconds: 60,
       };
 
     case "REDEMPTION_REFUSED":
@@ -427,11 +478,175 @@ export function looksLikeCode(raw: string): boolean {
   return CROCKFORD.test(normalisePairingCode(raw));
 }
 
+/**
+ * A prompt whose answer is never displayed.
+ *
+ * ===========================================================================
+ * THE DEFECT THIS SHAPE EXISTS TO PREVENT, FOUND BY INDEPENDENT REVIEW
+ * ===========================================================================
+ * The first version attached a raw `data` listener while the pairing console's
+ * `readline` interface was STILL ALIVE on the same stdin. readline is in
+ * terminal mode and echoes every keystroke itself, so the shop's Wi-Fi
+ * passphrase appeared on the wall-mounted console in cleartext, immediately
+ * followed by this function's asterisks:
+ *
+ *     Password: S3cretPass
+ *     **********
+ *
+ * The header claimed the opposite, and no test caught it because the UI suite
+ * injects a fake `secret()` and never runs this code.
+ *
+ * So there is now no readline interface to fight with: `main` creates one PER
+ * PROMPT and closes it, and this function owns stdin alone for its lifetime.
+ * `assertStdinIsFree` makes that structural — if a future edit reintroduces a
+ * long-lived reader, the console fails loudly instead of quietly echoing a
+ * secret.
+ *
+ * ===========================================================================
+ * BYTES ARE ACCUMULATED, NOT CHARACTERS
+ * ===========================================================================
+ * `String.fromCharCode(byte)` decoded UTF-8 as Latin-1, so `pässwörd1` became
+ * eleven mojibake characters, produced the WRONG derived key, and the installer
+ * was told their password was wrong. It also measured the 8–63 rule in bytes
+ * rather than characters. Bytes are buffered and decoded once, at the end.
+ */
+export function readSecret(prompt: string): Promise<string> {
+  const input = process.stdin;
+  // BEFORE the promise, so a busy stdin is a synchronous throw at the call site
+  // rather than a rejection something might swallow. The whole point is that
+  // this must be impossible to ignore.
+  assertStdinIsFree(input);
+
+  return new Promise((resolve) => {
+    process.stdout.write(prompt);
+    const wasRaw = input.isRaw === true;
+    if (input.isTTY) input.setRawMode(true);
+    input.resume();
+
+    let bytes: number[] = [];
+    /**
+     * ANSI escape state. 0 = text, 1 = just saw ESC, 2 = inside a CSI sequence.
+     *
+     * Two states, not one: an arrow key is `ESC [ A`, and treating `[` as the
+     * terminator (it is inside the 0x40-0x7e final-byte range) let the `A`
+     * through into the secret. A CSI sequence ends at its FINAL byte, after any
+     * parameter bytes.
+     */
+    let escape: 0 | 1 | 2 = 0;
+
+    const finish = (): void => {
+      input.off("data", onData);
+      input.off("end", onEnd);
+      if (input.isTTY) input.setRawMode(wasRaw);
+      input.pause();
+      process.stdout.write("\n");
+      resolve(Buffer.from(bytes).toString("utf8"));
+    };
+    const onEnd = (): void => {
+      // stdin closed — a console started with stdin from /dev/null, or Ctrl-D.
+      // Without this the promise never settles and the console hangs for ever.
+      bytes = [];
+      finish();
+    };
+    const onData = (chunk: Buffer): void => {
+      for (const byte of chunk) {
+        if (escape === 1) {
+          // ESC then `[` opens a CSI sequence; ESC then anything else was a
+          // two-byte escape that ends here.
+          escape = byte === 0x5b ? 2 : 0;
+          continue;
+        }
+        if (escape === 2) {
+          // Parameter and intermediate bytes are 0x30-0x3f and 0x20-0x2f; the
+          // sequence ends at the first final byte.
+          if (byte >= 0x40 && byte <= 0x7e) escape = 0;
+          continue;
+        }
+        if (byte === 0x1b) {
+          escape = 1;
+        } else if (byte === 0x03) {
+          // Ctrl-C. Raw mode means the driver will not do this for us.
+          if (input.isTTY) input.setRawMode(wasRaw);
+          process.stdout.write("\n");
+          process.exit(130);
+        } else if (byte === 0x0d || byte === 0x0a) {
+          finish();
+          return;
+        } else if (byte === 0x7f || byte === 0x08) {
+          // Remove one CHARACTER: pop UTF-8 continuation bytes, then its lead.
+          if (bytes.length > 0) {
+            while (bytes.length > 0 && (bytes[bytes.length - 1]! & 0xc0) === 0x80) bytes.pop();
+            bytes.pop();
+            process.stdout.write("\b \b");
+          }
+        } else if (byte >= 0x20) {
+          bytes.push(byte);
+          // One asterisk per CHARACTER, not per byte: a continuation byte is
+          // the middle of a character the installer already saw acknowledged.
+          if ((byte & 0xc0) !== 0x80) process.stdout.write("*");
+        }
+      }
+    };
+    input.on("data", onData);
+    input.once("end", onEnd);
+  });
+}
+
+/**
+ * Refuse to read a secret while anything else is listening to stdin.
+ *
+ * This is the assertion that would have caught the cleartext echo. A `readline`
+ * interface in terminal mode registers its own stdin listeners and echoes what
+ * it reads; so does any other reader. If one is attached, the only safe answer
+ * is to stop rather than to prompt.
+ */
+export function assertStdinIsFree(input: NodeJS.ReadStream): void {
+  const listeners = input.listenerCount("data") + input.listenerCount("keypress");
+  if (listeners > 0) {
+    throw new Error(
+      "KLUY-CONSOLE-STDIN-BUSY: refusing to read a secret while another reader is attached to " +
+        "stdin — it would echo the input in cleartext on the console.",
+    );
+  }
+}
+
 export async function main(): Promise<void> {
   const baseUrl = readImageEnv("KITLUY_ENROLLMENT_BASE_URL");
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
 
-  try {
+  /**
+   * ONE INTERFACE PER PROMPT, CLOSED IMMEDIATELY.
+   *
+   * A long-lived `readline` interface was what leaked the Wi-Fi passphrase: it
+   * stays in terminal mode listening to stdin between questions and echoes
+   * whatever anything else reads. Creating one per question costs nothing and
+   * leaves stdin unowned the rest of the time, which is the condition
+   * `readSecret` asserts before it will prompt at all.
+   */
+  const ask = async (prompt: string): Promise<string> => {
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    try {
+      return await rl.question(prompt);
+    } finally {
+      rl.close();
+      process.stdin.pause();
+    }
+  };
+
+  {
+    // NETWORK BEFORE PAIRING, AND SILENT WHEN THERE IS NOTHING TO DO.
+    //
+    // On Ethernet this returns immediately and the installer never sees a
+    // network screen — the canonical priority is wired first, wireless as the
+    // fallback for a shop with no usable socket. It is deliberately BEFORE the
+    // prompt: a pairing code typed with no route produces "check the network",
+    // which is a true message that helps nobody standing in front of the device.
+    const io: ConsoleIo = {
+      write: (text) => void process.stdout.write(text),
+      question: ask,
+      secret: (prompt) => readSecret(prompt),
+    };
+    await awaitNetwork(io, { baseUrl });
+
     for (;;) {
       const bootstrap = readBootstrapState();
       const registration = readRegistrationState();
@@ -478,7 +693,7 @@ export async function main(): Promise<void> {
         continue;
       }
 
-      const answer = await rl.question("  Enter pairing code:\n  > ");
+      const answer = await ask("  Enter pairing code:\n  > ");
       if (!looksLikeCode(answer)) {
         process.stdout.write(
           "\n  A pairing code is 8 characters, letters and digits (no I, L, O or U).\n" +
@@ -502,10 +717,8 @@ export async function main(): Promise<void> {
         render(readBootstrapState(), readPairingState(), outcome.message, readRegistrationState()),
       );
       if (outcome.done) return;
-      await new Promise((r) => setTimeout(r, 3000));
+      await new Promise((r) => setTimeout(r, (outcome.holdSeconds ?? 3) * 1000));
     }
-  } finally {
-    rl.close();
   }
 }
 

@@ -219,4 +219,8 @@ export const PERMISSION = {
   FLEET_PROVISIONING_ISSUE: "fleet.device_provisioning_code.issue",
   /** Registered by migration 0197 as CRITICAL. Admits hardware to the fleet. */
   FLEET_ENROLLMENT_APPROVE: "fleet.device_enrollment.approve",
+  /** Registered by migration 0215 as HIGH. The Admin creates a Digital Store. */
+  STORE_DIGITAL_STORE_CREATE: "store.digital_store.create",
+  /** Seeded reference permission; reused for the Admin's Store list. */
+  PARTNERS_READ: "partners.read",
 } as const;

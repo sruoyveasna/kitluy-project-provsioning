@@ -12,7 +12,7 @@
 import pg from "pg";
 
 export const DEV_DB_URL_ENV = "KITLUY_DEV_DB_URL";
-const DEFAULT_LOCAL_URL = "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
+const DEFAULT_LOCAL_URL = "postgresql://postgres:postgres@127.0.0.1:54392/postgres";
 
 // int8 -> bigint so integer minor units never pass through binary floating
 // point (money contract §4).

@@ -55,8 +55,16 @@ export const PAIRING_STATE_PATH = "/var/lib/kitluy/pairing-state.json";
  * implies is different in kind: stop typing, go back to the Partner Portal and
  * generate a new code. A screen that showed it as just another failure would send
  * someone on retyping a code that can no longer work.
+ *
+ * `ALREADY_ASSIGNED` is a phase for the same reason, one step further out: the
+ * required action is not on this device or in this room at all. The cloud holds
+ * a live assignment for this board, so no code — however freshly issued — can
+ * redeem. It is recorded rather than merely printed so that the screen still
+ * explains itself after a reboot, instead of showing a plain unpaired Hub and
+ * inviting the same futile attempt again.
  */
-export type PairingPhase = "UNPAIRED" | "AWAITING_CODE" | "SUBMITTING" | "PAIRED" | "LOCKED";
+export type PairingPhase =
+  "UNPAIRED" | "AWAITING_CODE" | "SUBMITTING" | "PAIRED" | "LOCKED" | "ALREADY_ASSIGNED";
 
 export interface PairingState {
   readonly phase: PairingPhase;

@@ -1,62 +1,64 @@
 /**
- * Partner PWA Portal — Store Hub pairing.
+ * Partner PWA Portal — shell, sign-in, Store navigation and routing.
  *
- * ===========================================================================
- * WHAT THIS SCREEN IS FOR
- * ===========================================================================
- * Owner decision KLD-2026-08-13-HUB-PAIRING-SESSION-001, Milestone 3: a Partner
- * opens a pairing SESSION for their shop, reads the code aloud to whoever is
- * standing at the Store Hub, and that Hub joins the shop.
+ * Two screens per Store, addressed by the hash (`routing.ts`): the Store Hub
+ * pairing tab (`hub-screen.tsx`) and Provisioning → Terminals
+ * (`terminals-screen.tsx`). The Stores a Partner holds are loaded once after
+ * sign-in and never re-derived in the browser: the Management API decides them
+ * from the actor's own assignments.
  *
- * There is deliberately NO Hub picker. The code belongs to the Store and any Hub
- * may use it — a Hub that has never paired belongs to nobody, so "their" unpaired
- * Hubs cannot be listed without listing everyone's, and the label on the Hub
- * console is derived on-device and stored nowhere, so it cannot be looked up
- * either. Asking a Partner which Hub they mean is a question with no honest
- * answer, so the screen does not ask it.
+ * The chrome is the shared `@kitluy/web-ui` AppShell: a left sidebar (the Store
+ * switcher and the two tabs), a sticky top bar (language and theme toggles) and
+ * the content area. The sidebar nav is per-Store and therefore lives inside
+ * `SignedIn`, where the Stores are known.
  *
- * ===========================================================================
- * THE PARTS THAT COULD LIE, AND WHERE THEY LIVE
- * ===========================================================================
- * The countdown, the code grouping and "can this Store be paired at all" are in
- * `pairing-presentation.ts`; response classification is in `pairing-client.ts`.
- * Both are unit-tested. What remains here is wiring, so the component has as
- * little untested judgement in it as possible.
- *
- * The code is rendered from state and never written anywhere else: not to
- * storage, not to a URL, not to a log. Only its digest exists server-side, so a
- * copy made here would be the only retrievable one in the system.
+ * Nothing about a one-time code lives here. Each screen keeps its code in its
+ * own state and the code never reaches the hash, storage or a log.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { KitluyLocale } from "@kitluy/localization";
 import {
   AppShell,
   DataSurface,
   KitluyErrorBoundary,
   LocaleProvider,
-  kitluyTokens,
+  LocaleToggle,
+  ThemeToggle,
+  restoreKitluyTheme,
 } from "@kitluy/web-ui";
 
 import { resolvePortalRuntime, type PortalRuntime } from "./config.js";
+import { HubPairingScreen, outcomeMessage } from "./hub-screen.js";
 import { MESSAGES, type MessageKey } from "./messages.js";
-import {
-  createPairingClient,
-  type PairingClient,
-  type PairingSessionStatus,
-  type IssuedCode,
-  type PairingOutcome,
-  type PartnerStore,
-} from "./pairing-client.js";
-import { canIssueFor, codeLife, groupCode } from "./pairing-presentation.js";
+import { createPairingClient, type PartnerStore } from "./pairing-client.js";
+import { parseRoute, routeHref, storeRoute, type Route } from "./routing.js";
 import { classifySignInError, validateCredentials, FAILURE_MESSAGE } from "./sign-in.js";
+import { TerminalsScreen } from "./terminals-screen.js";
+import { createTerminalsClient } from "./terminals-client.js";
+import { NoticePanel, StoreNav } from "./views.js";
 
 export const PRODUCT_NAME = "kitluy-partner-pwa-portal" as const;
 
-/** Maps a client outcome to the one thing a Partner should be told. */
-function outcomeMessage(outcome: { kind: string }): MessageKey {
-  if (outcome.kind === "unauthenticated") return "sessionExpired";
-  if (outcome.kind === "denied") return "denied";
-  return "unavailable";
+const SHELL_PRODUCT = "Partner Portal" as const;
+
+function currentHash(): string {
+  return typeof window === "undefined" ? "" : window.location.hash;
+}
+
+/** The language and theme toggles, shared by every top bar. */
+function Toggles({
+  locale,
+  onLocale,
+}: {
+  locale: KitluyLocale;
+  onLocale: (locale: KitluyLocale) => void;
+}): JSX.Element {
+  return (
+    <>
+      <LocaleToggle locale={locale} onLocale={onLocale} />
+      <ThemeToggle />
+    </>
+  );
 }
 
 function SignInForm({
@@ -98,200 +100,70 @@ function SignInForm({
   }
 
   return (
-    <form aria-label="sign-in" onSubmit={submit}>
-      <h1>{t.title}</h1>
-      <p>{t.intro}</p>
-      <p>
-        <label htmlFor="email">{t.email}</label>
-        <input
-          id="email"
-          type="email"
-          autoComplete="username"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-        />
-      </p>
-      <p>
-        <label htmlFor="password">{t.password}</label>
-        <input
-          id="password"
-          type="password"
-          autoComplete="current-password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
-      </p>
-      {failure === null ? null : <p role="alert">{t[failure]}</p>}
-      <button type="submit" disabled={busy}>
-        {busy ? t.signingIn : t.signIn}
-      </button>
-    </form>
-  );
-}
-
-/**
- * The issued code.
- *
- * Re-renders once a second so the countdown is honest, and switches to the
- * expired message the moment the SERVER's deadline passes — a code that looks
- * live but is dead sends an operator to type it and be refused.
- */
-function IssuedCodePanel({
-  locale,
-  issued,
-  client,
-}: {
-  locale: KitluyLocale;
-  issued: IssuedCode;
-  client: PairingClient;
-}) {
-  const t = MESSAGES[locale];
-  const [now, setNow] = useState(() => new Date());
-  const [status, setStatus] = useState<PairingSessionStatus | null>(null);
-
-  useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  /**
-   * Watch the session the Portal just opened.
-   *
-   * Polling, not Realtime: OD-ADMIN-FLEET-001 keeps `kitluy_devices` closed to
-   * browsers, so a subscription would mean exposing the schema to the client.
-   * Three seconds is chosen against the human loop — someone walks to the Hub
-   * and types eight characters — not against a machine one.
-   *
-   * Stops the moment the answer is final. A poller that kept running after a
-   * successful pairing would hammer the API for the life of the tab.
-   */
-  useEffect(() => {
-    let live = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-
-    const poll = async (): Promise<void> => {
-      const outcome = await client.sessionStatus(issued.sessionId);
-      if (!live) return;
-      if (outcome.kind === "ok") {
-        setStatus(outcome.value);
-        if (outcome.value.paired || outcome.value.locked) return;
-      }
-      // A transient failure must not kill the watch — the operator is still
-      // standing at the Hub. Keep trying until the code's own deadline passes.
-      if (Date.parse(issued.expiresAt) <= Date.now()) return;
-      timer = setTimeout(() => void poll(), 3000);
-    };
-
-    void poll();
-    return () => {
-      live = false;
-      if (timer !== undefined) clearTimeout(timer);
-    };
-  }, [client, issued.sessionId, issued.expiresAt]);
-
-  const life = codeLife(issued.expiresAt, now);
-
-  // SUCCESS WINS OVER THE CLOCK. A code that was used at 14:59:58 is paired even
-  // though the countdown has since run out, and showing "expired" then would be
-  // both wrong and alarming.
-  if (status?.paired === true) {
-    return (
-      <section aria-label="pairing-code" data-paired="true">
-        <h2 style={{ color: kitluyTokens.colorPrimary }}>{t.pairedHeading}</h2>
-        <p>{t.pairedDetail}</p>
-        {status.pairedDeviceReference === null ? null : (
-          <p style={{ color: kitluyTokens.colorMuted }}>
-            {t.pairedDevice}:{" "}
-            <strong style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
-              {status.pairedDeviceReference}
-            </strong>
-          </p>
-        )}
-      </section>
-    );
-  }
-
-  if (status?.locked === true) {
-    return (
-      <section aria-label="pairing-code" data-locked="true">
-        <h2>{t.codeHeading}</h2>
-        <p role="alert" style={{ color: kitluyTokens.colorDanger, fontWeight: 700 }}>
-          {t.lockedOut}
-        </p>
-      </section>
-    );
-  }
-
-  // Under two minutes the countdown turns urgent. An operator walking to the
-  // Hub needs to know the code may die before they arrive, and a uniform grey
-  // timer does not say that.
-  const urgent = life.kind === "live" && life.secondsRemaining <= 120;
-
-  return (
-    <section aria-label="pairing-code">
-      <h2>{t.codeHeading}</h2>
-      {life.kind === "expired" ? (
-        <p role="alert" style={{ color: kitluyTokens.colorDanger, fontWeight: 700 }}>
-          {t.expired}
-        </p>
-      ) : (
-        <div
-          style={{
-            border: `2px solid ${kitluyTokens.colorPrimary}`,
-            borderRadius: kitluyTokens.radius,
-            padding: "1.25rem 1.5rem",
-            textAlign: "center",
-            maxWidth: "26rem",
-          }}
-        >
-          {/* `aria-label` carries the ungrouped code so a screen reader does not
-              announce the display gap as part of what to type. */}
-          <p aria-label={issued.code} style={{ margin: "0 0 .5rem" }}>
-            <strong
-              style={{
-                fontSize: "2.6rem",
-                letterSpacing: "0.18em",
-                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                color: kitluyTokens.colorPrimary,
-              }}
-            >
-              {groupCode(issued.code)}
-            </strong>
-          </p>
-          <p
-            style={{
-              margin: 0,
-              color: urgent ? kitluyTokens.colorDanger : kitluyTokens.colorMuted,
-            }}
-          >
-            {t.expiresIn}{" "}
-            <time style={{ fontWeight: urgent ? 700 : 500, fontVariantNumeric: "tabular-nums" }}>
-              {life.label}
-            </time>
-          </p>
+    <section aria-label="sign-in" className="kl-login">
+      <div className="kl-card" style={{ width: "100%", maxWidth: 420 }}>
+        <div className="kl-card-body">
+          <div className="kl-page-head">
+            <h1>{t.portalTitle}</h1>
+            <p>{t.signInIntro}</p>
+          </div>
+          <form aria-label="sign-in" onSubmit={submit}>
+            <div className="kl-field">
+              <label htmlFor="email">{t.email}</label>
+              <input
+                className="kl-input"
+                id="email"
+                type="email"
+                autoComplete="username"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </div>
+            <div className="kl-field">
+              <label htmlFor="password">{t.password}</label>
+              <input
+                className="kl-input"
+                id="password"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </div>
+            {failure === null ? null : (
+              <div className="kl-notice kl-notice-critical" role="alert">
+                <span>{t[failure]}</span>
+              </div>
+            )}
+            <button className="kl-btn kl-btn-primary" type="submit" disabled={busy}>
+              {busy ? t.signingIn : t.signIn}
+            </button>
+          </form>
         </div>
-      )}
-      <p role="status" style={{ color: kitluyTokens.colorMuted }}>
-        {t.waitingForHub}
-      </p>
-      {status !== null && status.failedAttemptCount > 0 ? (
-        <p role="alert" style={{ color: kitluyTokens.colorWarning }}>
-          {t.attemptsFailed}: {status.failedAttemptCount}
-        </p>
-      ) : null}
-      <p style={{ color: kitluyTokens.colorMuted }}>
-        <em>{t.shownOnce}</em>
-      </p>
-      <p style={{ color: kitluyTokens.colorMuted }}>
-        <em>{t.replaced}</em>
-      </p>
+      </div>
     </section>
   );
 }
 
-function PairingView({ locale, runtime }: { locale: KitluyLocale; runtime: PortalRuntime }) {
+type StoresState =
+  | { readonly kind: "loading" }
+  | { readonly kind: "ready"; readonly stores: readonly PartnerStore[] }
+  | { readonly kind: "problem"; readonly messageKey: MessageKey };
+
+function SignedIn({
+  locale,
+  runtime,
+  toggles,
+  onSignOut,
+}: {
+  locale: KitluyLocale;
+  runtime: PortalRuntime;
+  toggles: ReactNode;
+  onSignOut: () => void;
+}) {
   const t = MESSAGES[locale];
-  const client = useMemo(
+  // Both clients over one transport; each keeps its own contract.
+  const pairingClient = useMemo(
     () =>
       createPairingClient({
         baseUrl: runtime.managementApiUrl,
@@ -302,154 +174,166 @@ function PairingView({ locale, runtime }: { locale: KitluyLocale; runtime: Porta
       }),
     [runtime],
   );
+  const terminalsClient = useMemo(
+    () =>
+      createTerminalsClient({
+        baseUrl: runtime.managementApiUrl,
+        accessToken: async () => {
+          const { data } = await runtime.client.auth.getSession();
+          return data.session?.access_token ?? null;
+        },
+      }),
+    [runtime],
+  );
 
-  const [stores, setStores] = useState<readonly PartnerStore[] | null>(null);
-  const [problem, setProblem] = useState<MessageKey | null>(null);
-  const [refusal, setRefusal] = useState<string | null>(null);
-  const [storeId, setStoreId] = useState("");
-  const [locationId, setLocationId] = useState("");
-  const [issued, setIssued] = useState<IssuedCode | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [route, setRoute] = useState<Route>(() => parseRoute(currentHash()));
+  const [stores, setStores] = useState<StoresState>({ kind: "loading" });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onHash = () => setRoute(parseRoute(currentHash()));
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const outcome = await client.listStores();
+      const outcome = await pairingClient.listStores();
       if (cancelled) return;
-      if (outcome.kind !== "ok") {
-        setProblem(outcomeMessage(outcome));
-        return;
-      }
-      setStores(outcome.value);
-      const first = outcome.value[0];
-      if (first !== undefined) {
-        setStoreId(first.digitalStoreId);
-        setLocationId(first.locations[0]?.storeLocationId ?? "");
-      }
+      if (outcome.kind === "ok") setStores({ kind: "ready", stores: outcome.value });
+      else setStores({ kind: "problem", messageKey: outcomeMessage(outcome) });
     })();
     return () => {
       cancelled = true;
     };
-  }, [client]);
+  }, [pairingClient]);
 
-  const selected = stores?.find((s) => s.digitalStoreId === storeId);
-
-  const generate = useCallback(async () => {
-    if (storeId === "" || locationId === "") return;
-    setBusy(true);
-    setProblem(null);
-    setRefusal(null);
-    // Clear the previous code BEFORE the call: opening a session revokes the
-    // last one for this Store, so leaving it on screen would show a code that
-    // has already stopped working.
-    setIssued(null);
-    try {
-      const outcome: PairingOutcome<IssuedCode> = await client.issuePairingCode({
-        digitalStoreId: storeId,
-        storeLocationId: locationId,
-      });
-      if (outcome.kind === "ok") {
-        setIssued(outcome.value);
-      } else if (outcome.kind === "refused") {
-        // Governed guidance from the door, shown as-is: it names what to fix.
-        setRefusal(outcome.message);
-      } else {
-        setProblem(outcomeMessage(outcome));
-      }
-    } finally {
-      setBusy(false);
+  // `#/` lands on the first Store's Hub tab once the Stores are known.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (route.kind !== "home" || stores.kind !== "ready") return;
+    const first = stores.stores[0];
+    if (first !== undefined) {
+      window.location.hash = routeHref(storeRoute("hub", first.digitalStoreId)).slice(1);
     }
-  }, [client, storeId, locationId]);
+  }, [route, stores]);
 
-  if (problem !== null) {
-    return (
+  const navigate = useCallback(
+    (storeId: string) => {
+      if (typeof window === "undefined") return;
+      const tab = route.kind === "terminals" ? "terminals" : "hub";
+      window.location.hash = routeHref(storeRoute(tab, storeId)).slice(1);
+    },
+    [route],
+  );
+
+  const account = (
+    <div className="kl-who">
+      <button
+        type="button"
+        className="kl-btn kl-btn-ghost kl-btn-sm"
+        style={{ width: "100%" }}
+        onClick={onSignOut}
+      >
+        {t.signOut}
+      </button>
+    </div>
+  );
+
+  // All hooks are called above; only the body and the sidebar nav vary below.
+  let nav: ReactNode = undefined;
+  let crumb: ReactNode = undefined;
+  let body: ReactNode;
+
+  if (stores.kind === "loading") {
+    body = <DataSurface state="loading" />;
+  } else if (stores.kind === "problem") {
+    body = (
       <section aria-label="pairing-unavailable">
-        <h1>{t.title}</h1>
-        <p role="alert">{t[problem]}</p>
+        <div className="kl-page-head">
+          <h1>{t.portalTitle}</h1>
+        </div>
+        <p role="alert" className="kl-notice kl-notice-critical">
+          <span>{t[stores.messageKey]}</span>
+        </p>
         <DataSurface state="unavailable" />
       </section>
     );
-  }
-
-  if (stores === null) return <DataSurface state="loading" />;
-
-  if (stores.length === 0) {
-    // Not an error: a real, actionable state. `DataSurface` stays "unavailable"
-    // because there is genuinely nothing to operate on.
-    return (
+  } else if (stores.stores.length === 0) {
+    body = (
       <section aria-label="no-stores">
-        <h1>{t.title}</h1>
-        <p>{t.noStores}</p>
+        <div className="kl-page-head">
+          <h1>{t.portalTitle}</h1>
+          <p>{t.noStores}</p>
+        </div>
         <DataSurface state="unavailable" />
       </section>
     );
+  } else if (route.kind === "home") {
+    body = <DataSurface state="loading" />;
+  } else if (route.kind === "unknown") {
+    body = <NoticePanel locale={locale} messageKey="unknownRoute" detail={route.path} />;
+  } else {
+    const store = stores.stores.find((s) => s.digitalStoreId === route.storeId);
+    if (store === undefined) {
+      body = <NoticePanel locale={locale} messageKey="denied" />;
+    } else {
+      nav = (
+        <StoreNav
+          locale={locale}
+          stores={stores.stores}
+          storeId={store.digitalStoreId}
+          tab={route.kind}
+          onStore={navigate}
+        />
+      );
+      crumb = (
+        <>
+          <span>{store.digitalStoreReference}</span>
+          <span className="kl-cur">{route.kind === "hub" ? t.navHub : t.navTerminals}</span>
+        </>
+      );
+      body =
+        route.kind === "hub" ? (
+          <HubPairingScreen
+            key={store.digitalStoreId}
+            locale={locale}
+            client={pairingClient}
+            store={store}
+          />
+        ) : (
+          <TerminalsScreen
+            key={store.digitalStoreId}
+            locale={locale}
+            client={terminalsClient}
+            store={store}
+          />
+        );
+    }
   }
-
-  const pairable = selected !== undefined && canIssueFor(selected);
 
   return (
-    <section aria-label="pairing">
-      <h1>{t.title}</h1>
-      <p>{t.intro}</p>
-
-      <p>
-        <label htmlFor="store">{t.store}</label>
-        <select
-          id="store"
-          value={storeId}
-          onChange={(e) => {
-            setStoreId(e.target.value);
-            const next = stores.find((s) => s.digitalStoreId === e.target.value);
-            setLocationId(next?.locations[0]?.storeLocationId ?? "");
-            // A code belongs to the Store it was opened for; keeping it on screen
-            // after switching would attach it to the wrong shop in the reader's head.
-            setIssued(null);
-          }}
-        >
-          {stores.map((s) => (
-            <option key={s.digitalStoreId} value={s.digitalStoreId}>
-              {s.digitalStoreReference}
-            </option>
-          ))}
-        </select>
-      </p>
-
-      {selected === undefined || selected.locations.length === 0 ? (
-        <p role="alert">{t.noLocation}</p>
-      ) : (
-        <p>
-          <label htmlFor="location">{t.location}</label>
-          <select
-            id="location"
-            value={locationId}
-            onChange={(e) => {
-              setLocationId(e.target.value);
-              setIssued(null);
-            }}
-          >
-            {selected.locations.map((l) => (
-              <option key={l.storeLocationId} value={l.storeLocationId}>
-                {l.locationReference}
-              </option>
-            ))}
-          </select>
-        </p>
-      )}
-
-      {refusal === null ? null : <p role="alert">{refusal}</p>}
-
-      <button type="button" onClick={() => void generate()} disabled={busy || !pairable}>
-        {busy ? t.generating : t.generate}
-      </button>
-
-      {issued === null ? null : <IssuedCodePanel locale={locale} issued={issued} client={client} />}
-    </section>
+    <AppShell
+      productName={SHELL_PRODUCT}
+      brandInitial="P"
+      nav={nav}
+      account={account}
+      topbarRight={toggles}
+      crumb={crumb}
+    >
+      {body}
+    </AppShell>
   );
 }
 
 export function App() {
   const [locale, setLocale] = useState<KitluyLocale>("km-KH");
   const [signedIn, setSignedIn] = useState(false);
+
+  useEffect(() => {
+    restoreKitluyTheme();
+  }, []);
 
   // Resolved once, and never thrown from: a misconfigured deployment renders the
   // reason rather than a blank page.
@@ -467,47 +351,44 @@ export function App() {
     };
   }, [resolved]);
 
+  const toggles = <Toggles locale={locale} onLocale={setLocale} />;
+
   return (
     <LocaleProvider locale={locale}>
       <KitluyErrorBoundary>
-        <AppShell productName="Partner PWA Portal">
-          <nav aria-label="language">
-            <button onClick={() => setLocale("km-KH")} aria-pressed={locale === "km-KH"}>
-              ខ្មែរ
-            </button>{" "}
-            <button onClick={() => setLocale("en-US")} aria-pressed={locale === "en-US"}>
-              English
-            </button>
-          </nav>
-
-          {resolved.kind !== "ready" ? (
+        {resolved.kind !== "ready" ? (
+          <AppShell productName={SHELL_PRODUCT} brandInitial="P" topbarRight={toggles}>
             <section aria-label="misconfigured">
-              <h1>{MESSAGES[locale].title}</h1>
-              <p role="alert">{resolved.detail}</p>
+              <div className="kl-page-head">
+                <h1>{MESSAGES[locale].portalTitle}</h1>
+              </div>
+              <p role="alert" className="kl-notice kl-notice-critical">
+                <span>{resolved.detail}</span>
+              </p>
               <DataSurface state="unavailable" />
             </section>
-          ) : signedIn ? (
-            <>
-              <PairingView locale={locale} runtime={resolved.runtime} />
-              <p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void resolved.runtime.client.auth.signOut().then(() => setSignedIn(false));
-                  }}
-                >
-                  {MESSAGES[locale].signOut}
-                </button>
-              </p>
-            </>
-          ) : (
+          </AppShell>
+        ) : signedIn ? (
+          <SignedIn
+            locale={locale}
+            runtime={resolved.runtime}
+            toggles={toggles}
+            onSignOut={() => {
+              void resolved.runtime.client.auth.signOut().then(() => {
+                setSignedIn(false);
+                if (typeof window !== "undefined") window.location.hash = "/";
+              });
+            }}
+          />
+        ) : (
+          <AppShell productName={SHELL_PRODUCT} brandInitial="P" topbarRight={toggles}>
             <SignInForm
               locale={locale}
               runtime={resolved.runtime}
               onSignedIn={() => setSignedIn(true)}
             />
-          )}
-        </AppShell>
+          </AppShell>
+        )}
       </KitluyErrorBoundary>
     </LocaleProvider>
   );

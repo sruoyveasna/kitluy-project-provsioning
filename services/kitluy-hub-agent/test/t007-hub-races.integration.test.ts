@@ -24,9 +24,17 @@ import { randomUUID } from "node:crypto";
 
 import pg from "pg";
 
+import { hubDatabaseUrl } from "../src/hub-database.js";
+
 const RUN = randomUUID().slice(0, 8);
 
-const DSN = "postgresql://postgres:postgres@127.0.0.1:54322/kitluy_hub_local";
+// RESOLVED, NOT HARDCODED. This read
+// `postgresql://postgres:postgres@127.0.0.1:54322/kitluy_hub_local` literally,
+// ignoring KITLUY_HUB_DB_URL that every other suite here honours — so it skipped
+// on any machine whose Hub database is somewhere else, and on a workstation
+// running several stacks, 54322 belongs to whichever one claimed it first.
+// `hubDatabaseUrl` also carries the KL-INF-P1-037 local-only guard.
+const DSN = hubDatabaseUrl();
 const ITERATIONS = 20;
 
 async function reachable(): Promise<boolean> {

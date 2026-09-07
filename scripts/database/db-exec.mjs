@@ -36,7 +36,7 @@ import { mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 const BLOCKER_DOC = "00_AI_HANDOFF/OPERATOR-INSTRUCTION-BLK-002.md";
-const LOCAL_DB_URL_DEFAULT = "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
+const LOCAL_DB_URL_DEFAULT = "postgresql://postgres:postgres@127.0.0.1:54392/postgres";
 const TYPES_OUTPUT = "packages/kitluy-supabase-types/src/database.generated.ts";
 // Review RV-402 (WS-01-T004-TYPES): after `supabase gen types` writes the raw
 // body, generation MUST re-prepend the governed warning header and apply

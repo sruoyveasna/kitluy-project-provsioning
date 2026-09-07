@@ -20,6 +20,11 @@ import {
 } from "./provisioning-routes.js";
 import { DEVICE_ENROLLMENT_PREFIX, type EnrollmentRouter } from "./enrollment-routes.js";
 import { HUB_PAIRING_PREFIX, type HubPairingRouter } from "./hub-pairing-routes.js";
+import { TERMINAL_PAIRING_PREFIX, type TerminalPairingRouter } from "./terminal-pairing-routes.js";
+import {
+  OPERATIONAL_CERTIFICATE_PREFIX,
+  type OperationalCertificateRouter,
+} from "./operational-certificate-routes.js";
 
 export interface KernelResponse {
   readonly status: number;
@@ -34,6 +39,8 @@ export interface KernelDeps {
   readonly provisioningRouter?: TerminalProvisioningRouter;
   readonly enrollmentRouter?: EnrollmentRouter;
   readonly hubPairingRouter?: HubPairingRouter;
+  readonly terminalPairingRouter?: TerminalPairingRouter;
+  readonly operationalCertificateRouter?: OperationalCertificateRouter;
 }
 
 /**
@@ -91,6 +98,36 @@ export async function handleRequest(
   // fails CLOSED with 503 when unconfigured, for the same reason the
   // revocation surface does: an instance without the wiring must not look
   // like a healthy one that simply had no such route.
+  // The operational-certificate surface. Matched before the generic `/v1/`
+  // delegation and failing CLOSED with 503 when unconfigured, for the same
+  // reason the bootstrap and revocation surfaces do: an instance without the
+  // wiring must not look like a healthy one that simply had no such route.
+  if (path.startsWith(OPERATIONAL_CERTIFICATE_PREFIX)) {
+    if (deps.operationalCertificateRouter === undefined) {
+      return {
+        status: 503,
+        body: errorEnvelope(
+          "DEPENDENCY_UNAVAILABLE",
+          "operational-certificate issuance is not configured on this instance",
+        ),
+      };
+    }
+    const response = await deps.operationalCertificateRouter.handle({
+      method: request.method,
+      path,
+      headers: request.headers,
+      // Both are optional on the kernel request — the bootstrap surfaces own
+      // their raw text — so they are defaulted here rather than asserted.
+      sourceIp: request.sourceIp ?? "",
+      rawBody: request.rawBody ?? "",
+    });
+    return {
+      status: response.status,
+      body: response.body,
+      ...(response.headers === undefined ? {} : { headers: response.headers }),
+    };
+  }
+
   if (path.startsWith(TERMINAL_PROVISIONING_PREFIX)) {
     if (deps.provisioningRouter === undefined) {
       return {
@@ -154,6 +191,30 @@ export async function handleRequest(
       };
     }
     const response = await deps.hubPairingRouter.handle({
+      method: request.method,
+      path: request.path,
+      headers: request.headers,
+      sourceIp: request.sourceIp ?? "",
+      rawBody: request.rawBody ?? "",
+    });
+    return { status: response.status, body: response.body, headers: response.headers };
+  }
+
+  // Pi Terminal pairing (KLD-2026-09-03-TERMINAL-PROVISIONING-001, group
+  // 0213). Same placement and the same fail-closed 503 as Hub pairing: an
+  // installer at a Pi typing a code must be told "not configured", never "wrong
+  // code", when the deployment was never wired for it.
+  if (path.startsWith(TERMINAL_PAIRING_PREFIX)) {
+    if (deps.terminalPairingRouter === undefined) {
+      return {
+        status: 503,
+        body: errorEnvelope(
+          "DEPENDENCY_UNAVAILABLE",
+          "terminal-pairing routes are not configured on this instance",
+        ),
+      };
+    }
+    const response = await deps.terminalPairingRouter.handle({
       method: request.method,
       path: request.path,
       headers: request.headers,

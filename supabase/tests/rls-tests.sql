@@ -4062,3 +4062,71 @@ rollback;
 
 
 select 'rls-tests complete: 14+9 baseline cases; cycle-5 WS5 7 negative + 7 positive and WS6 10 negative + 9 positive; cycle-6 WS7 13 negative + 6 positive and WS8 13 negative + 6 positive; cycle-10 WS11 T001 4 negative + 1 positive and T002 3 negative + 1 positive kitluy_devices cases executed; WS-11-T004-P02A 3 negative provisioning-code cases executed; WS-11-T004-P02B1 issuance-door boundary case executed; WS-11-T004-P02B2A presentation-evaluator boundary case executed; WS-11-T004-P02B2B1 revocation-door boundary case executed; WS-11-T004-P02B2B2A expiration-helper boundary case executed; WS-11-T004-P02B2B2B1 replacement-lineage boundary case executed; WS-11-T004-P02B2B2B2A recovery-door boundary case executed; WS-11-T004-P02B3A pop-foundation boundary case executed; WS-11-T004-P02B3B redemption-door boundary case executed; WS-11-T004-P02C composition-identity boundary case executed; WS-11-T004-P03A activation-state boundary case executed; WS-11-T005 fleet/support/containment boundary cases executed; WS-11-T006-P01 replacement boundary cases executed; WS-11-T006-P03 release boundary cases executed' as result;
+
+-- ============================================================================
+-- PT-1 (migration 0213): the terminal pairing planning tables are closed to
+-- browser roles. No tenant-scoped read path exists; the management API reads
+-- them with its trusted identity after deciding authority.
+-- ============================================================================
+begin;
+select set_config('request.jwt.claims', '{"role":"anon"}', true);
+set local role anon;
+do $$
+declare
+  v_denied int := 0;
+  v_probe int;
+  v_tbl text;
+begin
+  foreach v_tbl in array array['physical_terminals', 'physical_terminal_roles', 'terminal_pairing_sessions', 'physical_terminal_events'] loop
+    begin
+      execute format('select count(*) from kitluy_devices.%I', v_tbl) into v_probe;
+      if v_probe > 0 then
+        raise exception 'FAIL PT-1: anon read % rows of %', v_probe, v_tbl;
+      end if;
+      v_denied := v_denied + 1;
+    exception when insufficient_privilege then
+      v_denied := v_denied + 1;
+    end;
+  end loop;
+  if v_denied <> 4 then
+    raise exception 'FAIL PT-1: expected 4 denied anon probes, got %', v_denied;
+  end if;
+  raise notice 'PASS PT-1: anonymous reads of physical terminals and terminal pairing sessions are denied with no row leakage';
+end $$;
+rollback;
+
+-- PT-2: an authenticated Store staff user cannot read a session digest or a seat.
+begin;
+select set_config('request.jwt.claims', '{"sub":"00000000-0000-4000-8000-000000000010","role":"authenticated"}', true);
+select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-000000000010', true);
+set local role authenticated;
+do $$
+declare
+  v_denied int := 0;
+  v_probe int;
+  v_tbl text;
+begin
+  foreach v_tbl in array array['physical_terminals', 'terminal_pairing_sessions'] loop
+    begin
+      execute format('select count(*) from kitluy_devices.%I', v_tbl) into v_probe;
+      if v_probe > 0 then
+        raise exception 'FAIL PT-2: authenticated read % rows of %', v_probe, v_tbl;
+      end if;
+      v_denied := v_denied + 1;
+    exception when insufficient_privilege then
+      v_denied := v_denied + 1;
+    end;
+  end loop;
+  begin
+    perform kitluy_devices.open_terminal_pairing_session_v1(gen_random_uuid(), repeat('a', 64), 900, 'x');
+    raise exception 'FAIL PT-2: authenticated executed the session door';
+  exception when insufficient_privilege then
+    v_denied := v_denied + 1;
+  end;
+  if v_denied <> 3 then
+    raise exception 'FAIL PT-2: expected 3 denied authenticated probes, got %', v_denied;
+  end if;
+  raise notice 'PASS PT-2: an authenticated Store user reaches neither the seats, the sessions, nor the session door';
+end $$;
+rollback;
+

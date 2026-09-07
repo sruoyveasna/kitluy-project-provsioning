@@ -53,7 +53,7 @@ describe("development database guard", () => {
 
   it("accepts the local development target", () => {
     expect(() =>
-      assertDevelopmentDatabaseTarget("postgresql://postgres:postgres@127.0.0.1:54322/postgres"),
+      assertDevelopmentDatabaseTarget("postgresql://postgres:postgres@127.0.0.1:54392/postgres"),
     ).not.toThrow();
   });
 

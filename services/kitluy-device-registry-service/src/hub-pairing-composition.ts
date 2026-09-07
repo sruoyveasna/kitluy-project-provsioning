@@ -79,6 +79,19 @@ export type HubPairingResultCode =
   | "LOCKED"
   /** Presentation matched but redemption refused — a genuine race or state change. */
   | "REDEMPTION_REFUSED"
+  /**
+   * The DEVICE, not the code, is why this failed: it already holds a live
+   * assignment. Separated from `REDEMPTION_REFUSED` because the two demand
+   * opposite actions from the person standing at the Hub. "Ask for a new code"
+   * is the correct advice for a refused redemption and is a DEAD END here — a
+   * pairing code is a Store-scoped session that issues fine every time, and
+   * every one of them will be refused at this same door until the assignment
+   * is revoked. Observed on a re-flashed Store Hub: the board resolves to the
+   * same device record (hardware evidence, not storage), so the assignment from
+   * its first pairing was still live and the console kept sending the installer
+   * back to the Portal for codes that could never redeem.
+   */
+  | "ALREADY_ASSIGNED"
   | "REQUEST_INVALID"
   | "INTERNAL_ERROR";
 
@@ -141,6 +154,30 @@ const PRESENTATION_REFUSALS: Readonly<Record<string, string>> = {
  * Reaching any of these means presentation said MATCH_READY and redemption then
  * disagreed — a genuine race or a state change in between, never a wrong code.
  */
+/**
+ * Refusals about the DEVICE'S OWN STATE rather than about the presented code.
+ *
+ * Both are raised by `create_device_claim_v1` (0121) through the
+ * `issue_hub_claim_v1` bridge, INSIDE the redemption transaction, so without
+ * this map they were indistinguishable from a bad code:
+ *
+ *   KLUY-DEVICE-ALREADY-CLAIMED    same Store/Location, assignment still live
+ *   KLUY-DEVICE-OWNERSHIP-TRANSFER a DIFFERENT Store/Location — 0121 refuses a
+ *                                  transfer disguised as a new claim
+ *
+ * `KLUY-DEVICE-OWNERSHIP-TRANSFER` was not mapped ANYWHERE before this, so it
+ * fell through to `INTERNAL_ERROR` and the Hub console reported "check the
+ * network" for a device whose network was fine.
+ *
+ * Checked BEFORE `REDEMPTION_REFUSALS` so a code that lands in both is reported
+ * by its cause rather than by whichever key matched first.
+ */
+const ASSIGNMENT_CONFLICTS: Readonly<Record<string, string>> = {
+  "KLUY-DEVICE-ALREADY-CLAIMED": "the device already holds a live assignment",
+  "KLUY-DEVICE-OWNERSHIP-TRANSFER":
+    "the device holds a live assignment to a different Tenant/Store/Location",
+};
+
 const REDEMPTION_REFUSALS: Readonly<Record<string, string>> = {
   "KLUY-DEVICE-CLAIM-UNKNOWN": "no claim matches the presented token",
   "KLUY-DEVICE-CLAIM-REUSED": "claim token already redeemed; a token is single-use",
@@ -152,7 +189,6 @@ const REDEMPTION_REFUSALS: Readonly<Record<string, string>> = {
   "KLUY-DEVICE-TERMINAL": "device is in a terminal lifecycle state",
   "KLUY-DEVICE-EVIDENCE-COLLISION":
     "device shares hardware evidence with another non-retired device",
-  "KLUY-DEVICE-ALREADY-CLAIMED": "the device already holds a live assignment",
   "KLUY-DEVICE-MISSING": "no such device",
   // Raised by this composition, not by a door: another Hub consumed the session
   // between our match and our consume. Mapped here so it is answered as an
@@ -406,6 +442,23 @@ export class HubPairingComposition {
       // mapped, not leaked: a SQLSTATE, function name or role name reaching a
       // pre-credential caller would describe the schema to it.
       const message = error instanceof Error ? error.message : String(error);
+
+      // The device's own state, first: telling this operator to fetch another
+      // code would send them round a loop that cannot terminate.
+      const conflict = Object.keys(ASSIGNMENT_CONFLICTS).find((c) => message.includes(c));
+      if (conflict !== undefined) {
+        this.logger.info({
+          event: "hub-pairing-already-assigned",
+          correlationId,
+          audit: ASSIGNMENT_CONFLICTS[conflict] ?? "unmapped",
+        });
+        return {
+          result: "ALREADY_ASSIGNED",
+          correlationId,
+          auditDetail: ASSIGNMENT_CONFLICTS[conflict],
+        };
+      }
+
       const matched = Object.keys(REDEMPTION_REFUSALS).find((c) => message.includes(c));
       if (matched !== undefined) {
         this.logger.info({

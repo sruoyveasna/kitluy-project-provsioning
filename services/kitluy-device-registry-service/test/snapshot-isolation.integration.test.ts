@@ -29,7 +29,7 @@ import { REGISTRY_ROLES, withServiceRole } from "../src/database.js";
 import { createEd25519SnapshotSigner } from "../src/snapshot-signer.js";
 import { createSnapshotProducer, UnprovisionedHubError } from "../src/signed-snapshot-producer.js";
 
-const LOCAL_DSN = "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
+const LOCAL_DSN = "postgresql://postgres:postgres@127.0.0.1:54392/postgres";
 const ENV = { DEVICE_REGISTRY_DATABASE_URL: LOCAL_DSN, KITLUY_ENV: "local" } as const;
 const ENVIRONMENT = "development";
 const KEY_ENV_VAR = "TEST_EPHEMERAL_SNAPSHOT_KEY";

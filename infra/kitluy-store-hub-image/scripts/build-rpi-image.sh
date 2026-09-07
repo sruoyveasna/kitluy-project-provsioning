@@ -42,6 +42,8 @@ BUILD_DIR="${KITLUY_OS_IMAGE_ROOT}/build/work"
 PROFILE=""
 CHANNEL_OVERRIDE=""
 SKIP_DOCTOR="no"
+SKIP_PACKAGING="no"
+ENVIRONMENT_OVERRIDE=""
 NO_INTERACTIVE_ACCESS="no"
 FILESYSTEM_ONLY="no"
 COLLECT_ONLY="no"
@@ -65,7 +67,13 @@ Options:
   --build-dir <dir>    Builder work root (default: ../build/work).
   --filesystem-only    Build the root filesystem, skip image generation.
   --collect-only       Skip the build; re-collect and re-hash existing artifacts.
+  --environment <name> Environment to BAKE into the image (default: config).
+                       Not defaulted silently — the development storage and
+                       listener paths key on it. pilot/production are refused.
   --skip-doctor        Skip the host preflight. Not recommended.
+  --skip-packaging     Do not re-package runtime components into the overlay.
+                       The image then carries whatever the overlay already held,
+                       which may not match the source tree. Diagnostic only.
   --no-interactive-access  Build an image with NO console or SSH access at all.
                        Required to acknowledge that a failed bootstrap can then
                        only be reflashed, never inspected.
@@ -91,6 +99,8 @@ while [[ $# -gt 0 ]]; do
     --filesystem-only) FILESYSTEM_ONLY="yes"; shift ;;
     --collect-only)    COLLECT_ONLY="yes"; shift ;;
     --skip-doctor)     SKIP_DOCTOR="yes"; shift ;;
+    --skip-packaging)  SKIP_PACKAGING="yes"; shift ;;
+    --environment)     ENVIRONMENT_OVERRIDE="${2:-}"; shift 2 ;;
     --no-interactive-access) NO_INTERACTIVE_ACCESS="yes"; shift ;;
     -h|--help)         usage; exit 0 ;;
     *)                 usage; die "unknown argument: $1" ;;
@@ -119,6 +129,29 @@ else
   log "running host preflight (doctor.sh)"
   if ! bash "${SCRIPT_DIR}/doctor.sh"; then
     die "host preflight failed — fix the FAIL lines above, or run: sudo bash ${SCRIPT_DIR}/setup-ubuntu-arm64-builder.sh"
+  fi
+fi
+
+# --- Runtime packaging --------------------------------------------------------
+# THE STEP THIS SCRIPT USED TO SKIP.
+#
+# `package-bootstrap-runtime.sh` is what puts the agents into the rootfs overlay
+# that rpi-image-gen then bakes. Nothing invoked it: it was a manual pre-step
+# documented in a README, so a build run straight after a source change happily
+# produced an image containing the PREVIOUS overlay. That cost two full rebuilds
+# on 2026-08-31 and is the mechanism behind D-05 — the Hub agent's source, unit
+# and avahi advert all existed while no card ever carried the binary.
+#
+# Running it here makes the flashable image a function of the source tree again.
+# It is idempotent and takes about a second.
+if [[ "$SKIP_PACKAGING" == "yes" ]]; then
+  warn "runtime packaging skipped (--skip-packaging): the overlay may not match the source tree"
+else
+  log "packaging runtime components into the rootfs overlay"
+  if ! bash "${SCRIPT_DIR}/package-bootstrap-runtime.sh"; then
+    die "runtime packaging failed — the image would ship a stale or incomplete overlay. Build the workspace first:
+  pnpm --filter @kitluy-services/kitluy-device-firstboot-agent build
+  pnpm --filter @kitluy-services/kitluy-hub-agent build:bundle"
   fi
 fi
 
@@ -244,6 +277,58 @@ RIG_ARGS=(build -S "$KITLUY_SRC" -c "$RIG_CONFIG" -B "$BUILD_DIR")
 # codes that `device_provisioning_codes.store_hub_device_id NOT NULL` requires.
 # The failure would have surfaced at Store pairing, far from its cause.
 RIG_OVERRIDES+=("IGconf_kitluy_device_class=${KITLUY_PROFILE_DEVICE_CLASS}")
+
+# --- The environment, STATED (never inherited) --------------------------------
+# This override did not exist, and the layer defaulted the value to
+# `development`. So every image ever built declared itself a development device
+# because nobody said otherwise — while DEVELOPMENT-UNBOUND storage (a LUKS key
+# NOT bound to the board) and the development LAN listener both open exactly on
+# that word. An implicit default was authorising two security escape paths.
+#
+# It now comes from the profile config, is validated here, and is asserted by the
+# layer. `config/image.conf` carries `development` for this development builder;
+# `--environment` overrides it.
+BUILD_ENVIRONMENT="${ENVIRONMENT_OVERRIDE:-${KITLUY_ENVIRONMENT:-}}"
+[[ -n "$BUILD_ENVIRONMENT" ]] \
+  || die "no environment resolved: set KITLUY_ENVIRONMENT in config/image.conf or pass --environment. It is deliberately not defaulted — the development storage and listener paths key on it."
+
+case "$BUILD_ENVIRONMENT" in
+  local|development|staging) ;;
+  pilot|production|disaster_recovery)
+    # The channel gate already refuses to BUILD these; this refuses to LABEL an
+    # artifact as one. An image marked `production` from this host would carry a
+    # posture the artifact cannot support — it is unsigned and not release
+    # eligible — and the marking is what downstream checks would trust.
+    die "environment '${BUILD_ENVIRONMENT}' cannot be produced by this builder: artifacts from this host are DEVELOPMENT, UNSIGNED and NOT release-eligible (BLK-005)."
+    ;;
+  *)
+    die "environment '${BUILD_ENVIRONMENT}' is not a KitLuy environment (local, development, staging, pilot, production, disaster_recovery)."
+    ;;
+esac
+
+RIG_OVERRIDES+=("IGconf_kitluy_environment=${BUILD_ENVIRONMENT}")
+log "image environment: ${BUILD_ENVIRONMENT} (stated explicitly, not defaulted)"
+
+# DEVELOPMENT DIAGNOSTIC SUDO — OPT-IN, OFF BY DEFAULT.
+#
+# The hardened default purges sudo entirely (`IGconf_device_user1sudo=none`),
+# which is right for anything that could reach a shop: a Store Hub holds device
+# credentials and a local database, and `pi` is reachable over SSH by key.
+#
+# It also makes the device UNDIAGNOSABLE. `/var/lib/kitluy` is root-only 0750, so
+# the agents' own state — registration, pairing, operational credential — cannot
+# be read at all, and `journalctl` returns nothing for system units. A bring-up
+# session spent most of a day inferring device state from server logs because of
+# this, and got it wrong twice.
+#
+# `KITLUY_DEV_SUDO=1` grants passwordless sudo to `pi` for DEVELOPMENT images
+# only. It must never be set for a pilot or production build; those are signed
+# artifacts and this flag is not part of that path.
+if [[ "${KITLUY_DEV_SUDO:-}" == "1" ]]; then
+  RIG_OVERRIDES+=("IGconf_device_user1sudo=nopasswd")
+  warn "DEVELOPMENT SUDO ENABLED: user 'pi' has passwordless sudo in this image."
+  warn "  Diagnostic only. Never build a pilot or production artifact with KITLUY_DEV_SUDO=1."
+fi
 log "device class baked: ${KITLUY_PROFILE_DEVICE_CLASS}"
 
 if [[ -n "$ENROLLMENT_URL" ]]; then
@@ -287,6 +372,41 @@ elif [[ -n "$REGISTRATION_URL" ]]; then
     $0 --profile ${PROFILE} \\
       --registration-url https://<ref>.supabase.co/functions/v1/device-registration \\
       --hardware-profile-key CLOUD-HUB-PI5"
+fi
+
+# THE PINNED DEVELOPMENT ROOT DIGEST.
+#
+# The Hub verifies its operational certificate against a PINNED root: a chain
+# that verifies internally proves only that it is SELF-CONSISTENT, so the pin is
+# the only thing that makes it OURS.
+#
+# TOP LEVEL, deliberately. The first version of this sat inside the
+# `if [[ -n "$HARDWARE_PROFILE_KEY" ]]` block above and therefore never ran for a
+# build that passed no profile key — the image came out with no pin and nothing
+# said so. The pin has nothing to do with the profile key.
+#
+# Read from the operator's $KITLUY_DEV_PKI_DIR at build time and NEVER committed:
+# `scripts/verification/assert-no-dev-pki.mjs` refuses development CA material in
+# the repository, and rightly. A SHA-256 of a public certificate is not key
+# material — it authorises nothing and signs nothing.
+#
+# ABSENT IS SAFE. A Hub with no pin REFUSES to adopt any certificate rather than
+# adopting an unverified one, so an image built on a machine without the
+# development PKI — every CI runner — is inert on this path rather than
+# dangerous.
+if [[ -n "${KITLUY_DEV_PKI_DIR:-}" && -f "${KITLUY_DEV_PKI_DIR}/dev-root-ca.crt.pem" ]]; then
+  DEV_ROOT_SHA256="$(node -e '
+    const {createHash} = require("crypto"), fs = require("fs");
+    const pem = fs.readFileSync(process.argv[1], "utf8");
+    const der = Buffer.from(pem.replace(/-----[^-]+-----/g, "").replace(/\s/g, ""), "base64");
+    process.stdout.write(createHash("sha256").update(der).digest("hex"));
+  ' "${KITLUY_DEV_PKI_DIR}/dev-root-ca.crt.pem")"
+  RIG_OVERRIDES+=("IGconf_kitluy_development_root_sha256=${DEV_ROOT_SHA256}")
+  # Only the first bytes, so a build log never carries the whole pin.
+  log "development root pinned into the image: ${DEV_ROOT_SHA256:0:16}..."
+else
+  warn "no \$KITLUY_DEV_PKI_DIR: the image carries NO root pin, and the Hub will"
+  warn "  refuse to adopt any operational certificate until one is built in."
 fi
 
 [[ ${#RIG_OVERRIDES[@]} -gt 0 ]] && RIG_ARGS+=(-- "${RIG_OVERRIDES[@]}")

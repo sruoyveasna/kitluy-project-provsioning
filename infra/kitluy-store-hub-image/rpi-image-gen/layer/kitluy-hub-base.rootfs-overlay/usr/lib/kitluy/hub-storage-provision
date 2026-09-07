@@ -36,6 +36,36 @@
 # to 0. That is an owner decision about a physical board, not something a boot
 # script may do on its own initiative, and silently falling back to a weaker key
 # would give encryption that only LOOKS like it is bound to hardware.
+#
+# =============================================================================
+# THE ONE EXCEPTION: DEVELOPMENT-UNBOUND STORAGE
+# =============================================================================
+# Named for what is true about it: the key is NOT BOUND to the board. A drive
+# carrying it is readable in any machine that also has the key file, which is
+# exactly the property OTP binding exists to prevent. It is not a weaker version
+# of production security; it is a different thing, and the name says so on every
+# line that mentions it.
+#
+# It exists because irreversible fuse programming must not sit on the software
+# development critical path. Reaching it requires ALL FOUR of:
+#
+#   1. no OTP key is programmed        -- OTP ALWAYS wins when it is available
+#   2. KITLUY_ENVIRONMENT=development  -- and `unknown` when unreadable, so a
+#                                         missing image.env fails closed
+#   3. an operator-created marker file -- never shipped in the image, so no
+#                                         golden image can boot into this path
+#   4. /var/lib/kitluy not group- or world-writable
+#
+# The key is 32 random bytes generated ON THIS BOARD after boot, never shipped,
+# never shared between devices, never logged, mode 0600. It lives on the
+# persistent slot and NOT on the volume it unlocks -- `/var/lib/kitluy` is not
+# itself a mount point, only `/var/lib/kitluy/hub` is, so there is no
+# chicken-and-egg.
+#
+# The resulting posture is recorded in a world-readable label file so an operator
+# and the Hub agent can both see which path was taken WITHOUT reading key
+# material. `bin/hub-agent.ts` refuses to serve when that label says
+# DEVELOPMENT-UNBOUND and the environment is not development.
 set -eu
 
 log()  { printf '[kitluy-hub-storage] %s\n' "$*"; }
@@ -45,6 +75,144 @@ MAPPER_NAME="kitluy-hub-data"
 MOUNT_POINT="/var/lib/kitluy/hub"
 STATE_DIR="/var/lib/kitluy/hub"
 PROVISIONED_MARKER="/var/lib/kitluy/hub/.luks-provisioned"
+
+# The persistent-slot directory. NOT the encrypted volume — everything below
+# must be readable BEFORE that volume is unlocked.
+#
+# `--state-root` and `--etc-root` exist ONLY so the decision below can be tested
+# off-device, the same reason `image-env.ts` takes an `etcRoot` parameter. They
+# grant nothing: whoever can pass them can already run this script as root.
+STATE_ROOT="/var/lib/kitluy"
+ETC_ROOT="/etc"
+EXPLAIN_ONLY="no"
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --explain)    EXPLAIN_ONLY="yes"; shift ;;
+    --state-root) STATE_ROOT="${2:?--state-root needs a directory}"; shift 2 ;;
+    --etc-root)   ETC_ROOT="${2:?--etc-root needs a directory}"; shift 2 ;;
+    *) die "unknown argument '$1'" ;;
+  esac
+done
+
+DEV_UNBOUND_MARKER="${STATE_ROOT}/DEVELOPMENT-UNBOUND-STORAGE-AUTHORIZED"
+DEV_UNBOUND_KEY="${STATE_ROOT}/development-unbound-storage.key"
+POSTURE_FILE="${STATE_ROOT}/storage-posture"
+
+# Same two lines `hub-database-provision` uses, and for the same reason: the
+# `unknown` default is what makes an unreadable image.env fail closed.
+[ -f "${ETC_ROOT}/kitluy/image.env" ] && . "${ETC_ROOT}/kitluy/image.env"
+ENVIRONMENT="${KITLUY_ENVIRONMENT:-unknown}"
+
+# -----------------------------------------------------------------------------
+# 0. May this board provision at all, and with which key?
+# -----------------------------------------------------------------------------
+# Resolved BEFORE any device is touched, so the answer to "am I authorized" never
+# depends on what hardware happens to be fitted, and so it can be asked with
+# `--explain` without formatting anything.
+resolve_storage_posture() {
+  # OTP FIRST, ALWAYS. The development path is reachable only when this one is
+  # genuinely unavailable, so a board whose fuses are programmed can never be
+  # talked into the weaker posture by an environment variable or a stray file.
+  if command -v rpi-otp-private-key >/dev/null 2>&1 \
+     && rpi-otp-private-key -c >/dev/null 2>&1; then
+    # `-c` exits non-zero when the key is all zeros, i.e. never programmed.
+    STORAGE_POSTURE="OTP-BOUND"
+    return 0
+  fi
+
+  # Condition 2: development only. Anything else — including `unknown` from an
+  # unreadable image.env — refuses.
+  if [ "$ENVIRONMENT" != "development" ]; then
+    die "this board has no device-unique OTP key programmed.
+  The Store Hub data volume is encrypted with a key bound to the board, and
+  programming OTP is IRREVERSIBLE (fuses never return from 1 to 0), so it is an
+  owner decision and not something first boot performs on its own.
+  Provision the board, then reboot. See rpi-otp-private-key -h for the procedure.
+  (environment is '${ENVIRONMENT}'; DEVELOPMENT-UNBOUND storage is refused outside development)"
+  fi
+
+  # Condition 3: an operator authorized THIS board, by hand, after boot. The
+  # marker is never shipped, so no golden image can boot into this path.
+  if [ ! -e "$DEV_UNBOUND_MARKER" ]; then
+    die "this board has no device-unique OTP key programmed, and DEVELOPMENT-UNBOUND storage is not authorized.
+  The Store Hub data volume is normally encrypted with a key bound to the board.
+  Programming OTP is IRREVERSIBLE and is an owner decision.
+  For DEVELOPMENT ONLY, and understanding that the resulting volume is NOT bound
+  to this board, authorize the unbound key by creating:
+      ${DEV_UNBOUND_MARKER}
+  then reboot."
+  fi
+
+  # Condition 4: the directory holding the key must not be group- or
+  # world-writable, or anyone with an account could replace the key file.
+  # Mirrors `assertDevPkiDirectoryMode` (dev-operational-pki.ts) in shell.
+  if [ -n "$(find "$STATE_ROOT" -maxdepth 0 -perm /022 2>/dev/null)" ]; then
+    die "${STATE_ROOT} is group- or world-writable; refusing to keep an unbound storage key there"
+  fi
+
+  STORAGE_POSTURE="DEVELOPMENT-UNBOUND"
+}
+
+# The key file, generated ONCE on this board. `umask 077` means it is never
+# briefly world-readable between creation and chmod.
+ensure_dev_unbound_key() {
+  if [ ! -s "$DEV_UNBOUND_KEY" ]; then
+    log "generating a DEVELOPMENT-UNBOUND storage key for this board (32 random bytes, never shipped, never shared)"
+    ( umask 077; openssl rand -hex 32 > "$DEV_UNBOUND_KEY" )
+  fi
+  chmod 0600 "$DEV_UNBOUND_KEY"
+  [ -s "$DEV_UNBOUND_KEY" ] || die "the DEVELOPMENT-UNBOUND storage key file is empty"
+}
+
+# Writes the passphrase to stdout and NOTHING else. Both branches keep the secret
+# out of the process table, the journal and every log line: the value is piped
+# straight into cryptsetup and never assigned to a variable that outlives the call.
+derive_passphrase() {
+  case "$STORAGE_POSTURE" in
+    OTP-BOUND)
+      # HMAC of a fixed domain string under the OTP key. The OTP secret itself is
+      # never written to disk, never logged, and never becomes the passphrase.
+      otp_key="$(rpi-otp-private-key 2>/dev/null | tr -d ' \n')"
+      [ -n "$otp_key" ] || die "the OTP device key read back empty"
+      printf 'kitluy.hub-data-volume.v1' \
+        | openssl dgst -sha256 -mac HMAC -macopt "hexkey:${otp_key}" -hex \
+        | sed 's/^.*= //'
+      unset otp_key
+      ;;
+    DEVELOPMENT-UNBOUND)
+      cat "$DEV_UNBOUND_KEY"
+      ;;
+    *)
+      die "no storage key posture was resolved"
+      ;;
+  esac
+}
+
+STORAGE_POSTURE=""
+resolve_storage_posture
+
+if [ "$EXPLAIN_ONLY" = "yes" ]; then
+  # Decision only. No key generated, no posture file written, no device touched.
+  printf '%s\n' "$STORAGE_POSTURE"
+  exit 0
+fi
+
+# The key belongs to the authorization decision above, not to the disk, so it is
+# committed here rather than after the device checks — a board that is authorized
+# but has no drive fitted still has a stable key when one is.
+if [ "$STORAGE_POSTURE" = "DEVELOPMENT-UNBOUND" ]; then
+  ensure_dev_unbound_key
+  log "STORAGE POSTURE: DEVELOPMENT-UNBOUND — this volume is NOT bound to this board and is NOT production security"
+else
+  log "storage posture: OTP-BOUND"
+fi
+
+# A label, never key material. World-readable on purpose: the Hub agent and an
+# operator both need to know which path was taken, and neither should have to
+# read a key to find out.
+printf '%s\n' "$STORAGE_POSTURE" > "$POSTURE_FILE"
+chmod 0644 "$POSTURE_FILE"
 
 # -----------------------------------------------------------------------------
 # 1. Already unlocked?
@@ -92,29 +260,8 @@ esac
 # -----------------------------------------------------------------------------
 # 3. Derive the hardware-bound passphrase
 # -----------------------------------------------------------------------------
-command -v rpi-otp-private-key >/dev/null 2>&1 \
-  || die "rpi-otp-private-key is not installed; the data volume key is bound to this board's OTP and cannot be derived without it"
-
-# `-c` exits non-zero when the key is all zeros, i.e. never programmed.
-if ! rpi-otp-private-key -c >/dev/null 2>&1; then
-  die "this board has no device-unique OTP key programmed.
-  The Store Hub data volume is encrypted with a key bound to the board, and
-  programming OTP is IRREVERSIBLE (fuses never return from 1 to 0), so it is an
-  owner decision and not something first boot performs on its own.
-  Provision the board, then reboot. See rpi-otp-private-key -h for the procedure."
-fi
-
-# HMAC of a fixed domain string under the OTP key. The OTP secret itself is never
-# written to disk, never logged, and never becomes the passphrase.
-derive_passphrase() {
-  otp_key="$(rpi-otp-private-key 2>/dev/null | tr -d ' \n')"
-  [ -n "$otp_key" ] || die "the OTP device key read back empty"
-  printf 'kitluy.hub-data-volume.v1' \
-    | openssl dgst -sha256 -mac HMAC -macopt "hexkey:${otp_key}" -hex \
-    | sed 's/^.*= //'
-  unset otp_key
-}
-
+# The posture was resolved in section 0, before any device was touched, and the
+# key material it implies was committed there too. Nothing is left to decide.
 # -----------------------------------------------------------------------------
 # 4. Format, if this drive is not already ours
 # -----------------------------------------------------------------------------
@@ -144,7 +291,20 @@ fi
 # 5. Open and mount
 # -----------------------------------------------------------------------------
 if [ ! -e "/dev/mapper/$MAPPER_NAME" ]; then
-  derive_passphrase | cryptsetup open --type luks2 "$NVME_DEVICE" "$MAPPER_NAME" -
+  # `--key-file=-`, NOT a trailing `-`.
+  #
+  # `luksFormat` accepts a POSITIONAL key file, so `luksFormat <device> -` reads
+  # stdin and is correct above. `open` does not: its positional arguments are
+  # <device> and <name>, and a third `-` is not a key file. cryptsetup then asks
+  # for a passphrase interactively instead of reading the one on stdin, and
+  # under systemd — with no terminal — that surfaces as
+  # "No key available with this passphrase" on a volume whose key is perfectly
+  # good. The format above had already succeeded, so the drive was encrypted and
+  # unopenable in the same run.
+  #
+  # This never fired before BRINGUP-003 because the OTP gate refused first: no
+  # board ever reached this line.
+  derive_passphrase | cryptsetup open --type luks2 --key-file=- "$NVME_DEVICE" "$MAPPER_NAME"
   log "unlocked $NVME_DEVICE as $MAPPER_NAME"
 fi
 

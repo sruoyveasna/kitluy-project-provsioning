@@ -27,6 +27,15 @@ export default tseslint.config(
       // and each rootfs-overlay). `**/dist/**` above is ignored for exactly
       // this reason; these ARE dist, copied into an overlay.
       "**/*rootfs-overlay/**/lib/firstboot-agent/**",
+      // The Store Hub agent BUNDLE, for the same reason and one more.
+      //
+      // `dist-bundle/hub-agent.mjs` is esbuild output: the whole dependency
+      // graph inlined, including `pg` and its vendored parsers. Linting it
+      // reports on code this repository did not write and cannot fix — the
+      // `parseFloat` findings, for instance, are inside pg's numeric parser,
+      // where they are correct. The TypeScript it is built from IS linted.
+      "**/dist-bundle/**",
+      "**/*rootfs-overlay/**/lib/hub-agent/**",
       "infra/*/out/**",
     ],
   },

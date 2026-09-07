@@ -44,8 +44,8 @@ import {
   tbsBytes,
   verifyDetachedSignature,
   type Certificate,
+  type CertificateAuthorityProvider,
   type CertificateChain,
-  type DevelopmentCertificateAuthority,
 } from "./dev-crypto.js";
 import type { HardwareTrustLevel } from "./index.js";
 
@@ -218,7 +218,16 @@ export interface PipelineInput extends PrepareInput {
 export async function runGovernedIssuance(
   input: PipelineInput,
   gateway: GovernedIssuanceGateway,
-  ca: DevelopmentCertificateAuthority,
+  /**
+   * WIDENED to the interface this function actually uses. The body touches only
+   * `issueDeviceCertificate`, `rootCertificate` and `intermediateCertificate`,
+   * which is exactly `CertificateAuthorityProvider`. The concrete type was a
+   * narrower requirement than the code had, and it forced every caller to use
+   * the EPHEMERAL development CA — the one that mints a new identity per
+   * process and orphans everything it signed before. No behaviour changes here;
+   * a persistent provider simply becomes expressible.
+   */
+  ca: CertificateAuthorityProvider,
 ): Promise<AdapterOutcome> {
   // -- 1. PREPARE ------------------------------------------------------------
   let reservation: PreparedReservation;
@@ -287,11 +296,34 @@ export async function runGovernedIssuance(
   ).toString("utf8");
 
   if (locallyBuilt !== canonicalTbs) {
+    // NAME THE FIELD THAT DIVERGED.
+    //
+    // "the two layers disagree" is true and useless: the canonical form is a
+    // newline-joined record, so the fields are positional and the first
+    // mismatch identifies the culprit exactly. Without this a divergence is an
+    // afternoon of guessing — which is how it was found the first time.
+    //
+    // Only the POSITION and LENGTHS are reported. The values themselves are a
+    // public key, a fingerprint and timestamps, but this string reaches an
+    // unauthenticated device, so it carries no content.
+    const mine = locallyBuilt.split("\n");
+    const theirs = canonicalTbs.split("\n");
+    let where = "field counts differ";
+    if (mine.length === theirs.length) {
+      const i = mine.findIndex((line, n) => line !== theirs[n]);
+      where =
+        i === -1
+          ? "no field differs (trailing bytes?)"
+          : `field ${i + 1} of ${mine.length} (local ${mine[i]?.length ?? 0} chars, database ${theirs[i]?.length ?? 0})`;
+    } else {
+      where = `field count: local ${mine.length}, database ${theirs.length}`;
+    }
     return {
       outcome: "REFUSED",
       refusalCode: "ISSUE_CANONICAL_TBS_DIVERGENCE",
       detail:
-        "the database and the device-identity package disagree about canonical TBS bytes; nothing was signed",
+        "the database and the device-identity package disagree about canonical TBS bytes; " +
+        `nothing was signed — ${where}`,
     };
   }
 

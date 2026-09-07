@@ -34,7 +34,7 @@ import { handleRequest } from "../src/http.js";
 import { refuseAllRequests, type RequestAuthenticator } from "../src/authentication.js";
 import type { RouteRequest } from "../src/revocation-routes.js";
 
-const LOCAL_DSN = "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
+const LOCAL_DSN = "postgresql://postgres:postgres@127.0.0.1:54392/postgres";
 const RUN = randomUUID().slice(0, 8);
 const ENV = { DEVICE_REGISTRY_DATABASE_URL: LOCAL_DSN, KITLUY_ENV: "local" } as const;
 

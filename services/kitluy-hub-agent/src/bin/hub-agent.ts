@@ -38,12 +38,19 @@ import {
   type HubMigrationEntry,
 } from "../hub/safety-mode.js";
 import {
+  certificateFingerprint,
   decideStartup,
   evaluateSchema,
+  evaluateStoragePosture,
   loadTlsMaterial,
   resolveBindHost,
   HUB_LAN_PORT,
+  type StoragePosture,
 } from "../hub-runtime.js";
+import {
+  composeDevelopmentListener,
+  startDevelopmentListener,
+} from "../hub/edge/development-listener.js";
 
 const log = createLogger(SERVICE_NAME);
 
@@ -105,6 +112,25 @@ async function measureDiskUsedPercent(path: string): Promise<number | undefined>
   }
 }
 
+/**
+ * The posture label `hub-storage-provision` wrote, or `undefined`.
+ *
+ * A label, never key material — that is the whole reason the provisioner writes
+ * a separate world-readable file instead of the agent inspecting the volume.
+ * Unreadable reads as `undefined`, which {@link evaluateStoragePosture} treats
+ * as "not this rule's business" rather than as a pass.
+ */
+async function readStoragePosture(): Promise<StoragePosture> {
+  const path = process.env.HUB_STORAGE_POSTURE_PATH ?? "/var/lib/kitluy/storage-posture";
+  try {
+    const { readFile } = await import("node:fs/promises");
+    const value = (await readFile(path, "utf8")).trim();
+    return value === "OTP-BOUND" || value === "DEVELOPMENT-UNBOUND" ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function main(): Promise<void> {
   const reachable = await isHubDatabaseReachable();
 
@@ -134,14 +160,25 @@ async function main(): Promise<void> {
   const dataPath = process.env.HUB_DATA_PATH ?? "/var/lib/kitluy/hub";
   const diskUsedPercent = await measureDiskUsedPercent(dataPath);
 
+  // The environment the IMAGE declares. `unknown` when unreadable, matching the
+  // provisioner's default, so a Hub that cannot see its own environment is never
+  // treated as a development one.
+  const environment = process.env.KITLUY_ENVIRONMENT ?? "unknown";
+
+  // Hoisted out of the `decideStartup` call because the listener needs the same
+  // values afterwards, and reading the certificate twice would let the file
+  // change between the check and the use.
+  const tls = loadTlsMaterial({
+    keyPath: process.env.HUB_TLS_KEY_PATH,
+    certPath: process.env.HUB_TLS_CERT_PATH,
+    clientCaPath: process.env.HUB_DEVICE_CA_PATH,
+  });
+
   const verdict = decideStartup({
     databaseReachable: reachable,
     schema: evaluateSchema(await expectedMigrations(), applied),
-    tls: loadTlsMaterial({
-      keyPath: process.env.HUB_TLS_KEY_PATH,
-      certPath: process.env.HUB_TLS_CERT_PATH,
-      clientCaPath: process.env.HUB_DEVICE_CA_PATH,
-    }),
+    storage: evaluateStoragePosture(await readStoragePosture(), environment),
+    tls,
     bind: resolveBindHost(process.env.HUB_LAN_BIND_HOST),
     safety: {
       readOnlyDeclared: process.env.HUB_READ_ONLY === "true",
@@ -187,24 +224,72 @@ async function main(): Promise<void> {
   });
 
   // ===========================================================================
-  // The terminal-facing listener is deliberately NOT started here yet.
+  // The terminal-facing listener — DEVELOPMENT ONLY.
   // ===========================================================================
-  // `createEdgeTerminalRouter` additionally needs a `TerminalPairingComposition`
-  // with an operational SIGNER, a `CloudActivationGateway` and an
-  // `EdgeDiscoveryAuthority` — and the signer is the same BLK-005 key custody
-  // that gates the certificates. Reaching this point means the material exists,
-  // which cannot happen until that decision is made, so wiring a listener now
-  // would be code no one could execute or review against reality.
+  // This used to stop here for every Hub, because composing a listener needs a
+  // pairing SIGNER and signer custody is BLK-005. That is still true for pilot
+  // and production, and `composeDevelopmentListener` refuses them by name.
   //
-  // What this entrypoint delivers today is the part that is decidable: a Hub
-  // that proves its database, its schema and its interface, and states exactly
-  // what it is waiting for.
-  log.info("terminal listener not started", {
-    reason: "KLUY-HUB-EDGE-PENDING",
-    detail:
-      "certificate material resolved, but pairing/discovery composition requires the BLK-005 operational signer",
+  // A development Hub is different only because it has real material to compose
+  // from: an adopted credential and an ed25519 identity, both from the
+  // development CA. Nothing here mints either one.
+  // `decideStartup` refuses on absent TLS material, so reaching here means it is
+  // present. The check restates that for the type system rather than asserting.
+  if (tls.kind !== "present") {
+    log.info("terminal listener not started", { reason: tls.code, detail: tls.detail });
+    await pool?.end().catch(() => undefined);
+    return;
+  }
+
+  const composition = composeDevelopmentListener({
+    environment,
+    tlsCertificateFingerprint: certificateFingerprint(tls.cert),
+    bindHost: verdict.bindHost,
   });
-  await pool?.end().catch(() => undefined);
+
+  if (composition.kind === "refused") {
+    // Same shape as before: a Hub that is not serving says exactly why, at info,
+    // and exits 0 so systemd does not restart-loop a configured outcome.
+    log.info("terminal listener not started", {
+      reason: composition.code,
+      detail: composition.detail,
+    });
+    await pool?.end().catch(() => undefined);
+    return;
+  }
+
+  const listener = await startDevelopmentListener({
+    pool: pool!,
+    composition,
+    environment,
+    bindHost: verdict.bindHost,
+    tls: { key: tls.key, cert: tls.cert, clientCa: tls.clientCa },
+    logger: { info: (fields) => log.info("edge", fields) },
+  });
+
+  log.info("Store Hub is serving terminals", {
+    bindHost: verdict.bindHost,
+    port: listener.port,
+    // Stated on every start. A development listener must never be mistaken in a
+    // log for the production one it is standing in for.
+    posture: "DEVELOPMENT-ONLY",
+    hubDeviceId: composition.identity.hubDeviceId,
+    storeLocationId: composition.identity.storeLocationId,
+  });
+
+  // The process now stays up because the server holds the event loop open.
+  // Shutdown is explicit so an update can stop it without severing a request
+  // mid-flight.
+  const shutdown = (signal: string): void => {
+    log.info("Store Hub is stopping", { signal });
+    void listener
+      .close()
+      .catch(() => undefined)
+      .then(() => pool?.end().catch(() => undefined))
+      .then(() => process.exit(0));
+  };
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
 }
 
 main().catch((error: unknown) => {

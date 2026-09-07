@@ -241,6 +241,12 @@ export function createManagementRuntime(env: Env = process.env, max = 8): Manage
       // Device-enrollment approval likewise MUTATES through a governed door and
       // needs a transaction it can enter `service_role` inside.
       approval: { pool },
+      // Terminal pairing (group 0213): Partner routes enter
+      // `kitluy_terminal_issuance_service` inside a transaction.
+      terminals: { pool },
+      // Digital Store creation (group 0215) enters `service_role` inside a
+      // transaction, as device approval does.
+      stores: { pool },
       // Asserted to `has_permission`; RLS-022 fails closed without it.
       environment: requireEnvironment(env),
     },

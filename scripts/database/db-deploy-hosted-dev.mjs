@@ -69,6 +69,20 @@ try {
   throw error;
 }
 
+// =============================================================================
+// D-20: THE SUBPROCESS GETS THE CANONICAL DSN, NEVER THE ORIGINAL.
+// =============================================================================
+// The Supabase CLI takes a connection string, so a sanitized options object is
+// not available here — the string is rebuilt instead, from the components the
+// guard verified plus the allowlisted TLS parameters and nothing else.
+//
+// This matters more for the subprocess than for `pg`: the CLI links libpq, which
+// honours routing keywords `pg` ignores (`hostaddr`, `service`, `passfile`).
+// Validating the string and then handing the ORIGINAL to a child process would
+// mean the guard and the thing that actually connects disagree about the target,
+// which is exactly the defect.
+const canonicalDbUrl = target.canonicalConnectionString;
+
 console.log(
   `[hosted-dev] target ${target.name} (${target.projectRef}) · env=${target.environment}`,
 );
@@ -86,7 +100,7 @@ console.log(`[hosted-dev] migration files on disk: ${files.length}`);
 // already required for the push itself, so it is the one tool guaranteed present.
 function migrationList() {
   try {
-    return execFileSync("supabase", ["migration", "list", "--db-url", dbUrl], {
+    return execFileSync("supabase", ["migration", "list", "--db-url", canonicalDbUrl], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -140,7 +154,7 @@ console.log(
   `[hosted-dev] applying ${files.length - ledgerCount} migration(s) with supabase db push`,
 );
 try {
-  execFileSync("supabase", ["db", "push", "--db-url", dbUrl, "--include-all", "--yes"], {
+  execFileSync("supabase", ["db", "push", "--db-url", canonicalDbUrl, "--include-all", "--yes"], {
     stdio: "inherit",
     cwd: process.cwd(),
   });

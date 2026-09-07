@@ -30,7 +30,7 @@ import {
 } from "../src/composition.js";
 import { createEmergencyLapseWorker, EMERGENCY_LAPSE_JOB_KIND } from "../src/lapse-worker.js";
 
-const LOCAL_DSN = "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
+const LOCAL_DSN = "postgresql://postgres:postgres@127.0.0.1:54392/postgres";
 const RUN = randomUUID().slice(0, 8);
 const ENV = { DEVICE_REGISTRY_DATABASE_URL: LOCAL_DSN, KITLUY_ENV: "local" } as const;
 /**

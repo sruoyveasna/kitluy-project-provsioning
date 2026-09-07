@@ -50,6 +50,7 @@ import {
   type DeviceRegistrationSignal,
 } from "../device-registration-bytes.js";
 import type { HardwareSignals } from "../identity.js";
+import { assetTagFromFingerprint } from "../registration-state.js";
 
 /** What the device must be able to do with its key, without holding it. */
 export interface DeviceSigner {
@@ -211,7 +212,7 @@ export function createHttpRegistrationClient(
         // Derived from the key, not from hardware. The contract is explicit that
         // an asset tag is a LABEL and not an identity, and the server will not
         // rename a board it already knows under a different tag.
-        assetTag: `KL-${fingerprint.slice(0, 12).toUpperCase()}`,
+        assetTag: assetTagFromFingerprint(fingerprint),
         hardwareProfileKey: options.hardwareProfileKey,
         hostname: normalise(input.hostname),
         registrationPublicKeyFingerprint: fingerprint,

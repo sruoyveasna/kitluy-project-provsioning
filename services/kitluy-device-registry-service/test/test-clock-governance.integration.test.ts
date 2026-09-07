@@ -16,7 +16,7 @@
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-const LOCAL_DSN = "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
+const LOCAL_DSN = "postgresql://postgres:postgres@127.0.0.1:54392/postgres";
 const DECISION = "KLD-2026-07-31-SECURITY-TEST-CLOCK-001";
 
 async function reachable(): Promise<boolean> {

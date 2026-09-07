@@ -1,0 +1,51 @@
+[Unit]
+Description=KitLuy cloud registration client
+# FACTORY ENROLLMENT, STAGE ONE (KLD-2026-09-03-FACTORY-ENROLLMENT-001).
+#
+# The device announces itself to KitLuy and waits for an explicit Admin
+# approval. It presents NO ticket and NO credential, and no answer this route
+# gives can make it `enrolled` — that transition belongs to a human at HET.
+# Approval grants recognition and provisioning eligibility only; Store
+# authority arrives later, through pairing and activation.
+#
+# Ordered after firstboot because registration proves possession of the key
+# firstboot creates; there is nothing to sign with until that has run.
+After=kitluy-firstboot.service network-online.target
+Wants=network-online.target
+Requires=kitluy-firstboot.service
+ConditionPathExists=/usr/lib/kitluy/cloud-registration
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/kitluy/cloud-registration
+User=root
+Restart=always
+RestartSec=30s
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictRealtime=yes
+CapabilityBoundingSet=
+# Writes registration-state.json and installation.json, and reads the identity
+# firstboot created. Nothing outside /var/lib/kitluy is writable to it.
+ReadWritePaths=/var/lib/kitluy
+StateDirectory=kitluy
+# 0751 — the SAME value every KitLuy unit sharing /var/lib/kitluy declares.
+#
+# systemd re-applies StateDirectoryMode on every start, so units that disagree
+# leave the directory's mode to boot order. The Store Hub image settled on 0751
+# because postgres must TRAVERSE /var/lib/kitluy to reach its cluster; the
+# terminal carries no database, but the value is kept identical so the
+# agreement test and both images stay on one convention. `x` without `r`
+# grants traversal only: /var/lib/kitluy still cannot be listed by others, and
+# identity/ and the other state directories stay 0700.
+StateDirectoryMode=0751
+
+[Install]
+WantedBy=multi-user.target

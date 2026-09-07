@@ -69,3 +69,7 @@ export function holdsPermission(access: AccessState, permission: string): boolea
 export const PERMISSION_FLEET_READ = "fleet.read" as const;
 /** Registered CRITICAL by migration 0197. Presentation gate only. */
 export const PERMISSION_FLEET_ENROLLMENT_APPROVE = "fleet.device_enrollment.approve" as const;
+/** Registered HIGH by migration 0215. Presentation gate only. */
+export const PERMISSION_STORE_CREATE = "store.digital_store.create" as const;
+/** Seeded reference permission, reused for the Stores list. Presentation gate only. */
+export const PERMISSION_PARTNERS_READ = "partners.read" as const;

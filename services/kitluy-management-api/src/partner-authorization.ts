@@ -183,3 +183,16 @@ export async function authorizePartnerRequest(
     digitalStoreIds: row.digital_store_ids ?? [],
   };
 }
+
+/**
+ * Partner-side permission keys this service enforces.
+ *
+ * Two keys, two authorities: attaching a Store Hub to a Store (0193) and
+ * attaching a Pi Terminal to a named seat (0213). `fleet.device_provisioning_code.issue`
+ * is deliberately NOT a Partner key — its door has no Store-scope conjunct.
+ */
+export const PARTNER_PERMISSION = {
+  HUB_PAIRING_ISSUE: "fleet.hub_pairing_code.issue",
+  /** Registered by migration 0213 as CRITICAL; granted to DIGITAL_STORE_STAFF. */
+  TERMINAL_PAIRING_ISSUE: "fleet.terminal_pairing_code.issue",
+} as const;

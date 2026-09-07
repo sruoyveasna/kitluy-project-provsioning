@@ -22,7 +22,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 
-const DSN = "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
+const DSN = "postgresql://postgres:postgres@127.0.0.1:54392/postgres";
 const ITERATIONS = 20;
 
 // The section-56 fixture Location (a REAL store_locations row). The

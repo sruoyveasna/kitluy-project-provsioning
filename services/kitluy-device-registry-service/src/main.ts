@@ -25,6 +25,9 @@ import { EnrollmentComposition, type DevelopmentOpenEnrollment } from "./enrollm
 import { createEnrollmentRouter, DEVICE_ENROLLMENT_PREFIX } from "./enrollment-routes.js";
 import { HubPairingComposition } from "./hub-pairing-composition.js";
 import { createHubPairingRouter, HUB_PAIRING_PREFIX } from "./hub-pairing-routes.js";
+import { createTerminalPairingRouter, TERMINAL_PAIRING_PREFIX } from "./terminal-pairing-routes.js";
+import { TerminalPairingComposition } from "./terminal-pairing-composition.js";
+import { createOperationalCertificateRouter } from "./operational-certificate-routes.js";
 import { advanceDeviceTrust } from "./device-trust-advance.js";
 import { resolveEnrollmentTimeSigningKeyReference } from "./enrollment-time-signer.js";
 import { handleRequest } from "./http.js";
@@ -198,6 +201,13 @@ const enrollmentRouter = createEnrollmentRouter({
  * the connecting `service_role`, so this pre-credential surface cannot touch a
  * table even if every check above it were bypassed.
  */
+// The governed operational-certificate route. It owns no policy: every decision
+// is made behind `issueFirstOperationalCertificate` and its doors.
+const operationalCertificateRouter = createOperationalCertificateRouter({
+  pool: revocation.pool,
+  logger: { info: (fields) => log.info("operational-certificate", fields) },
+});
+
 const hubPairingRouter = createHubPairingRouter({
   composition: new HubPairingComposition({
     source: revocation.pool,
@@ -216,6 +226,23 @@ const hubPairingRouter = createHubPairingRouter({
       actorRef: "device/hub-pairing",
     }),
   logger: { info: (fields) => log.info("hub-pairing-route", fields) },
+});
+
+// Pi Terminal pairing (group 0213): the same two-door shape as Hub pairing,
+// with the assignment performed inside the consume door, then the same
+// separate trust advance so a paired terminal can reach `active`.
+const terminalPairingRouter = createTerminalPairingRouter({
+  composition: new TerminalPairingComposition({
+    source: revocation.pool,
+    logger: { info: (fields) => log.info("terminal-pairing", fields) },
+  }),
+  advanceTrust: (deviceRecordId) =>
+    advanceDeviceTrust(revocation.pool, {
+      deviceRecordId,
+      environment: trustEnvironment,
+      actorRef: "device/terminal-pairing",
+    }),
+  logger: { info: (fields) => log.info("terminal-pairing-route", fields) },
 });
 
 /**
@@ -282,7 +309,8 @@ const server = createServer((req, res) => {
       // its rate limiter is the only thing standing between an eight-character
       // code and unlimited guessing volume. A malformed body rejected here would
       // never reach that limiter, so garbage JSON would be free.
-      url.startsWith(HUB_PAIRING_PREFIX);
+      url.startsWith(HUB_PAIRING_PREFIX) ||
+      url.startsWith(TERMINAL_PAIRING_PREFIX);
     let parsed: unknown;
     if (!isBootstrap && raw.text.length > 0) {
       try {
@@ -319,6 +347,8 @@ const server = createServer((req, res) => {
         provisioningRouter,
         enrollmentRouter,
         hubPairingRouter,
+        terminalPairingRouter,
+        operationalCertificateRouter,
       },
     );
     res.writeHead(status, { "content-type": "application/json", ...(headers ?? {}) });

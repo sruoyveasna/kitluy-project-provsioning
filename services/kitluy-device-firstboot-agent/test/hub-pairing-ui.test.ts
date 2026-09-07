@@ -157,6 +157,11 @@ describe("what the operator is told, and what is recorded", () => {
 
   it("CODE_REFUSED keeps prompting and records NOTHING", () => {
     const out = interpret(attempt({ status: 403, result: "CODE_REFUSED" }), DEVICE);
+    // 0194 collapses "wrong code" and "ineligible device" on purpose — telling
+    // them apart would be a code-existence oracle. The CONSOLE leaks nothing by
+    // naming the second cause, and a re-flashed Hub is exactly that case.
+    expect(out.message).toContain("paired before");
+    expect(out.message).toContain("unassigned");
 
     expect(out.done).toBe(false);
     // A wrong guess is not a state change. Writing one would also mean the screen
@@ -190,8 +195,44 @@ describe("what the operator is told, and what is recorded", () => {
     expect(out.message).toContain("network");
   });
 
+  /**
+   * The re-flashed Store Hub. The board is resolved from hardware evidence, so a
+   * new SD card is a new installation of the SAME device and its first pairing's
+   * assignment is still live in the cloud. Before this case existed the console
+   * answered with REDEMPTION_REFUSED's text — "generate a new pairing code" —
+   * which is the one action that cannot possibly work: codes issue happily and
+   * every one of them is refused at `create_device_claim_v1`.
+   */
+  it("ALREADY_ASSIGNED says a new code will NOT help, and names the real remedy", () => {
+    const out = interpret(attempt({ status: 409, result: "ALREADY_ASSIGNED" }), DEVICE);
+    expect(out.message).toContain("already assigned");
+    expect(out.message).toContain("will NOT help");
+    expect(out.message).toContain("unassign");
+    // The trap this case exists to avoid.
+    expect(out.message).not.toMatch(/generate a new pairing code/i);
+    expect(out.state?.phase).toBe("ALREADY_ASSIGNED");
+    expect(out.state?.deviceRecordId).toBe(DEVICE);
+    // Not `done`: the fix lands in the cloud, and when it does the operator
+    // types a code on THIS screen. Returning would exit into `Restart=always`
+    // and throw the explanation away every few seconds.
+    expect(out.done).toBe(false);
+    // Long enough to be read and acted on, rather than a three-second flash.
+    expect(out.holdSeconds).toBeGreaterThanOrEqual(30);
+  });
+
+  it("renders an already-assigned Hub as assigned, never as Unassigned", () => {
+    const screen = render(enrolled, {
+      phase: "ALREADY_ASSIGNED",
+      deviceRecordId: DEVICE,
+      updatedAt: "x",
+    });
+    // The cloud holds a live assignment. A screen reading "Unassigned" would be
+    // the device contradicting the fleet in front of the person fixing it.
+    expect(screen).toContain("Assigned (must be unassigned to re-pair)");
+  });
+
   it("never echoes anything that could be a code back to the screen", () => {
-    for (const result of ["CODE_REFUSED", "LOCKED", "REDEMPTION_REFUSED"]) {
+    for (const result of ["CODE_REFUSED", "LOCKED", "REDEMPTION_REFUSED", "ALREADY_ASSIGNED"]) {
       const out = interpret(attempt({ status: 403, result }), DEVICE);
       expect(out.message).not.toMatch(/[0-9A-Z]{8}/);
     }

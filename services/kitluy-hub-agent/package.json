@@ -7,6 +7,7 @@
   "main": "./dist/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "build:bundle": "node scripts/bundle.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:offline": "vitest run test/offline-reconnect.test.ts",
@@ -32,6 +33,7 @@
     "pg": "catalog:"
   },
   "devDependencies": {
+    "esbuild": "catalog:",
     "typescript": "catalog:",
     "@types/node": "catalog:",
     "@types/pg": "catalog:",

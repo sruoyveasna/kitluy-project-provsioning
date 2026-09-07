@@ -690,7 +690,7 @@ describe.skipIf(!live)("T1 end-to-end startup against a running development Hub 
     // database NOWHERE.
     // =====================================================================
     const cloudPool = new pg.Pool({
-      connectionString: "postgresql://postgres:postgres@127.0.0.1:54322/postgres",
+      connectionString: "postgresql://postgres:postgres@127.0.0.1:54392/postgres",
       max: 4,
     });
     try {

@@ -270,6 +270,52 @@ export function evaluateSchema(
 }
 
 // ---------------------------------------------------------------------------
+// 3b. Whether the volume under the database is bound to this board
+// ---------------------------------------------------------------------------
+
+/**
+ * The label `hub-storage-provision` writes to `/var/lib/kitluy/storage-posture`.
+ *
+ * `OTP-BOUND` means the LUKS key is derived from this board's OTP fuses, so the
+ * drive is ciphertext in any other machine. `DEVELOPMENT-UNBOUND` means it is
+ * NOT — the key is a file, and anyone holding it can read the volume anywhere.
+ *
+ * Absent means the volume was not provisioned by that script at all (a developer
+ * workstation, for instance). That is not the case this rule exists to catch, so
+ * it does not refuse; the database and schema checks already govern it.
+ */
+export type StoragePosture = "OTP-BOUND" | "DEVELOPMENT-UNBOUND" | undefined;
+
+/**
+ * Refuse to serve a shop from a volume that is not bound to its Hub.
+ *
+ * The development storage fallback exists so that irreversible OTP programming
+ * does not block software development. It is not a security posture a Store may
+ * trade on: a stolen drive from such a Hub is readable, which is the exact
+ * property the encryption was specified to provide.
+ *
+ * So the fallback is refused anywhere but `development`, in the runtime as well
+ * as in the provisioner. Two independent gates, because the provisioner's gate
+ * lives on the device and an image could in principle be built wrong.
+ */
+export function evaluateStoragePosture(
+  posture: StoragePosture,
+  environment: string,
+): SchemaVerdict {
+  if (posture === "DEVELOPMENT-UNBOUND" && environment !== "development") {
+    return {
+      ok: false,
+      code: "KLUY-HUB-STORAGE-UNBOUND",
+      detail:
+        `the data volume was provisioned with a DEVELOPMENT-UNBOUND key and this Hub is running in "${environment}". ` +
+        "That key is not bound to this board, so the volume is readable off it; a Store is not served from one. " +
+        "Program the board's OTP key and re-provision the volume.",
+    };
+  }
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
 // 4. The whole verdict
 // ---------------------------------------------------------------------------
 
@@ -279,6 +325,12 @@ export interface HubStartupObservations {
   readonly tls: TlsMaterial;
   readonly bind: BindResolution;
   readonly safety: HubSafetyObservations;
+  /**
+   * Optional so every existing caller keeps compiling. Absent is the honest
+   * reading of "no posture file", which {@link evaluateStoragePosture} treats as
+   * not-this-rule's-business rather than as a pass.
+   */
+  readonly storage?: SchemaVerdict;
 }
 
 export type HubStartupVerdict =
@@ -316,6 +368,17 @@ export function decideStartup(observations: HubStartupObservations): HubStartupV
       code: "KLUY-HUB-DB-UNREACHABLE",
       detail:
         "the local Hub database is not reachable; a Hub is the Store's authority and cannot serve without it",
+    };
+  }
+
+  // Before the schema, because a volume nobody can stand behind makes the
+  // question of which migrations it holds beside the point.
+  if (observations.storage !== undefined && !observations.storage.ok) {
+    return {
+      kind: "refuse",
+      code: observations.storage.code ?? "KLUY-HUB-STORAGE-REFUSED",
+      detail:
+        observations.storage.detail ?? "the Hub data volume is not acceptable for this environment",
     };
   }
 

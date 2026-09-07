@@ -50,7 +50,22 @@ export const TRUSTED_TIME_STATUSES: readonly TrustedTimeStatus[] = [
 ] as const;
 
 export type TrustedTimeSource =
-  "rtc" | "authenticated_network" | "signed_cloud_token" | "persisted_floor" | "none";
+  | "rtc"
+  | "authenticated_network"
+  | "signed_cloud_token"
+  | "persisted_floor"
+  | "none"
+  /**
+   * Added by migration group 0200. `now()` read INSIDE the database, requested
+   * by a boolean and never supplied by any caller, and the ONLY source exempt
+   * from the forward-jump rule — because a gap there measures how long a device
+   * was away, not how far something moved a clock.
+   *
+   * A device never OFFERS it. A device that reads its own trusted-time state
+   * will see it, because the cloud path is what establishes trusted time for a
+   * paired Hub.
+   */
+  | "cloud_authoritative";
 
 export const TRUSTED_TIME_SOURCES: readonly TrustedTimeSource[] = [
   "rtc",
@@ -58,6 +73,7 @@ export const TRUSTED_TIME_SOURCES: readonly TrustedTimeSource[] = [
   "signed_cloud_token",
   "persisted_floor",
   "none",
+  "cloud_authoritative",
 ] as const;
 
 /** Certificate windows, per environment (KLD-2026-07-28-002 §5). */

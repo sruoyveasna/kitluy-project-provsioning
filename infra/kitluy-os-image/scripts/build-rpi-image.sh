@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# KitLuy OS image — rpi-image-gen build entrypoint (DEVELOPMENT cross-build).
+# KitLuy Pi Terminal image — rpi-image-gen build entrypoint (DEVELOPMENT cross-build).
 #
-#   build-rpi-image.sh --profile store-hub|pi-terminal [--skip-doctor]
+#   build-rpi-image.sh --profile pi-terminal [--skip-doctor]
 #                      [--filesystem-only] [--build-dir DIR]
 #
 # This is the path that produces an actual arm64 .img. It drives the PINNED
@@ -9,6 +9,12 @@
 # KitLuy external source, and it exists so that the invocation, the preflight
 # and the artifact classification are one reproducible command rather than
 # three remembered ones.
+#
+# ONE TREE, ONE DEVICE. This tree builds the Pi Terminal image and nothing else
+# (owner decision 2026-08-13: two devices, two images, two sources). The Store
+# Hub image is built from infra/kitluy-store-hub-image, and this script
+# REFUSES the store-hub profile rather than producing a Hub artifact from a tree
+# that no longer carries the Hub's runtime.
 #
 # RELATIONSHIP TO build-image.sh
 # ------------------------------
@@ -26,7 +32,8 @@
 # field, and the emitted manifest states the artifact is not release-eligible.
 #
 # Authority: mission §21/§24 (external source, builder pinning),
-#            §25 (build-host classification), KLD-2026-07-28-002 (BLK-005).
+#            §25 (build-host classification), KLD-2026-07-28-002 (BLK-005),
+#            KLD-2026-09-03-FACTORY-ENROLLMENT-001 (the terminal's first stage).
 
 set -euo pipefail
 
@@ -42,25 +49,41 @@ BUILD_DIR="${KITLUY_OS_IMAGE_ROOT}/build/work"
 PROFILE=""
 CHANNEL_OVERRIDE=""
 SKIP_DOCTOR="no"
+SKIP_PACKAGING="no"
+ENVIRONMENT_OVERRIDE=""
 NO_INTERACTIVE_ACCESS="no"
 FILESYSTEM_ONLY="no"
 COLLECT_ONLY="no"
 
 usage() {
   cat >&2 <<'EOF'
-Usage: build-rpi-image.sh --profile <store-hub|pi-terminal> [options]
+Usage: build-rpi-image.sh --profile <pi-terminal> [options]
 
-  --enrollment-url <url>  bake the fleet enrollment endpoint into the image,
-                          e.g. http://172.16.21.17:8787 . Without it the card
-                          boots and reports that no endpoint is configured.
+  --registration-url <url>
+                          bake the CLOUD registration route into the image,
+                          e.g. https://<ref>.supabase.co/functions/v1/device-registration
+  --hardware-profile-key <key>
+                          bake the hardware profile KEY the device registers as.
+                          It must exist in the stack the registration route
+                          points at: KL-PI5-TERMINAL-DEV on the local development
+                          stacks, CLOUD-TERM-PI5 on hosted development.
+  --enrollment-url <url>  bake the fleet enrollment endpoint into the image.
+                          Retained for the Store Hub's fleet service; a
+                          terminal registers through --registration-url.
 
 Options:
-  --profile <name>     Image profile to build (required).
+  --profile <name>     Image profile to build (required; only pi-terminal builds here).
   --channel <name>     Release channel (default: config; only `internal` builds).
   --build-dir <dir>    Builder work root (default: ../build/work).
   --filesystem-only    Build the root filesystem, skip image generation.
   --collect-only       Skip the build; re-collect and re-hash existing artifacts.
+  --environment <name> Environment to BAKE into the image (default: config).
+                       Not defaulted silently — development-only paths key on
+                       it. pilot/production are refused.
   --skip-doctor        Skip the host preflight. Not recommended.
+  --skip-packaging     Do not re-package runtime components into the overlay.
+                       The image then carries whatever the overlay already held,
+                       which may not match the source tree. Diagnostic only.
   --no-interactive-access  Build an image with NO console or SSH access at all.
                        Required to acknowledge that a failed bootstrap can then
                        only be reflashed, never inspected.
@@ -72,14 +95,21 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --profile)         PROFILE="${2:-}"; shift 2 ;;
     --channel)         CHANNEL_OVERRIDE="${2:-}"; shift 2 ;;
-    # The address the flashed device will call to enroll. Exported so the
-    # kitluy-base layer can bake it into /etc/kitluy/image.env, which is what
-    # makes a card cloneable: every copy already knows where the fleet is.
+    # The fleet enrollment endpoint. Kept so the layer's image.env key stays
+    # populated for a Hub-style build; a terminal does not use it.
     --enrollment-url)  ENROLLMENT_URL="${2:-}"; shift 2 ;;
+    # The CLOUD registration route, as a FULL url. Separate from the fleet
+    # endpoint because it is a different service: Supabase does not serve
+    # /v1/device-enrollment, and the fleet service does not serve this.
+    --registration-url) REGISTRATION_URL="${2:-}"; shift 2 ;;
+    # A stable hardware profile KEY (never a UUID) so the image stays generic.
+    --hardware-profile-key) HARDWARE_PROFILE_KEY="${2:-}"; shift 2 ;;
     --build-dir)       BUILD_DIR="${2:-}"; shift 2 ;;
     --filesystem-only) FILESYSTEM_ONLY="yes"; shift ;;
     --collect-only)    COLLECT_ONLY="yes"; shift ;;
     --skip-doctor)     SKIP_DOCTOR="yes"; shift ;;
+    --skip-packaging)  SKIP_PACKAGING="yes"; shift ;;
+    --environment)     ENVIRONMENT_OVERRIDE="${2:-}"; shift 2 ;;
     --no-interactive-access) NO_INTERACTIVE_ACCESS="yes"; shift ;;
     -h|--help)         usage; exit 0 ;;
     *)                 usage; die "unknown argument: $1" ;;
@@ -87,6 +117,17 @@ while [[ $# -gt 0 ]]; do
 done
 
 assert_known_profile "$PROFILE"
+
+# The stale store-hub profile files in this tree are kept for record and are
+# NOT buildable from here. A Hub artifact built from a tree without the Hub's
+# runtime would be D-05 all over again: a card advertising a service it cannot
+# serve.
+if [[ "$PROFILE" == "store-hub" ]]; then
+  die "the Store Hub image is built from infra/kitluy-store-hub-image, not from this tree.
+  This tree builds the Pi Terminal image only (owner decision 2026-08-13: two
+  devices, two images, two sources). Its store-hub profile files remain for
+  record and are not buildable here."
+fi
 
 # --- Release-channel gate (reused, not restated) -----------------------------
 load_config "${KITLUY_OS_IMAGE_ROOT}/config/image.conf"
@@ -108,6 +149,24 @@ else
   log "running host preflight (doctor.sh)"
   if ! bash "${SCRIPT_DIR}/doctor.sh"; then
     die "host preflight failed — fix the FAIL lines above, or run: sudo bash ${SCRIPT_DIR}/setup-ubuntu-arm64-builder.sh"
+  fi
+fi
+
+# --- Runtime packaging --------------------------------------------------------
+# `package-bootstrap-runtime.sh` is what puts the agents into the rootfs overlay
+# that rpi-image-gen then bakes. On the Hub tree nothing invoked it for weeks —
+# it was a manual pre-step documented in a README — so a build run straight
+# after a source change happily produced an image containing the PREVIOUS
+# overlay (D-05). Running it here makes the flashable image a function of the
+# source tree again. It is idempotent and takes about a second, and it REFUSES
+# when runtime-manifest.json and the overlay disagree.
+if [[ "$SKIP_PACKAGING" == "yes" ]]; then
+  warn "runtime packaging skipped (--skip-packaging): the overlay may not match the source tree"
+else
+  log "packaging runtime components into the rootfs overlay"
+  if ! bash "${SCRIPT_DIR}/package-bootstrap-runtime.sh"; then
+    die "runtime packaging failed — the image would ship a stale or incomplete overlay. Build the agent first:
+  pnpm --filter @kitluy-services/kitluy-device-firstboot-agent build"
   fi
 fi
 
@@ -163,6 +222,8 @@ mkdir -p "$BUILD_DIR"
 # should be a decision, not a side effect.
 RIG_OVERRIDES=()
 ENROLLMENT_URL="${ENROLLMENT_URL:-${KITLUY_ENROLLMENT_BASE_URL:-}}"
+REGISTRATION_URL="${REGISTRATION_URL:-${KITLUY_REGISTRATION_URL:-}}"
+HARDWARE_PROFILE_KEY="${HARDWARE_PROFILE_KEY:-${KITLUY_HARDWARE_PROFILE_KEY:-}}"
 if [[ -n "${KITLUY_DEV_SSH_PUBKEY:-}" ]]; then
   [[ -f "$KITLUY_DEV_SSH_PUBKEY" ]] \
     || die "KITLUY_DEV_SSH_PUBKEY is not a readable file: ${KITLUY_DEV_SSH_PUBKEY}"
@@ -213,34 +274,109 @@ fi
 
 RIG_ARGS=(build -S "$KITLUY_SRC" -c "$RIG_CONFIG" -B "$BUILD_DIR")
 [[ "$FILESYSTEM_ONLY" == "yes" ]] && RIG_ARGS+=(-f)
-# The endpoint a flashed device will call.
-#
-# Passed as an IGconf override rather than an exported shell variable: the
-# layer's customize steps run inside bdebstrap, which forwards ONLY what it is
-# given, so an exported KITLUY_ENROLLMENT_BASE_URL never crossed that boundary
-# and the first build with --enrollment-url still produced an EMPTY endpoint.
-#
-# It has to be right at build time. The rootfs is erofs — read-only — so this
-# cannot be corrected on the card afterwards.
+
 # WHICH DEVICE THIS IMAGE IS.
 #
 # The profile has always known (`KITLUY_PROFILE_DEVICE_CLASS`) and this builder
-# already writes it into the manifest — but never into the image, so the agent
-# fell back to its default of `terminal`. A Store Hub built from this path would
-# have enrolled as a TERMINAL, and a terminal cannot anchor the provisioning
-# codes that `device_provisioning_codes.store_hub_device_id NOT NULL` requires.
-# The failure would have surfaced at Store pairing, far from its cause.
+# already writes it into the manifest — it must ALSO go into the image, because
+# the cloud derives the device class from the hardware profile a device
+# registers with and the agents read this value from /etc/kitluy/image.env.
+# Passed as an IGconf override rather than an exported shell variable: the
+# layer's customize steps run inside bdebstrap, which forwards ONLY what it is
+# given, so an exported variable never crosses that boundary.
 RIG_OVERRIDES+=("IGconf_kitluy_device_class=${KITLUY_PROFILE_DEVICE_CLASS}")
+
+# --- The environment, STATED (never inherited) --------------------------------
+# The layer used to default this to `development`, and the builder never passed
+# one, so every image ever built declared itself a development device because
+# nobody said otherwise — while development-only escape paths key on exactly
+# that word. It now comes from the profile config, is validated here, and is
+# asserted by the layer. `config/image.conf` carries `development` for this
+# development builder; `--environment` overrides it.
+BUILD_ENVIRONMENT="${ENVIRONMENT_OVERRIDE:-${KITLUY_ENVIRONMENT:-}}"
+[[ -n "$BUILD_ENVIRONMENT" ]] \
+  || die "no environment resolved: set KITLUY_ENVIRONMENT in config/image.conf or pass --environment. It is deliberately not defaulted — the development-only paths key on it."
+
+case "$BUILD_ENVIRONMENT" in
+  local|development|staging) ;;
+  pilot|production|disaster_recovery)
+    # The channel gate already refuses to BUILD these; this refuses to LABEL an
+    # artifact as one. An image marked `production` from this host would carry a
+    # posture the artifact cannot support — it is unsigned and not release
+    # eligible — and the marking is what downstream checks would trust.
+    die "environment '${BUILD_ENVIRONMENT}' cannot be produced by this builder: artifacts from this host are DEVELOPMENT, UNSIGNED and NOT release-eligible (BLK-005)."
+    ;;
+  *)
+    die "environment '${BUILD_ENVIRONMENT}' is not a KitLuy environment (local, development, staging, pilot, production, disaster_recovery)."
+    ;;
+esac
+
+RIG_OVERRIDES+=("IGconf_kitluy_environment=${BUILD_ENVIRONMENT}")
+log "image environment: ${BUILD_ENVIRONMENT} (stated explicitly, not defaulted)"
+
+# DEVELOPMENT DIAGNOSTIC SUDO — OPT-IN, OFF BY DEFAULT.
+#
+# The hardened default purges sudo entirely (`IGconf_device_user1sudo=none`),
+# which is right for anything that could reach a shop: a terminal holds a device
+# identity, and `pi` is reachable over SSH by key.
+#
+# It also makes the device UNDIAGNOSABLE. `/var/lib/kitluy` is root-only, so the
+# agents' own state — registration, identity — cannot be read at all, and
+# `journalctl` returns nothing for system units. `KITLUY_DEV_SUDO=1` grants
+# passwordless sudo to `pi` for DEVELOPMENT images only. It must never be set
+# for a pilot or production build; those are signed artifacts and this flag is
+# not part of that path.
+if [[ "${KITLUY_DEV_SUDO:-}" == "1" ]]; then
+  RIG_OVERRIDES+=("IGconf_device_user1sudo=nopasswd")
+  warn "DEVELOPMENT SUDO ENABLED: user 'pi' has passwordless sudo in this image."
+  warn "  Diagnostic only. Never build a pilot or production artifact with KITLUY_DEV_SUDO=1."
+fi
 log "device class baked: ${KITLUY_PROFILE_DEVICE_CLASS}"
 
 if [[ -n "$ENROLLMENT_URL" ]]; then
   RIG_OVERRIDES+=("IGconf_kitluy_enrollment_url=${ENROLLMENT_URL}")
   log "enrollment endpoint baked: ${ENROLLMENT_URL}"
-else
-  warn "no --enrollment-url given: the image will boot and report that no"
-  warn "  enrollment endpoint is configured. The rootfs is read-only, so this"
-  warn "  cannot be fixed on the card — rebuild with --enrollment-url."
 fi
+
+# THE CLOUD REGISTRATION ROUTE — FACTORY ENROLLMENT, STAGE ONE.
+#
+# Without it the device cannot announce itself to KitLuy at all, and — because
+# the rootfs is read-only and dm-verity protected — nothing on the flashed card
+# can add it later. The fix is a rebuild, and the operator should learn that
+# here rather than with a card in their hand.
+if [[ -n "$REGISTRATION_URL" ]]; then
+  RIG_OVERRIDES+=("IGconf_kitluy_registration_url=${REGISTRATION_URL}")
+  log "cloud registration route baked: ${REGISTRATION_URL}"
+else
+  warn "no --registration-url given: this image cannot register itself to the"
+  warn "  cloud, so Factory Enrollment can never begin. The rootfs is read-only,"
+  warn "  so rebuild with --registration-url."
+fi
+
+if [[ -n "$HARDWARE_PROFILE_KEY" ]]; then
+  RIG_OVERRIDES+=("IGconf_kitluy_hardware_profile_key=${HARDWARE_PROFILE_KEY}")
+  log "hardware profile key baked: ${HARDWARE_PROFILE_KEY}"
+elif [[ -n "$REGISTRATION_URL" ]]; then
+  # A registration URL with no profile key produces a device that reaches the
+  # cloud and is refused KLUY-REG-UNKNOWN-PROFILE every time. Refused here
+  # rather than warned, because the two values are only useful together and the
+  # failure would otherwise appear as a network-looking error in a shop.
+  die "--registration-url given without --hardware-profile-key.
+  A device registering with no profile key is refused KLUY-REG-UNKNOWN-PROFILE
+  by the cloud on every attempt, and the read-only rootfs cannot be corrected
+  on the card.
+
+  Pass both, e.g.:
+    $0 --profile ${PROFILE} \\
+      --registration-url https://<ref>.supabase.co/functions/v1/device-registration \\
+      --hardware-profile-key KL-PI5-TERMINAL-DEV"
+fi
+
+# NO DEVELOPMENT ROOT PIN ON A TERMINAL, YET. The Store Hub bakes the SHA-256 of
+# the development root certificate so it can verify the operational certificate
+# it is issued. A terminal's own credential custody is a later slice; when it
+# arrives, the pin is injected here the way the Hub tree does it, from the
+# operator's $KITLUY_DEV_PKI_DIR and never from the repository.
 
 [[ ${#RIG_OVERRIDES[@]} -gt 0 ]] && RIG_ARGS+=(-- "${RIG_OVERRIDES[@]}")
 
@@ -278,12 +414,8 @@ for d in "${BUILD_DIR}"/image-* "${BUILD_DIR}"/deploy-*; do
 done
 
 # Artifacts must belong to THIS profile. The deploy directory is keyed by
-# builder version (deploy-v2.7.0), not by profile, so after building both
-# profiles it holds Store Hub and Terminal artifacts side by side. Collecting
-# the directory wholesale would put Terminal images in the Store Hub manifest,
-# and a manifest that misattributes an artifact is worse than no manifest —
-# it is evidence pointing at the wrong thing. The image name from the builder
-# config is the discriminator.
+# builder version (deploy-v2.7.0), not by profile. The image name from the
+# builder config is the discriminator.
 RIG_IMAGE_NAME="$(awk '/^image:/{f=1;next} f&&/^[^[:space:]]/{f=0} f&&/^[[:space:]]+name:/{print $2; exit}' \
   "${KITLUY_SRC}/config/${RIG_CONFIG}")"
 [[ -n "$RIG_IMAGE_NAME" ]] || die "could not read image.name from ${KITLUY_SRC}/config/${RIG_CONFIG}"

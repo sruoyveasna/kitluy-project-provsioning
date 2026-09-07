@@ -1,10 +1,24 @@
 /**
- * Cross-layer conformance: TypeScript versus migration group 0123.
+ * Cross-layer conformance: TypeScript versus the migration chain.
  *
- * This test reads the ACTUAL migration file. It is not a restatement of what
+ * This test reads the ACTUAL migration files. It is not a restatement of what
  * the SQL is believed to say — that is exactly how WS-10's C34/C35/C36 stayed
  * green while the code contradicted the ruling. If either layer changes a
  * vocabulary, a tolerance or a policy field name without the other, this fails.
+ *
+ * ===========================================================================
+ * WHY THE ENUM READERS NO LONGER READ ONE FILE
+ * ===========================================================================
+ * They read 0123 alone, which made this suite blind to the one thing it exists
+ * to catch. Group 0200 added `cloud_authoritative` to
+ * `kitluy_devices.trusted_time_source` with `alter type ... add value`; the
+ * database then had six members, TypeScript still listed five, and this file
+ * went on comparing TypeScript against 0123's original five and passing green.
+ * Found by independent review, not by the suite.
+ *
+ * A vocabulary is the whole chain's answer, not one migration's. `enumMembers`
+ * now applies every later `add value` in filename order, so a member introduced
+ * by any future group is seen here the moment it is written.
  */
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -30,11 +44,32 @@ const readMigration = (marker: string): string => {
 const sql0123 = readMigration("0123_trusted_time");
 const sql0122 = readMigration("0122_device_trust_decision_alignment");
 
-/** Extracts the members of a `create type ... as enum (...)` block. */
+/** Every migration in the chain, in application order. */
+const ALL_MIGRATIONS = readdirSync(MIGRATIONS_DIR)
+  .filter((f) => f.endsWith(".sql"))
+  .sort()
+  .map((f) => readFileSync(join(MIGRATIONS_DIR, f), "utf8"));
+
+/**
+ * The members of an enum AS THE CHAIN LEAVES IT: the `create type` block, plus
+ * every later `alter type ... add value` in application order.
+ */
 const enumMembers = (source: string, typeName: string): string[] => {
   const match = source.match(new RegExp(`create type ${typeName} as enum \\(([^)]*)\\)`, "i"));
   if (match === null) throw new Error(`enum ${typeName} not found`);
-  return [...(match[1] ?? "").matchAll(/'([a-z0-9_]+)'/g)].map((m) => m[1] as string);
+  const members = [...(match[1] ?? "").matchAll(/'([a-z0-9_]+)'/g)].map((m) => m[1] as string);
+
+  const added = new RegExp(
+    `alter\\s+type\\s+${typeName}\\s+add\\s+value(?:\\s+if\\s+not\\s+exists)?\\s+'([a-z0-9_]+)'`,
+    "gi",
+  );
+  for (const migration of ALL_MIGRATIONS) {
+    for (const m of migration.matchAll(added)) {
+      const value = m[1] as string;
+      if (!members.includes(value)) members.push(value);
+    }
+  }
+  return members;
 };
 
 describe("trusted-time status vocabulary", () => {

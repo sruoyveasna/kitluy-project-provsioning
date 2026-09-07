@@ -167,3 +167,47 @@ export function registrationHeadline(phase: RegistrationPhase): string {
       return "NO CONNECTION — this device cannot reach KitLuy. Check the network; it will keep trying.";
   }
 }
+
+/**
+ * Short status word for a KitLuy row on a console. The headline above carries
+ * the explanation; this is the one-or-two-word state an operator reads first.
+ *
+ * Lives here, beside the phases, rather than in either console: the Store Hub
+ * console and the Pi Terminal screen render the same registration state and
+ * must never disagree on what to call it.
+ */
+export function registrationPhaseLabel(phase: RegistrationPhase): string {
+  switch (phase) {
+    case "NOT_REGISTERED":
+      return "Not registered";
+    case "REGISTERING":
+      return "Registering";
+    case "AWAITING_APPROVAL":
+      return "Waiting for approval";
+    case "TRUST_REVIEW_REQUIRED":
+      return "Trust review required";
+    case "APPROVED":
+      return "Approved";
+    case "CONTAINED":
+      return "Stopped by KitLuy";
+    case "UNREACHABLE":
+      return "No connection";
+  }
+}
+
+/**
+ * THE ASSET TAG, DERIVED ONCE.
+ *
+ * The registration client sends `KL-` + the first twelve hex digits of the
+ * registration key fingerprint as the device's asset tag, and that string is
+ * what the Admin Portal lists. On the first terminal boot (2026-09-03) the
+ * status screen showed only the opaque cloud id, so the person at the Pi and
+ * the person at the portal had no common name for the board. Both now derive
+ * the label here, from the fingerprint the state already persists.
+ *
+ * A LABEL, not an identity: it grants nothing and the server never renames a
+ * board it already knows under a different tag (registration contract §9).
+ */
+export function assetTagFromFingerprint(fingerprint: string): string {
+  return `KL-${fingerprint.slice(0, 12).toUpperCase()}`;
+}

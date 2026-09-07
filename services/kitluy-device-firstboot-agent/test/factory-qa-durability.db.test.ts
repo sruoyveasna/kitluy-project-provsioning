@@ -41,7 +41,7 @@ import {
 import { runFactoryQa, validateHardwareManifest, type HardwareSignal } from "../src/factory.js";
 
 const DB_URL =
-  process.env.KITLUY_M1_DB_URL ?? "postgresql://postgres:postgres@127.0.0.1:54402/postgres";
+  process.env.KITLUY_M1_DB_URL ?? "postgresql://postgres:postgres@127.0.0.1:54392/postgres";
 
 const HUB_PROFILE_KEY = "WS11-T001-HUB-PROBE";
 const REQUIRED_SIGNALS = ["mac_address", "board_serial", "storage_serial"] as const;

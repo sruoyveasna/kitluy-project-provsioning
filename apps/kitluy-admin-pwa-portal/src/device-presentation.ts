@@ -18,7 +18,7 @@
  */
 import type { KitluyLocale } from "@kitluy/localization";
 import type { FleetDeviceView } from "./management-client.js";
-import { t } from "./messages.js";
+import { t, type MessageKey } from "./messages.js";
 
 export type DeviceCondition = "abnormal" | "attention" | "normal";
 
@@ -115,7 +115,11 @@ export function sortForOperator(devices: readonly FleetDeviceView[]): readonly F
  * and a Terminal cannot be provisioned until its Hub is active — so "show me the
  * Hubs" is the question an operator asks when a shop is stuck.
  */
-export type DeviceClassFilter = "all" | "store_hub" | "pi_terminal";
+// `terminal` is the value `kitluy_devices.device_class` actually holds. This
+// filter shipped as `pi_terminal` and could never match a real board — the
+// first Pi Terminal to register (2026-09-03, class `terminal`) disappeared the
+// moment an operator asked to see only terminals.
+export type DeviceClassFilter = "all" | "store_hub" | "terminal";
 
 export function filterByClass(
   devices: readonly FleetDeviceView[],
@@ -149,6 +153,45 @@ export function hubAssignmentSummary(
 }
 
 /**
+ * What a Terminal's assignment state means, in the four owner-locked stages.
+ *
+ * A Terminal at `pending_trust` is PAIRED / ASSIGNED (Factory Enrollment §7,
+ * stage three): a Partner has bound it to a Store, and it now waits on
+ * activation. It is not operational, and it is not "approved" either — both of
+ * those words already have a stage of their own. The Store and profile count
+ * come from the same read model; the Store label is the human one when the API
+ * provides it, never a UUID.
+ *
+ * Returns null for anything that is not a `terminal`, for the same reason
+ * `hubAssignmentSummary` does.
+ */
+export type TerminalAssignmentSummary =
+  | { readonly kind: "unassigned" }
+  | { readonly kind: "assigned_awaiting"; readonly profiles: number; readonly store: string | null }
+  | { readonly kind: "active"; readonly profiles: number; readonly store: string | null }
+  | { readonly kind: "other"; readonly state: string };
+
+export function terminalAssignmentSummary(
+  device: FleetDeviceView,
+): TerminalAssignmentSummary | null {
+  if (device.deviceClass !== "terminal") return null;
+  const state = device.assignmentState ?? "unassigned";
+  const profiles = device.terminalAssignmentCount;
+  const store = device.digitalStoreLabel;
+  switch (state) {
+    case "unassigned":
+      return { kind: "unassigned" };
+    case "pending_trust":
+      return { kind: "assigned_awaiting", profiles, store };
+    case "active":
+      return { kind: "active", profiles, store };
+    default:
+      // Shown verbatim, never softened.
+      return { kind: "other", state };
+  }
+}
+
+/**
  * Plain words for a lifecycle state.
  *
  * ===========================================================================
@@ -163,32 +206,36 @@ export function hubAssignmentSummary(
  * These are DISPLAY strings. The enum stays canonical; nothing here is ever sent
  * back to the server or compared against a stored value.
  */
+const LIFECYCLE_MESSAGE: Readonly<Record<string, MessageKey>> = {
+  manufactured: "lifecycleManufactured",
+  enrolled: "lifecycleEnrolled",
+  awaiting_trust: "lifecycleAwaitingTrust",
+  active: "lifecycleActive",
+  quarantined: "lifecycleQuarantined",
+  restricted_investigation: "lifecycleRestrictedInvestigation",
+  suspended: "lifecycleSuspended",
+  retired: "lifecycleRetired",
+  replaced: "lifecycleReplaced",
+};
+
+/**
+ * Every lifecycle value this build knows a label for. Mirrors the nine values
+ * of `kitluy_devices.device_lifecycle_state`; the test asserts the count so a
+ * value added to the enum without a label is noticed rather than shown raw.
+ *
+ * `awaiting_trust` was the one missing: a Terminal a Partner had just paired
+ * read as the literal `awaiting_trust` in the list, which is the PAIRED /
+ * ASSIGNED stage the owner requires to be distinguishable (Factory Enrollment
+ * §7, task KL-PT-PORTAL-206).
+ */
+export const KNOWN_LIFECYCLES: readonly string[] = Object.keys(LIFECYCLE_MESSAGE);
+
 export function lifecycleLabel(lifecycle: string, locale: KitluyLocale): string {
-  const km = locale === "km-KH";
-  switch (lifecycle) {
-    case "manufactured":
-      // The important one: this device is waiting for a human decision.
-      return km ? "រង់ចាំការអនុម័ត" : "Waiting for approval";
-    case "enrolled":
-      return km ? "បានអនុម័ត" : "Approved";
-    case "active":
-      return km ? "កំពុងដំណើរការ" : "Active";
-    case "quarantined":
-      return km ? "ត្រូវបានដាក់ឱ្យនៅដាច់ដោយឡែក" : "Quarantined";
-    case "restricted_investigation":
-      return km ? "កំពុងស៊ើបអង្កេត" : "Under investigation";
-    case "suspended":
-      return km ? "ត្រូវបានផ្អាក" : "Suspended";
-    case "retired":
-      return km ? "ឈប់ប្រើ" : "Retired";
-    case "replaced":
-      return km ? "ត្រូវបានជំនួស" : "Replaced";
-    default:
-      // An unrecognised state is shown VERBATIM rather than softened into
-      // something friendly — inventing a reassuring word for a state this build
-      // does not know about is exactly how a screen starts lying.
-      return lifecycle;
-  }
+  const key = LIFECYCLE_MESSAGE[lifecycle];
+  // An unrecognised state is shown VERBATIM rather than softened into
+  // something friendly — inventing a reassuring word for a state this build
+  // does not know about is exactly how a screen starts lying.
+  return key === undefined ? lifecycle : t(locale, key);
 }
 
 /** Lifecycle states where a person is being waited on. */
@@ -201,6 +248,8 @@ export interface FleetSummary {
   readonly withIncidents: number;
   readonly contained: number;
   readonly hubs: number;
+  /** Paired to a Store, waiting on activation — the PAIRED / ASSIGNED stage. */
+  readonly assignedAwaiting: number;
 }
 
 /**
@@ -215,13 +264,22 @@ export function summariseFleet(devices: readonly FleetDeviceView[]): FleetSummar
   let withIncidents = 0;
   let contained = 0;
   let hubs = 0;
+  let assignedAwaiting = 0;
   for (const d of devices) {
     if (AWAITING_DECISION.has(d.lifecycle)) awaitingApproval += 1;
+    if (d.lifecycle === "awaiting_trust") assignedAwaiting += 1;
     if (d.openIncidentCount > 0) withIncidents += 1;
     if (ABNORMAL_LIFECYCLES.has(d.lifecycle)) contained += 1;
     if (d.deviceClass === "store_hub") hubs += 1;
   }
-  return { total: devices.length, awaitingApproval, withIncidents, contained, hubs };
+  return {
+    total: devices.length,
+    awaitingApproval,
+    withIncidents,
+    contained,
+    hubs,
+    assignedAwaiting,
+  };
 }
 
 /**

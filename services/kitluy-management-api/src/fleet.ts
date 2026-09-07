@@ -32,6 +32,14 @@ export interface FleetDeviceDto {
   readonly tenantReference: string | null;
   readonly digitalStoreReference: string | null;
   readonly locationReference: string | null;
+  /**
+   * `store_code — name` and `location_code — name`: the same human labels the
+   * Partner route builds in `listPartnerStores`. The `*Reference` fields above
+   * are raw ids and were never rendered; an Admin telling a Terminal's Store
+   * apart needs the words.
+   */
+  readonly digitalStoreLabel: string | null;
+  readonly locationLabel: string | null;
   readonly terminalAssignmentCount: number;
   readonly openIncidentCount: number;
   readonly lastSeenAt: string | null;
@@ -100,6 +108,8 @@ interface FleetRow {
   tenant_id: string | null;
   digital_store_id: string | null;
   store_location_id: string | null;
+  digital_store_label: string | null;
+  location_label: string | null;
   terminal_assignment_count: string | number | null;
   open_incident_count: string | number | null;
   last_observed_at: string | null;
@@ -119,6 +129,8 @@ function toDto(row: FleetRow, policy: FreshnessPolicy, now: Date): FleetDeviceDt
     tenantReference: row.tenant_id,
     digitalStoreReference: row.digital_store_id,
     locationReference: row.store_location_id,
+    digitalStoreLabel: row.digital_store_label ?? null,
+    locationLabel: row.location_label ?? null,
     terminalAssignmentCount: Number(row.terminal_assignment_count ?? 0),
     openIncidentCount: Number(row.open_incident_count ?? 0),
     lastSeenAt: row.last_observed_at,
@@ -129,10 +141,21 @@ function toDto(row: FleetRow, policy: FreshnessPolicy, now: Date): FleetDeviceDt
   };
 }
 
-const FLEET_COLUMNS = `device_record_id, asset_tag, device_class, lifecycle_state,
-       hardware_trust_level, certificate_status, profile_key, assignment_state,
-       tenant_id, digital_store_id, store_location_id,
-       terminal_assignment_count, open_incident_count, last_observed_at, fleet_status`;
+// The Store and Location names are read here, with the server's trusted
+// identity, only after `authorizeRequest` has decided the caller may see the
+// fleet at all — the same precedent as `resolveStoreScope` reading
+// `kitluy_core` for the Partner route. Left joins: an unassigned device has no
+// Store, and that is a null, not a missing row.
+const FLEET_COLUMNS = `f.device_record_id, f.asset_tag, f.device_class, f.lifecycle_state,
+       f.hardware_trust_level, f.certificate_status, f.profile_key, f.assignment_state,
+       f.tenant_id, f.digital_store_id, f.store_location_id,
+       ds.store_code || ' — ' || ds.name as digital_store_label,
+       sl.location_code || ' — ' || sl.name as location_label,
+       f.terminal_assignment_count, f.open_incident_count, f.last_observed_at, f.fleet_status`;
+
+const FLEET_FROM = `kitluy_devices.device_fleet_status f
+       left join kitluy_core.digital_stores ds on ds.id = f.digital_store_id
+       left join kitluy_core.store_locations sl on sl.id = f.store_location_id`;
 
 export async function listFleet(
   db: DatabaseHandle,
@@ -141,8 +164,8 @@ export async function listFleet(
   const limit = Math.min(Math.max(options.limit ?? 200, 1), 500);
   const { rows } = await db.query<FleetRow>(
     `select ${FLEET_COLUMNS}
-       from kitluy_devices.device_fleet_status
-      order by asset_tag
+       from ${FLEET_FROM}
+      order by f.asset_tag
       limit $1`,
     [limit],
   );
@@ -158,8 +181,8 @@ export async function getFleetDevice(
 ): Promise<FleetDeviceDto | null> {
   const { rows } = await db.query<FleetRow>(
     `select ${FLEET_COLUMNS}
-       from kitluy_devices.device_fleet_status
-      where device_record_id = $1::uuid`,
+       from ${FLEET_FROM}
+      where f.device_record_id = $1::uuid`,
     [deviceId],
   );
   const row = rows[0];
@@ -179,33 +202,102 @@ export interface ProvisioningReadiness {
 /**
  * May a provisioning session be issued for this device?
  *
- * DERIVED from canonical facts — there is no stored `PROVISIONING_ELIGIBLE`
- * flag and none is created. A stored flag is a second copy of the truth, and
- * the copy is what goes stale: a device quarantined after being marked
- * eligible would still read as eligible.
+ * ===========================================================================
+ * ONE PREDICATE, IN THE DATABASE
+ * ===========================================================================
+ * This used to re-implement the rule in TypeScript, and it was one of THREE
+ * definitions that disagreed (recorded under KLD-2026-09-03-FACTORY-ENROLLMENT-001).
+ * Since group 0214 there is exactly one: `evaluate_provisioning_eligibility_v1`.
+ * The terminal pairing door reads it, and so does this route. The DTO shape is
+ * unchanged; the reasons are the door's own text, rendered verbatim.
  *
- * This is a PRESENTATION gate that lets the UI disable a button and explain
- * why. It is not the security boundary — the governed issuance path revalidates
- * everything server-side, and a caller who defeats this still gets refused.
+ * Still a PRESENTATION gate, never the security boundary: the governed doors
+ * re-evaluate under their own locks.
  */
-export function evaluateProvisioningReadiness(device: FleetDeviceDto): ProvisioningReadiness {
-  const reasons: string[] = [];
+export function toProvisioningReadiness(
+  row:
+    { readonly eligible: boolean | null; readonly reasons: readonly string[] | null } | undefined,
+): ProvisioningReadiness {
+  if (row === undefined) {
+    // Fail CLOSED: no verdict is not a yes.
+    return { eligible: false, reasons: ["eligibility could not be evaluated"] };
+  }
+  return { eligible: row.eligible === true, reasons: row.reasons ?? [] };
+}
 
-  if (device.lifecycle !== "enrolled") {
-    reasons.push(`lifecycle is '${device.lifecycle}'; only an enrolled device may be provisioned`);
-  }
-  if (ATTENTION_LIFECYCLES.has(device.lifecycle)) {
-    reasons.push(`device is ${device.lifecycle} — provisioning is forbidden`);
-  }
-  if (device.openIncidentCount > 0) {
-    reasons.push(`${device.openIncidentCount} open trust incident(s)`);
-  }
-  if (device.certificateStatus === "revoked") {
-    reasons.push("device certificate is revoked");
-  }
-  if (device.assignmentState === "active") {
-    reasons.push("device already holds an active assignment");
-  }
+export async function readProvisioningReadiness(
+  db: DatabaseHandle,
+  deviceId: string,
+): Promise<ProvisioningReadiness> {
+  const { rows } = await db.query<{ eligible: boolean | null; reasons: string[] | null }>(
+    `select eligible, reasons from kitluy_devices.evaluate_provisioning_eligibility_v1($1::uuid)`,
+    [deviceId],
+  );
+  return toProvisioningReadiness(rows[0]);
+}
 
-  return { eligible: reasons.length === 0, reasons };
+// ---------------------------------------------------------------------------
+// Assignment context — where a device is, in words
+// ---------------------------------------------------------------------------
+
+/**
+ * The live assignment of a device, with human labels, its terminal profile
+ * keys and the physical terminal (seat) it holds. Null when unassigned. Read
+ * with the trusted identity after `fleet.read` has been decided.
+ */
+export interface DeviceAssignmentContext {
+  readonly assignmentState: string;
+  readonly tenantReference: string | null;
+  readonly digitalStoreReference: string | null;
+  readonly locationReference: string | null;
+  readonly terminalProfileKeys: readonly string[];
+  readonly physicalTerminalId: string | null;
+  readonly physicalTerminalLabel: string | null;
+}
+
+export async function readDeviceAssignmentContext(
+  db: DatabaseHandle,
+  deviceId: string,
+): Promise<DeviceAssignmentContext | null> {
+  const { rows } = await db.query<{
+    assignment_state: string;
+    tenant_reference: string | null;
+    digital_store_reference: string | null;
+    location_reference: string | null;
+    terminal_profile_keys: string[] | null;
+    physical_terminal_id: string | null;
+    physical_terminal_label: string | null;
+  }>(
+    `select a.state::text                                               as assignment_state,
+            t.tenant_code || ' — ' || coalesce(t.display_name, t.legal_name) as tenant_reference,
+            ds.store_code || ' — ' || ds.name                             as digital_store_reference,
+            sl.location_code || ' — ' || sl.name                          as location_reference,
+            coalesce((select array_agg(ta.terminal_profile_key order by ta.assigned_at)
+                        from kitluy_devices.device_terminal_assignments ta
+                       where ta.assignment_id = a.id and ta.state <> 'revoked'),
+                     '{}'::text[])                                        as terminal_profile_keys,
+            pt.id                                                         as physical_terminal_id,
+            pt.label                                                      as physical_terminal_label
+       from kitluy_devices.device_assignments a
+       join kitluy_core.tenants t on t.id = a.tenant_id
+       join kitluy_core.digital_stores ds on ds.id = a.digital_store_id
+       join kitluy_core.store_locations sl on sl.id = a.store_location_id
+       left join kitluy_devices.physical_terminals pt
+              on pt.bound_device_id = a.device_id and pt.bound_assignment_id = a.id
+      where a.device_id = $1::uuid and a.state in ('pending_trust', 'active')
+      order by a.assignment_generation desc
+      limit 1`,
+    [deviceId],
+  );
+  const row = rows[0];
+  if (row === undefined) return null;
+  return {
+    assignmentState: row.assignment_state,
+    tenantReference: row.tenant_reference,
+    digitalStoreReference: row.digital_store_reference,
+    locationReference: row.location_reference,
+    terminalProfileKeys: row.terminal_profile_keys ?? [],
+    physicalTerminalId: row.physical_terminal_id,
+    physicalTerminalLabel: row.physical_terminal_label,
+  };
 }

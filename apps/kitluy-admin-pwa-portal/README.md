@@ -83,7 +83,10 @@ handoff — never in git, never in this file.
 
 - `#/login` — sign in.
 - `#/devices` — governed fleet list (requires `fleet.read`).
-- `#/devices/:id` — device detail with DERIVED provisioning readiness.
+- `#/devices/:id` — device detail with provisioning readiness from the single database predicate and the assignment context in words.
+- `#/pending` — the verify-and-approve queue (requires `fleet.device_enrollment.approve`).
+- `#/stores` — every Digital Store with its Tenant in words (requires `partners.read`).
+- `#/stores/new` — create a Digital Store under a Tenant (requires `store.digital_store.create`; a second approver when the server says the environment needs one).
 
 Issuing a provisioning code is a governed mutation and is deliberately absent
 from this slice; the detail view says so rather than offering an inert button.

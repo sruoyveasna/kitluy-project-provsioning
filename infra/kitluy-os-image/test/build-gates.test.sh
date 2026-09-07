@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# KitLuy OS image — build-system tests.
+# KitLuy Pi Terminal image — build-system tests.
 #
 # These test the GATES and the COMPOSITION, which is what can honestly be
 # tested without Raspberry Pi hardware. Nothing here claims hardware
-# certification; see 00_AI_HANDOFF/edge-platform/11_KITLUY_OS_IMAGE_IMPLEMENTATION.md.
+# certification. This tree builds the Pi Terminal image only; the Store Hub
+# image has its own tree and its own copy of this suite.
 #
 # Run: bash infra/kitluy-os-image/test/build-gates.test.sh
 
@@ -26,7 +27,7 @@ run_build() {
   RC=$?
 }
 
-printf '\nKitLuy OS image — build gate tests\n\n'
+printf '\nKitLuy Pi Terminal image — build gate tests\n\n'
 
 # --- Profile gate -----------------------------------------------------------
 run_build --profile nonsense --stage-only
@@ -69,13 +70,6 @@ else
 fi
 
 # --- Internal channel builds ------------------------------------------------
-run_build --profile store-hub --out "${TMP}/hub" --stage-only
-if [[ $RC -eq 0 ]]; then
-  ok "store-hub stages on the internal channel"
-else
-  bad "store-hub stages on the internal channel" "rc=$RC out=$OUT"
-fi
-
 run_build --profile pi-terminal --out "${TMP}/term" --stage-only
 if [[ $RC -eq 0 ]]; then
   ok "pi-terminal stages on the internal channel"
@@ -90,68 +84,126 @@ else
   bad "unpinned base OS is reported" "no warning emitted"
 fi
 
-# --- Shared base composition ------------------------------------------------
-for profile in hub term; do
-  for unit in kitluy-firstboot.service kitluy-enrollment-agent.service \
-              kitluy-health-reporter.service kitluy-update-agent.service; do
-    if [[ -f "${TMP}/${profile}/rootfs/etc/systemd/system/${unit}" ]]; then
-      ok "${profile}: base unit ${unit} present"
-    else
-      bad "${profile}: base unit ${unit} present" "missing"
-    fi
-  done
-  if [[ -f "${TMP}/${profile}/rootfs/etc/ssh/sshd_config.d/60-kitluy-hardening.conf" ]]; then
-    ok "${profile}: ssh hardening present"
+ROOTFS="${TMP}/term/rootfs"
+UNITS="${ROOTFS}/etc/systemd/system"
+
+# --- Bootstrap composition (KLD-2026-08-11-DEVICE-BOOTSTRAP-RUNTIME-001) ------
+# The image carries the bootstrap runtime and nothing more.
+for unit in kitluy-firstboot.service kitluy-cloud-registration.service \
+            kitluy-health-reporter.service kitluy-update-agent.service \
+            kitluy-ssh-hostkeys.service kitluy-bootstrap-screen.service; do
+  if [[ -f "${UNITS}/${unit}" ]]; then
+    ok "term: bootstrap unit ${unit} present"
   else
-    bad "${profile}: ssh hardening present" "missing"
+    bad "term: bootstrap unit ${unit} present" "missing"
   fi
 done
 
-# --- Ordering: identity before enrollment -----------------------------------
-# Enrollment has nothing to prove possession of until identity exists.
-if grep -q 'Before=kitluy-enrollment-agent.service' \
-     "${TMP}/hub/rootfs/etc/systemd/system/kitluy-firstboot.service"; then
-  ok "firstboot identity is ordered before enrollment"
+# --- Factory Enrollment is the ONE identity path (KLD-2026-09-03-FACTORY-ENROLLMENT-001)
+# The flash-time ticket agent enrolled a device straight to `enrolled` with no
+# Admin decision, and its identity included the SD card. Unit, enablement and
+# executable are three separate facts; all three must be gone.
+if [[ -f "${UNITS}/kitluy-enrollment-agent.service" ]]; then
+  bad "term: ticket enrollment agent unit stays out" "a device could self-enroll past Admin approval"
 else
-  bad "firstboot identity is ordered before enrollment" "ordering absent"
+  ok "term: ticket enrollment agent unit stays out"
+fi
+if [[ -e "${UNITS}/multi-user.target.wants/kitluy-enrollment-agent.service" ]]; then
+  bad "term: ticket enrollment agent is not enabled" "wants symlink present"
+else
+  ok "term: ticket enrollment agent is not enabled"
+fi
+if [[ -e "${ROOTFS}/usr/lib/kitluy/enrollment-agent" ]]; then
+  bad "term: ticket enrollment agent executable stays out" "shim present"
+else
+  ok "term: ticket enrollment agent executable stays out"
+fi
+if [[ -e "${ROOTFS}/usr/lib/kitluy/lib/firstboot-agent/bin/enrollment-bootstrap.js" ]]; then
+  bad "term: ticket enrollment module is not packaged" "bin/enrollment-bootstrap.js present"
+else
+  ok "term: ticket enrollment module is not packaged"
 fi
 
-# --- Profile separation -----------------------------------------------------
-if [[ -f "${TMP}/hub/rootfs/etc/systemd/system/kitluy-hub-agent.service" ]]; then
-  ok "store-hub has the Hub agent"
+# Cloud registration is present AND enabled AND backed by a packaged module.
+if [[ -e "${UNITS}/multi-user.target.wants/kitluy-cloud-registration.service" ]]; then
+  ok "term: cloud registration is enabled"
 else
-  bad "store-hub has the Hub agent" "missing"
+  bad "term: cloud registration is enabled" "no wants symlink"
 fi
-if [[ ! -f "${TMP}/term/rootfs/etc/systemd/system/kitluy-hub-agent.service" ]]; then
-  ok "pi-terminal does NOT have the Hub agent"
+if [[ -x "${ROOTFS}/usr/lib/kitluy/cloud-registration" \
+   && -f "${ROOTFS}/usr/lib/kitluy/lib/firstboot-agent/bin/cloud-registration.js" ]]; then
+  ok "term: cloud registration shim and module are packaged"
 else
-  bad "pi-terminal does NOT have the Hub agent" "terminal must not run Hub authority"
+  bad "term: cloud registration shim and module are packaged" "shim or bin/cloud-registration.js missing"
 fi
-if [[ -f "${TMP}/term/rootfs/etc/systemd/system/kitluy-terminal-client.service" ]]; then
-  ok "pi-terminal has the kiosk client"
+
+if [[ -f "${ROOTFS}/etc/ssh/sshd_config.d/60-kitluy-hardening.conf" ]]; then
+  ok "term: ssh hardening present"
 else
-  bad "pi-terminal has the kiosk client" "missing"
+  bad "term: ssh hardening present" "missing"
 fi
-if [[ ! -f "${TMP}/hub/rootfs/etc/systemd/system/kitluy-terminal-client.service" ]]; then
-  ok "store-hub does NOT have the kiosk client (headless)"
+
+# --- Ordering: identity before registration, registration before the screen --
+# Registration has nothing to prove possession of until identity exists, and
+# the screen's first paint should already reflect a registration pass.
+if grep -q 'After=kitluy-firstboot.service' "${UNITS}/kitluy-cloud-registration.service"; then
+  ok "firstboot identity is ordered before cloud registration"
 else
-  bad "store-hub does NOT have the kiosk client (headless)" "Hub must stay headless"
+  bad "firstboot identity is ordered before cloud registration" "ordering absent"
+fi
+if grep -qE '^After=.*kitluy-cloud-registration\.service' "${UNITS}/kitluy-bootstrap-screen.service"; then
+  ok "the status screen is ordered after cloud registration"
+else
+  bad "the status screen is ordered after cloud registration" "ordering absent"
+fi
+if grep -qE '^Requires=.*kitluy-cloud-registration' "${UNITS}/kitluy-bootstrap-screen.service"; then
+  bad "the status screen does not Requires= registration" "the screen must come up with the network down"
+else
+  ok "the status screen does not Requires= registration"
+fi
+
+# --- No Store authority of any kind ------------------------------------------
+# Factory Enrollment grants recognition and provisioning eligibility only. The
+# terminal image must carry nothing that could act as Store authority.
+for forbidden in etc/systemd/system/kitluy-hub-agent.service \
+                 usr/lib/kitluy/hub-agent \
+                 usr/lib/kitluy/hub-migrations \
+                 usr/lib/kitluy/hub-storage-provision \
+                 usr/lib/kitluy/hub-database-provision \
+                 etc/kitluy/hub.env \
+                 etc/avahi/services/kitluy-edge.service; do
+  if [[ -e "${ROOTFS}/${forbidden}" ]]; then
+    bad "term: no Store authority at /${forbidden}" "a terminal image carries Hub material"
+  else
+    ok "term: no Store authority at /${forbidden}"
+  fi
+done
+
+# --- The business application is a governed release: defined, NOT enabled ----
+if [[ -f "${UNITS}/kitluy-terminal-client.service" ]]; then
+  ok "term: governed POS client unit is defined"
+else
+  bad "term: governed POS client unit is defined" "missing"
+fi
+if [[ -e "${UNITS}/multi-user.target.wants/kitluy-terminal-client.service" \
+   || -e "${UNITS}/graphical.target.wants/kitluy-terminal-client.service" ]]; then
+  bad "term: governed POS client unit is NOT enabled" "the image would try to run an application it does not carry"
+else
+  ok "term: governed POS client unit is NOT enabled"
 fi
 
 # --- Zero-secret image ------------------------------------------------------
-# The whole staged tree must contain no credential material.
-if grep -rIqE 'service_role|BEGIN [A-Z ]*PRIVATE KEY|SUPABASE_SERVICE_ROLE_KEY=.+' \
-     "${TMP}/hub/rootfs" "${TMP}/term/rootfs" 2>/dev/null; then
-  bad "staged roots are zero-secret" "credential material found"
+if grep -rIqE 'service_role|BEGIN [A-Z ]*PRIVATE KEY|SUPABASE_SERVICE_ROLE_KEY=.+' "${ROOTFS}" 2>/dev/null; then
+  bad "staged root is zero-secret" "credential material found"
 else
-  ok "staged roots are zero-secret"
+  ok "staged root is zero-secret"
 fi
 
 # --- No assignment truth is baked into the image ----------------------------
 # A terminal image must not carry a terminal profile, Tenant, Store, Location
 # or Hub endpoint. Those are delivered after cloud-authorised assignment.
 if grep -rIqE 'KITLUY_TERMINAL_PROFILE=|KITLUY_TENANT_ID=|KITLUY_DIGITAL_STORE_ID=|KITLUY_LOCATION_ID=|KITLUY_HUB_ENDPOINT=' \
-     "${TMP}/term/rootfs" 2>/dev/null; then
+     "${ROOTFS}" 2>/dev/null; then
   bad "terminal image bakes no assignment truth" "assignment value found in image"
 else
   ok "terminal image bakes no assignment truth"

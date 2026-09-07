@@ -23,3 +23,23 @@ export * from "./identity.js";
 export * from "./enrollment.js";
 export * from "./factory.js";
 export * from "./factory-gateway.js";
+
+// Device-side DISPLAY state readers and their path constants. Exported so a
+// console that mirrors these phases — the Pi Terminal Device Shell — can assert
+// against the real definitions in a drift test rather than a copy of them
+// (apps/kitluy-device-shell/test/drift.test.ts). They own no truth; the cloud
+// does. See each module's header.
+export * from "./registration-state.js";
+export * from "./pairing-state.js";
+export * from "./bootstrap-state.js";
+export * from "./image-env.js";
+
+// The operational TLS client. Exported so the registry service's end-to-end
+// suite can drive the REAL device code against the REAL governed route rather
+// than a re-implementation of it — the only way that test proves anything.
+export * from "./operational-key.js";
+export * from "./operational-csr-bytes.js";
+export * from "./operational-credential-state.js";
+export * from "./operational-certificate-verification.js";
+export * from "./operational-tls-client.js";
+export * from "./adapters/http-operational-certificate-client.js";

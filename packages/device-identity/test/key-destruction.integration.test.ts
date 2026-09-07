@@ -862,9 +862,15 @@ describe.skipIf(!reachable)("live governed provider-key destruction", () => {
 
       // Eligibility on the abandoned basis: 7 days past abandoned_at plus the
       // 14-day recovery floor, both cleared by the +365d trusted instant.
-      const { rows: eligibility } = await client.query<{
-        result: { eligible: boolean; blockers: string[]; retention_basis: string };
-      }>(
+      // Entered explicitly. This call used to run as plain `postgres` and
+      // reached the door through `service_role`'s inherited membership — the
+      // chain group 0206 cut to close finding C-4. The eligibility door is
+      // granted to `kitluy_issuance_service`, so the test enters it, exactly as
+      // the product does.
+      const { rows: eligibility } = await withRole(client, TEST_ROLES.issuanceService, async () =>
+        client.query<{
+          result: { eligible: boolean; blockers: string[]; retention_basis: string };
+        }>(
         `select kitluy_devices.evaluate_key_destruction_eligibility_v1(
            $1::uuid, $2, $3, $4::timestamptz, $5) as result`,
         [
@@ -874,6 +880,7 @@ describe.skipIf(!reachable)("live governed provider-key destruction", () => {
           new Date(Date.now() + 365 * MS_PER_DAY),
           "trusted",
         ],
+        ),
       );
       expect(
         eligibility[0]?.result.retention_basis,

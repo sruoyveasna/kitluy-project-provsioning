@@ -81,6 +81,11 @@ export const REGISTRY_ROLES = {
    *  surface whose caller is authorized by an eight-character code alone, and
    *  such a surface must never run as `service_role`, which holds BYPASSRLS. */
   hubPairing: "kitluy_hub_pairing_service",
+  /**
+   * The device-side terminal pairing identity (group 0213): evaluate and consume
+   * a terminal pairing session, and nothing else.
+   */
+  terminalPairing: "kitluy_terminal_pairing_service",
   /** Device activation composition (group 0198): trusted time + activation. */
   activation: "kitluy_activation_service",
   /** DEVELOPMENT certificate issuance (group 0199). Deliberately a DIFFERENT
@@ -159,6 +164,7 @@ export async function withServiceRole<T>(
     | "kitluy_edge_sync_service"
     | "kitluy_fleet_service"
     | "kitluy_hub_pairing_service"
+    | "kitluy_terminal_pairing_service"
     | "kitluy_activation_service"
     | "kitluy_device_certificate_issuer"
   >,

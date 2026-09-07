@@ -70,12 +70,12 @@ for d in config layer; do
   [[ -d "${SRC}/${d}" ]] && ok "external source has ${d}/" || bad "external source has ${d}/" "missing"
 done
 
-CONFIGS=(kitluy-store-hub kitluy-pi-terminal)
+CONFIGS=(kitluy-pi-terminal)
 for c in "${CONFIGS[@]}"; do
   [[ -f "${SRC}/config/${c}.yaml" ]] && ok "config ${c}.yaml present" || bad "config ${c}.yaml present" "missing"
 done
 
-LAYERS=(kitluy-base kitluy-store-hub kitluy-pi-terminal)
+LAYERS=(kitluy-base kitluy-pi-terminal)
 for l in "${LAYERS[@]}"; do
   f="${SRC}/layer/${l}.yaml"
   if [[ -f "$f" ]]; then
@@ -91,25 +91,21 @@ for l in "${LAYERS[@]}"; do
   fi
 done
 
-# --- Both profiles reuse the common base ------------------------------------
-# Two managed profiles, one platform. Separate image systems would drift.
-for l in kitluy-store-hub kitluy-pi-terminal; do
+# --- The terminal profile builds on the common base --------------------------
+# One platform. The Store Hub image has its own tree (owner decision 2026-08-13)
+# and its own copy of this check; the stale store-hub files here are not asserted.
+for l in kitluy-pi-terminal; do
   grep -q "X-Env-Layer-Requires: kitluy-base" "${SRC}/layer/${l}.yaml" 2>/dev/null \
     && ok "${l} builds on kitluy-base" \
     || bad "${l} builds on kitluy-base" "does not require the common base"
 done
 
 # --- Profile separation -----------------------------------------------------
-grep -q "postgresql" "${SRC}/layer/kitluy-store-hub.yaml" 2>/dev/null \
-  && ok "store-hub carries local PostgreSQL" || bad "store-hub carries local PostgreSQL" "absent"
 grep -qi "postgresql" "${SRC}/layer/kitluy-pi-terminal.yaml" 2>/dev/null \
   && bad "terminal does NOT carry a local database" "found postgresql" \
   || ok "terminal does NOT carry a local database"
 grep -qiE "labwc|wayland" "${SRC}/layer/kitluy-pi-terminal.yaml" 2>/dev/null \
   && ok "terminal carries the Wayland/labwc kiosk runtime" || bad "terminal carries the Wayland/labwc kiosk runtime" "absent"
-grep -qiE "labwc|wayland|xserver-xorg" "${SRC}/layer/kitluy-store-hub.yaml" 2>/dev/null \
-  && bad "store-hub stays headless" "found a display stack" \
-  || ok "store-hub stays headless"
 
 # --- Zero-secret (mission §23) ----------------------------------------------
 if grep -rIqE 'service_role|SUPABASE_SERVICE_ROLE_KEY[[:space:]]*=[[:space:]]*.+|BEGIN [A-Z ]*PRIVATE KEY|PGPASSWORD[[:space:]]*=[[:space:]]*.+' "$SRC" 2>/dev/null; then
@@ -194,8 +190,15 @@ else
   # config/, the worked examples and the test configurations. Using only
   # config/*.yaml would reject `layer.custom` and `image.compression`, which
   # are real keys demonstrated in examples/.
+  # The DOCUMENTED corpus counts too. `ssh: pubkey_only: y` is shown in the
+  # pinned tree's getting_started.adoc and docs/config/index.adoc but appears in
+  # no shipped example config, so a corpus built from examples alone rejected a
+  # key the builder demonstrably consumes (docs/layer/openssh-server.html names
+  # IGconf_ssh_pubkey_only). Documentation files are read for the same
+  # two-level key shape; they can only ADD allowed keys, never remove one.
   UP_CONFIG_KEYS="$(grep -rhoE '^[a-z_]+:|^  [a-z_]+:' \
     "$UP"/config/*.yaml "$UP"/examples/*/config/*.yaml "$UP"/test/configurations/config/*.yaml \
+    "$UP"/getting_started.adoc "$UP"/docs/config/*.adoc \
     2>/dev/null | tr -d ' :' | sort -u)"
   BADKEY=""
   for c in "${CONFIGS[@]}"; do

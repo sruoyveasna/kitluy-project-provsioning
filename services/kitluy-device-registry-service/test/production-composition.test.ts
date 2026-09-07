@@ -35,7 +35,7 @@ import type { DurableJob } from "@kitluy/job-contracts";
 
 const SRC = join(import.meta.dirname, "..", "src");
 const DIST = join(import.meta.dirname, "..", "dist");
-const LOCAL_DSN = "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
+const LOCAL_DSN = "postgresql://postgres:postgres@127.0.0.1:54392/postgres";
 
 function productionSources(): { readonly file: string; readonly text: string }[] {
   return readdirSync(SRC)

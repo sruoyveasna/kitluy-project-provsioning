@@ -239,6 +239,8 @@ export async function resolveStoreScope(
 export interface PartnerStoreOption {
   readonly digitalStoreId: string;
   readonly digitalStoreReference: string;
+  /** The Store's primary vertical code (e.g. LAUNDRY), verbatim. Decides which terminal vocabulary a Portal may offer. */
+  readonly vertical: string | null;
   readonly locations: readonly {
     readonly storeLocationId: string;
     readonly locationReference: string;
@@ -287,6 +289,7 @@ export async function listPartnerStores(
     const { rows } = await client.query<{
       digital_store_id: string;
       digital_store_reference: string;
+      vertical: string | null;
       store_location_id: string | null;
       location_reference: string | null;
     }>(
@@ -295,6 +298,7 @@ export async function listPartnerStores(
       // does not have to invent a formatting rule of its own.
       `select ds.id                                as digital_store_id,
               ds.store_code || ' — ' || ds.name    as digital_store_reference,
+              ds.primary_vertical_code             as vertical,
               sl.id                                as store_location_id,
               sl.location_code || ' — ' || sl.name as location_reference
          from kitluy_core.digital_stores ds
@@ -314,6 +318,7 @@ export async function listPartnerStores(
         entry = {
           digitalStoreId: r.digital_store_id,
           digitalStoreReference: r.digital_store_reference,
+          vertical: r.vertical,
           locations: [],
         };
         byStore.set(r.digital_store_id, entry);
@@ -354,7 +359,7 @@ export async function listPartnerStores(
  */
 export interface PairingSessionStatus {
   readonly sessionId: string;
-  /** `pending` · `consumed` · `revoked` · `expired` · `locked` — the stored state. */
+  /** `open` · `consumed` · `revoked` · `expired` · `locked` — the stored state (0194). */
   readonly state: string;
   readonly pairedAt: string | null;
   /** The Hub that used the code. An opaque id, safe to show — contract §9. */

@@ -18,7 +18,15 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import type { KitluyLocale } from "@kitluy/localization";
-import { AppShell, DataSurface, KitluyErrorBoundary, LocaleProvider } from "@kitluy/web-ui";
+import {
+  AppShell,
+  DataSurface,
+  KitluyErrorBoundary,
+  LocaleProvider,
+  LocaleToggle,
+  restoreKitluyTheme,
+  ThemeToggle,
+} from "@kitluy/web-ui";
 import {
   holdsPermission,
   resolveAccess,
@@ -45,6 +53,13 @@ import {
   NoticePanel,
   PendingApprovalsView,
 } from "./views.js";
+import { StoreCreateView, StoreListView } from "./views.js";
+import { PERMISSION_STORE_CREATE } from "./access.js";
+import type {
+  CreateStoreResult,
+  StoreCreationOptions,
+  StoreListPage,
+} from "./management-client.js";
 
 export const PRODUCT_NAME = "kitluy-admin-pwa-portal" as const;
 export { MESSAGES };
@@ -75,6 +90,16 @@ export function App(): JSX.Element {
   const [detail, setDetail] = useState<Loadable<DeviceDetail>>({ kind: "loading" });
   const [pending, setPending] = useState<Loadable<PendingPage>>({ kind: "loading" });
   const [approving, setApproving] = useState<string | null>(null);
+  const [stores, setStores] = useState<Loadable<StoreListPage>>({ kind: "loading" });
+  const [storeOptions, setStoreOptions] = useState<Loadable<StoreCreationOptions>>({
+    kind: "loading",
+  });
+  const [creatingStore, setCreatingStore] = useState(false);
+  const [storeNotice, setStoreNotice] = useState<
+    | { readonly kind: "created"; readonly result: CreateStoreResult }
+    | { readonly kind: "refused"; readonly reason: string; readonly message: string }
+    | null
+  >(null);
   const [approvalNotice, setApprovalNotice] = useState<
     { readonly deviceId: string; readonly message: string } | undefined
   >(undefined);
@@ -96,6 +121,10 @@ export function App(): JSX.Element {
   )[0];
 
   // ---- routing ------------------------------------------------------------
+  useEffect(() => {
+    restoreKitluyTheme();
+  }, []);
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     const onHashChange = (): void => setRoute(parseRoute(currentHash()));
@@ -168,6 +197,64 @@ export function App(): JSX.Element {
     if (api === null || access.kind !== "granted" || route.kind !== "pending") return;
     loadPending();
   }, [api, access.kind, route.kind, loadPending]);
+
+  useEffect(() => {
+    if (api === null || access.kind !== "granted" || route.kind !== "stores") return;
+    let live = true;
+    setStores({ kind: "loading" });
+    void api.listStores().then((outcome) => {
+      if (live) setStores(handleOutcome(outcome));
+    });
+    return () => {
+      live = false;
+    };
+  }, [api, access.kind, route.kind, handleOutcome]);
+
+  const loadStoreOptions = useCallback((): void => {
+    if (api === null) return;
+    setStoreOptions({ kind: "loading" });
+    void api.getStoreCreationOptions().then((outcome) => {
+      setStoreOptions(handleOutcome(outcome));
+    });
+  }, [api, handleOutcome]);
+
+  useEffect(() => {
+    if (api === null || access.kind !== "granted" || route.kind !== "store_new") return;
+    setStoreNotice(null);
+    loadStoreOptions();
+  }, [api, access.kind, route.kind, loadStoreOptions]);
+
+  const onCreateStore = useCallback(
+    (input: Parameters<ManagementClient["createStore"]>[0]): void => {
+      if (api === null) return;
+      setCreatingStore(true);
+      setStoreNotice(null);
+      void api.createStore(input).then((outcome) => {
+        setCreatingStore(false);
+        if (outcome.kind === "ok") {
+          setStoreNotice({ kind: "created", result: outcome.value });
+          // Re-read the options rather than mutate locally: the Partner staff
+          // count and any new Tenant state come from the server.
+          loadStoreOptions();
+          return;
+        }
+        if (outcome.kind === "unauthenticated") {
+          setAccess({ kind: "signed_out", messageKey: "sessionExpired" });
+          return;
+        }
+        if (outcome.kind === "refused" || outcome.kind === "denied") {
+          setStoreNotice({ kind: "refused", reason: outcome.reason, message: outcome.message });
+          return;
+        }
+        setStoreNotice({
+          kind: "refused",
+          reason: outcome.kind,
+          message: outcome.kind === "unavailable" ? outcome.detail : "No such Tenant.",
+        });
+      });
+    },
+    [api, loadStoreOptions],
+  );
 
   const deviceId = route.kind === "device" ? route.deviceId : null;
   useEffect(() => {
@@ -258,11 +345,48 @@ export function App(): JSX.Element {
   }, [runtime]);
 
   // ---- render -------------------------------------------------------------
+  const granted = access.kind === "granted";
+  const crumbKey: MessageKey =
+    route.kind === "pending"
+      ? "pendingNav"
+      : route.kind === "stores"
+        ? "storesNav"
+        : route.kind === "store_new"
+          ? "newStoreNav"
+          : "devices";
   return (
     <LocaleProvider locale={locale}>
       <KitluyErrorBoundary>
-        <AppShell productName="Admin PWA Portal">
-          <AdminNav locale={locale} access={access} onSignOut={onSignOut} onLocale={setLocale} />
+        <AppShell
+          productName="Admin Portal"
+          brandInitial="A"
+          crumb={<span className="kl-cur">{t(locale, crumbKey)}</span>}
+          nav={granted ? <AdminNav locale={locale} access={access} route={route} /> : undefined}
+          topbarRight={
+            <>
+              <LocaleToggle locale={locale} onLocale={setLocale} />
+              <ThemeToggle />
+            </>
+          }
+          account={
+            granted ? (
+              <div className="kl-who">
+                <div className="kl-avatar">HA</div>
+                <div style={{ minWidth: 0 }}>
+                  <div className="kl-who-name">{t(locale, "adminAccount")}</div>
+                  <button
+                    type="button"
+                    className="kl-btn kl-btn-ghost kl-btn-sm"
+                    style={{ marginTop: 4, padding: "4px 9px" }}
+                    onClick={onSignOut}
+                  >
+                    {t(locale, "signOut")}
+                  </button>
+                </div>
+              </div>
+            ) : undefined
+          }
+        >
           {renderBody()}
         </AppShell>
       </KitluyErrorBoundary>
@@ -338,6 +462,43 @@ export function App(): JSX.Element {
           busyDeviceId={approving}
           notice={approvalNotice}
           onApprove={onApprove}
+        />
+      );
+    }
+
+    if (route.kind === "stores") {
+      if (stores.kind === "loading") return <DataSurface state="loading" />;
+      if (stores.kind === "problem") {
+        return (
+          <NoticePanel locale={locale} messageKey={stores.messageKey} detail={stores.detail} />
+        );
+      }
+      return <StoreListView locale={locale} page={stores.value} />;
+    }
+
+    if (route.kind === "store_new") {
+      if (storeOptions.kind === "loading") return <DataSurface state="loading" />;
+      if (storeOptions.kind === "problem") {
+        return (
+          <NoticePanel
+            locale={locale}
+            messageKey={
+              storeOptions.messageKey === "noDevices"
+                ? "optionsUnavailable"
+                : storeOptions.messageKey
+            }
+            detail={storeOptions.detail}
+          />
+        );
+      }
+      return (
+        <StoreCreateView
+          locale={locale}
+          options={storeOptions.value}
+          canCreate={holdsPermission(access, PERMISSION_STORE_CREATE)}
+          busy={creatingStore}
+          notice={storeNotice}
+          onCreate={onCreateStore}
         />
       );
     }

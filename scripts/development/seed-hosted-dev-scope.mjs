@@ -35,7 +35,12 @@ import { fileURLToPath } from "node:url";
 
 import pg from "pg";
 
-import { ALLOWED_HOSTED_DEV, deriveProjectRef } from "../database/hosted-dev-target.mjs";
+import {
+  ALLOWED_HOSTED_DEV,
+  HostedTargetRefusal,
+  canonicalHostedConnection,
+  deriveProjectRef,
+} from "../database/hosted-dev-target.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const CONFIG_DIR = resolve(REPO, "..", "..", "local-config", "het-kitluy-project");
@@ -72,7 +77,19 @@ const TENANT = "00000000-0000-4000-8000-000000000011";
 const STORE = "00000000-0000-4000-8000-000000000015";
 const LOCATION = "00000000-0000-4000-8000-000000000018";
 
-const client = new pg.Client({ connectionString: dsn, connectionTimeoutMillis: 15000 });
+// D-20: connect to the VALIDATED target, never to the original string — a
+// `?host=`/`?port=` override would otherwise be re-read by pg and win.
+// This changes the CONNECTION TARGET only; the environment gating above is
+// finding D-19 and is deliberately untouched here.
+let canonical;
+try {
+  canonical = canonicalHostedConnection(dsn);
+} catch (error) {
+  if (error instanceof HostedTargetRefusal)
+    die(`${String(error.message).replace(/^REFUSED:\s*/, "")}\n  code: ${error.code}`);
+  throw error;
+}
+const client = new pg.Client({ ...canonical.connectionConfig, connectionTimeoutMillis: 15000 });
 await client.connect();
 
 try {

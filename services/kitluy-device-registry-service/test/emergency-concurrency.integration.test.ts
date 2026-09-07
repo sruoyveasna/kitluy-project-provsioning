@@ -30,7 +30,7 @@ import {
   type DeviceRevocationRuntime,
 } from "../src/composition.js";
 
-const LOCAL_DSN = "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
+const LOCAL_DSN = "postgresql://postgres:postgres@127.0.0.1:54392/postgres";
 const ENV = { DEVICE_REGISTRY_DATABASE_URL: LOCAL_DSN, KITLUY_ENV: "local" } as const;
 const RUN = randomUUID().slice(0, 8);
 const DECISION = "KLD-2026-07-31-SECURITY-TEST-CLOCK-001";

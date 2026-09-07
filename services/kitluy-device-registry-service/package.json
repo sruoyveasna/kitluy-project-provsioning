@@ -2,7 +2,7 @@
   "name": "@kitluy-services/kitluy-device-registry-service",
   "version": "0.1.0",
   "private": true,
-  "description": "Device registry — HET-enrolled device identity, hardware manifests, certificate records (Hub spec Appendix A)",
+  "description": "Device registry \u2014 HET-enrolled device identity, hardware manifests, certificate records (Hub spec Appendix A)",
   "type": "module",
   "main": "./dist/main.js",
   "scripts": {
@@ -17,12 +17,15 @@
     "@kitluy/job-contracts": "workspace:*",
     "@kitluy/observability": "workspace:*",
     "@kitluy/shared-config": "workspace:*",
+    "node-forge": "catalog:",
     "pg": "catalog:"
   },
   "devDependencies": {
-    "typescript": "catalog:",
+    "@kitluy-services/kitluy-device-firstboot-agent": "workspace:*",
     "@types/node": "catalog:",
+    "@types/node-forge": "catalog:",
     "@types/pg": "catalog:",
+    "typescript": "catalog:",
     "vitest": "catalog:"
   }
 }

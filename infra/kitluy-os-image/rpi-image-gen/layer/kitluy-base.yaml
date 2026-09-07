@@ -1,11 +1,11 @@
 # METABEGIN
 # X-Env-Layer-Name: kitluy-base
 # X-Env-Layer-Category: kitluy
-# X-Env-Layer-Desc: KitLuy managed-device common base. Shared by the Store Hub
-#  and Pi terminal profiles: device identity bootstrap, firstboot, the cloud
-#  enrollment agent, health reporting, the update runtime, security hardening
-#  and persistent logging. Carries NO secret and NO assignment truth.
-# X-Env-Layer-Version: 0.1.0
+# X-Env-Layer-Desc: KitLuy Pi Terminal common base: device identity bootstrap,
+#  firstboot, cloud registration (Factory Enrollment, stage one), health
+#  reporting, the update runtime, security hardening and persistent logging.
+#  Carries NO secret, NO assignment truth and NO Store authority.
+# X-Env-Layer-Version: 0.2.0
 # X-Env-Layer-Requires: bookworm-minbase,
 #  openssh-server,
 #  systemd-timesyncd,
@@ -21,22 +21,52 @@
 # backwards. A device that cannot establish trusted time cannot prove a
 # certificate is currently valid, so this is a security dependency rather than
 # a convenience.
+#
+# WHAT THIS LAYER IS NOT
+# ----------------------
+# It is the terminal's copy of the Store Hub's base layer
+# (infra/kitluy-store-hub-image/rpi-image-gen/layer/kitluy-hub-base.yaml),
+# kept deliberately close to it so the two images stay one platform. Two things
+# the Hub layer carries are absent here on purpose: the operational-credential
+# directory and the development root pin. Both belong to the Hub's certificate
+# stage; a terminal's credential custody is a later slice.
 mmdebstrap:
   packages:
     # Device agent runtime. Node is the runtime the KitLuy agents are written
-    # in; the agent code itself is delivered by the governed release system,
-    # not baked here (mission §27: OS image is not an application release).
+    # in. The bootstrap agents are baked (KLD-2026-08-11-DEVICE-BOOTSTRAP-
+    # RUNTIME-001); the business application is a governed release and is NOT.
     - nodejs
     # LAN discovery. The Hub advertises _kitluy-edge._tcp.local and the
     # terminal listens for it; both sides need the resolver.
     - avahi-daemon
     - libnss-mdns
+    # WI-FI ASSOCIATION ONLY (owner decision 2026-08-24 §7).
+    #
+    # The active network stack is systemd-networkd and Ethernet DHCP already
+    # works; the ONLY missing capability is associating with an access point.
+    # NetworkManager was rejected for this milestone: it would replace the
+    # network ACTIVATOR to obtain a capability that is missing at a lower layer,
+    # which is a larger change and a larger attack surface for no gain here.
+    #
+    # `iw` is not a dependency of the code but is what a technician needs on
+    # tty2 when a radio misbehaves.
+    - wpasupplicant
+    - iw
     # Storage and integrity tooling for the A/B + encrypted-data layout.
     - cryptsetup
     - e2fsprogs
     # Log persistence — a device that loses its logs on reboot cannot support
     # an incident investigation.
     - systemd-journal-remote
+    # THE ZONEINFO DATABASE, DECLARED. The appliance-clock hook below links
+    # /etc/localtime to /usr/share/zoneinfo/Asia/Phnom_Penh and REFUSES when
+    # that file is absent. On the Store Hub the file was always there because
+    # PostgreSQL depends on tzdata; a terminal carries no database, so the first
+    # terminal build from this layer (2026-09-03) died in that hook with every
+    # later hook — clone hygiene, tty1 ownership, the Wi-Fi seed — never run and
+    # the KitLuy overlay never applied. A dependency a hook needs is a
+    # dependency this layer names.
+    - tzdata
 
   customize-hooks:
     # Security hardening. Applied as a hook rather than as shipped files so the
@@ -66,25 +96,23 @@ mmdebstrap:
       SystemMaxUse=256M
       MaxRetentionSec=30day
       EOF
-    # Device identity lives on the encrypted data partition and is created ON
-    # the device at firstboot. The directory is created empty and 0700; no key
-    # material is ever placed here by the build.
+    # Device identity lives on the data partition and is created ON the device
+    # at firstboot. The directory is created empty and 0700; no key material is
+    # ever placed here by the build.
     - install -d -m 0700 "$1/var/lib/kitluy/identity"
     - install -d "$1/etc/kitluy" "$1/var/lib/kitluy" "$1/usr/lib/kitluy"
-    # STATE DIRECTORIES FOR THE OTHER THREE AGENTS.
+    # STATE DIRECTORIES FOR THE OTHER AGENTS.
     #
     # Every bootstrap unit runs ProtectSystem=strict and names its own writable
     # path with ReadWritePaths=. systemd REFUSES to start a unit whose
     # ReadWritePaths does not exist — `226/NAMESPACE`, before ExecStart is even
     # reached — so a missing directory is not a first-use failure, it is a
-    # service that can never run once.
+    # service that can never run once. On the first real Raspberry Pi boot
+    # (2026-08-13) the health and update agents crash-looped every 30 seconds
+    # from boot for exactly this reason.
     #
-    # Only `identity` existed. On the first real Raspberry Pi boot
-    # (2026-08-13, pi5-zjjtir) kitluy-firstboot came up and the enrollment,
-    # health and update agents each crash-looped every 30 seconds from boot,
-    # having never executed a line of their own code. firstboot worked for
-    # exactly one reason: `identity` is the one directory that was created.
-    - install -d -m 0700 "$1/var/lib/kitluy/enrollment"
+    # No `enrollment` directory any more: the flash-time ticket agent is retired
+    # from this image (KLD-2026-09-03-FACTORY-ENROLLMENT-001).
     - install -d -m 0700 "$1/var/lib/kitluy/health"
     - install -d -m 0700 "$1/var/lib/kitluy/update"
     # THE KIOSK USER, CREATED AT BUILD TIME.
@@ -92,7 +120,7 @@ mmdebstrap:
     # `etc/sysusers.d/60-kitluy-terminal.conf` declares this user, and
     # systemd-sysusers can never apply it: the rootfs is erofs, mounted
     # read-only, so /etc/passwd cannot be written on the device. The unit
-    # therefore failed `217/USER` on the same first boot.
+    # therefore failed `217/USER` on the first real boot.
     #
     # The sysusers file is kept — it remains the declaration of intent and
     # costs nothing — but the user is baked here, where /etc is still writable.
@@ -108,10 +136,9 @@ mmdebstrap:
         "$1/var/lib/kitluy/terminal" 2>/dev/null \
         || install -d -m 0700 "$1/var/lib/kitluy/terminal"
     # /etc/kitluy/image.env — the identity every KitLuy unit loads via
-    # EnvironmentFile. It existed only on the staged path, so units on the REAL
-    # image referenced a file that was never created; systemd fails a unit whose
-    # EnvironmentFile is missing, which would have taken the whole bootstrap
-    # runtime down on first boot. Non-secret by construction.
+    # EnvironmentFile. systemd fails a unit whose EnvironmentFile is missing,
+    # so it is written here, on the path that produces the real image.
+    # Non-secret by construction.
     - |
       cat > "$1/etc/kitluy/image.env" <<'EOF'
       KITLUY_IMAGE_NAME=kitluy-os
@@ -120,35 +147,107 @@ mmdebstrap:
       KITLUY_RELEASE_CHANNEL=internal
       KITLUY_DEVICE_CLASS=terminal
       KITLUY_ENROLLMENT_BASE_URL=
-      KITLUY_ENVIRONMENT=development
+      KITLUY_REGISTRATION_URL=
+      KITLUY_HARDWARE_PROFILE_KEY=
+      # DELIBERATELY EMPTY. The builder must state the environment explicitly.
+      #
+      # This read `development`, and that was an IMPLICIT SECURITY DEFAULT: the
+      # builder never passed IGconf_kitluy_environment, so every image ever
+      # produced declared itself a development device by omission — while the
+      # development-only paths on both images key on exactly this value.
+      #
+      # Empty means the readers see `unknown` (`${VAR:-unknown}` fires on empty
+      # as well as unset, and `readImageEnv` returns undefined for empty), and
+      # every development escape path REFUSES. The assertion further down makes
+      # a build that forgot to supply one fail rather than ship this.
+      KITLUY_ENVIRONMENT=
       KITLUY_DEFAULT_TIMEZONE=Asia/Phnom_Penh
       KITLUY_DEFAULT_LOCALES=km-KH,en-US
       KITLUY_BASE_PINNED=no
       EOF
-    # THE ONE BUILD-TIME VALUE THIS PATH MAY INJECT.
-    #
-    # `build-image.sh` has carried an enrollment-URL override since it existed;
-    # this path — the one that produces the actual .img — did not, so every
-    # flashable card was built with an EMPTY endpoint and reported
-    # "no enrollment endpoint is configured" on first boot no matter how it was
-    # built. Baking it here is what makes a card CLONEABLE: copy the card and
-    # every copy already knows where the fleet service is.
-    #
-    # Still not a secret. It is a public address, and an image carrying it is
-    # exactly as zero-secret as one without (KLSRC-0162 §34).
+    # BUILD-TIME VALUES THIS PATH MAY INJECT. All public addresses or model keys;
+    # none is a secret, and an image carrying them is exactly as zero-secret as
+    # one without (KLSRC-0162 §34).
     - |
       if [ -n "${IGconf_kitluy_enrollment_url:-}" ]; then
         sed -i "s|^KITLUY_ENROLLMENT_BASE_URL=.*|KITLUY_ENROLLMENT_BASE_URL=${IGconf_kitluy_enrollment_url}|" \
+          "$1/etc/kitluy/image.env"
+      fi
+      # The CLOUD registration route, as a FULL url — Factory Enrollment, stage
+      # one. A separate key from KITLUY_ENROLLMENT_BASE_URL on purpose: that
+      # names the fleet service, which does not serve this route, and a device
+      # that assembled one from the other would POST registrations to a host
+      # answering 404 — which it could not tell apart from a genuine refusal.
+      if [ -n "${IGconf_kitluy_registration_url:-}" ]; then
+        sed -i "s|^KITLUY_REGISTRATION_URL=.*|KITLUY_REGISTRATION_URL=${IGconf_kitluy_registration_url}|" \
+          "$1/etc/kitluy/image.env"
+      fi
+      # The hardware profile KEY, never a UUID. A key names a MODEL, so a
+      # generic image may carry one and stay generic (plan §5.2); a UUID would
+      # differ per environment and make the image environment-specific.
+      if [ -n "${IGconf_kitluy_hardware_profile_key:-}" ]; then
+        sed -i "s|^KITLUY_HARDWARE_PROFILE_KEY=.*|KITLUY_HARDWARE_PROFILE_KEY=${IGconf_kitluy_hardware_profile_key}|" \
           "$1/etc/kitluy/image.env"
       fi
       if [ -n "${IGconf_kitluy_device_class:-}" ]; then
         sed -i "s|^KITLUY_DEVICE_CLASS=.*|KITLUY_DEVICE_CLASS=${IGconf_kitluy_device_class}|" \
           "$1/etc/kitluy/image.env"
       fi
+      # THE ENVIRONMENT IS REQUIRED, VALIDATED, AND ASSERTED.
+      #
+      # Not "injected if supplied", like the values above. Those are addresses:
+      # a missing one produces a device that says it is unconfigured. This one
+      # gates development-only behaviour, so a missing one used to produce a
+      # device that quietly enabled it.
       if [ -n "${IGconf_kitluy_environment:-}" ]; then
+        case "${IGconf_kitluy_environment}" in
+          local|development|staging|pilot|production|disaster_recovery) ;;
+          *)
+            echo "REFUSED: KITLUY_ENVIRONMENT='${IGconf_kitluy_environment}' is not a KitLuy environment" >&2
+            exit 1
+            ;;
+        esac
         sed -i "s|^KITLUY_ENVIRONMENT=.*|KITLUY_ENVIRONMENT=${IGconf_kitluy_environment}|" \
           "$1/etc/kitluy/image.env"
       fi
+      # Fail the BUILD, not the boot. An image with no environment is one whose
+      # security posture nobody stated; shipping it and letting the device refuse
+      # at 03:00 moves a knowable build error into a shop.
+      baked="$(sed -n 's/^KITLUY_ENVIRONMENT=//p' "$1/etc/kitluy/image.env")"
+      if [ -z "$baked" ]; then
+        echo "REFUSED: this image declares no KITLUY_ENVIRONMENT." >&2
+        echo "  Pass --environment to build-rpi-image.sh. It is not defaulted:" >&2
+        echo "  the development-only paths key on it." >&2
+        exit 1
+      fi
+    # =========================================================================
+    # THE APPLIANCE CLOCK READS Asia/Phnom_Penh, AND NOBODY IS ASKED.
+    # =========================================================================
+    # `KITLUY_DEFAULT_TIMEZONE=Asia/Phnom_Penh` has been in image.env since the
+    # file existed and is read by NO code. The built Hub artifact carried
+    # /etc/localtime -> Europe/London, the Debian default nobody chose — so every
+    # journal line and every `date` a technician ran on tty2 was seven hours out
+    # for a Cambodian shop.
+    #
+    # There is no timezone-selection step and there must never be one (owner
+    # decision 2026-08-24 §3): the installer is not asked, and the Store Location
+    # already owns the business timezone in the control plane.
+    #
+    # This is the APPLIANCE and BUSINESS presentation clock. It is NOT the
+    # trusted-time authority and it does not touch it: trusted time is
+    # established server-side and compared in UTC throughout.
+    #
+    # /etc is EROFS at runtime, so this must be baked here where it is still
+    # writable — the same constraint that moved the kiosk user into the build.
+    - |
+      TZ="${IGconf_kitluy_timezone:-Asia/Phnom_Penh}"
+      if [ ! -f "$1/usr/share/zoneinfo/$TZ" ]; then
+        echo "KLUY-IMAGE: no zoneinfo file for timezone $TZ — is tzdata in this layer's packages?" >&2
+        exit 1
+      fi
+      printf '%s\n' "$TZ" > "$1/etc/timezone"
+      ln -sf "/usr/share/zoneinfo/$TZ" "$1/etc/localtime"
+      sed -i "s|^KITLUY_DEFAULT_TIMEZONE=.*|KITLUY_DEFAULT_TIMEZONE=$TZ|" "$1/etc/kitluy/image.env"
     # CLONE HYGIENE (mission §15). A golden image must not carry a machine
     # identity, or every device flashed from it enrolls as the same device.
     # Truncating rather than deleting makes systemd regenerate a unique
@@ -158,45 +257,39 @@ mmdebstrap:
       rm -f "$1/var/lib/dbus/machine-id"
       ln -sf /etc/machine-id "$1/var/lib/dbus/machine-id"
     # No pre-seeded SSH host keys — cloned host keys would let one device
-    # impersonate another on the LAN.
+    # impersonate another on the LAN. kitluy-ssh-hostkeys.service regenerates
+    # them per device at first boot, into the slot-shared /etc/ssh.
     - rm -f "$1"/etc/ssh/ssh_host_*
     # CLONE HYGIENE, second class of shared key. Debian's `ssl-cert` package
     # generates /etc/ssl/private/ssl-cert-snakeoil.key at install time, so it is
     # baked into the golden image and EVERY device flashed from it would share
-    # one private key. It is a self-signed placeholder rather than a KitLuy
-    # credential, and nothing in this image serves TLS with it — but a shared
+    # one private key. Nothing in this image serves TLS with it — but a shared
     # private key across a fleet is exactly the property clone hygiene exists to
-    # prevent, and it is removed for the same reason the SSH host keys are.
-    # Caught by scan-image-secrets.sh against the BUILT image, which is the
-    # check the staged-tree scan could not perform.
+    # prevent. Caught by scan-image-secrets.sh against the BUILT image.
     - rm -f "$1"/etc/ssl/private/ssl-cert-snakeoil.key "$1"/etc/ssl/certs/ssl-cert-snakeoil.pem
     # =========================================================================
     # TTY1 OWNERSHIP IS DECIDED HERE, NOT CONTESTED AT BOOT.
     # =========================================================================
     # A KitLuy device is an appliance: an operator must never meet `login:` as
-    # the product. The KitLuy console unit already declares
+    # the product. The KitLuy console unit declares
     # `Conflicts=getty@tty1.service`, but Conflicts ALONE leaves three ways for a
-    # login prompt to appear on tty1, all three verified present in the built
+    # login prompt to appear on tty1, all three verified present in a built
     # artifact before this hook existed:
     #
     #   1. `getty@tty1.service` is still enabled in `getty.target.wants/` by the
     #      Debian preset, so getty and the KitLuy console are both wanted and
-    #      race. Conflicts is explicitly "orthogonal to ordering", and no
-    #      ordering was declared between them.
-    #   2. `systemd-logind` autospawns `autovt@ttyN.service` on VT activation.
-    #      `autovt@.service` is a symlink to `getty@.service`, so it is the SAME
-    #      program under a DIFFERENT unit name — and `Conflicts=getty@tty1.service`
-    #      does not name it. Default `NAutoVTs=6` covers tty1.
+    #      race. Conflicts is explicitly "orthogonal to ordering".
+    #   2. `systemd-logind` autospawns `autovt@ttyN.service`, which is the SAME
+    #      program under a DIFFERENT unit name that Conflicts= does not match.
     #   3. The KitLuy console uses `Restart=always`; each restart releases and
     #      re-acquires tty1, reopening the window in 1 and 2.
     #
-    # So getty is removed from tty1 and autospawn is switched off, which makes the
-    # outcome deterministic instead of a race.
+    # So getty is removed from tty1 and autospawn is switched off.
     #
-    # MAINTENANCE ACCESS IS PRESERVED, deliberately (this must not become a device
-    # that cannot be recovered): getty is ENABLED ON tty2 instead. A technician
-    # presses Ctrl+Alt+F2 and gets the normal authenticated Debian login; SSH with
-    # governed keys is unchanged. tty1 belongs to the product, tty2 to maintenance.
+    # MAINTENANCE ACCESS IS PRESERVED, deliberately: getty is ENABLED ON tty2. A
+    # technician presses Ctrl+Alt+F2 and gets the normal authenticated Debian
+    # login; SSH with governed keys is unchanged. tty1 belongs to the product,
+    # tty2 to maintenance.
     - |
       rm -f "$1/etc/systemd/system/getty.target.wants/getty@tty1.service"
       install -d "$1/etc/systemd/system/getty.target.wants"
@@ -213,3 +306,95 @@ mmdebstrap:
       NAutoVTs=0
       ReserveVT=0
       EOF
+    # =========================================================================
+    # ETHERNET IS PREFERRED. THE KERNEL DECIDES, NOT A PROGRAM.
+    # =========================================================================
+    # The rpi device layer generates 01-eth0.network and 02-wlan0.network with
+    # nothing but `DHCP=yes`, which leaves two questions unanswered: with BOTH
+    # links up, which default route wins (undefined), and does an unconfigured
+    # wlan0 hold `network-online.target` for its full timeout on every boot
+    # (yes). RouteMetric answers the first in the routing table;
+    # RequiredForOnline answers the second. These OVERWRITE the generated files.
+    - |
+      cat > "$1/etc/systemd/network/01-eth0.network" <<'EOF'
+      [Match]
+      Name=eth0
+
+      [Network]
+      DHCP=yes
+
+      [DHCPv4]
+      # UseHostname=no: the appliance names itself at firstboot and never takes a
+      # hostname from a DHCP lease. With the default (yes) networkd asks
+      # systemd-hostnamed to apply the lease's hostname, and hostnamed cannot
+      # start on this read-only erofs root (226/NAMESPACE, "Failed to set up
+      # mount namespacing: /run/systemd/unit-root/dev: Read-only file system"),
+      # so every boot carried one failed unit — seen on the first terminal boot
+      # and on the Store Hub alike (2026-09-03).
+      UseHostname=no
+      # Lower metric wins. Ethernet is the canonical terminal installation.
+      RouteMetric=100
+
+      [Link]
+      # A wired terminal must not report itself online before its cable is usable.
+      RequiredForOnline=yes
+      EOF
+    - |
+      cat > "$1/etc/systemd/network/02-wlan0.network" <<'EOF'
+      [Match]
+      Name=wlan0
+
+      [Network]
+      DHCP=yes
+
+      [DHCPv4]
+      # UseHostname=no: the appliance names itself at firstboot and never takes a
+      # hostname from a DHCP lease. With the default (yes) networkd asks
+      # systemd-hostnamed to apply the lease's hostname, and hostnamed cannot
+      # start on this read-only erofs root (226/NAMESPACE, "Failed to set up
+      # mount namespacing: /run/systemd/unit-root/dev: Read-only file system"),
+      # so every boot carried one failed unit — seen on the first terminal boot
+      # and on the Store Hub alike (2026-09-03).
+      UseHostname=no
+      # Higher metric: Wi-Fi carries Store traffic only when Ethernet cannot.
+      RouteMetric=600
+
+      [Link]
+      # THE BOOT-DELAY FIX. Without this, a wired-only terminal waits out
+      # systemd-networkd-wait-online's timeout on every boot because wlan0 never
+      # becomes routable. Nothing that matters is ordered behind Wi-Fi.
+      RequiredForOnline=no
+      EOF
+    # =========================================================================
+    # WHERE THE SHOP'S WI-FI PASSWORD WILL LIVE.
+    # =========================================================================
+    # In wpa_supplicant's own configuration file, 0600 and root-owned — the
+    # operating system's credential store. The file SEEDED here contains no
+    # network and therefore no secret: a ctrl_interface so `wpa_cli` can reach
+    # the daemon, and `update_config=1`. The image stays zero-secret.
+    #
+    # /etc/wpa_supplicant is declared SLOT-SHARED in slot-shared.d — see that
+    # file for why per-slot would lose the shop's Wi-Fi on every A/B update.
+    # The screen that joins a network arrives with the graphical Device Shell;
+    # until then a wired installation is the supported path.
+    - |
+      install -d -m 0700 "$1/etc/wpa_supplicant"
+      cat > "$1/etc/wpa_supplicant/wpa_supplicant-wlan0.conf" <<'EOF'
+      ctrl_interface=/run/wpa_supplicant
+      update_config=1
+      EOF
+      chmod 0600 "$1/etc/wpa_supplicant/wpa_supplicant-wlan0.conf"
+    # The supplicant runs for wlan0 whenever the adapter exists. Debian's
+    # template unit already binds to the interface, so a board without a radio
+    # simply never starts it rather than failing.
+    - |
+      install -d "$1/etc/systemd/system/multi-user.target.wants"
+      ln -sf /lib/systemd/system/wpa_supplicant@.service \
+        "$1/etc/systemd/system/multi-user.target.wants/wpa_supplicant@wlan0.service"
+    # A crypto library's own TEST VECTORS, which are 2.8 MB of PEM-shaped
+    # fixtures that nothing on a terminal ever executes. `scan-image-secrets.sh`
+    # matched them as private key material and failed the built Hub image. The
+    # LIBRARY stays: `rpi-eeprom-config` imports Cryptodome to handle signed
+    # Pi 5 EEPROM images, so removing the package would break firmware tooling
+    # on the very board this image targets.
+    - rm -rf "$1"/usr/lib/python3/dist-packages/Cryptodome/SelfTest

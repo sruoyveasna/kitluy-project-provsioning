@@ -1,0 +1,14 @@
+#!/bin/sh
+# The KitLuy Store Hub agent — the LAN /edge/v1 API on 7443, local authority, sync.
+#
+# A shim rather than a shebang'd bundle for the same reason every other component
+# here is one: the unit names a stable path under /usr/lib/kitluy, and how that
+# path is satisfied (a file closure, a bundle, a future release artifact) stays an
+# implementation detail of the packaging step.
+#
+# `.mjs` so node treats it as ESM without a package.json beside it. The bundle is
+# built by `pnpm --filter @kitluy-services/kitluy-hub-agent build:bundle` and
+# installed here by scripts/package-bootstrap-runtime.sh, which reads
+# runtime-manifest.json.
+set -eu
+exec /usr/bin/node /usr/lib/kitluy/lib/hub-agent/main.mjs "$@"
