@@ -74,7 +74,9 @@ function inContainer(script) {
 let before;
 try {
   before = inContainer(`grep '^supautils.hint_roles' ${CONF}`);
-} catch (error) {
+} catch {
+  // The thrown value is deliberately not shown: it is a docker/grep exit, and
+  // the actionable sentence is the one below, not the shell's.
   console.error(
     `Cannot read ${CONF} in container "${CONTAINER}".\n` +
       "Is the local development database running? Override the name with " +
@@ -100,9 +102,7 @@ if (/^supautils\.hint_roles\s*=\s*''\s*$/.test(before.trim())) {
 
 // Keep a copy of the original, so the change is reversible by hand.
 inContainer(`cp -n ${CONF} ${CONF}.kitluy-backup || true`);
-inContainer(
-  `sed -i "s/^supautils.hint_roles = .*/supautils.hint_roles = ''/" ${CONF}`,
-);
+inContainer(`sed -i "s/^supautils.hint_roles = .*/supautils.hint_roles = ''/" ${CONF}`);
 
 const after = inContainer(`grep '^supautils.hint_roles' ${CONF}`);
 if (/'[^']+'/.test(after)) {
@@ -124,7 +124,9 @@ if (!reserved.includes("service_role")) {
   console.error(
     "[supautils-workaround] REFUSING TO CONTINUE — supautils.reserved_roles no longer " +
       "protects service_role. That is a real security property and this script must not " +
-      "have changed it. Restore " + CONF + ".kitluy-backup and investigate.",
+      "have changed it. Restore " +
+      CONF +
+      ".kitluy-backup and investigate.",
   );
   process.exit(1);
 }

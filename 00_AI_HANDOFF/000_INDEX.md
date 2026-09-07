@@ -4,6 +4,17 @@ Read the newest relevant handoff before starting work. Naming:
 `YYYY-MM-DD__<AREA>__<TASK-ID>__<SLUG>__AI-HANDOFF.md` under the matching
 subfolder (repository/ shared/ apps/ services/ data/ infrastructure/ reviews/).
 
+## A Pi Terminal can present a pairing code: the transport exists, and the shell can read the state it renders (2026-09-07)
+
+Record: [`apps/2026-09-07__APPS__KL-P1-TERM-SHELL-002__DEVICE-SHELL-TERMINAL-PAIRING-TRANSPORT__AI-HANDOFF.md`](apps/2026-09-07__APPS__KL-P1-TERM-SHELL-002__DEVICE-SHELL-TERMINAL-PAIRING-TRANSPORT__AI-HANDOFF.md)
+· **PARTIAL** · Phase 3 of Slice 1B · committed `8f16cc3` on `claude/fix-firstboot-esm-and-ssh-hostkeys` · no hardware run · no hosted write
+
+The cloud half of terminal pairing has been complete since Slice 2B; the register recorded the missing half as "no Pi has typed a code". `adapters/http-terminal-pairing-client.ts` is that half — two values leave the board (what it is, what it was told), everything else comes back, and the code is never logged, persisted or echoed. Refusals stay three distinct outcomes because the operator action differs: try again, ask for a new code, or the problem is not in this room. Drift tests read the registry's own route file. The Device Shell's `PAIRING_NOT_AVAILABLE_IN_THIS_BUILD` stub is gone: it loads the client from the closure the image installs, records the seat in `/var/lib/kitluy/terminal/assignment.json` (the kiosk user's own directory, already named by clone hygiene), and reports a granted-but-unsaved seat as a failure rather than as success.
+
+**A blocker was found on the way and fixed:** `registration-state.json` and `pairing-state.json` were `0640 root:root`, and the shell reads them as `kitluy-terminal`. It could not — an approved board would have sat on "waiting for approval" for ever, silently, with the cloud disagreeing. Both are display state and are now `0644`, with a suite asserting readable-not-writable on all three.
+
+Agent 455/9 skipped, shell 66/66, terminal image 294/0/1, Store Hub image 291/0/1, secret scan 2089 files. **Still not done:** the shell is not in the image (needs arm64 Electron, cage, a session unit and the `tty1` flip), and BLK-005 still keeps the Hub's LAN listener development-only.
+
 ## The Pi Terminal graphical Device Shell exists as an app: kiosk screens, keypad, drift-guarded against the agent (2026-09-04)
 
 Record: [`apps/2026-09-04__APPS__KL-P1-TERM-SHELL-001__PI-TERMINAL-DEVICE-SHELL-APP__AI-HANDOFF.md`](apps/2026-09-04__APPS__KL-P1-TERM-SHELL-001__PI-TERMINAL-DEVICE-SHELL-APP__AI-HANDOFF.md)
