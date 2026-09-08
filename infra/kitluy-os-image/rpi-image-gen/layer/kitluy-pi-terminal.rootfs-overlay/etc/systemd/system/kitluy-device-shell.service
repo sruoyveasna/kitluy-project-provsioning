@@ -73,6 +73,36 @@ Environment=XDG_SESSION_TYPE=wayland
 # widening anything.
 Environment=HOME=/var/lib/kitluy/terminal
 
+# XWAYLAND'S SOCKET DIRECTORY IS NOT THIS UNIT'S JOB.
+#
+# cage starts Xwayland unconditionally and exits when it cannot, and Xwayland
+# needs /tmp/.X11-unix. The image already ships the correct answer —
+# `/usr/lib/tmpfiles.d/x11.conf` declares that directory — it simply had no
+# writable /tmp to create it in, because the erofs root is read-only and no
+# `tmp.mount` existed. That is fixed in the base overlay, so systemd-tmpfiles
+# does this at boot and nothing is needed here.
+#
+# An earlier attempt put `ExecStartPre=install -d /tmp/.X11-unix` here and it
+# could not work: `PrivateTmp=yes` builds a unit's private tmp inside the REAL
+# /tmp, so on a read-only /tmp the sandbox never forms and even /tmp is absent.
+# The error was "cannot create directory '/tmp': Permission denied", which reads
+# like a permissions problem and is really a missing filesystem.
+
+# THE KIOSK USER MUST OWN ITS OWN HOME.
+#
+# The image creates /var/lib/kitluy/terminal as root (the layer's `install -d`),
+# but the shell runs as `kitluy-terminal` and Chromium writes a shader cache and
+# its config under HOME. Without this it logs
+#   Failed to create /var/lib/kitluy/terminal/.cache ... (Permission denied)
+# on every start — not fatal, but it means no shader cache and a slower paint on
+# a device whose whole job is to draw one screen.
+#
+# `+` runs this as root regardless of User=, and it is idempotent. Done here
+# rather than at build time because the uid is allocated by systemd-sysusers and
+# a unit that fixes its own directory keeps working on an image built before the
+# ownership was ever considered.
+ExecStartPre=+/usr/bin/chown kitluy-terminal:kitluy-terminal /var/lib/kitluy/terminal
+
 ExecStart=/usr/lib/kitluy/device-shell
 # The screen is the product on this device: if it dies, it comes back.
 Restart=always

@@ -43,7 +43,21 @@ export function writeRegistrationState(state, path = REGISTRATION_STATE_PATH) {
     const dir = dirname(path);
     mkdirSync(dir, { recursive: true, mode: 0o750 });
     const temp = `${path}.tmp`;
-    writeFileSync(temp, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o640 });
+    // 0644, NOT 0640 — THE UNPRIVILEGED SHELL HAS TO READ THIS.
+    //
+    // The Device Shell renders this file and runs as `kitluy-terminal`
+    // (kitluy-terminal-session.service), not as root. At 0640 root:root it is
+    // unreadable to that user: `readObject` catches the EACCES, the view reads as
+    // null, and `deriveScreen` falls back to NOT_REGISTERED — so an approved board
+    // would sit on "waiting for approval" for ever while the cloud held it
+    // approved. `/var/lib/kitluy` is 0751, so traversal already works; only the
+    // file mode was in the way.
+    //
+    // This is display state by construction — the header above says so, and the
+    // fields are a phase, a public asset tag and an operator sentence. No secret,
+    // no credential, and never the presented pairing code. `bootstrap-state.json`
+    // has been 0644 for exactly this reason since it was written.
+    writeFileSync(temp, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o644 });
     const fd = openSync(temp, "r");
     try {
         fsyncSync(fd);

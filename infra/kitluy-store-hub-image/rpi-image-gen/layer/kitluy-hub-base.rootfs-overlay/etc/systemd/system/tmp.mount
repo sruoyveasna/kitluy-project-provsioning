@@ -1,0 +1,43 @@
+# A WRITABLE /tmp. THE IMAGE HAD NONE.
+#
+# The root filesystem is erofs and READ-ONLY (A/B slots), and the upstream
+# `systemd-min` layer does not ship systemd's own `tmp.mount`. The result was a
+# `/tmp` that is a plain directory on a read-only filesystem: mode 1777, and
+# every write refused with EROFS. Measured on pi5-diftxf and on the Store Hub —
+# both images, same defect.
+#
+# WHAT IT BROKE
+# -------------
+# The Device Shell, completely. cage starts Xwayland unconditionally, Xwayland
+# needs /tmp/.X11-unix, and `/usr/lib/tmpfiles.d/x11.conf` (shipped, correct)
+# could never create it. cage exited 133 and systemd restarted it 285 times in
+# 25 minutes — a black screen with no failed unit to point at.
+#
+# It also defeated `PrivateTmp=yes`: systemd builds a unit's private tmp INSIDE
+# the real /tmp, so on a read-only /tmp the sandbox cannot be constructed at all.
+# That is why an ExecStartPre creating /tmp/.X11-unix failed with "cannot create
+# directory '/tmp'" rather than "file exists".
+#
+# Anything else that assumes a writable /tmp was equally broken and equally
+# silent. This is the fix for the class, not for the one symptom.
+#
+# Content mirrors systemd's own tmp.mount. `strictatime` and the nosuid/nodev
+# flags are upstream's; the size cap keeps a runaway writer from consuming RAM
+# the Store needs.
+[Unit]
+Description=Temporary Directory /tmp
+Documentation=man:file-hierarchy(7)
+ConditionPathIsSymbolicLink=!/tmp
+DefaultDependencies=no
+Conflicts=umount.target
+Before=local-fs.target umount.target
+After=swap.target
+
+[Mount]
+What=tmpfs
+Where=/tmp
+Type=tmpfs
+Options=mode=1777,strictatime,nosuid,nodev,size=25%,nr_inodes=400k
+
+[Install]
+WantedBy=local-fs.target

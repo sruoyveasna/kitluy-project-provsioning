@@ -736,6 +736,66 @@ else
   ok "device shell: no source maps are shipped"
 fi
 
+# --- A WRITABLE /tmp, WITHOUT WHICH THE SCREEN CANNOT START -----------------
+# The erofs root is read-only and upstream's systemd-min ships no tmp.mount, so
+# /tmp was a read-only directory on both images. cage could not start Xwayland
+# (no /tmp/.X11-unix), exited 133, and restarted 285 times in 25 minutes with no
+# failed unit to point at. It also defeats PrivateTmp=, which systemd builds
+# inside the real /tmp.
+TMP_UNIT="${BASE_OVERLAY}/etc/systemd/system/tmp.mount"
+if [[ -f "$TMP_UNIT" ]]; then
+  ok "a tmpfs /tmp is shipped (the erofs root cannot provide one)"
+  if grep -q 'Type=tmpfs' "$TMP_UNIT" && grep -q 'Where=/tmp' "$TMP_UNIT"; then
+    ok "tmp.mount actually mounts a tmpfs at /tmp"
+  else
+    bad "tmp.mount actually mounts a tmpfs at /tmp" "unit does not declare Type=tmpfs at /tmp"
+  fi
+  if grep -q 'mode=1777' "$TMP_UNIT"; then
+    ok "the tmpfs /tmp is world-writable with the sticky bit (1777)"
+  else
+    bad "the tmpfs /tmp is world-writable with the sticky bit (1777)" \
+        "Xwayland and every other consumer need an ordinary /tmp"
+  fi
+  if [[ -L "${BASE_OVERLAY}/etc/systemd/system/local-fs.target.wants/tmp.mount" ]]; then
+    ok "tmp.mount is enabled, not merely defined"
+  else
+    bad "tmp.mount is enabled, not merely defined" "no local-fs.target.wants symlink — /tmp stays read-only"
+  fi
+else
+  bad "a tmpfs /tmp is shipped (the erofs root cannot provide one)" \
+      "without it cage cannot start Xwayland and the Device Shell crash-loops"
+fi
+
+# --- Xwayland, and the private /tmp it cannot live without -------------------
+# The 2026-08-13 defect, twice: labwc died starting Xwayland because PrivateTmp
+# gave it an empty /tmp with no .X11-unix, and the cage unit reproduced it
+# exactly (pi5-aanljf, exit 133, restart counter 157).
+if grep -qE '^\s+- xwayland\s*$' "$TERMINAL_LAYER"; then
+  ok "device shell: Xwayland is declared, not left to a transitive dependency"
+else
+  bad "device shell: Xwayland is declared, not left to a transitive dependency" \
+      "cage exits when it cannot start Xwayland, so this is not optional"
+fi
+
+# /tmp/.X11-unix comes from the distribution's own tmpfiles.d, which needs only
+# a writable /tmp (asserted above). Asserting the declaration here keeps the
+# dependency visible: if a future layer drops x11.conf, cage stops starting.
+if grep -rq 'X11-unix' "${ROOT}/rpi-image-gen/layer/" 2>/dev/null || true; then :; fi
+if grep -q 'Type=tmpfs' "${BASE_OVERLAY}/etc/systemd/system/tmp.mount" 2>/dev/null; then
+  ok "device shell: Xwayland has a writable /tmp to create its socket directory in"
+else
+  bad "device shell: Xwayland has a writable /tmp to create its socket directory in" \
+      "no tmpfs /tmp — cage exits 133 and the screen never paints"
+fi
+
+# The kiosk user must own its HOME or Chromium cannot cache shaders.
+if grep -qE '^ExecStartPre=\+.*chown.*kitluy-terminal.*\/var\/lib\/kitluy\/terminal' "$SHELL_UNIT"; then
+  ok "device shell: the kiosk user is given ownership of its own HOME"
+else
+  bad "device shell: the kiosk user is given ownership of its own HOME" \
+      "the image creates /var/lib/kitluy/terminal as root; the shell runs as kitluy-terminal"
+fi
+
 # --- The pinned runtime ------------------------------------------------------
 if [[ -f "$ELECTRON_PIN" ]]; then
   ok "device shell: the Electron runtime is pinned"

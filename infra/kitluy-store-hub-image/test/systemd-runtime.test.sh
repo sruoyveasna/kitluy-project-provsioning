@@ -686,5 +686,35 @@ for hub_overlay in "${LAYER_DIR}/kitluy-hub-base.rootfs-overlay" "${LAYER_DIR}/k
   fi
 done
 
+# --- A WRITABLE /tmp, WITHOUT WHICH THE SCREEN CANNOT START -----------------
+# The erofs root is read-only and upstream's systemd-min ships no tmp.mount, so
+# /tmp was a read-only directory on both images. cage could not start Xwayland
+# (no /tmp/.X11-unix), exited 133, and restarted 285 times in 25 minutes with no
+# failed unit to point at. It also defeats PrivateTmp=, which systemd builds
+# inside the real /tmp.
+TMP_UNIT="${LAYER_DIR}/kitluy-hub-base.rootfs-overlay/etc/systemd/system/tmp.mount"
+if [[ -f "$TMP_UNIT" ]]; then
+  ok "a tmpfs /tmp is shipped (the erofs root cannot provide one)"
+  if grep -q 'Type=tmpfs' "$TMP_UNIT" && grep -q 'Where=/tmp' "$TMP_UNIT"; then
+    ok "tmp.mount actually mounts a tmpfs at /tmp"
+  else
+    bad "tmp.mount actually mounts a tmpfs at /tmp" "unit does not declare Type=tmpfs at /tmp"
+  fi
+  if grep -q 'mode=1777' "$TMP_UNIT"; then
+    ok "the tmpfs /tmp is world-writable with the sticky bit (1777)"
+  else
+    bad "the tmpfs /tmp is world-writable with the sticky bit (1777)" \
+        "Xwayland and every other consumer need an ordinary /tmp"
+  fi
+  if [[ -L "${LAYER_DIR}/kitluy-hub-base.rootfs-overlay/etc/systemd/system/local-fs.target.wants/tmp.mount" ]]; then
+    ok "tmp.mount is enabled, not merely defined"
+  else
+    bad "tmp.mount is enabled, not merely defined" "no local-fs.target.wants symlink — /tmp stays read-only"
+  fi
+else
+  bad "a tmpfs /tmp is shipped (the erofs root cannot provide one)" \
+      "without it cage cannot start Xwayland and the Device Shell crash-loops"
+fi
+
 printf '\n  %d passed, %d failed\n\n' "$PASS" "$FAIL"
 [[ $FAIL -eq 0 ]] || exit 1

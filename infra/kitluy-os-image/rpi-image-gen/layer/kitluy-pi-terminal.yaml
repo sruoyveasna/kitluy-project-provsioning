@@ -43,6 +43,14 @@ mmdebstrap:
     # The kiosk compositor the Device Shell runs under: one application, full
     # screen, nothing behind it.
     - cage
+    # DECLARED EXPLICITLY, THOUGH cage ALREADY PULLS IT IN.
+    #
+    # cage is built with Xwayland support, calls wlr_xwayland_create()
+    # unconditionally, and offers no switch to disable it — it EXITS when the
+    # server cannot start. So Xwayland is not optional here whatever the screen
+    # actually uses, and leaving it to a transitive dependency means a future
+    # upstream change could remove it and take the display with it.
+    - xwayland
     - wlr-randr
     - seatd
     - libinput-tools
