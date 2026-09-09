@@ -253,6 +253,43 @@ mmdebstrap:
     # Injected at BUILD time from the operator's environment, never committed:
     # the repository must not carry development CA material, which is the whole
     # reason that guard exists.
+    # -----------------------------------------------------------------------
+    # RECOVERY SUDO — development builds with an SSH key, and nothing else
+    # -----------------------------------------------------------------------
+    # The build calls `KITLUY_DEV_SSH_PUBKEY` "recovery access", but `pi` ships
+    # with a LOCKED password (`pi:!:` in /etc/shadow) and no sudoers grant, so
+    # that access could read a few files and do nothing else. On 2026-09-08 a
+    # Hub needed one `wipefs` to recover its data volume and the only account
+    # that could reach it could not become root: the access was decorative.
+    #
+    # A build that grants SSH therefore also grants sudo -- half of it is worse
+    # than neither, because it looks serviceable and is not.
+    #
+    # NOT narrowed to a command list: that list would be wrong within a week and
+    # buys nothing, since whoever holds the key already has a shell here. The
+    # boundary is the KEY and the ENVIRONMENT, which the builder gates on both.
+    #
+    # `printf`, not a heredoc: a heredoc body inside a YAML block scalar has to
+    # be indented to stay inside the block, and the first version of this was
+    # not -- it made the whole layer unparseable and the build refused.
+    - |
+      if [ -n "${IGconf_kitluy_dev_recovery_sudo:-}" ]; then
+        install -d -m 0755 "$1/etc/sudoers.d"
+        {
+          printf '%s\n' '# DEVELOPMENT RECOVERY ACCESS -- written only for a build given'
+          printf '%s\n' '# KITLUY_DEV_SSH_PUBKEY with KITLUY_ENVIRONMENT=development.'
+          printf '%s\n' '#'
+          printf '%s\n' '# This file must NEVER appear on a pilot or production image. If you'
+          printf '%s\n' '# are reading it on a device serving a real Store, that device was'
+          printf '%s\n' '# built wrong: treat it as compromised and rebuild.'
+          printf '%s\n' 'pi ALL=(ALL) NOPASSWD: ALL'
+        } > "$1/etc/sudoers.d/010-kitluy-dev-recovery"
+        chmod 0440 "$1/etc/sudoers.d/010-kitluy-dev-recovery"
+        # Already root-owned when the builder runs as root; tolerated because a
+        # failure here must not abort a build over ownership that is correct.
+        chown 0:0 "$1/etc/sudoers.d/010-kitluy-dev-recovery" 2>/dev/null || :
+      fi
+
     - |
       if [ -n "${IGconf_kitluy_development_root_sha256:-}" ]; then
         printf '%s\n' "${IGconf_kitluy_development_root_sha256}" \

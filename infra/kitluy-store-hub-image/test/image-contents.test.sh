@@ -263,5 +263,34 @@ else
   ok "no SSH host keys are baked in"
 fi
 
+
+# ---------------------------------------------------------------------------
+# Development recovery sudo
+# ---------------------------------------------------------------------------
+# `pi` ships with a LOCKED password, so an image with an SSH key but no sudoers
+# grant can be logged into and little else -- which stranded a Hub on
+# 2026-09-08. The grant is written by a layer hook, and the FIRST version of
+# that hook made the layer YAML unparseable and the build refused. This asserts
+# the hook is still syntactically reachable and still gated.
+SUDOERS_HOOK="${ROOT}/rpi-image-gen/layer/kitluy-hub-base.yaml"
+if grep -q 'IGconf_kitluy_dev_recovery_sudo' "$SUDOERS_HOOK"; then
+  ok "the recovery-sudo hook is present in the layer"
+else
+  bad "the recovery-sudo hook is present in the layer" "hook missing"
+fi
+
+if python3 -c "import yaml,sys; yaml.safe_load(open(sys.argv[1]))" "$SUDOERS_HOOK" 2>/dev/null; then
+  ok "the hub layer YAML parses"
+else
+  bad "the hub layer YAML parses" "rpi-image-gen would refuse this build"
+fi
+
+# The grant must be behind the override, never unconditional.
+if grep -A2 'IGconf_kitluy_dev_recovery_sudo' "$SUDOERS_HOOK" | grep -q 'if \[ -n'; then
+  ok "the recovery-sudo grant is gated on the build override"
+else
+  bad "the recovery-sudo grant is gated on the build override" "it may be unconditional"
+fi
+
 printf '\n  %d passed, %d failed, %d skipped\n\n' "$PASS" "$FAIL" "$SKIP"
 [[ $FAIL -eq 0 ]] || exit 1

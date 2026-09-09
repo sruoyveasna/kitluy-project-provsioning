@@ -231,6 +231,7 @@ if [[ -n "${KITLUY_DEV_SSH_PUBKEY:-}" ]]; then
   # and NOT by looking at chroot-*/filesystem/home, which is empty by design.
   RIG_OVERRIDES+=("IGconf_ssh_pubkey_user1=$(cat "$KITLUY_DEV_SSH_PUBKEY")")
   log "recovery access: public key from ${KITLUY_DEV_SSH_PUBKEY} -> /home/pi/.ssh/authorized_keys"
+
 elif [[ "$NO_INTERACTIVE_ACCESS" == "yes" ]]; then
   warn "--no-interactive-access: building an image with NO way in, deliberately."
   warn "  root is locked, pi has no password, and sshd rejects password auth."
@@ -291,6 +292,29 @@ RIG_OVERRIDES+=("IGconf_kitluy_device_class=${KITLUY_PROFILE_DEVICE_CLASS}")
 BUILD_ENVIRONMENT="${ENVIRONMENT_OVERRIDE:-${KITLUY_ENVIRONMENT:-}}"
 [[ -n "$BUILD_ENVIRONMENT" ]] \
   || die "no environment resolved: set KITLUY_ENVIRONMENT in config/image.conf or pass --environment. It is deliberately not defaulted — the development storage and listener paths key on it."
+
+# SSH WITHOUT SUDO IS NOT RECOVERY ACCESS.
+#
+# `pi` ships with a LOCKED password, so an image carrying a development SSH key
+# but no sudoers grant gives a shell that cannot restart a unit, read a protected
+# log or repair a volume. That shipped: on 2026-09-08 a Hub needed one `wipefs`
+# to recover its data volume and the only account that could reach the board
+# could not become root. Half of recovery access is worse than none, because it
+# looks serviceable.
+#
+# DELIBERATELY PLACED HERE, not beside the key check above: `BUILD_ENVIRONMENT`
+# is not resolved until this point, and the first version of this read an unset
+# variable and silently never granted anything.
+if [[ -n "${KITLUY_DEV_SSH_PUBKEY:-}" ]]; then
+  if [[ "$BUILD_ENVIRONMENT" == "development" ]]; then
+    RIG_OVERRIDES+=("IGconf_kitluy_dev_recovery_sudo=yes")
+    log "recovery access: pi may use sudo without a password (DEVELOPMENT ONLY)"
+  else
+    warn "environment '${BUILD_ENVIRONMENT}': SSH key installed, but NO sudo grant."
+    warn "  pi has a locked password, so this image can be logged into and little"
+    warn "  else. That is deliberate outside development."
+  fi
+fi
 
 case "$BUILD_ENVIRONMENT" in
   local|development|staging) ;;

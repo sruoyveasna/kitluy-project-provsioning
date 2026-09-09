@@ -56,17 +56,77 @@
 #                                         golden image can boot into this path
 #   4. /var/lib/kitluy not group- or world-writable
 #
-# The key is 32 random bytes generated ON THIS BOARD after boot, never shipped,
-# never shared between devices, never logged, mode 0600. It lives on the
-# persistent slot and NOT on the volume it unlocks -- `/var/lib/kitluy` is not
-# itself a mount point, only `/var/lib/kitluy/hub` is, so there is no
-# chicken-and-egg.
+# THE KEY IS DERIVED, NOT STORED (changed 2026-09-08).
+#
+# It used to be 32 random bytes written to `/var/lib/kitluy/development-unbound-
+# storage.key`. That directory is on the SD card's persistent partition, and the
+# volume it unlocks is on the NVMe -- so RE-FLASHING THE SD CARD destroyed the
+# only copy of the key while leaving the encrypted drive intact. The volume was
+# then unopenable for ever, and since re-flashing is routine in development this
+# happened on every flash. Observed on a real Hub, 2026-09-08.
+#
+# So the key is now HMAC-SHA256 of a fixed domain string under the BOARD SERIAL,
+# which lives in the SoC and survives any amount of re-flashing. Nothing is
+# written to disk, so there is no copy to lose and none to steal.
+#
+# THE BOARD SERIAL IS NOT SECRET. It is printed by `/proc/cpuinfo` to any local
+# user and is reported to the fleet as hardware evidence. Anyone who can read it
+# can derive this key. That is precisely why this posture stays refused outside
+# `KITLUY_ENVIRONMENT=development` and still demands an operator's marker file:
+# it buys REPRODUCIBILITY, not secrecy, and it is not a step toward production.
+# What it does add over the old random key is that the volume is now bound to
+# this board rather than to a file anyone holding the SD card could read.
 #
 # The resulting posture is recorded in a world-readable label file so an operator
 # and the Hub agent can both see which path was taken WITHOUT reading key
 # material. `bin/hub-agent.ts` refuses to serve when that label says
 # DEVELOPMENT-UNBOUND and the environment is not development.
 set -eu
+
+# Resolve the data drive by TYPE, never by a hardcoded /dev/nvme0n1: a Hub with
+# two drives, or one that enumerates differently after a firmware update, must
+# not silently encrypt the wrong disk. Sets NVME_DEVICE; returns non-zero when
+# there is none, so each caller phrases its own refusal.
+#
+# A FUNCTION because two paths need it now -- boot provisioning and
+# --reset-data-volume -- and a second copy of "which disk is the Store's" is
+# exactly the kind of duplication that ends with one of them wrong.
+NVME_DEVICE=""
+find_nvme() {
+  NVME_DEVICE=""
+  for candidate in /dev/nvme*n1; do
+    [ -b "$candidate" ] || continue
+    if [ -n "$NVME_DEVICE" ]; then
+      die "more than one NVMe drive is present ($NVME_DEVICE, $candidate); this Hub will not guess which one holds the Store's data"
+    fi
+    NVME_DEVICE="$candidate"
+  done
+  [ -n "$NVME_DEVICE" ]
+}
+
+usage() {
+  cat >&2 <<'USAGE'
+Usage: hub-storage-provision [options]
+
+  (no options)                      Provision and unlock the data volume. This is
+                                    what the systemd unit runs at boot.
+
+  --explain                         Print the storage posture and exit. Touches
+                                    no device and writes no state.
+  --key-fingerprint                 Print a NON-SECRET fingerprint of the volume
+                                    key, to prove two derivations agree.
+
+RECOVERY (deliberate, never automatic):
+  --authorize-development-unbound   Allow this board to use a key derived from
+                                    its serial instead of OTP fuses. Development
+                                    only; refused in every other environment.
+  --reset-data-volume               DESTROY the data volume and re-provision it.
+                                    Use when the drive carries a LUKS container
+                                    this board can no longer open -- for example
+                                    after the key was lost. Everything on the
+                                    drive is unrecoverable afterwards.
+USAGE
+}
 
 log()  { printf '[kitluy-hub-storage] %s\n' "$*"; }
 die()  { printf '[kitluy-hub-storage] REFUSED: %s\n' "$*" >&2; exit 1; }
@@ -85,12 +145,34 @@ PROVISIONED_MARKER="/var/lib/kitluy/hub/.luks-provisioned"
 STATE_ROOT="/var/lib/kitluy"
 ETC_ROOT="/etc"
 EXPLAIN_ONLY="no"
+FINGERPRINT_ONLY="no"
+RESET_VOLUME="no"
+AUTHORIZE_UNBOUND="no"
+# The SoC serial, which no re-flash can change. `/proc/cpuinfo` is the fallback.
+BOARD_SERIAL_FILE="/sys/firmware/devicetree/base/serial-number"
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --explain)    EXPLAIN_ONLY="yes"; shift ;;
+    # Prints a NON-SECRET fingerprint of the derived passphrase, never the
+    # passphrase. It exists so the regression this file was written for -- the
+    # key must not change when the state directory is wiped -- is testable at
+    # all: the passphrase itself must never reach a terminal or a test log.
+    --key-fingerprint) FINGERPRINT_ONLY="yes"; shift ;;
+    # ------------------------------------------------------------------------
+    # RECOVERY. Two commands, each doing ONE thing, both discoverable in --help.
+    # ------------------------------------------------------------------------
+    # Written because the recovery for a lost storage key was "know to run
+    # wipefs on the right device, and know the marker's path" -- which only
+    # works if the person who wrote it is in the room. Neither is automatic and
+    # neither runs at boot: the refusal that sends you here exists because this
+    # script cannot tell a spare drive from one holding another Store's records.
+    --reset-data-volume)          RESET_VOLUME="yes"; shift ;;
+    --authorize-development-unbound) AUTHORIZE_UNBOUND="yes"; shift ;;
+    -h|--help)                    usage; exit 0 ;;
     --state-root) STATE_ROOT="${2:?--state-root needs a directory}"; shift 2 ;;
     --etc-root)   ETC_ROOT="${2:?--etc-root needs a directory}"; shift 2 ;;
+    --serial-file) BOARD_SERIAL_FILE="${2:?--serial-file needs a path}"; shift 2 ;;
     *) die "unknown argument '$1'" ;;
   esac
 done
@@ -138,8 +220,9 @@ resolve_storage_posture() {
     die "this board has no device-unique OTP key programmed, and DEVELOPMENT-UNBOUND storage is not authorized.
   The Store Hub data volume is normally encrypted with a key bound to the board.
   Programming OTP is IRREVERSIBLE and is an owner decision.
-  For DEVELOPMENT ONLY, and understanding that the resulting volume is NOT bound
-  to this board, authorize the unbound key by creating:
+  For DEVELOPMENT ONLY, and understanding that the resulting key is derived from
+  the board serial -- which is NOT secret, so the volume is reproducible by
+  anyone who can read it -- authorize the unbound key by creating:
       ${DEV_UNBOUND_MARKER}
   then reboot."
   fi
@@ -154,15 +237,25 @@ resolve_storage_posture() {
   STORAGE_POSTURE="DEVELOPMENT-UNBOUND"
 }
 
-# The key file, generated ONCE on this board. `umask 077` means it is never
-# briefly world-readable between creation and chmod.
+# Nothing is generated any more. A key file is honoured only where one already
+# EXISTS, so a Hub provisioned before 2026-09-08 keeps opening the volume its
+# random key encrypted; wiping that file here would orphan exactly the volumes
+# this change exists to stop orphaning.
 ensure_dev_unbound_key() {
-  if [ ! -s "$DEV_UNBOUND_KEY" ]; then
-    log "generating a DEVELOPMENT-UNBOUND storage key for this board (32 random bytes, never shipped, never shared)"
-    ( umask 077; openssl rand -hex 32 > "$DEV_UNBOUND_KEY" )
-  fi
+  [ -s "$DEV_UNBOUND_KEY" ] || return 0
+  # stderr: `--key-fingerprint` must put NOTHING but the fingerprint on stdout.
+  log "using the legacy DEVELOPMENT-UNBOUND key file this board was provisioned with" >&2
   chmod 0600 "$DEV_UNBOUND_KEY"
-  [ -s "$DEV_UNBOUND_KEY" ] || die "the DEVELOPMENT-UNBOUND storage key file is empty"
+}
+
+# The board serial, from the SoC. Not secret -- see the header.
+board_serial() {
+  if [ -r "$BOARD_SERIAL_FILE" ]; then
+    # Device-tree strings are NUL-terminated.
+    tr -d '\000' < "$BOARD_SERIAL_FILE" | tr -d ' \t\n'
+  else
+    grep -m1 -i '^Serial' /proc/cpuinfo 2>/dev/null | awk '{ print $3 }' | tr -d ' \t\n'
+  fi
 }
 
 # Writes the passphrase to stdout and NOTHING else. Both branches keep the secret
@@ -181,13 +274,56 @@ derive_passphrase() {
       unset otp_key
       ;;
     DEVELOPMENT-UNBOUND)
-      cat "$DEV_UNBOUND_KEY"
+      if [ -s "$DEV_UNBOUND_KEY" ]; then
+        # Legacy board: the volume is encrypted with the random key that used to
+        # be generated here, and only that key can still open it.
+        cat "$DEV_UNBOUND_KEY"
+      else
+        # Hex-encoded because `-macopt hexkey:` demands hex and a serial is not
+        # required to be hex on every board; the Pi's happens to be.
+        serial="$(board_serial)"
+        [ -n "$serial" ] || die "the board serial read back empty; refusing to derive a storage key from nothing"
+        serial_hex="$(printf '%s' "$serial" | od -An -tx1 | tr -d ' \n')"
+        printf 'kitluy.hub-data-volume.development-unbound.v1' \
+          | openssl dgst -sha256 -mac HMAC -macopt "hexkey:${serial_hex}" -hex \
+          | sed 's/^.*= //'
+        unset serial serial_hex
+      fi
       ;;
     *)
       die "no storage key posture was resolved"
       ;;
   esac
 }
+
+# ---------------------------------------------------------------------------
+# --authorize-development-unbound
+# ---------------------------------------------------------------------------
+# BEFORE `resolve_storage_posture`, and it has to be: resolving is exactly what
+# fails without this marker, so a command placed after it could never run on the
+# board that needs it. (It was, once.)
+#
+# Writes the marker the boot path refuses without. It is a SEPARATE command from
+# the wipe on purpose: authorising a weaker key posture and destroying a disk are
+# two different decisions, and bundling them would let someone reach for one and
+# get both.
+if [ "$AUTHORIZE_UNBOUND" = "yes" ]; then
+  if [ "$ENVIRONMENT" != "development" ]; then
+    die "environment is '${ENVIRONMENT}'; DEVELOPMENT-UNBOUND storage is refused outside development"
+  fi
+  if command -v rpi-otp-private-key >/dev/null 2>&1 && rpi-otp-private-key -c >/dev/null 2>&1; then
+    # OTP FIRST, ALWAYS -- the same rule resolve_storage_posture applies. A board
+    # with fuses programmed must not be talked down to the weaker posture.
+    die "this board has an OTP key programmed and will use it; the development posture is not available"
+  fi
+  install -d -m 0750 "$STATE_ROOT"
+  : > "$DEV_UNBOUND_MARKER"
+  chmod 0644 "$DEV_UNBOUND_MARKER"
+  log "DEVELOPMENT-UNBOUND storage authorized on this board."
+  log "  The volume key derives from the board serial, which is NOT secret."
+  log "  Reboot, or run this command with no options, to provision the volume."
+  exit 0
+fi
 
 STORAGE_POSTURE=""
 resolve_storage_posture
@@ -198,12 +334,53 @@ if [ "$EXPLAIN_ONLY" = "yes" ]; then
   exit 0
 fi
 
+# ---------------------------------------------------------------------------
+# --reset-data-volume
+# ---------------------------------------------------------------------------
+# The recovery for a drive this board can no longer open. It reports what it
+# found BEFORE destroying it, so the operator can still stop -- and it refuses
+# outright on the disk the Hub booted from.
+if [ "$RESET_VOLUME" = "yes" ]; then
+  find_nvme || die "no NVMe device found; there is nothing to reset"
+  ROOT_SOURCE="$(findmnt -no SOURCE / 2>/dev/null || echo '')"
+  case "$ROOT_SOURCE" in
+    "$NVME_DEVICE"*) die "$NVME_DEVICE carries the running root filesystem; refusing to destroy the disk this Hub booted from" ;;
+  esac
+
+  log "device:  $NVME_DEVICE"
+  log "size:    $(lsblk -no SIZE "$NVME_DEVICE" 2>/dev/null | head -1 | tr -d ' ')"
+  if cryptsetup isLuks "$NVME_DEVICE" 2>/dev/null; then
+    log "content: a LUKS container"
+    if derive_passphrase 2>/dev/null | cryptsetup open --test-passphrase --key-file=- "$NVME_DEVICE" 2>/dev/null; then
+      # Refusing here is the point: if the volume OPENS, its data is reachable
+      # and destroying it would be a mistake, not a recovery.
+      die "this board CAN open that volume; it is not orphaned. Refusing to destroy readable data."
+    fi
+    log "content: this board CANNOT open it -- the key it was created with is gone"
+  else
+    log "content: not a LUKS container"
+  fi
+
+  log "DESTROYING every byte on $NVME_DEVICE"
+  wipefs -a "$NVME_DEVICE" >/dev/null
+  log "done. Reboot, or run this command with no options, to provision a fresh volume."
+  exit 0
+fi
+
+if [ "$FINGERPRINT_ONLY" = "yes" ]; then
+  # A HASH of the passphrase, truncated. Enough to prove two derivations agree,
+  # useless for opening anything. Writes no posture file and touches no device.
+  ensure_dev_unbound_key
+  derive_passphrase | openssl dgst -sha256 -hex | sed 's/^.*= //' | cut -c1-32
+  exit 0
+fi
+
 # The key belongs to the authorization decision above, not to the disk, so it is
 # committed here rather than after the device checks — a board that is authorized
 # but has no drive fitted still has a stable key when one is.
 if [ "$STORAGE_POSTURE" = "DEVELOPMENT-UNBOUND" ]; then
   ensure_dev_unbound_key
-  log "STORAGE POSTURE: DEVELOPMENT-UNBOUND — this volume is NOT bound to this board and is NOT production security"
+  log "STORAGE POSTURE: DEVELOPMENT-UNBOUND — the key derives from the board serial, which is NOT secret; this is NOT production security"
 else
   log "storage posture: OTP-BOUND"
 fi
@@ -236,16 +413,7 @@ fi
 # Resolved by TYPE, never by a hardcoded /dev/nvme0n1: a Hub with two drives, or
 # one that enumerates differently after a firmware update, must not silently
 # encrypt the wrong disk.
-NVME_DEVICE=""
-for candidate in /dev/nvme*n1; do
-  [ -b "$candidate" ] || continue
-  if [ -n "$NVME_DEVICE" ]; then
-    die "more than one NVMe drive is present ($NVME_DEVICE, $candidate); this Hub will not guess which one holds the Store's data"
-  fi
-  NVME_DEVICE="$candidate"
-done
-
-[ -n "$NVME_DEVICE" ] || die "no NVMe drive found. A Store Hub keeps the Store's database on NVMe and does not fall back to the boot card (owner decision). Fit an NVMe drive and reboot."
+find_nvme || die "no NVMe drive found. A Store Hub keeps the Store's database on NVMe and does not fall back to the boot card (owner decision). Fit an NVMe drive and reboot."
 
 log "found NVMe at $NVME_DEVICE"
 

@@ -58,14 +58,27 @@ make_board() {
     printf '#!/bin/sh\nexit 1\n' > "${dir}/bin/rpi-otp-private-key"
   fi
   chmod 0755 "${dir}/bin/rpi-otp-private-key"
+
+  # The SoC serial. Real boards read this from the device tree; here it is a
+  # plain file, which is what --serial-file exists for.
+  printf '%s' "${SERIAL_OVERRIDE:-334a2a7bcc3dba2a}" > "${dir}/serial-number"
   printf '%s' "$dir"
 }
 
 explain() {
   local dir="$1"
   OUT="$(PATH="${dir}/bin:$PATH" "$SCRIPT" --explain \
-          --state-root "${dir}/state" --etc-root "${dir}/etc" 2>&1)"
+          --state-root "${dir}/state" --etc-root "${dir}/etc" \
+          --serial-file "${dir}/serial-number" 2>&1)"
   RC=$?
+}
+
+# A non-secret fingerprint of the passphrase this board would use.
+fingerprint() {
+  local dir="$1"
+  PATH="${dir}/bin:$PATH" "$SCRIPT" --key-fingerprint \
+    --state-root "${dir}/state" --etc-root "${dir}/etc" \
+    --serial-file "${dir}/serial-number" 2>/dev/null
 }
 
 # ---------------------------------------------------------------------------
@@ -180,13 +193,17 @@ fi
 # key with the authorization rather than with the disk.
 dir="$(make_board real-run absent development authorized)"
 OUT="$(PATH="${dir}/bin:$PATH" "$SCRIPT" \
-        --state-root "${dir}/state" --etc-root "${dir}/etc" 2>&1)"
+        --state-root "${dir}/state" --etc-root "${dir}/etc" \
+        --serial-file "${dir}/serial-number" 2>&1)"
 KEY="${dir}/state/development-unbound-storage.key"
 
-if [[ -s "$KEY" && "$(stat -c '%a' "$KEY")" == "600" ]]; then
-  ok "the DEVELOPMENT-UNBOUND key is generated 0600"
+# THE KEY IS NEVER WRITTEN DOWN (2026-09-08). It used to be 32 random bytes in
+# this file, on the SD card's persistent partition -- which a re-flash wipes,
+# orphaning the NVMe volume it had encrypted. There must be no copy to lose.
+if [[ ! -e "$KEY" ]]; then
+  ok "no DEVELOPMENT-UNBOUND key file is written; the key is derived"
 else
-  bad "the DEVELOPMENT-UNBOUND key is generated 0600" "mode=$(stat -c '%a' "$KEY" 2>/dev/null) size=$(stat -c '%s' "$KEY" 2>/dev/null)"
+  bad "no DEVELOPMENT-UNBOUND key file is written; the key is derived" "found $KEY"
 fi
 
 if [[ "$(cat "${dir}/state/storage-posture" 2>/dev/null)" == "DEVELOPMENT-UNBOUND" ]]; then
@@ -195,20 +212,31 @@ else
   bad "the posture file records DEVELOPMENT-UNBOUND" "got: $(cat "${dir}/state/storage-posture" 2>/dev/null)"
 fi
 
-# THE LEAK CHECK. The generated key must appear in no log line the unit emits.
-# journalctl keeps those, and a key in the journal is a key on the disk in
-# plaintext, which defeats the volume it protects.
-SECRET="$(cat "$KEY")"
+# THE LEAK CHECK. The key must appear in no log line the unit emits. journalctl
+# keeps those, and a key in the journal is a key on the disk in plaintext, which
+# defeats the volume it protects.
+#
+# Derived independently rather than read from a file: since 2026-09-08 there IS
+# no file, and a leak check that reads an absent key would compare against the
+# empty string and pass against any output at all.
+SECRET="$(printf 'kitluy.hub-data-volume.development-unbound.v1' \
+  | openssl dgst -sha256 -mac HMAC \
+      -macopt "hexkey:$(printf '%s' 334a2a7bcc3dba2a | od -An -tx1 | tr -d ' \n')" -hex \
+  | sed 's/^.*= //')"
 if [[ -n "$SECRET" && "$OUT" != *"$SECRET"* ]]; then
   ok "the storage key never appears in the script's output"
 else
   bad "the storage key never appears in the script's output" "the key was printed"
 fi
 
-# A second run must reuse the key rather than mint a new one — a regenerated key
-# would make the existing LUKS volume permanently unopenable.
-PATH="${dir}/bin:$PATH" "$SCRIPT" --state-root "${dir}/state" --etc-root "${dir}/etc" >/dev/null 2>&1
-if [[ "$(cat "$KEY")" == "$SECRET" ]]; then
+# A second run must arrive at the SAME key — a key that changed between runs
+# would make the existing LUKS volume permanently unopenable. Compared through
+# the fingerprint, because the key is derived now and never written down.
+PATH="${dir}/bin:$PATH" "$SCRIPT" --state-root "${dir}/state" --etc-root "${dir}/etc" \
+  --serial-file "${dir}/serial-number" >/dev/null 2>&1
+# `%s\n`: derive_passphrase ends its line, so the fingerprint covers that byte.
+SECRET_FP="$(printf '%s\n' "$SECRET" | openssl dgst -sha256 -hex | sed 's/^.*= //' | cut -c1-32)"
+if [[ "$(fingerprint "$dir")" == "$SECRET_FP" ]]; then
   ok "a second run reuses the existing key rather than minting a new one"
 else
   bad "a second run reuses the existing key rather than minting a new one" "the key changed; the volume would be unopenable"
@@ -224,6 +252,161 @@ if find "$OVERLAY" \( -name 'development-unbound-storage.key' \
   bad "no unbound-storage key or marker is baked into the image" "the golden image would boot straight into the development path"
 else
   ok "no unbound-storage key or marker is baked into the image"
+fi
+
+
+# ---------------------------------------------------------------------------
+# 11. THE REGRESSION: a re-flash must not orphan the encrypted volume
+# ---------------------------------------------------------------------------
+# The Store Hub boots from the SD card and keeps its data on NVMe. The unbound
+# key used to be 32 random bytes stored under /var/lib/kitluy -- on the SD card.
+# Re-flashing the card (routine in development) destroyed the only copy while
+# leaving the LUKS volume intact, so the drive could never be opened again.
+# Observed on a real Hub on 2026-09-08 with a 465.8G volume.
+#
+# The key must therefore depend ONLY on something no re-flash can change.
+dir="$(make_board reflash-stability absent development authorized)"
+BEFORE="$(fingerprint "$dir")"
+
+# A re-flash, exactly: the whole persistent state directory goes, and the
+# operator authorizes the board again on the fresh card.
+rm -rf "${dir}/state"
+mkdir -p "${dir}/state"; chmod 0750 "${dir}/state"
+touch "${dir}/state/DEVELOPMENT-UNBOUND-STORAGE-AUTHORIZED"
+AFTER="$(fingerprint "$dir")"
+
+if [[ -n "$BEFORE" && "$BEFORE" == "$AFTER" ]]; then
+  ok "the storage key survives a wiped state directory (a re-flash)"
+else
+  bad "the storage key survives a wiped state directory (a re-flash)" "before=${BEFORE:-<empty>} after=${AFTER:-<empty>}"
+fi
+
+# ---------------------------------------------------------------------------
+# 12. Two different boards must not share a volume key
+# ---------------------------------------------------------------------------
+# Reproducible must not mean identical everywhere: a drive pulled from one Hub
+# must still be ciphertext in another.
+SERIAL_OVERRIDE=ffffffffffffffff dir2="$(SERIAL_OVERRIDE=ffffffffffffffff make_board other-board absent development authorized)"
+OTHER="$(fingerprint "$dir2")"
+if [[ -n "$OTHER" && "$OTHER" != "$AFTER" ]]; then
+  ok "a different board serial derives a different key"
+else
+  bad "a different board serial derives a different key" "same=${OTHER}"
+fi
+
+# ---------------------------------------------------------------------------
+# 13. A legacy board keeps opening the volume it already has
+# ---------------------------------------------------------------------------
+# Boards provisioned before this change hold a random key file, and only that
+# key can open their existing volume. Ignoring it would orphan exactly the
+# volumes this change exists to protect.
+dir="$(make_board legacy-key absent development authorized)"
+printf 'aaaaaaaabbbbbbbbccccccccdddddddd\n' > "${dir}/state/development-unbound-storage.key"
+chmod 0600 "${dir}/state/development-unbound-storage.key"
+LEGACY="$(fingerprint "$dir")"
+EXPECTED="$(printf 'aaaaaaaabbbbbbbbccccccccdddddddd\n' | openssl dgst -sha256 -hex | sed 's/^.*= //' | cut -c1-32)"
+if [[ "$LEGACY" == "$EXPECTED" ]]; then
+  ok "an existing legacy key file still wins, so its volume stays openable"
+else
+  bad "an existing legacy key file still wins, so its volume stays openable" "got=$LEGACY want=$EXPECTED"
+fi
+
+# ---------------------------------------------------------------------------
+# 14. --key-fingerprint leaks no key material and commits nothing
+# ---------------------------------------------------------------------------
+dir="$(make_board fp-pure absent development authorized)"
+FP="$(fingerprint "$dir")"
+RAW="$(PATH="${dir}/bin:$PATH" "$SCRIPT" --key-fingerprint \
+        --state-root "${dir}/state" --etc-root "${dir}/etc" \
+        --serial-file "${dir}/serial-number" 2>/dev/null)"
+# The real passphrase for this serial, computed independently.
+TRUE_KEY="$(printf 'kitluy.hub-data-volume.development-unbound.v1' \
+  | openssl dgst -sha256 -mac HMAC \
+      -macopt "hexkey:$(printf '%s' 334a2a7bcc3dba2a | od -An -tx1 | tr -d ' \n')" -hex \
+  | sed 's/^.*= //')"
+if [[ "$RAW" != *"$TRUE_KEY"* && ${#FP} -eq 32 ]]; then
+  ok "--key-fingerprint prints a fingerprint, never the passphrase"
+else
+  bad "--key-fingerprint prints a fingerprint, never the passphrase" "len=${#FP}"
+fi
+if [[ ! -e "${dir}/state/storage-posture" ]]; then
+  ok "--key-fingerprint writes no posture file"
+else
+  bad "--key-fingerprint writes no posture file" "it wrote one"
+fi
+
+
+# ---------------------------------------------------------------------------
+# 15. The recovery commands exist and are discoverable
+# ---------------------------------------------------------------------------
+# The recovery for a lost storage key used to be "know to run wipefs on the
+# right device, and know the marker's path". That only works while the person
+# who wrote it is in the room; on 2026-09-08 it was not, and a Hub sat unusable.
+HELP="$("$SCRIPT" --help 2>&1 || true)"
+for flag in --reset-data-volume --authorize-development-unbound --explain; do
+  if [[ "$HELP" == *"$flag"* ]]; then
+    ok "--help documents ${flag}"
+  else
+    bad "--help documents ${flag}" "absent from usage"
+  fi
+done
+
+# ---------------------------------------------------------------------------
+# 16. --authorize-development-unbound is refused outside development
+# ---------------------------------------------------------------------------
+# The marker is the whole gate on the weaker key posture. A command that writes
+# it must honour the same environment rule the boot path does, or it becomes a
+# way around that rule rather than a way to use it.
+for environment in pilot production staging local disaster_recovery; do
+  dir="$(make_board "auth-${environment}" absent "$environment" unauthorized)"
+  OUT="$(PATH="${dir}/bin:$PATH" "$SCRIPT" --authorize-development-unbound \
+          --state-root "${dir}/state" --etc-root "${dir}/etc" \
+          --serial-file "${dir}/serial-number" 2>&1)"; RC=$?
+  if [[ $RC -ne 0 && ! -e "${dir}/state/DEVELOPMENT-UNBOUND-STORAGE-AUTHORIZED" ]]; then
+    ok "--authorize-development-unbound refuses environment '${environment}'"
+  else
+    bad "--authorize-development-unbound refuses environment '${environment}'" "rc=$RC out=$OUT"
+  fi
+done
+
+dir="$(make_board auth-dev absent development unauthorized)"
+OUT="$(PATH="${dir}/bin:$PATH" "$SCRIPT" --authorize-development-unbound \
+        --state-root "${dir}/state" --etc-root "${dir}/etc" \
+        --serial-file "${dir}/serial-number" 2>&1)"; RC=$?
+if [[ $RC -eq 0 && -e "${dir}/state/DEVELOPMENT-UNBOUND-STORAGE-AUTHORIZED" ]]; then
+  ok "--authorize-development-unbound writes the marker in development"
+else
+  bad "--authorize-development-unbound writes the marker in development" "rc=$RC out=$OUT"
+fi
+
+# ---------------------------------------------------------------------------
+# 17. A board with OTP programmed cannot be talked down to the weaker posture
+# ---------------------------------------------------------------------------
+dir="$(make_board auth-otp present development unauthorized)"
+OUT="$(PATH="${dir}/bin:$PATH" "$SCRIPT" --authorize-development-unbound \
+        --state-root "${dir}/state" --etc-root "${dir}/etc" \
+        --serial-file "${dir}/serial-number" 2>&1)"; RC=$?
+if [[ $RC -ne 0 && ! -e "${dir}/state/DEVELOPMENT-UNBOUND-STORAGE-AUTHORIZED" ]]; then
+  ok "--authorize-development-unbound refuses a board whose OTP is programmed"
+else
+  bad "--authorize-development-unbound refuses a board whose OTP is programmed" "rc=$RC out=$OUT"
+fi
+
+# ---------------------------------------------------------------------------
+# 18. The recovery commands never run at boot
+# ---------------------------------------------------------------------------
+# The unit must invoke the provisioner with NO recovery flag, or a boot could
+# destroy a Store's data by itself. That is the property the whole "refuse and
+# stop" design rests on.
+UNIT="${ROOT}/rpi-image-gen/layer/kitluy-hub-base.rootfs-overlay/etc/systemd/system/kitluy-hub-storage.service"
+if [[ -f "$UNIT" ]]; then
+  if ! grep -qE 'ExecStart=.*(--reset-data-volume|--authorize-development-unbound)' "$UNIT"; then
+    ok "the systemd unit invokes no recovery flag"
+  else
+    bad "the systemd unit invokes no recovery flag" "a boot could destroy data by itself"
+  fi
+else
+  bad "the systemd unit invokes no recovery flag" "unit not found at $UNIT"
 fi
 
 printf '\n  %d passed, %d failed\n\n' "$PASS" "$FAIL"
