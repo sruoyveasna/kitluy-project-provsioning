@@ -1,0 +1,78 @@
+[Unit]
+Description=KitLuy Pi Terminal operational TLS identity
+Documentation=https://github.com/Soenghak3301/HET-KITLUY-PROJECT
+# THE LIFECYCLE ORDER, AND IT IS NOT COLLAPSED.
+#
+#   registration -> HET approval -> Store pairing -> trusted time
+#     -> CERTIFICATE (this unit) -> activation
+#
+# Six distinct facts. This unit consumes the first four and produces only the
+# fifth. It runs After= pairing because a certificate is a statement about a
+# device that belongs to a Store: asking before pairing gets the correct refusal
+# KLUY-KEY-NO-ASSIGNMENT (group 0208), which would just be noise.
+#
+# It is NOT Requires= pairing. Requires would stop this unit when the pairing
+# console exits, and the console is an interactive screen whose exit says
+# nothing about whether the Hub is paired. The prerequisite is checked from the
+# pairing STATE FILE instead, which is the fact rather than a proxy for it.
+# The Terminal pairs on the Device Shell, not a console unit, so this waits
+# on the shell rather than on kitluy-hub-pairing.service (which the Terminal
+# image does not carry). The agent polls and waits when unpaired anyway, so
+# ordering is a courtesy rather than a requirement.
+After=kitluy-firstboot.service kitluy-cloud-registration.service kitluy-device-shell.service network-online.target
+Wants=network-online.target
+Requires=kitluy-firstboot.service
+ConditionPathExists=/usr/lib/kitluy/operational-tls
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/kitluy/operational-tls
+# The unit polls while a prerequisite is missing and EXITS 0 once adopted.
+# Restart=on-failure, never always: a clean exit means the Hub has its identity
+# and restarting would re-run a unit whose whole job is done.
+Restart=on-failure
+RestartSec=30
+# The credential directory is owner-only and this unit owns it.
+UMask=0077
+# Hardening. The private key lives under /var/lib/kitluy, which is the only
+# writable path this unit needs.
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+# The KitLuy unit hardening baseline, enforced by test/systemd-runtime.test.sh.
+# A unit that holds a device's private key has no business gaining privilege
+# through a setuid binary it happened to exec.
+RestrictSUIDSGID=yes
+ReadWritePaths=/var/lib/kitluy
+# THE SIBLING CONVENTION, deliberately.
+#
+# `/var/lib/kitluy` is SHARED with the enrollment, health, update and
+# registration agents, and they all declare `StateDirectory=kitluy` at 0750.
+# The first version here declared `StateDirectory=kitluy/operational` at 0700 —
+# which creates BOTH components and applies the mode to the parent as well, so
+# whichever unit happened to start first would decide the mode of a directory
+# four other units share. Non-deterministic, and not this unit's decision to
+# make.
+#
+# The credential directory itself is created 0700 by the agent
+# (`operational-credential-state.ts`), and the private key 0600 by
+# `operational-key.ts` — where the requirement actually belongs, and where it is
+# enforced by tests rather than by unit ordering.
+StateDirectory=kitluy
+# 0751, NOT 0750/0700 — the LAST digit is load-bearing.
+#
+# PostgreSQL runs as the `postgres` user, and its cluster lives on the
+# encrypted volume mounted at /var/lib/kitluy/hub. Reaching it means
+# TRAVERSING /var/lib/kitluy, and `postgres` is neither the owner nor in the
+# group — so without the final execute bit initdb fails with
+# "could not access directory ... Permission denied" on a directory it owns.
+# Every unit that declares this StateDirectory must agree, because systemd
+# re-applies the mode on each start and the strictest one would win back.
+#
+# `x` without `r` grants TRAVERSAL ONLY: /var/lib/kitluy still cannot be
+# listed by others, and identity/, operational/ and the rest stay 0700.
+StateDirectoryMode=0751
+
+[Install]
+WantedBy=multi-user.target

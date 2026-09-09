@@ -440,5 +440,59 @@ else
       "the Khmer-default UI would render as empty boxes on a real terminal"
 fi
 
+
+# ---------------------------------------------------------------------------
+# The operational certificate path
+# ---------------------------------------------------------------------------
+# A Terminal that pairs is stuck at "Assigned to a Store, awaiting activation"
+# for ever without this: activation is certificate-backed for BOTH device
+# classes, and nothing else on the device asks for a certificate. The Store Hub
+# image has carried it since 2026-09-08; the Terminal did not, because no
+# Terminal had ever asked.
+for f in operational-tls; do
+  if [[ -x "${ROOTFS}/usr/lib/kitluy/${f}" ]]; then
+    ok "the ${f} launcher is present and executable"
+  else
+    bad "the ${f} launcher is present and executable" "missing or not executable"
+  fi
+done
+
+for m in bin/operational-tls.js paired-identity.js operational-key.js \
+         operational-tls-client.js adapters/http-operational-certificate-client.js; do
+  if [[ -f "${ROOTFS}/usr/lib/kitluy/lib/firstboot-agent/${m}" ]]; then
+    ok "the certificate closure carries ${m}"
+  else
+    bad "the certificate closure carries ${m}" "absent — the agent would fail to import"
+  fi
+done
+
+# `paired-identity` specifically: the Device Shell is sandboxed to
+# /var/lib/kitluy/terminal and CANNOT write the canonical pairing state, so the
+# agent reads the Terminal's seat instead. Without this module a paired Terminal
+# reports "waiting: not paired yet" for ever.
+if grep -q "terminal/assignment.json" \
+     "${ROOTFS}/usr/lib/kitluy/lib/firstboot-agent/paired-identity.js" 2>/dev/null; then
+  ok "the agent reads the Terminal's seat, not only the Hub's pairing state"
+else
+  bad "the agent reads the Terminal's seat, not only the Hub's pairing state" "path absent"
+fi
+
+# The pin is INJECTED at build time and must never be committed.
+if grep -q "IGconf_kitluy_development_root_sha256" \
+     "${ROOT}/rpi-image-gen/layer/kitluy-base.yaml"; then
+  ok "the layer writes the development root pin when the builder supplies one"
+else
+  bad "the layer writes the development root pin when the builder supplies one" "hook missing"
+fi
+
+# Against the SOURCE overlay, not the built image: the built one SHOULD carry a
+# pin (the builder injects it). What must never happen is the pin being
+# committed, which is what `assert-no-dev-pki.mjs` guards from the other side.
+if [[ ! -e "${ROOT}/rpi-image-gen/layer/kitluy-base.rootfs-overlay/etc/kitluy/development-root.sha256" ]]; then
+  ok "no development root pin is committed to the repository"
+else
+  bad "no development root pin is committed to the repository" "CA material in git"
+fi
+
 printf '\n  %d passed, %d failed, %d skipped\n\n' "$PASS" "$FAIL" "$SKIP"
 [[ $FAIL -eq 0 ]] || exit 1

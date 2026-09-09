@@ -33,7 +33,7 @@
  * newline must not be able to grow this process without bound.
  */
 import { createServer } from "node:net";
-import { chownSync, chmodSync, existsSync, readFileSync, readdirSync, writeFileSync, unlinkSync } from "node:fs";
+import { chownSync, chmodSync, existsSync, readFileSync, readdirSync, writeFileSync, unlinkSync, } from "node:fs";
 import { userInfo } from "node:os";
 import { MAX_REQUEST_BYTES, serve } from "../device-config.js";
 import { withoutNetwork, WPA_CONFIG_PATH } from "../network.js";
@@ -123,7 +123,11 @@ export function attach(socket, deps) {
             // Abandoned, not buffered further. Answering first keeps the client honest
             // about why, and destroying the socket stops an unbounded line.
             poisoned = true;
-            socket.end(JSON.stringify({ ok: false, code: "REQUEST_TOO_LARGE", message: "The request was refused unread." }) + "\n");
+            socket.end(JSON.stringify({
+                ok: false,
+                code: "REQUEST_TOO_LARGE",
+                message: "The request was refused unread.",
+            }) + "\n");
             return;
         }
         let index = buffer.indexOf("\n");

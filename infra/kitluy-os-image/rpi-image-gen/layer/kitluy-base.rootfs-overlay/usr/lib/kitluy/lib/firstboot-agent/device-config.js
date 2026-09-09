@@ -93,7 +93,10 @@ export function parseRequest(line) {
     }
     if (verb === "network.join" || verb === "network.forget") {
         const ssidHex = raw.ssidHex;
-        if (typeof ssidHex !== "string" || ssidHex === "" || !HEX.test(ssidHex) || ssidHex.length % 2 !== 0) {
+        if (typeof ssidHex !== "string" ||
+            ssidHex === "" ||
+            !HEX.test(ssidHex) ||
+            ssidHex.length % 2 !== 0) {
             return refuse("MALFORMED", "The network identifier was not hex.");
         }
         // 32 bytes is the 802.11 maximum; a longer one cannot be a real SSID.
@@ -176,10 +179,11 @@ export async function handle(request, deps = {}) {
             }
         }
     }
-    catch (error) {
-        // The message is the broker's own, never the underlying error's: a failure
-        // from `wpa_passphrase` or a sysfs write can quote its input, and one of
-        // those inputs is the shop's Wi-Fi password.
+    catch {
+        // The error is NOT bound, deliberately. The message returned is the broker's
+        // own and never the underlying one: a failure from `wpa_passphrase` or a
+        // sysfs write can quote its input, and one of those inputs is the shop's
+        // Wi-Fi password. Binding it invites a later edit to interpolate it.
         return refuse("FAILED", `The device refused to apply that change (${request.verb}).`);
     }
 }

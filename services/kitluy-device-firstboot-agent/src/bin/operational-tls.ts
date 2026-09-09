@@ -43,7 +43,7 @@ import { readFileSync } from "node:fs";
 
 import { createHttpOperationalCertificateClient } from "../adapters/http-operational-certificate-client.js";
 import { readImageEnv } from "../image-env.js";
-import { readPairingState } from "../pairing-state.js";
+import { readPairedIdentity } from "../paired-identity.js";
 import {
   currentPhase,
   readManifest,
@@ -122,13 +122,18 @@ async function once(): Promise<"done" | "waiting" | "blocked"> {
     return "blocked";
   }
 
-  const pairing = readPairingState();
-  if (pairing === null || pairing.phase !== "PAIRED" || pairing.deviceRecordId === undefined) {
+  // BOTH device classes. A Hub pairs at its console and writes the canonical
+  // pairing state; a Terminal pairs on its graphical shell, which is sandboxed
+  // to /var/lib/kitluy/terminal and writes its seat there instead. Reading only
+  // the Hub's file left a perfectly paired Terminal waiting for ever.
+  const pairing = readPairedIdentity();
+  if (pairing === null) {
     // Pairing is a DIFFERENT fact from registration and approval. Waiting here
-    // is correct and is the designed resting state for an unpaired Hub.
-    log(`waiting: not paired yet (phase ${pairing?.phase ?? "UNPAIRED"})`);
+    // is correct and is the designed resting state for an unpaired device.
+    log("waiting: not paired yet");
     return "waiting";
   }
+  log(`paired according to ${pairing.source}`);
 
   const rootPin = readRootPin();
   if (rootPin === null) {
@@ -139,7 +144,13 @@ async function once(): Promise<"done" | "waiting" | "blocked"> {
     return "blocked";
   }
 
-  const assignmentGeneration = Number(process.env.KITLUY_ASSIGNMENT_GENERATION ?? "1");
+  // From the paired identity, not an environment variable: a Terminal's seat
+  // states its own generation, and requesting against the wrong one is refused
+  // by `activate_device_v1` as KLUY-DEVICE-GENERATION-STALE. The env var still
+  // wins where it is set, so an operator can still override for a Hub.
+  const assignmentGeneration = Number(
+    process.env.KITLUY_ASSIGNMENT_GENERATION ?? String(pairing.assignmentGeneration),
+  );
   const trustedTime = new Date();
 
   const outcome = await ensureOperationalCertificate({

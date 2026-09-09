@@ -193,6 +193,27 @@ mmdebstrap:
         sed -i "s|^KITLUY_DEVICE_CLASS=.*|KITLUY_DEVICE_CLASS=${IGconf_kitluy_device_class}|" \
           "$1/etc/kitluy/image.env"
       fi
+      # ---------------------------------------------------------------------
+      # The development root CA pin
+      # ---------------------------------------------------------------------
+      # `operational-tls` compares the chain it is offered against this digest
+      # before adopting anything. A certificate that verifies internally proves
+      # only that it is self-consistent; the pin is what makes it OURS.
+      #
+      # Injected at BUILD time from the operator's environment, never committed:
+      # the repository must not carry development CA material, which is what
+      # `assert-no-dev-pki.mjs` exists to enforce. A SHA-256 of a PUBLIC
+      # certificate is not key material.
+      #
+      # ABSENT IS SAFE and deliberately not fatal: a device with no pin refuses
+      # to adopt any certificate ("blocked: no development root pin") rather
+      # than adopting an unverified one, so an image built without it is inert
+      # on this path rather than dangerous.
+      if [ -n "${IGconf_kitluy_development_root_sha256:-}" ]; then
+        printf '%s\n' "${IGconf_kitluy_development_root_sha256}" \
+          > "$1/etc/kitluy/development-root.sha256"
+        chmod 0644 "$1/etc/kitluy/development-root.sha256"
+      fi
       # THE ENVIRONMENT IS REQUIRED, VALIDATED, AND ASSERTED.
       #
       # Not "injected if supplied", like the values above. Those are addresses:

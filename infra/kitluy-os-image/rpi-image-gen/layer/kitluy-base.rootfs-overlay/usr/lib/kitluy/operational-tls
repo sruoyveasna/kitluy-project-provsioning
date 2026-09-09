@@ -1,0 +1,5 @@
+#!/bin/sh
+# KitLuy operational TLS identity. Obtains and adopts the device's operational
+# certificate once it has paired — the step that makes activation possible.
+set -eu
+exec /usr/bin/node /usr/lib/kitluy/lib/firstboot-agent/bin/operational-tls.js "$@"

@@ -404,6 +404,41 @@ fi
 # arrives, the pin is injected here the way the Hub tree does it, from the
 # operator's $KITLUY_DEV_PKI_DIR and never from the repository.
 
+# ---------------------------------------------------------------------------
+# The development root CA pin
+# ---------------------------------------------------------------------------
+# A certificate that verifies internally proves only that it is SELF-CONSISTENT,
+# so the pin is the only thing that makes a chain OURS. `operational-tls` refuses
+# to adopt anything without it.
+#
+# The Store Hub image has carried this since 2026-09-08; the Terminal did not,
+# because no Terminal had ever asked for a certificate. It asks now: a Terminal
+# that pairs is otherwise stuck at "Assigned to a Store, awaiting activation"
+# for ever, since activation is certificate-backed for both device classes.
+#
+# Read from the operator's $KITLUY_DEV_PKI_DIR at build time and NEVER committed:
+# `scripts/verification/assert-no-dev-pki.mjs` refuses development CA material in
+# the repository. A SHA-256 of a PUBLIC certificate is not key material.
+#
+# ABSENT IS SAFE. A device with no pin REFUSES to adopt any certificate rather
+# than adopting an unverified one, so an image built on a machine without the
+# development PKI — every CI runner — is inert on this path rather than
+# dangerous.
+if [[ -n "${KITLUY_DEV_PKI_DIR:-}" && -f "${KITLUY_DEV_PKI_DIR}/dev-root-ca.crt.pem" ]]; then
+  DEV_ROOT_SHA256="$(node -e '
+    const {createHash} = require("crypto"), fs = require("fs");
+    const pem = fs.readFileSync(process.argv[1], "utf8");
+    const der = Buffer.from(pem.replace(/-----[^-]+-----/g, "").replace(/\s/g, ""), "base64");
+    process.stdout.write(createHash("sha256").update(der).digest("hex"));
+  ' "${KITLUY_DEV_PKI_DIR}/dev-root-ca.crt.pem")"
+  RIG_OVERRIDES+=("IGconf_kitluy_development_root_sha256=${DEV_ROOT_SHA256}")
+  # Only the first bytes, so a build log never carries the whole pin.
+  log "development root pinned into the image: ${DEV_ROOT_SHA256:0:16}..."
+else
+  warn "no \$KITLUY_DEV_PKI_DIR: the image carries NO root pin, and this device"
+  warn "  will refuse to adopt any operational certificate until one is built in."
+fi
+
 [[ ${#RIG_OVERRIDES[@]} -gt 0 ]] && RIG_ARGS+=(-- "${RIG_OVERRIDES[@]}")
 
 log "profile=${PROFILE} config=${RIG_CONFIG} channel=${KITLUY_RELEASE_CHANNEL}"

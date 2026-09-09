@@ -80,6 +80,19 @@ DEVICE_MODULES=(
   # `kitluy-device-config.service` is inert by ConditionPathExists and the
   # Settings screen reports the device unreachable rather than failing oddly.
   bin/device-config-broker device-config network
+  # The operational certificate. A Terminal that has paired is otherwise stuck
+  # at "Assigned to a Store, awaiting activation" for ever: activation is
+  # certificate-backed for BOTH device classes, and nothing else on the device
+  # asks for one. Same closure the Store Hub image packages.
+  #
+  # `paired-identity` rides along because the agent reads the Terminal's seat
+  # (/var/lib/kitluy/terminal/assignment.json) as well as the Hub's pairing
+  # state — the Device Shell is sandboxed and cannot write the canonical file.
+  operational-key operational-csr-bytes operational-credential-state
+  operational-certificate-verification operational-tls-client
+  adapters/http-operational-certificate-client
+  paired-identity
+  bin/operational-tls
 )
 rm -rf "$LIB_DIR"
 mkdir -p "$LIB_DIR"
