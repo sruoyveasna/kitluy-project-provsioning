@@ -24,6 +24,9 @@ export function Chrome(props: {
   locale: KitluyLocale;
   deviceLabel: string | null;
   onToggleLocale: () => void;
+  /** Optional so every existing caller and test keeps working unchanged. */
+  settingsOpen?: boolean;
+  onToggleSettings?: () => void;
   children: JSX.Element;
 }): JSX.Element {
   const m = messagesFor(props.locale);
@@ -31,14 +34,27 @@ export function Chrome(props: {
     <div className="kt-shell" data-locale={props.locale}>
       <header className="kt-top">
         <span className="kt-brand">{BRAND}</span>
-        <button
-          type="button"
-          className="kt-lang"
-          aria-label="switch-language"
-          onClick={props.onToggleLocale}
-        >
-          {m.switchLanguage}
-        </button>
+        <span className="kt-top-actions">
+          {props.onToggleSettings === undefined ? null : (
+            <button
+              type="button"
+              className="kt-lang"
+              aria-label="toggle-settings"
+              data-settings-open={props.settingsOpen === true ? "yes" : "no"}
+              onClick={props.onToggleSettings}
+            >
+              {props.settingsOpen === true ? m.settingsClose : m.settings}
+            </button>
+          )}
+          <button
+            type="button"
+            className="kt-lang"
+            aria-label="switch-language"
+            onClick={props.onToggleLocale}
+          >
+            {m.switchLanguage}
+          </button>
+        </span>
       </header>
       <main className="kt-body">{props.children}</main>
       <footer className="kt-foot" data-device-label={props.deviceLabel ?? ""}>

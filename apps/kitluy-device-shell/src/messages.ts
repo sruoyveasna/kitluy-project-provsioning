@@ -35,11 +35,66 @@ export interface ShellMessages {
   readonly keyClear: string;
   readonly keyContinue: string;
   readonly pairingNotAvailable: string;
+  readonly pairingPaired: string;
+  readonly pairingRefused: string;
+  readonly pairingLocked: string;
+  readonly pairingAlreadyAssigned: string;
+  readonly pairingNotRegistered: string;
+  readonly pairingUnreachable: string;
+  readonly pairingFailed: string;
 
   readonly assignedTitle: string;
   readonly assignedBody: string;
 
   readonly switchLanguage: string;
+
+  // --- Settings -------------------------------------------------------------
+  readonly settings: string;
+  readonly settingsClose: string;
+  readonly tabNetwork: string;
+  readonly tabPrinter: string;
+  readonly tabDevice: string;
+  readonly tabDisplay: string;
+
+  readonly netConnectedWired: string;
+  readonly netConnectedWireless: string;
+  readonly netDisconnected: string;
+  readonly netScan: string;
+  readonly netScanning: string;
+  readonly netNoneFound: string;
+  readonly netSecured: string;
+  readonly netOpen: string;
+  readonly netPassword: string;
+  readonly netJoin: string;
+  readonly netJoining: string;
+  readonly netJoined: string;
+  readonly netForget: string;
+  readonly netSaved: string;
+
+  readonly printerHost: string;
+  readonly printerPort: string;
+  readonly printerLabel: string;
+  readonly printerSave: string;
+  readonly printerSaved: string;
+  readonly printerTest: string;
+  readonly printerTesting: string;
+  readonly printerTestOk: string;
+  readonly printerNone: string;
+  readonly printerBadHost: string;
+  readonly printerBadPort: string;
+  readonly printerUsbNote: string;
+
+  readonly devHostname: string;
+  readonly devSerial: string;
+  readonly devClass: string;
+  readonly devImage: string;
+  readonly devEnvironment: string;
+
+  readonly dispBrightness: string;
+  readonly dispNoBacklight: string;
+  readonly dispLanguage: string;
+
+  readonly configUnavailable: string;
 }
 
 export type MessageKey = keyof ShellMessages;
@@ -71,11 +126,65 @@ const km: ShellMessages = {
   keyClear: "សម្អាត",
   keyContinue: "បន្ត",
   pairingNotAvailable: "ការផ្គូផ្គងមិនទាន់អាចប្រើបានក្នុងកំណែនេះនៅឡើយទេ។",
+  pairingPaired: "បានផ្គូផ្គងដោយជោគជ័យ។ ឧបករណ៍នេះឥឡូវជាកម្មសិទ្ធិរបស់ហាង។",
+  pairingRefused: "លេខកូដនេះមិនត្រឹមត្រូវទេ។ សូមពិនិត្យម្ដងទៀត ឬបង្កើតលេខកូដថ្មីនៅ Partner Portal។",
+  pairingLocked: "បានព្យាយាមច្រើនដងពេក។ សូមបង្កើតលេខកូដថ្មីនៅ Partner Portal។",
+  pairingAlreadyAssigned: "ឧបករណ៍នេះត្រូវបានកំណត់ទៅហាងណាមួយរួចហើយ។",
+  pairingNotRegistered: "ឧបករណ៍នេះមិនទាន់បានចុះឈ្មោះជាមួយ KitLuy ទេ។",
+  pairingUnreachable: "មិនអាចទាក់ទង KitLuy បានទេ។ សូមពិនិត្យបណ្ដាញ។",
+  pairingFailed: "ការផ្គូផ្គងមិនបានសម្រេច។",
 
   assignedTitle: "បានកំណត់ទៅហាង",
   assignedBody: "ម៉ាស៊ីននេះត្រូវបានកំណត់ទៅហាងមួយ។ វានឹងបញ្ចប់ការរៀបចំដោយខ្លួនឯង។",
 
   switchLanguage: "English",
+
+  settings: "ការកំណត់",
+  settingsClose: "បិទ",
+  tabNetwork: "បណ្ដាញ",
+  tabPrinter: "ម៉ាស៊ីនបោះពុម្ព",
+  tabDevice: "ឧបករណ៍",
+  tabDisplay: "អេក្រង់",
+
+  netConnectedWired: "បានភ្ជាប់តាមខ្សែ Ethernet",
+  netConnectedWireless: "បានភ្ជាប់តាម Wi-Fi",
+  netDisconnected: "គ្មានការភ្ជាប់បណ្ដាញ",
+  netScan: "ស្វែងរកបណ្ដាញ",
+  netScanning: "កំពុងស្វែងរក…",
+  netNoneFound: "រកមិនឃើញបណ្ដាញណាមួយទេ។",
+  netSecured: "មានពាក្យសម្ងាត់",
+  netOpen: "បើកចំហ",
+  netPassword: "ពាក្យសម្ងាត់ Wi-Fi",
+  netJoin: "ភ្ជាប់",
+  netJoining: "កំពុងភ្ជាប់…",
+  netJoined: "បានភ្ជាប់ដោយជោគជ័យ។",
+  netForget: "លុបបណ្ដាញនេះ",
+  netSaved: "បានរក្សាទុកបណ្ដាញនេះរួចហើយ",
+
+  printerHost: "អាសយដ្ឋានម៉ាស៊ីនបោះពុម្ព",
+  printerPort: "ច្រក (លំនាំដើម 9100)",
+  printerLabel: "ឈ្មោះ (ស្រេចចិត្ត)",
+  printerSave: "រក្សាទុក",
+  printerSaved: "បានរក្សាទុក។",
+  printerTest: "សាកល្បងបោះពុម្ព",
+  printerTesting: "កំពុងបោះពុម្ព…",
+  printerTestOk: "បានផ្ញើទៅម៉ាស៊ីនបោះពុម្ព។",
+  printerNone: "មិនទាន់មានម៉ាស៊ីនបោះពុម្ពទេ។",
+  printerBadHost: "អាសយដ្ឋាននេះមិនត្រឹមត្រូវទេ។",
+  printerBadPort: "ច្រកនេះមិនត្រឹមត្រូវទេ។",
+  printerUsbNote: "ម៉ាស៊ីនបោះពុម្ព USB មិនទាន់ត្រូវបានគាំទ្រនៅអេក្រង់នេះទេ។",
+
+  devHostname: "ឈ្មោះម៉ាស៊ីន",
+  devSerial: "លេខសៀរៀល",
+  devClass: "ប្រភេទឧបករណ៍",
+  devImage: "កំណែរូបភាព",
+  devEnvironment: "បរិស្ថាន",
+
+  dispBrightness: "ពន្លឺអេក្រង់",
+  dispNoBacklight: "អេក្រង់នេះមិនអាចកែពន្លឺបានទេ។",
+  dispLanguage: "ភាសា",
+
+  configUnavailable: "មិនអាចកំណត់ឧបករណ៍នេះពីទីនេះបានទេ។",
 };
 
 const en: ShellMessages = {
@@ -106,11 +215,65 @@ const en: ShellMessages = {
   keyClear: "Clear",
   keyContinue: "Continue",
   pairingNotAvailable: "Pairing is not available in this build yet.",
+  pairingPaired: "Paired. This terminal now belongs to the shop.",
+  pairingRefused: "That code was not accepted. Check it, or make a new one in the Partner Portal.",
+  pairingLocked: "Too many attempts. Make a new code in the Partner Portal.",
+  pairingAlreadyAssigned: "This terminal is already assigned to a shop.",
+  pairingNotRegistered: "This terminal has not registered with KitLuy yet.",
+  pairingUnreachable: "Could not reach KitLuy. Check the network.",
+  pairingFailed: "Pairing could not be completed.",
 
   assignedTitle: "Assigned to a Store",
   assignedBody: "This terminal is assigned to a Store. It will finish setting up on its own.",
 
   switchLanguage: "ខ្មែរ",
+
+  settings: "Settings",
+  settingsClose: "Close",
+  tabNetwork: "Network",
+  tabPrinter: "Printer",
+  tabDevice: "Device",
+  tabDisplay: "Display",
+
+  netConnectedWired: "Connected by Ethernet",
+  netConnectedWireless: "Connected by Wi-Fi",
+  netDisconnected: "No network connection",
+  netScan: "Scan for networks",
+  netScanning: "Scanning…",
+  netNoneFound: "No networks found.",
+  netSecured: "Password required",
+  netOpen: "Open",
+  netPassword: "Wi-Fi password",
+  netJoin: "Join",
+  netJoining: "Joining…",
+  netJoined: "Connected.",
+  netForget: "Forget this network",
+  netSaved: "A network is already saved",
+
+  printerHost: "Printer address",
+  printerPort: "Port (default 9100)",
+  printerLabel: "Name (optional)",
+  printerSave: "Save",
+  printerSaved: "Saved.",
+  printerTest: "Test print",
+  printerTesting: "Printing…",
+  printerTestOk: "Sent to the printer.",
+  printerNone: "No printer has been set up yet.",
+  printerBadHost: "That address is not valid.",
+  printerBadPort: "That port is not valid.",
+  printerUsbNote: "USB printers are not supported from this screen yet.",
+
+  devHostname: "Hostname",
+  devSerial: "Serial",
+  devClass: "Device class",
+  devImage: "Image version",
+  devEnvironment: "Environment",
+
+  dispBrightness: "Screen brightness",
+  dispNoBacklight: "This screen's brightness cannot be adjusted.",
+  dispLanguage: "Language",
+
+  configUnavailable: "This device cannot be configured from here.",
 };
 
 export const MESSAGES: Readonly<Record<KitluyLocale, ShellMessages>> = {

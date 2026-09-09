@@ -2,7 +2,12 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { readNetwork, readSnapshot, type DeviceRoots } from "../electron/device-state-files.js";
+import {
+  readDeviceRecordId,
+  readNetwork,
+  readSnapshot,
+  type DeviceRoots,
+} from "../electron/device-state-files.js";
 
 let root = "";
 let roots: DeviceRoots;
@@ -98,5 +103,37 @@ describe("readNetwork", () => {
   it("detects a default route from /proc/net/route", () => {
     online();
     expect(readNetwork(roots)).toEqual({ hasLink: true, hasRoute: true });
+  });
+});
+
+describe("the device record id survives the retired bootstrap file", () => {
+  it("falls back to registration-state.json when bootstrap-state.json is gone", () => {
+    // THE HARDWARE BUG (2026-09-09): the ticket agent that wrote
+    // bootstrap-state.json was retired, so every terminal built since had no
+    // record id, and pairing refused NO_DEVICE_RECORD before the network. The
+    // pairing session showed zero attempts because none was ever made.
+    const dir = mkdtempSync(join(tmpdir(), "kitluy-recordid-"));
+    writeFileSync(
+      join(dir, "registration-state.json"),
+      JSON.stringify({ phase: "APPROVED", deviceId: "ed2ca426-593a-4c83-88a6-4cda76605eff" }),
+    );
+    expect(readDeviceRecordId(dir)).toBe("ed2ca426-593a-4c83-88a6-4cda76605eff");
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("still prefers bootstrap-state.json where a board carries both", () => {
+    const dir = mkdtempSync(join(tmpdir(), "kitluy-recordid-"));
+    writeFileSync(join(dir, "bootstrap-state.json"), JSON.stringify({ deviceRecordId: "from-bootstrap" }));
+    writeFileSync(join(dir, "registration-state.json"), JSON.stringify({ deviceId: "from-registration" }));
+    expect(readDeviceRecordId(dir)).toBe("from-bootstrap");
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("is undefined when neither file has one, rather than throwing", () => {
+    const dir = mkdtempSync(join(tmpdir(), "kitluy-recordid-"));
+    expect(readDeviceRecordId(dir)).toBeUndefined();
+    writeFileSync(join(dir, "registration-state.json"), JSON.stringify({ phase: "APPROVED" }));
+    expect(readDeviceRecordId(dir)).toBeUndefined();
+    rmSync(dir, { recursive: true, force: true });
   });
 });

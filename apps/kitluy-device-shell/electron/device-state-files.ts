@@ -115,10 +115,35 @@ export function readPairing(stateDir = DEFAULT_ROOTS.stateDir): PairingView | nu
   };
 }
 
-/** The server record id the pairing belongs to, from bootstrap-state.json. */
+/**
+ * The server record id the pairing belongs to.
+ *
+ * ===========================================================================
+ * TWO SOURCES, AND THE SECOND IS THE LIVE ONE
+ * ===========================================================================
+ * This read ONLY `bootstrap-state.json`, written by the flash-time ticket agent
+ * that KLD-2026-09-03-FACTORY-ENROLLMENT-001 RETIRED from the terminal image. On
+ * every terminal built since, the file is absent, so this returned undefined and
+ * `submitPairingCode` refused with NO_DEVICE_RECORD before touching the network
+ * — a pairing code that could never work, on a board that had registered
+ * perfectly well. Observed on hardware 2026-09-09; the pairing session showed
+ * zero attempts, because none was ever made.
+ *
+ * `health-reporter.ts` already hit this exact trap and already documents the
+ * answer: cloud registration's `registration-state.json` is the live signal now.
+ * The key is `deviceId` there and `deviceRecordId` in the retired file — the two
+ * names are why a single lookup could not simply be repointed.
+ *
+ * Bootstrap is still read FIRST so a board that somehow carries both keeps its
+ * existing behaviour; the fallback only fires where the old file is gone.
+ */
 export function readDeviceRecordId(stateDir = DEFAULT_ROOTS.stateDir): string | undefined {
-  const raw = readObject(join(stateDir, "bootstrap-state.json"));
-  return raw === null ? undefined : str(raw, "deviceRecordId");
+  const bootstrap = readObject(join(stateDir, "bootstrap-state.json"));
+  const fromBootstrap = bootstrap === null ? undefined : str(bootstrap, "deviceRecordId");
+  if (fromBootstrap !== undefined) return fromBootstrap;
+
+  const registration = readObject(join(stateDir, "registration-state.json"));
+  return registration === null ? undefined : str(registration, "deviceId");
 }
 
 /**

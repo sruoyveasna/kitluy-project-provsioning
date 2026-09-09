@@ -25,6 +25,49 @@ describe("preload surface", () => {
     expect(source).toMatch(/\bsubmitPairingCode:/);
   });
 
+  // The Settings verbs. Listed one by one on purpose: this test is the record of
+  // what the renderer can reach, and a verb that appears in the preload without
+  // appearing here has been added without anyone deciding it should be.
+  it("exposes each Settings verb as its own named method", () => {
+    for (const method of [
+      "getNetworkStatus",
+      "scanNetworks",
+      "joinNetwork",
+      "forgetNetwork",
+      "getBrightness",
+      "setBrightness",
+      "getDeviceInfo",
+      "getPrinter",
+      "savePrinter",
+      "testPrinter",
+    ]) {
+      expect(source, method).toMatch(new RegExp(`\\b${method}:`));
+    }
+  });
+
+  it("exposes no method the bridge type does not declare", () => {
+    // Everything the preload puts on the object, in source order.
+    const exposed = [...source.matchAll(/^\s{2}(\w+):/gm)].map((m) => m[1]);
+    const declared = new Set([
+      "getSnapshot",
+      "onSnapshot",
+      "submitPairingCode",
+      "getNetworkStatus",
+      "scanNetworks",
+      "joinNetwork",
+      "forgetNetwork",
+      "getBrightness",
+      "setBrightness",
+      "getDeviceInfo",
+      "getPrinter",
+      "savePrinter",
+      "testPrinter",
+    ]);
+    for (const method of exposed) {
+      expect(declared.has(method!), `preload exposes undeclared method: ${method}`).toBe(true);
+    }
+  });
+
   it("exposes no generic pass-through", () => {
     // No unrestricted send/invoke handed to the renderer, and no way to name an
     // arbitrary channel from the renderer side.

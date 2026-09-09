@@ -57,6 +57,38 @@ button { font-family: inherit; cursor: none; }
   .kt-keypad { grid-template-columns: repeat(4, 1fr); }
   .kt-box { width: 44px; height: 60px; font-size: 26px; }
 }
+
+/* --- Settings ------------------------------------------------------------ */
+/* Touch targets are 44px minimum throughout: this is operated with a finger on
+   a wall-mounted screen, often by someone in a hurry. */
+.kt-top-actions { display: flex; gap: .5rem; align-items: center; }
+.kt-settings { display: flex; flex-direction: column; gap: 1rem; width: 100%; max-width: 46rem; }
+.kt-tabs { display: flex; gap: .25rem; flex-wrap: wrap; }
+.kt-tab {
+  flex: 1 1 auto; min-height: 44px; padding: .6rem 1rem; cursor: pointer;
+  border: 1px solid rgba(255,255,255,.18); border-radius: .5rem;
+  background: transparent; color: inherit; font: inherit;
+}
+.kt-tab[data-active="yes"] { background: rgba(255,255,255,.14); font-weight: 700; }
+.kt-panel { display: flex; flex-direction: column; gap: .75rem; text-align: left; }
+.kt-nets { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .25rem; }
+.kt-net-btn {
+  width: 100%; min-height: 44px; display: flex; gap: .75rem; align-items: center;
+  padding: .5rem .75rem; cursor: pointer; text-align: left;
+  border: 1px solid rgba(255,255,255,.14); border-radius: .5rem;
+  background: transparent; color: inherit; font: inherit;
+}
+.kt-net-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kt-field { display: flex; flex-direction: column; gap: .25rem; }
+.kt-field input[type="text"], .kt-field input[type="password"] {
+  min-height: 44px; padding: .5rem .75rem; font: inherit;
+  border: 1px solid rgba(255,255,255,.24); border-radius: .5rem;
+  background: rgba(0,0,0,.25); color: inherit;
+}
+.kt-field input[type="range"] { min-height: 44px; }
+.kt-join { display: flex; flex-direction: column; gap: .75rem; }
+.kt-facts { display: flex; flex-direction: column; gap: .5rem; margin: 0; }
+.kt-fact { display: flex; justify-content: space-between; gap: 1rem; }
 `;
 
 export function injectShellStyles(): void {

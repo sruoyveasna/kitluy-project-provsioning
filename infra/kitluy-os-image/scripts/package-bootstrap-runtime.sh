@@ -74,6 +74,12 @@ DEVICE_MODULES=(
   # would not demand it; it is listed so the module is present if a later caller
   # needs the values rather than the type.
   adapters/http-terminal-pairing-client pairing-state
+  # The privileged half of Terminal Settings. The Device Shell runs with an
+  # empty CapabilityBoundingSet and cannot join a network or set the backlight;
+  # this root broker owns those verbs and the Shell is its client. Without it
+  # `kitluy-device-config.service` is inert by ConditionPathExists and the
+  # Settings screen reports the device unreachable rather than failing oddly.
+  bin/device-config-broker device-config network
 )
 rm -rf "$LIB_DIR"
 mkdir -p "$LIB_DIR"

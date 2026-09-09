@@ -30,10 +30,23 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { CROCKFORD_BASE32, normalizeCodeChar } from "../src/model/code-entry.js";
 import { submitPairingCode } from "./pairing.js";
 import { startSnapshotFeed } from "./snapshot.js";
+import { requestDeviceConfig } from "./device-config-client.js";
+import { readDeviceInfo } from "./device-info.js";
+import { printTest, readPrinterConfig, validateConfig, writePrinterConfig } from "./printer.js";
 import { writeTerminalAssignment } from "./terminal-assignment.js";
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 const SNAPSHOT_CHANNEL = "kitluy:shell:snapshot";
 const SNAPSHOT_CHANGED_CHANNEL = "kitluy:shell:snapshot-changed";
+const NETWORK_STATUS_CHANNEL = "kitluy:shell:network-status";
+const NETWORK_SCAN_CHANNEL = "kitluy:shell:network-scan";
+const NETWORK_JOIN_CHANNEL = "kitluy:shell:network-join";
+const NETWORK_FORGET_CHANNEL = "kitluy:shell:network-forget";
+const BRIGHTNESS_GET_CHANNEL = "kitluy:shell:brightness-get";
+const BRIGHTNESS_SET_CHANNEL = "kitluy:shell:brightness-set";
+const DEVICE_INFO_CHANNEL = "kitluy:shell:device-info";
+const PRINTER_GET_CHANNEL = "kitluy:shell:printer-get";
+const PRINTER_SAVE_CHANNEL = "kitluy:shell:printer-save";
+const PRINTER_TEST_CHANNEL = "kitluy:shell:printer-test";
 const SUBMIT_CODE_CHANNEL = "kitluy:shell:submit-code";
 const TRANSPORT_UNAVAILABLE = "PAIRING_TRANSPORT_UNAVAILABLE";
 const CODE_MALFORMED = "CODE_MALFORMED";
@@ -132,6 +145,58 @@ void app.whenReady().then(() => {
             deviceRecordId: latest?.deviceRecordId,
             persist: writeTerminalAssignment,
         });
+    });
+    // --- Settings -------------------------------------------------------------
+    // Every argument is re-checked HERE, in the trusted process, before it reaches
+    // the broker. The broker validates again and is the real boundary; this is the
+    // near-side check that keeps obviously wrong input off the socket entirely.
+    const hex = (value) => typeof value === "string" && value !== "" && value.length <= 64 && /^[0-9a-fA-F]+$/.test(value)
+        ? value
+        : null;
+    ipcMain.handle(NETWORK_STATUS_CHANNEL, () => requestDeviceConfig({ verb: "network.status" }));
+    ipcMain.handle(NETWORK_SCAN_CHANNEL, () => requestDeviceConfig({ verb: "network.scan" }));
+    ipcMain.handle(NETWORK_JOIN_CHANNEL, async (_event, ssidHex, passphrase) => {
+        const ssid = hex(ssidHex);
+        if (ssid === null) {
+            return { ok: false, code: "MALFORMED", message: "That network could not be identified." };
+        }
+        // An open network sends no passphrase at all rather than an empty string,
+        // so the broker's own "is this open?" test stays the only one that decides.
+        return requestDeviceConfig({
+            verb: "network.join",
+            ssidHex: ssid,
+            ...(typeof passphrase === "string" && passphrase !== "" ? { psk: passphrase } : {}),
+        });
+    });
+    ipcMain.handle(NETWORK_FORGET_CHANNEL, async (_event, ssidHex) => {
+        const ssid = hex(ssidHex);
+        if (ssid === null) {
+            return { ok: false, code: "MALFORMED", message: "That network could not be identified." };
+        }
+        return requestDeviceConfig({ verb: "network.forget", ssidHex: ssid });
+    });
+    ipcMain.handle(BRIGHTNESS_GET_CHANNEL, () => requestDeviceConfig({ verb: "display.getBrightness" }));
+    ipcMain.handle(BRIGHTNESS_SET_CHANNEL, async (_event, percent) => {
+        if (typeof percent !== "number" || !Number.isFinite(percent)) {
+            return { ok: false, code: "MALFORMED", message: "That brightness is not a number." };
+        }
+        return requestDeviceConfig({ verb: "display.setBrightness", percent });
+    });
+    ipcMain.handle(DEVICE_INFO_CHANNEL, () => readDeviceInfo());
+    ipcMain.handle(PRINTER_GET_CHANNEL, () => readPrinterConfig());
+    ipcMain.handle(PRINTER_SAVE_CHANNEL, async (_event, config) => {
+        const validated = validateConfig(config);
+        if ("ok" in validated)
+            return validated;
+        writePrinterConfig(validated);
+        return { ok: true };
+    });
+    ipcMain.handle(PRINTER_TEST_CHANNEL, async () => {
+        const config = readPrinterConfig();
+        if (config === null) {
+            return { ok: false, code: "PRINTER_UNSET", message: "No printer has been set up yet." };
+        }
+        return printTest(config);
     });
     const window = createWindow();
     const stop = startSnapshotFeed((snapshot) => {

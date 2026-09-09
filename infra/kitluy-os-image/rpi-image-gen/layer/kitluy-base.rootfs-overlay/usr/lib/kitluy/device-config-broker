@@ -1,0 +1,6 @@
+#!/bin/sh
+# KitLuy Terminal device-configuration broker. Runs as root and answers a closed
+# list of verbs on a unix socket, because the Device Shell that needs those verbs
+# runs with no capabilities at all and must keep it that way.
+set -eu
+exec /usr/bin/node /usr/lib/kitluy/lib/firstboot-agent/bin/device-config-broker.js "$@"

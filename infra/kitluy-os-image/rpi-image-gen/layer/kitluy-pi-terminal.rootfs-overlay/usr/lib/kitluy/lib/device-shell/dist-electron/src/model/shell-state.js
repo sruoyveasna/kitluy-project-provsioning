@@ -117,4 +117,30 @@ export function deriveScreen(snapshot) {
             return { kind: "waiting_for_approval", sub: "NOT_REGISTERED", deviceLabel, noNetwork };
     }
 }
+export function pairingMessageKey(status) {
+    switch (status) {
+        case "PAIRED":
+            return "pairingPaired";
+        case "CODE_REFUSED":
+        case "CODE_MALFORMED":
+            return "pairingRefused";
+        case "LOCKED":
+            return "pairingLocked";
+        case "ALREADY_ASSIGNED":
+            return "pairingAlreadyAssigned";
+        case "NO_DEVICE_RECORD":
+            return "pairingNotRegistered";
+        case "PAIRING_UNREACHABLE":
+            return "pairingUnreachable";
+        // The build genuinely has no transport — an image packaged without the
+        // agent's pairing client. Distinct from every refusal above, because the
+        // answer is "reflash", not "try again".
+        case "PAIRING_TRANSPORT_UNAVAILABLE":
+            return "pairingNotAvailable";
+        default:
+            // Anything the registry adds later reads as a plain failure rather than
+            // as success. Failing closed matters more here than covering every code.
+            return "pairingFailed";
+    }
+}
 //# sourceMappingURL=shell-state.js.map

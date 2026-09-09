@@ -1,0 +1,54 @@
+[Unit]
+Description=KitLuy Terminal device-configuration broker (privileged verbs for Settings)
+# The Shell is the only client, but this must be UP FIRST or the Settings screen
+# opens onto a socket that is not there yet and reports the device unreachable.
+Before=kitluy-device-shell.service
+After=systemd-networkd.service
+ConditionPathExists=/usr/lib/kitluy/device-config-broker
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/kitluy/device-config-broker
+Restart=always
+RestartSec=5s
+# ROOT, and only because the verbs require it: writing wpa_supplicant's
+# configuration and the backlight cannot be delegated to the Shell's user
+# without giving that user the same power by another name.
+User=root
+
+# /run/kitluy-device-config, recreated on every start. The socket lives here and
+# not in /tmp: PrivateTmp would hide it from the Shell, and a path under /run is
+# gone after a reboot, which is correct for a socket.
+RuntimeDirectory=kitluy-device-config
+RuntimeDirectoryMode=0750
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+# The image requires this of every KitLuy unit, and it costs nothing here: the
+# socket lives under RuntimeDirectory in /run, which PrivateTmp does not touch.
+# (A sibling unit was broken once by assuming the opposite, so: /run, not /tmp.)
+PrivateTmp=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectKernelTunables=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictAddressFamilies=AF_UNIX
+# No network sockets at all. Every verb is local: wpa_supplicant configuration,
+# a sysfs write, and a scan through `iw`. A broker that could open a TCP socket
+# would be a more interesting thing to compromise than one that cannot.
+PrivateNetwork=no
+
+# The shop's Wi-Fi configuration. Slot-shared, so this is a real bind mount to
+# the persistent partition and survives a slot switch.
+ReadWritePaths=/etc/wpa_supplicant
+# ProtectKernelTunables makes /sys read-only, which is right for everything
+# except the one file this is allowed to write. The leading `-` keeps the unit
+# startable on a board with no backlight class at all — an HDMI monitor has
+# none, and `findBacklight` already answers null there.
+ReadWritePaths=-/sys/class/backlight
+
+[Install]
+WantedBy=multi-user.target

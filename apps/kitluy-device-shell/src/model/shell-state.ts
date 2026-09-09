@@ -221,3 +221,55 @@ export function deriveScreen(snapshot: ShellSnapshot | null): ShellScreen {
       return { kind: "waiting_for_approval", sub: "NOT_REGISTERED", deviceLabel, noNetwork };
   }
 }
+
+/**
+ * The message key for a pairing outcome.
+ *
+ * ===========================================================================
+ * WHY THIS EXISTS
+ * ===========================================================================
+ * `App.tsx` used to DISCARD the transport's answer and always render
+ * "Pairing is not available in this build yet" — correct while Slice 1B had no
+ * transport, and wrong from the moment one shipped. The result was a terminal
+ * that paired successfully and told the person standing at it that the feature
+ * did not exist. Observed on hardware 2026-09-09.
+ *
+ * Every branch is a key, never a sentence: the server's own prose is not shown
+ * because it is written for an operator reading a log, not for a shop.
+ */
+export type PairingMessageKey =
+  | "pairingPaired"
+  | "pairingRefused"
+  | "pairingLocked"
+  | "pairingAlreadyAssigned"
+  | "pairingNotRegistered"
+  | "pairingUnreachable"
+  | "pairingNotAvailable"
+  | "pairingFailed";
+
+export function pairingMessageKey(status: string): PairingMessageKey {
+  switch (status) {
+    case "PAIRED":
+      return "pairingPaired";
+    case "CODE_REFUSED":
+    case "CODE_MALFORMED":
+      return "pairingRefused";
+    case "LOCKED":
+      return "pairingLocked";
+    case "ALREADY_ASSIGNED":
+      return "pairingAlreadyAssigned";
+    case "NO_DEVICE_RECORD":
+      return "pairingNotRegistered";
+    case "PAIRING_UNREACHABLE":
+      return "pairingUnreachable";
+    // The build genuinely has no transport — an image packaged without the
+    // agent's pairing client. Distinct from every refusal above, because the
+    // answer is "reflash", not "try again".
+    case "PAIRING_TRANSPORT_UNAVAILABLE":
+      return "pairingNotAvailable";
+    default:
+      // Anything the registry adds later reads as a plain failure rather than
+      // as success. Failing closed matters more here than covering every code.
+      return "pairingFailed";
+  }
+}
