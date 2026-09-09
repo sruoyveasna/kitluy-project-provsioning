@@ -4,6 +4,21 @@ Read the newest relevant handoff before starting work. Naming:
 `YYYY-MM-DD__<AREA>__<TASK-ID>__<SLUG>__AI-HANDOFF.md` under the matching
 subfolder (repository/ shared/ apps/ services/ data/ infrastructure/ reviews/).
 
+## A Pi Terminal has a Settings screen, and a root broker so the kiosk never needs privileges of its own (2026-09-08)
+
+Record: [`edge-platform/34_TERMINAL_SETTINGS_AND_THE_CONFIG_BROKER.md`](edge-platform/34_TERMINAL_SETTINGS_AND_THE_CONFIG_BROKER.md)
+· **TESTED-IN-DEV** · both images rebuilt · no hardware run · not committed · no hosted write
+
+The Device Shell runs with an EMPTY `CapabilityBoundingSet`, so it cannot join a Wi-Fi network or set the backlight — and that hardening was not weakened. The privileged verbs moved to `kitluy-device-config.service`, a root broker answering a closed six-verb list on a unix socket, with the Shell as its client; `network.ts` was reused rather than rewritten. Four tabs in km-KH and en-US: Network (scan/join/status), Printer (network ESC/POS with a real test receipt; USB stated unsupported rather than offered and failing), Device (hostname/serial/image/class), Display (brightness/language). The printer deliberately does NOT go through the broker — a TCP socket and a file in the Shell's own directory need no root, and the broker's value is that its list stays short. 119 shell tests (was 72), 40 broker tests, 357 terminal image gates, all green; the preload guard was mutation-tested by smuggling in a `runAnything`. **Also answered: there is NO 4-digit PIN table, and it belongs in `hub/migrations/0042`, not the cloud** — §12 makes the Store Hub the offline verifier. It is blocked behind rung 6 (`appInstalled`) and Hub activation, so the owner chose Settings first.
+
+
+## An Admin can tell an online Pi from an unplugged one, and a board that stops answering leaves the approval queue (2026-09-08)
+
+Record: [`edge-platform/33_DEVICE_LIVENESS_AND_THE_PENDING_QUEUE.md`](edge-platform/33_DEVICE_LIVENESS_AND_THE_PENDING_QUEUE.md)
+· **TESTED-IN-DEV** · migration 0216 applied on both local stacks · not committed · no hosted write · **no image change, no reflash**
+
+Every device read `NEVER_SEEN` because the freshness projection read only `last_observed_at`, which records enrolment-time hardware evidence and is empty on a fresh stack and null for every pending board. The signal was already arriving: `cloud-registration.ts` polls the registration route every 60s for ever, approved or not, and `register_device_v1` returns the same `device_id` every time. Migration 0216 adds `device_registration_sightings` and a definer door that never raises; the edge function calls it in the same transaction after a successful registration; the fleet DTO takes the later of the two sources. `/devices-pending` now hides a board unheard for longer than the **already-ruled** OFFLINE threshold (300s, OD-EDGE-LIVENESS-001) — nothing is deleted, and the row returns the moment the board answers. Owner rule of 2026-09-08. 162 API tests, 107 portal tests, `deno check` clean, edge probe 12/12 over real HTTP, both behaviours mutation-tested.
+
 ## The Pi Terminal image has a screen that can take a pairing code: cage, a pinned Electron, and the display owner flipped (2026-09-07)
 
 Record: [`apps/2026-09-07__APPS__KL-P1-TERM-SHELL-003__DEVICE-SHELL-IMAGE-INTEGRATION__AI-HANDOFF.md`](apps/2026-09-07__APPS__KL-P1-TERM-SHELL-003__DEVICE-SHELL-IMAGE-INTEGRATION__AI-HANDOFF.md)
