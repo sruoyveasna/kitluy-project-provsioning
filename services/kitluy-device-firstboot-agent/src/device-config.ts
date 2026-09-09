@@ -231,10 +231,11 @@ export async function handle(
         return { ok: true, data: { percent: request.percent } };
       }
     }
-  } catch (error) {
-    // The message is the broker's own, never the underlying error's: a failure
-    // from `wpa_passphrase` or a sysfs write can quote its input, and one of
-    // those inputs is the shop's Wi-Fi password.
+  } catch {
+    // The error is NOT bound, deliberately. The message returned is the broker's
+    // own and never the underlying one: a failure from `wpa_passphrase` or a
+    // sysfs write can quote its input, and one of those inputs is the shop's
+    // Wi-Fi password. Binding it invites a later edit to interpolate it.
     return refuse("FAILED", `The device refused to apply that change (${request.verb}).`);
   }
 }
