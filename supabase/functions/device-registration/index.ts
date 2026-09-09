@@ -233,7 +233,35 @@ Deno.serve(async (request: Request): Promise<Response> => {
           }::jsonb,
           ${tx.json(candidate.installationEvidence) as never}::jsonb,
           'device/self-registration'::text) as r`;
-      return { unknownProfile: false as const, result: row?.r };
+
+      // RECORD THAT THIS BOARD ANNOUNCED ITSELF (group 0216).
+      //
+      // `bin/cloud-registration.ts` polls this route every 60 seconds while it
+      // waits for approval, so this is the ONLY liveness a device has before it
+      // enrols: `device_fleet_status.last_observed_at` reads hardware-evidence
+      // COMPARISONS, an enrolment-time fact that is null for every pending board.
+      // Without this an Admin cannot tell a Pi unplugged yesterday from one
+      // powering up in the next room — the signal was arriving all along and
+      // nothing recorded it.
+      //
+      // In the SAME transaction and only after the registration succeeded, so the
+      // device id is one this call just produced rather than anything a caller
+      // supplied. The door creates nothing and decides nothing.
+      //
+      // Deliberately not allowed to fail the request: a liveness write is not
+      // worth turning a successful registration into an error the board retries
+      // forever. The door itself never raises; this catch covers the transport.
+      const registered = row?.r;
+      if (registered?.device_id) {
+        try {
+          await tx`select kitluy_devices.record_device_sighting_v1(
+            ${registered.device_id}::uuid,
+            ${registered.installation_id ?? null}::uuid)`;
+        } catch (error) {
+          console.error("record_device_sighting_v1 failed; registration stands", error);
+        }
+      }
+      return { unknownProfile: false as const, result: registered };
     });
 
     if (result.unknownProfile) {

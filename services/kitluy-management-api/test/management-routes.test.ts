@@ -274,6 +274,68 @@ describe("GET /management/v1/devices", () => {
     }
   });
 
+  it("reports a board with only a registration beat, which is every pending board", async () => {
+    // THE ADMIN PORTAL BUG (owner, 2026-09-08): `last_observed_at` is written at
+    // ENROLMENT, so it is null for every board waiting for approval and the table
+    // is empty on a fresh stack. Reading only that column made a Pi that had been
+    // answering every 60 seconds display as NEVER_SEEN.
+    const now = new Date("2026-08-10T12:00:00Z");
+    const ruled = { staleAfterSeconds: 90, offlineAfterSeconds: 300 };
+    const res = await handleManagementRequest(
+      {
+        db: db(ACTIVE_ADMIN, [
+          { ...ROW, last_observed_at: null, last_seen_at: "2026-08-10T11:59:50Z" },
+        ]),
+        verifier: verifier(USER),
+        now: () => now,
+        freshnessPolicy: ruled,
+      },
+      GET(`${MANAGEMENT_PREFIX}/devices`),
+    );
+    const body = res.body as { devices: { freshness: string; lastSeenAt: string | null }[] };
+    expect(body.devices[0]?.freshness).toBe("ONLINE");
+    expect(body.devices[0]?.lastSeenAt).toBe("2026-08-10T11:59:50Z");
+  });
+
+  it("takes the LATER of the two liveness sources, whichever it is", async () => {
+    const now = new Date("2026-08-10T12:00:00Z");
+    const ruled = { staleAfterSeconds: 90, offlineAfterSeconds: 300 };
+    // An old enrolment observation must not drag a fresh beat down...
+    for (const [observed, beat, expected] of [
+      ["2026-08-10T10:00:00Z", "2026-08-10T11:59:50Z", "ONLINE"],
+      // ...and a stale beat must not erase a fresh observation either.
+      ["2026-08-10T11:59:50Z", "2026-08-10T10:00:00Z", "ONLINE"],
+      ["2026-08-10T10:00:00Z", "2026-08-10T10:00:00Z", "OFFLINE"],
+    ] as const) {
+      const res = await handleManagementRequest(
+        {
+          db: db(ACTIVE_ADMIN, [{ ...ROW, last_observed_at: observed, last_seen_at: beat }]),
+          verifier: verifier(USER),
+          now: () => now,
+          freshnessPolicy: ruled,
+        },
+        GET(`${MANAGEMENT_PREFIX}/devices`),
+      );
+      const body = res.body as { devices: { freshness: string }[] };
+      expect(body.devices[0]?.freshness).toBe(expected);
+    }
+  });
+
+  it("still reports NEVER_SEEN when neither source has anything", async () => {
+    const res = await handleManagementRequest(
+      {
+        db: db(ACTIVE_ADMIN, [{ ...ROW, last_observed_at: null, last_seen_at: null }]),
+        verifier: verifier(USER),
+        now: () => new Date("2026-08-10T12:00:00Z"),
+        freshnessPolicy: { staleAfterSeconds: 90, offlineAfterSeconds: 300 },
+      },
+      GET(`${MANAGEMENT_PREFIX}/devices`),
+    );
+    const body = res.body as { devices: { freshness: string; lastSeenAt: string | null }[] };
+    expect(body.devices[0]?.freshness).toBe("NEVER_SEEN");
+    expect(body.devices[0]?.lastSeenAt).toBeNull();
+  });
+
   it("never reports ONLINE while the threshold is unruled", async () => {
     const seen = { ...ROW, last_observed_at: "2026-08-10T11:59:59Z" };
     const res = await handleManagementRequest(

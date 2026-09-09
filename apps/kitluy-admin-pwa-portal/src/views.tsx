@@ -919,6 +919,12 @@ export function PendingApprovalsView(props: {
                 label={t(locale, "pendingLastRegistration")}
                 value={device.lastRegistrationAt}
               />
+              {/* The 60s registration beat. Every board in this queue is by
+                  definition answering — one that stops drops out of the list
+                  entirely (owner rule, 2026-09-08) — so this says HOW recently,
+                  which is what makes it safe to walk over and check the board
+                  rather than hunting for hardware that is not powered. */}
+              <Evidence label={t(locale, "pendingLastSeen")} value={device.lastSeenAt} />
               {/* The device id is shown because contract §9 makes it the one
                 identifier a pending device receives — it is what an operator on
                 the phone can quote back. */}

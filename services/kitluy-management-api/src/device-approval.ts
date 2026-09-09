@@ -60,6 +60,13 @@ export interface PendingRegistrationDto {
   readonly firstSeenAt: string | null;
   readonly lastRegistrationAt: string | null;
   /**
+   * Last moment the board was heard from — the 60s registration beat, falling
+   * back to its last registration. Every row in this list is by definition
+   * recent (see the query's unseen filter), so this tells a verifier HOW recent:
+   * "answered 12s ago" is what makes it safe to walk over and check the board.
+   */
+  readonly lastSeenAt: string | null;
+  /**
    * Open trust incidents. A non-empty list makes the device UNAPPROVABLE — the
    * governed door refuses it — so the UI must disable approval and say why
    * rather than letting a verifier discover it as a server error.
@@ -96,6 +103,7 @@ interface PendingRow {
   enrollment_sequence: string | number | null;
   first_seen_at: string | null;
   last_registration_at: string | null;
+  last_seen_at: string | null;
   incidents: readonly PendingIncidentDto[] | null;
 }
 
@@ -125,6 +133,7 @@ const PENDING_QUERY = `
          me.enrollment_sequence,
          d.created_at                           as first_seen_at,
          di.created_at                          as last_registration_at,
+         greatest(sight.last_seen_at, di.created_at) as last_seen_at,
          inc.incidents
     from kitluy_devices.devices d
     left join kitluy_devices.hardware_profiles hp on hp.id = d.hardware_profile_id
@@ -150,6 +159,10 @@ const PENDING_QUERY = `
         join kitluy_devices.hardware_manifest_signals hms on hms.manifest_id = hm.id
        where hm.device_id = d.id
     ) sig on true
+    -- The 60s registration beat (group 0216). The greatest() above falls back to
+    -- the last registration for a board enrolled before sightings existed; it
+    -- ignores nulls, and once the board has polled the beat is always the later.
+    left join kitluy_devices.device_registration_sightings sight on sight.device_id = d.id
     left join lateral (
       select jsonb_agg(jsonb_build_object(
                'incidentType', ti.incident_type::text,
@@ -161,6 +174,20 @@ const PENDING_QUERY = `
        where ti.device_id = d.id and ${OPEN_INCIDENT_PREDICATE}
     ) inc on true
    where d.lifecycle_state = 'manufactured'
+     -- OWNER RULE (2026-09-08): liveness is tracked for APPROVED devices; a board
+     -- still waiting for approval that has stopped answering simply leaves the
+     -- queue. An Admin approves hardware they can point at, and a Pi unplugged
+     -- yesterday sitting in "waiting for approval" is an instruction to go and
+     -- verify a board that is not powered.
+     --
+     -- Nothing is deleted and no state is written: the row reappears the moment
+     -- the board polls again, because this reads the beat rather than recording a
+     -- decision about it. A board with NO liveness evidence at all (never
+     -- self-registered, e.g. enrolled at a QA station) has a null here and is
+     -- KEPT — absence of evidence is not evidence of absence, and hiding it would
+     -- strand it with no way back.
+     and (greatest(sight.last_seen_at, di.created_at) is null
+          or greatest(sight.last_seen_at, di.created_at) > now() - ($2::integer * interval '1 second'))
    order by d.created_at desc
    limit $1`;
 
@@ -205,6 +232,7 @@ function toDto(row: PendingRow): PendingRegistrationDto {
     enrollmentSequence: row.enrollment_sequence === null ? null : Number(row.enrollment_sequence),
     firstSeenAt: row.first_seen_at,
     lastRegistrationAt: row.last_registration_at,
+    lastSeenAt: row.last_seen_at,
     openIncidents: incidents,
     suspectedCredentialReuse,
     verificationEvidenceRecorded: false,
@@ -213,12 +241,29 @@ function toDto(row: PendingRow): PendingRegistrationDto {
   };
 }
 
+/**
+ * How long a board may go unheard before it leaves the approval queue.
+ *
+ * Not a new number: it is the owner-ruled OFFLINE threshold (OD-EDGE-LIVENESS-001,
+ * 300s) that the fleet badges already use, so "OFFLINE" and "gone from the queue"
+ * can never disagree. Callers pass the configured value; this default exists only
+ * so a caller that has not been wired yet keeps the ruled behaviour rather than
+ * silently showing everything.
+ */
+export const DEFAULT_PENDING_UNSEEN_AFTER_SECONDS = 300;
+
 export async function listPendingRegistrations(
   db: DatabaseHandle,
-  options: { readonly limit?: number } = {},
+  options: { readonly limit?: number; readonly unseenAfterSeconds?: number } = {},
 ): Promise<readonly PendingRegistrationDto[]> {
   const limit = Math.min(Math.max(options.limit ?? 200, 1), 500);
-  const { rows } = await db.query<PendingRow>(PENDING_QUERY, [limit]);
+  // Floored at 1s: a zero or negative window would make `now() - 0` hide every
+  // board including one that answered this second.
+  const unseenAfterSeconds = Math.max(
+    Math.trunc(options.unseenAfterSeconds ?? DEFAULT_PENDING_UNSEEN_AFTER_SECONDS),
+    1,
+  );
+  const { rows } = await db.query<PendingRow>(PENDING_QUERY, [limit, unseenAfterSeconds]);
   return rows.map(toDto);
 }
 

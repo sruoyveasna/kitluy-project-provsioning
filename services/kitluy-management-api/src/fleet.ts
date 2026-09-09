@@ -113,7 +113,40 @@ interface FleetRow {
   terminal_assignment_count: string | number | null;
   open_incident_count: string | number | null;
   last_observed_at: string | null;
+  /** Group 0216. The 60s registration beat; null until a board has polled once. */
+  last_seen_at: string | null;
   fleet_status: string | null;
+}
+
+/**
+ * The most recent moment ANY source saw this device, or null when none did.
+ *
+ * There are two independent sources and neither subsumes the other:
+ * `last_observed_at` is enrolment-time hardware evidence, which is null for
+ * every board still waiting for approval, and `last_seen_at` is the 60s
+ * registration beat `bin/cloud-registration.ts` sends for as long as the board
+ * is powered. Reporting only the first is why a running Pi read `NEVER_SEEN`.
+ *
+ * Composed HERE rather than in the view: `device_fleet_status.last_observed_at`
+ * has a settled meaning that group 0122 owns, and widening it in place would
+ * change that column for every other reader. This route decides what "seen"
+ * means for an operator looking at a badge.
+ */
+function mostRecent(a: string | null | undefined, b: string | null | undefined): string | null {
+  // `undefined`, not just `null`: a row from a query that did not select the
+  // column has the field ABSENT. Treating that as a date produced NaN, which
+  // `deriveFreshness` reports as UNKNOWN — a device that was plainly ONLINE
+  // read as unknowable because of a column nobody asked for.
+  const left = a ?? null;
+  const right = b ?? null;
+  if (left === null) return right;
+  if (right === null) return left;
+  const lt = new Date(left).getTime();
+  const rt = new Date(right).getTime();
+  // An unparseable timestamp must not win the comparison and blank out a good one.
+  if (Number.isNaN(lt)) return Number.isNaN(rt) ? null : right;
+  if (Number.isNaN(rt)) return left;
+  return lt >= rt ? left : right;
 }
 
 function toDto(row: FleetRow, policy: FreshnessPolicy, now: Date): FleetDeviceDto {
@@ -133,9 +166,9 @@ function toDto(row: FleetRow, policy: FreshnessPolicy, now: Date): FleetDeviceDt
     locationLabel: row.location_label ?? null,
     terminalAssignmentCount: Number(row.terminal_assignment_count ?? 0),
     openIncidentCount: Number(row.open_incident_count ?? 0),
-    lastSeenAt: row.last_observed_at,
+    lastSeenAt: mostRecent(row.last_observed_at, row.last_seen_at),
     fleetStatus: row.fleet_status,
-    freshness: deriveFreshness(row.last_observed_at, policy, now),
+    freshness: deriveFreshness(mostRecent(row.last_observed_at, row.last_seen_at), policy, now),
     requiresAttention:
       ATTENTION_LIFECYCLES.has(row.lifecycle_state) || Number(row.open_incident_count ?? 0) > 0,
   };
@@ -151,7 +184,8 @@ const FLEET_COLUMNS = `f.device_record_id, f.asset_tag, f.device_class, f.lifecy
        f.tenant_id, f.digital_store_id, f.store_location_id,
        ds.store_code || ' — ' || ds.name as digital_store_label,
        sl.location_code || ' — ' || sl.name as location_label,
-       f.terminal_assignment_count, f.open_incident_count, f.last_observed_at, f.fleet_status`;
+       f.terminal_assignment_count, f.open_incident_count, f.last_observed_at,
+       f.last_seen_at, f.fleet_status`;
 
 const FLEET_FROM = `kitluy_devices.device_fleet_status f
        left join kitluy_core.digital_stores ds on ds.id = f.digital_store_id

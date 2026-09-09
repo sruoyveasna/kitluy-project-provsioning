@@ -1277,7 +1277,16 @@ export async function handleManagementRequest(
     );
     if (outcome.kind === "deny") return denialResponse(outcome);
 
-    const pending = await listPendingRegistrations(deps.db, { limit: DEVICE_PAGE_LIMIT });
+    // A board that stopped answering leaves the queue (owner rule, 2026-09-08).
+    // The window is the SAME ruled OFFLINE threshold the fleet badges use, so a
+    // device can never read OFFLINE in one view and "waiting" in the other.
+    const unseenAfter = deps.freshnessPolicy?.offlineAfterSeconds ?? undefined;
+    const pending = await listPendingRegistrations(deps.db, {
+      limit: DEVICE_PAGE_LIMIT,
+      ...(unseenAfter !== null && unseenAfter !== undefined
+        ? { unseenAfterSeconds: unseenAfter }
+        : {}),
+    });
     return {
       status: 200,
       body: {

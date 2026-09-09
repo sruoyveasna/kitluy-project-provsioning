@@ -81,6 +81,8 @@ export interface PendingRegistrationView {
   readonly enrollmentSequence: number | null;
   readonly firstSeenAt: string | null;
   readonly lastRegistrationAt: string | null;
+  /** The 60s registration beat; the board is in this list because it is answering. */
+  readonly lastSeenAt: string | null;
   readonly openIncidents: readonly {
     readonly incidentType: string;
     readonly severity: string;
