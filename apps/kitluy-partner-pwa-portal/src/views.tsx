@@ -423,6 +423,11 @@ export function ProvisioningLadder(props: {
     current: "rungCurrent",
     not_reported: "rungNotReported",
     blocked: "rungBlocked",
+    // DISTINCT from not_reported on purpose: that one means "nothing has been
+    // reported YET", which the ladder's own footnote promises. This one means
+    // nothing ever will in this build, and showing them alike made a working
+    // terminal look stalled behind a step that could never complete.
+    unbuilt: "rungUnbuilt",
   };
   const rungClass = (state: LadderRung["state"]) =>
     state === "done"

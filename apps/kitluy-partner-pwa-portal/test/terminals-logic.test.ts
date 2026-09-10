@@ -231,7 +231,7 @@ describe("the ladder reports, never infers", () => {
       locked: false,
     });
     const s = state(deriveLadder({ hub: active, terminal: terminal(), session }, NOW));
-    expect(s).toMatchObject({ issued: "done", redeemed: "current", hubPaired: "not_reported" });
+    expect(s).toMatchObject({ issued: "done", redeemed: "current", hubPaired: "unbuilt" });
   });
 
   it("an expired session is not an issued code", () => {
@@ -258,7 +258,7 @@ describe("the ladder reports, never infers", () => {
       },
     });
     const rungs = deriveLadder({ hub: active, terminal: bound, session: null }, NOW);
-    expect(state(rungs)).toMatchObject({ issued: "done", redeemed: "done", hubPaired: "current" });
+    expect(state(rungs)).toMatchObject({ issued: "done", redeemed: "done", hubPaired: "unbuilt" });
     expect(rungs.find((r) => r.key === "redeemed")?.detail).toBe("KL-6783D70CB6BF");
   });
 
@@ -274,7 +274,7 @@ describe("the ladder reports, never infers", () => {
     const s = state(deriveLadder({ hub: active, terminal: bound, session: null }, NOW));
     expect(s).toMatchObject({
       activated: "done",
-      hubPaired: "current",
+      hubPaired: "unbuilt",
       appInstalled: "not_reported",
       pinSet: "not_reported",
       active: "not_reported",
@@ -295,7 +295,7 @@ describe("the ladder reports, never infers", () => {
       hubActive: "blocked",
       issued: "done",
       redeemed: "done",
-      hubPaired: "not_reported",
+      hubPaired: "unbuilt",
     });
     expect(rungs[0]?.reason).toBe("hubNotActive");
   });
@@ -303,6 +303,56 @@ describe("the ladder reports, never infers", () => {
   it("an unreported Hub blocks with its own reason", () => {
     const rungs = deriveLadder({ hub: hubReadiness({}), terminal: terminal(), session: null }, NOW);
     expect(rungs[0]).toMatchObject({ state: "blocked", reason: "hubUnreported" });
+  });
+
+  describe("a rung nothing can report is not shown as one being waited for", () => {
+    // THE BUG (2026-09-09): `hubPaired` is hardcoded false — there is no reporter
+    // on the device, no field in the API and nothing to compute from — but it was
+    // rendered as `not_reported`, which the ladder's own footnote promises means
+    // "nothing has been reported YET". It stayed invisible until a Terminal first
+    // reached `activated`, at which point the ladder showed rung 5 done above a
+    // rung 4 that was permanently pending: an ordering that cannot happen.
+    it("marks hubPaired unbuilt, never current or not_reported", () => {
+      for (const input of [
+        { hub: active, terminal: terminal({}), session: null },
+        { hub: pending, terminal: terminal({}), session: null },
+      ]) {
+        const s = state(deriveLadder(input, NOW));
+        expect(s.hubPaired).toBe("unbuilt");
+      }
+    });
+
+    it("does not promote the rung AFTER it to current", () => {
+      // Saying "we are waiting on the app install" would be a second untruth: it
+      // sits behind a step that can never complete.
+      const bound = terminal({
+        boundDevice: {
+          deviceId: "d",
+          deviceReference: "KL-1",
+          lifecycle: "active",
+          assignmentState: "active",
+        },
+      });
+      const s = state(deriveLadder({ hub: active, terminal: bound, session: null }, NOW));
+      expect(s.appInstalled).toBe("not_reported");
+      expect(s.pinSet).toBe("not_reported");
+      expect(s.active).toBe("not_reported");
+    });
+
+    it("still lets a genuinely reportable rung go done above it", () => {
+      // The ordering that exposed the bug: activated is real and must stay green.
+      const bound = terminal({
+        boundDevice: {
+          deviceId: "d",
+          deviceReference: "KL-1",
+          lifecycle: "active",
+          assignmentState: "active",
+        },
+      });
+      const s = state(deriveLadder({ hub: active, terminal: bound, session: null }, NOW));
+      expect(s.activated).toBe("done");
+      expect(s.hubPaired).toBe("unbuilt");
+    });
   });
 });
 

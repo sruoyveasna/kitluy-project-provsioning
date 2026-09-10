@@ -116,6 +116,7 @@ export const MESSAGES = {
     rungDone: "រួចរាល់",
     rungCurrent: "ជំហានបន្ទាប់",
     rungNotReported: "មិនទាន់រាយការណ៍",
+    rungUnbuilt: "មិនទាន់មានក្នុងកំណែនេះ",
     rungBlocked: "ត្រូវបានរារាំង",
     ladderHonesty: "ជំហានដែលមិនទាន់រាយការណ៍ មិនមែនបរាជ័យទេ — គ្រាន់តែមិនទាន់មានព័ត៌មានអំពីវានៅឡើយ។",
     dataAsOf: "ទិន្នន័យគិតត្រឹម",
@@ -226,6 +227,7 @@ export const MESSAGES = {
     rungDone: "Done",
     rungCurrent: "Next",
     rungNotReported: "Not yet reported",
+    rungUnbuilt: "Not available in this build",
     rungBlocked: "Blocked",
     ladderHonesty:
       "A step that is not yet reported has not failed — nothing has been reported about it yet.",

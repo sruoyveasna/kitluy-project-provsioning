@@ -63,7 +63,26 @@ export const LADDER_RUNGS = [
   "active",
 ] as const;
 export type RungKey = (typeof LADDER_RUNGS)[number];
-export type RungState = "done" | "current" | "not_reported" | "blocked";
+export type RungState = "done" | "current" | "not_reported" | "blocked" | "unbuilt";
+
+/**
+ * Rungs nothing in this build can ever report.
+ *
+ * `not_reported` promises "nothing has been reported about it YET", and the
+ * ladder says so in its own footnote. For these that is untrue: there is no
+ * reporter on the device, no field in the API, and nothing to compute from, so
+ * they can never advance no matter what the fleet does.
+ *
+ * It stayed invisible until a Terminal first reached `activated` on 2026-09-09,
+ * at which point the ladder showed rung 5 complete above a rung 4 that was
+ * permanently pending — an ordering that cannot happen and made a working
+ * device look broken.
+ *
+ * `hubPaired` needs `terminal-client`, the governed application release, which
+ * is not in the Terminal image. When it ships, delete the entry: the rung then
+ * has a real reporter and goes back to meaning what it says.
+ */
+export const UNREPORTABLE_RUNGS: ReadonlySet<string> = new Set(["hubPaired"]);
 
 export interface LadderRung {
   readonly key: RungKey;
@@ -113,6 +132,8 @@ export function deriveLadder(
     // a fact chain, not an inference about a later rung.
     issued: sessionLive || (session?.paired ?? false) || bound !== null,
     redeemed: (session?.paired ?? false) || bound !== null,
+    // Nothing reports this. See UNREPORTABLE_RUNGS — it is rendered as
+    // "not available in this build" rather than as a step still being waited on.
     hubPaired: false,
     activated: bound !== null && bound.lifecycle === "active",
     appInstalled: false,
@@ -127,6 +148,15 @@ export function deriveLadder(
 
   let nextMarked = false;
   return LADDER_RUNGS.map((key): LadderRung => {
+    // Checked BEFORE `current`, so an unbuildable rung never becomes the step
+    // the operator is told to wait for — which is exactly how this misled.
+    if (!done[key] && UNREPORTABLE_RUNGS.has(key)) {
+      // Nothing after an unbuildable rung is "current" either. A step sitting
+      // behind one that can never complete is not the thing being waited for,
+      // and saying so would replace one untruth with another.
+      nextMarked = true;
+      return { key, state: "unbuilt" };
+    }
     if (done[key]) {
       const d = detail[key];
       return d === undefined ? { key, state: "done" } : { key, state: "done", detail: d };
