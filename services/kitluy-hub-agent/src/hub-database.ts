@@ -401,6 +401,7 @@ export const HUB_MIGRATION_ORDER = [
   // sync-metadata-only acknowledgment carve-out (any lifecycle, no version
   // advance); every 0040 business rule retained.
   "0041_booking_draft_sync_acknowledgment.sql",
+  "0042_terminal_pairing_signing_credential.sql",
 ] as const;
 
 /**

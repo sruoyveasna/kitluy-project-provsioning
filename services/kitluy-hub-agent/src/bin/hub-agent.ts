@@ -292,9 +292,86 @@ async function main(): Promise<void> {
   process.on("SIGINT", () => shutdown("SIGINT"));
 }
 
-main().catch((error: unknown) => {
-  log.error("Store Hub agent failed to start", {
-    error: error instanceof Error ? error.message : String(error),
+/**
+ * `hub-agent publish-development-configuration <grants.json>`
+ *
+ * A SUBCOMMAND RATHER THAN A SECOND BUNDLE, because the packaging step installs
+ * exactly one entrypoint (`/usr/lib/kitluy/lib/hub-agent/main.mjs`) and
+ * `runtime-manifest.json` is checked against that path. A second artifact would
+ * mean a second manifest component for a tool that runs a handful of times in a
+ * board's life.
+ *
+ * The grants file is the terminal projection delivery that
+ * `hub-provision-terminal` already applied — it carries `profileCodes` — so an
+ * operator publishes exactly what the cloud says the Partner granted.
+ */
+async function publishDevelopmentConfigurationCommand(path: string): Promise<void> {
+  const { readFileSync } = await import("node:fs");
+  const { publishDevelopmentConfiguration } = await import("../hub/dev-configuration.js");
+  const environment = process.env.KITLUY_ENVIRONMENT ?? "unknown";
+
+  const delivery = JSON.parse(readFileSync(path, "utf8")) as {
+    terminalDeviceId?: string;
+    tenantId?: string;
+    digitalStoreId?: string;
+    storeLocationId?: string;
+    profileCodes?: readonly string[];
+  };
+  const required = ["terminalDeviceId", "tenantId", "digitalStoreId", "storeLocationId"] as const;
+  for (const field of required) {
+    if (typeof delivery[field] !== "string" || delivery[field] === "") {
+      throw new Error(`the delivery has no ${field}`);
+    }
+  }
+  const profileCodes = delivery.profileCodes ?? [];
+  if (profileCodes.length === 0) {
+    throw new Error(
+      "the delivery grants no profiles; the Hub would activate a configuration that " +
+        "permits nothing and every pairing would still be refused",
+    );
+  }
+
+  const pool = createHubPool();
+  try {
+    const outcome = await publishDevelopmentConfiguration(pool, {
+      tenantId: delivery.tenantId as string,
+      digitalStoreId: delivery.digitalStoreId as string,
+      locationId: delivery.storeLocationId as string,
+      environment,
+      grants: [
+        { terminalDeviceId: delivery.terminalDeviceId as string, profileCodes },
+      ],
+    });
+    log.info("development configuration activated", {
+      snapshotId: outcome.snapshotId,
+      snapshotVersion: outcome.snapshotVersion,
+      previousSnapshotId: outcome.previousSnapshotId,
+      grantsWritten: outcome.grantsWritten,
+      profiles: profileCodes.join(", "),
+    });
+  } finally {
+    await pool.end().catch(() => undefined);
+  }
+}
+
+const subcommand = process.argv[2];
+if (subcommand === "publish-development-configuration") {
+  const path = process.argv[3];
+  if (path === undefined) {
+    log.error("publish-development-configuration needs the delivery file path");
+    process.exit(2);
+  }
+  publishDevelopmentConfigurationCommand(path).catch((error: unknown) => {
+    log.error("development configuration was REFUSED", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    process.exit(1);
   });
-  process.exit(1);
-});
+} else {
+  main().catch((error: unknown) => {
+    log.error("Store Hub agent failed to start", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    process.exit(1);
+  });
+}

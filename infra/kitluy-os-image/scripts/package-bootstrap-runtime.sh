@@ -36,6 +36,37 @@ MANIFEST="${ROOT}/runtime-manifest.json"
   exit 2
 }
 
+# PRESENT IS NOT THE SAME AS CURRENT.
+#
+# This script COPIES `dist/*.js`; it never compiles. The check above only asks
+# whether a compile ever happened, so a `dist` from a previous day satisfies it
+# perfectly — and the image then ships source that does not match the tree it
+# was built from.
+#
+# That is not hypothetical. On 2026-09-12 the `edge-session.ts` umask fix was
+# written, unit-tested and committed to the working tree, the image was rebuilt,
+# and the shipped `edge-session.js` contained none of it: `dist` was 16 hours
+# old. The image passed every gate, because every gate read either the source
+# tree or the copied artifact — and the two had silently diverged.
+#
+# Comparing newest-source against oldest-shipped-artifact catches exactly that,
+# and says which file is stale rather than "rebuild something".
+STALE_SRC=""
+if [[ -d "${AGENT}/src" ]]; then
+  while IFS= read -r TS; do
+    JS="${AGENT}/dist/$(basename "${TS%.ts}").js"
+    [[ -f "$JS" ]] || continue
+    [[ "$TS" -nt "$JS" ]] && STALE_SRC="${STALE_SRC} $(basename "$TS")"
+  done < <(find "${AGENT}/src" -maxdepth 1 -name '*.ts' ! -name '*.d.ts' 2>/dev/null)
+fi
+if [[ -n "$STALE_SRC" ]]; then
+  echo "REFUSED: ${AGENT}/dist is STALE — newer source than its compiled output:" >&2
+  for F in $STALE_SRC; do echo "    $F" >&2; done
+  echo "  The image would ship code that does not match this tree." >&2
+  echo "  Run: pnpm --filter @kitluy-services/kitluy-device-firstboot-agent build" >&2
+  exit 2
+fi
+
 # SHIP ONLY THE DEVICE CLOSURE. `dist/` also contains factory.js and
 # factory-gateway.js — the MANUFACTURING STATION path, which talks to a database
 # through a DatabaseHandle and carries the governed refusal-code vocabulary
@@ -80,6 +111,26 @@ DEVICE_MODULES=(
   # `kitluy-device-config.service` is inert by ConditionPathExists and the
   # Settings screen reports the device unreachable rather than failing oddly.
   bin/device-config-broker device-config network
+  # THE RELEASE RUNTIME (U1). The update agent grew from a precondition reporter
+  # into the thing that actually fetches, verifies and installs a release, so
+  # its closure grows with it.
+  #
+  # `release-verify` is a MIRROR of the canonical contract in
+  # @kitluy/device-identity, not an import: the device closure ships node
+  # built-ins only, and importing a workspace package would pull `pg` onto a
+  # shop-floor appliance. `test/release-verify-drift.test.ts` is what keeps the
+  # mirror honest.
+  #
+  # `release-archive` is the safe extractor — it can create a directory or a
+  # regular file and has no code that could create a symlink, a device node or
+  # anything outside the release root.
+  durable-write release-store release-verify release-trust
+  release-archive release-artifact release-assignment release-install release-status
+  adapters/http-release-source
+  # The COMPOSITION. Without this the agent reports status for ever and installs
+  # nothing — the defect found before the first flash, now gated by
+  # test/release-runtime.test.ts.
+  release-runtime
   # The operational certificate. A Terminal that has paired is otherwise stuck
   # at "Assigned to a Store, awaiting activation" for ever: activation is
   # certificate-backed for BOTH device classes, and nothing else on the device
@@ -93,6 +144,19 @@ DEVICE_MODULES=(
   adapters/http-operational-certificate-client
   paired-identity
   bin/operational-tls
+  # The link to the Store Hub. A terminal that has a certificate and cannot use
+  # it is not a till; this is the client that discovers the Hub over mDNS,
+  # proves itself with mutual TLS, pairs Hub-locally, and reads authority time,
+  # eligibility and configuration. It writes only a status file, which the
+  # sandboxed Device Shell reads — the Shell runs as `kitluy-terminal` and
+  # cannot hold the operational private key.
+  #
+  # `edge-discovery-record` is the agent-local copy of the discovery contract,
+  # kept honest by `test/edge-discovery-drift.test.ts` against
+  # @kitluy/device-identity — the same zero-runtime-dependency reason as
+  # `hub-claim-bytes` and `device-registration-bytes`.
+  edge-discovery-record edge-mdns edge-transport edge-pairing edge-session
+  bin/terminal-edge
 )
 rm -rf "$LIB_DIR"
 mkdir -p "$LIB_DIR"

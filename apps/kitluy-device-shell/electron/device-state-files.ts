@@ -22,6 +22,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { readTerminalAssignment } from "./terminal-assignment.js";
 import type {
+  ReleaseView,
   AssignmentView,
   NetworkState,
   PairingPhase,
@@ -38,12 +39,18 @@ export interface DeviceRoots {
   readonly netDir: string;
   /** Default `/proc/net/route`. */
   readonly routePath: string;
+  /**
+   * The slot-shared release store. Read-only from here: the shell renders what
+   * the update runtime recorded and never writes to it.
+   */
+  readonly releaseStoreDir: string;
 }
 
 export const DEFAULT_ROOTS: DeviceRoots = {
   stateDir: "/var/lib/kitluy",
   netDir: "/sys/class/net",
   routePath: "/proc/net/route",
+  releaseStoreDir: "/persistent/shared/kitluy/releases/device-shell",
 };
 
 const REGISTRATION_PHASES: readonly RegistrationPhase[] = [
@@ -206,6 +213,78 @@ export function readAssignment(stateDir = DEFAULT_ROOTS.stateDir): AssignmentVie
   };
 }
 
+/**
+ * What is actually running, for the screen (U1 requirement 4).
+ *
+ * TWO SOURCES, AND THE LAUNCHER IS THE ONE THAT KNOWS. `running-source.json` is
+ * written by `/usr/lib/kitluy/device-shell` immediately before it execs, so it
+ * is the only honest witness to what this process was started from; the journal
+ * says what is INSTALLED, which can differ. Reporting the journal alone would
+ * show the assigned version on a board that is actually running the image copy
+ * — the exact confusion the owner asked to be made impossible.
+ */
+export function readRelease(roots: DeviceRoots = DEFAULT_ROOTS): ReleaseView | null {
+  const witness = readJsonOrNull(join(roots.stateDir, "terminal", "running-source.json"));
+  const journal = readJsonOrNull(join(roots.releaseStoreDir, "journal.json"));
+  if (witness === null && journal === null) return null;
+
+  const rawSource = typeof witness?.["source"] === "string" ? witness["source"] : "";
+  const source: ReleaseView["source"] =
+    rawSource === "RELEASE" || rawSource === "IMAGE_FALLBACK" ? rawSource : "UNKNOWN";
+
+  const installedVersion =
+    typeof journal?.["committedVersion"] === "string" ? journal["committedVersion"] : null;
+  const committed = typeof journal?.["committed"] === "string" ? journal["committed"] : null;
+
+  // The running version is only claimed when the launcher says a release ran.
+  // For the image copy it stays null on purpose: there is no release version to
+  // report, and borrowing the installed one would be the lie.
+  const app = typeof witness?.["app"] === "string" ? witness["app"] : "";
+  const runningIsCommitted = committed !== null && app.includes(`rel-${committed}`);
+  const runningVersion = source === "RELEASE" && runningIsCommitted ? installedVersion : null;
+
+  const stale =
+    (source === "IMAGE_FALLBACK" && committed !== null) ||
+    (source === "RELEASE" && committed !== null && !runningIsCommitted);
+
+  const lastResult = journal?.["lastResult"] as Record<string, unknown> | null | undefined;
+  const lastOutcome =
+    typeof lastResult?.["outcome"] === "string"
+      ? (lastResult["outcome"] as ReleaseView["lastOutcome"])
+      : null;
+  const lastReason = typeof lastResult?.["reason"] === "string" ? lastResult["reason"] : null;
+
+  let fallbackReason: string | null = null;
+  if (source === "IMAGE_FALLBACK") {
+    fallbackReason =
+      committed !== null
+        ? "a release is installed; it starts on the next restart"
+        : (lastReason ?? "no release has been installed on this device");
+  }
+
+  return {
+    source,
+    runningVersion,
+    installedVersion,
+    stale,
+    fallbackReason,
+    lastOutcome,
+    lastReason,
+  };
+}
+
+/** Never throws: an unreadable or malformed file reads as absent. */
+function readJsonOrNull(path: string): Record<string, unknown> | null {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+    return typeof parsed === "object" && parsed !== null
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export function readSnapshot(roots: DeviceRoots = DEFAULT_ROOTS): ShellSnapshot {
   const registration = readRegistration(roots.stateDir);
   const deviceRecordId = readDeviceRecordId(roots.stateDir);
@@ -218,5 +297,6 @@ export function readSnapshot(roots: DeviceRoots = DEFAULT_ROOTS): ShellSnapshot 
       ? {}
       : { keyFingerprint: registration.keyFingerprint }),
     ...(deviceRecordId === undefined ? {} : { deviceRecordId }),
+    release: readRelease(roots),
   };
 }

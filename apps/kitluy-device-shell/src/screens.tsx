@@ -17,7 +17,7 @@ import { CROCKFORD_BASE32, type CodeEntryState } from "./model/code-entry.js";
 import { messagesFor } from "./messages.js";
 import type { WaitingSub } from "./model/shell-state.js";
 
-const BRAND = "KitLuy";
+const BRAND = "KitLuy OTA-A";
 
 /** The shared frame: the brand, the board label, and the language toggle. */
 export function Chrome(props: {
@@ -27,6 +27,11 @@ export function Chrome(props: {
   /** Optional so every existing caller and test keeps working unchanged. */
   settingsOpen?: boolean;
   onToggleSettings?: () => void;
+  /**
+   * What software is running (U1 requirement 4). Optional for the same reason:
+   * an image without the release runtime renders exactly as it does today.
+   */
+  release?: { readonly text: string; readonly tone: "normal" | "attention" } | null;
   children: JSX.Element;
 }): JSX.Element {
   const m = messagesFor(props.locale);
@@ -60,6 +65,21 @@ export function Chrome(props: {
       <footer className="kt-foot" data-device-label={props.deviceLabel ?? ""}>
         <span className="kt-foot-k">{m.deviceLabelPrefix}</span>
         <span className="kt-foot-v kt-mono">{props.deviceLabel ?? m.noDeviceLabel}</span>
+        {/*
+          The software line. `data-release-tone="attention"` is what a board
+          running the IMAGE FALLBACK with an update installed carries, so the
+          state is greppable in a screenshot and testable without reading
+          pixels — and can never be confused with a normal running release.
+        */}
+        {props.release == null ? null : (
+          <span
+            className="kt-foot-release"
+            data-release-tone={props.release.tone}
+            data-release-text={props.release.text}
+          >
+            {props.release.text}
+          </span>
+        )}
       </footer>
     </div>
   );

@@ -20,6 +20,7 @@ beforeEach(() => {
     stateDir: join(root, "state"),
     netDir: join(root, "net"),
     routePath: join(root, "route"),
+    releaseStoreDir: join(root, "releases"),
   };
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
@@ -123,8 +124,14 @@ describe("the device record id survives the retired bootstrap file", () => {
 
   it("still prefers bootstrap-state.json where a board carries both", () => {
     const dir = mkdtempSync(join(tmpdir(), "kitluy-recordid-"));
-    writeFileSync(join(dir, "bootstrap-state.json"), JSON.stringify({ deviceRecordId: "from-bootstrap" }));
-    writeFileSync(join(dir, "registration-state.json"), JSON.stringify({ deviceId: "from-registration" }));
+    writeFileSync(
+      join(dir, "bootstrap-state.json"),
+      JSON.stringify({ deviceRecordId: "from-bootstrap" }),
+    );
+    writeFileSync(
+      join(dir, "registration-state.json"),
+      JSON.stringify({ deviceId: "from-registration" }),
+    );
     expect(readDeviceRecordId(dir)).toBe("from-bootstrap");
     rmSync(dir, { recursive: true, force: true });
   });

@@ -63,13 +63,19 @@ Usage: build-rpi-image.sh --profile <pi-terminal> [options]
                           bake the CLOUD registration route into the image,
                           e.g. https://<ref>.supabase.co/functions/v1/device-registration
   --hardware-profile-key <key>
+  --release-source <url>      DEVELOPMENT release source, e.g. http://<lan-ip>:8791
+                              A DEFAULT only; overridable on the device at
+                              /persistent/shared/kitluy/release-source.env
                           bake the hardware profile KEY the device registers as.
                           It must exist in the stack the registration route
                           points at: KL-PI5-TERMINAL-DEV on the local development
                           stacks, CLOUD-TERM-PI5 on hosted development.
-  --enrollment-url <url>  bake the fleet enrollment endpoint into the image.
-                          Retained for the Store Hub's fleet service; a
-                          terminal registers through --registration-url.
+  --enrollment-url <url>  REQUIRED. The fleet service origin that serves
+                          /v1/operational-certificate, e.g. http://<lan-ip>:8787.
+                          Without it the terminal never obtains its operational
+                          certificate, terminal-edge stays NOT_ACTIVATED, and the
+                          board never reaches SERVING. Distinct from
+                          --registration-url: that is a different service.
 
 Options:
   --profile <name>     Image profile to build (required; only pi-terminal builds here).
@@ -95,15 +101,28 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --profile)         PROFILE="${2:-}"; shift 2 ;;
     --channel)         CHANNEL_OVERRIDE="${2:-}"; shift 2 ;;
-    # The fleet enrollment endpoint. Kept so the layer's image.env key stays
-    # populated for a Hub-style build; a terminal does not use it.
+    # The FLEET SERVICE origin — the host serving /v1/operational-certificate,
+    # /v1/device-enrollment and /v1/hub-pairing.
+    #
+    # This comment used to read "a terminal does not use it". That stopped being
+    # true when the terminal gained its operational certificate, and the stale
+    # line cost a reflash on 2026-09-12: the flag was omitted, image.env carried
+    # `KITLUY_ENROLLMENT_BASE_URL=`, and operational-tls logged
+    #   waiting: no KITLUY_ENROLLMENT_BASE_URL in /etc/kitluy/image.env
+    # every 30s for ever. terminal-edge therefore stayed NOT_ACTIVATED and the
+    # board could never reach SERVING — on a card that otherwise looked perfect.
     --enrollment-url)  ENROLLMENT_URL="${2:-}"; shift 2 ;;
     # The CLOUD registration route, as a FULL url. Separate from the fleet
     # endpoint because it is a different service: Supabase does not serve
     # /v1/device-enrollment, and the fleet service does not serve this.
     --registration-url) REGISTRATION_URL="${2:-}"; shift 2 ;;
+    --allow-unconfigured-image) ALLOW_UNCONFIGURED="yes"; shift ;;
     # A stable hardware profile KEY (never a UUID) so the image stays generic.
     --hardware-profile-key) HARDWARE_PROFILE_KEY="${2:-}"; shift 2 ;;
+    # The DEVELOPMENT release source, baked as a DEFAULT. Overridable at
+    # runtime through /persistent/shared/kitluy/release-source.env, so a
+    # workstation that changes address never costs a reflash.
+    --release-source)  RELEASE_SOURCE="${2:-}"; shift 2 ;;
     --build-dir)       BUILD_DIR="${2:-}"; shift 2 ;;
     --filesystem-only) FILESYSTEM_ONLY="yes"; shift ;;
     --collect-only)    COLLECT_ONLY="yes"; shift ;;
@@ -245,7 +264,12 @@ mkdir -p "$BUILD_DIR"
 RIG_OVERRIDES=()
 ENROLLMENT_URL="${ENROLLMENT_URL:-${KITLUY_ENROLLMENT_BASE_URL:-}}"
 REGISTRATION_URL="${REGISTRATION_URL:-${KITLUY_REGISTRATION_URL:-}}"
+ALLOW_UNCONFIGURED="${ALLOW_UNCONFIGURED:-no}"
 HARDWARE_PROFILE_KEY="${HARDWARE_PROFILE_KEY:-${KITLUY_HARDWARE_PROFILE_KEY:-}}"
+# The DEVELOPMENT release source, as a baked DEFAULT. Env-or-flag, like the
+# values above; empty is fine and produces an image whose source is set on the
+# device instead.
+RELEASE_SOURCE="${RELEASE_SOURCE:-${KITLUY_RELEASE_SOURCE:-}}"
 if [[ -n "${KITLUY_DEV_SSH_PUBKEY:-}" ]]; then
   [[ -f "$KITLUY_DEV_SSH_PUBKEY" ]] \
     || die "KITLUY_DEV_SSH_PUBKEY is not a readable file: ${KITLUY_DEV_SSH_PUBKEY}"
@@ -366,6 +390,44 @@ fi
 # the rootfs is read-only and dm-verity protected — nothing on the flashed card
 # can add it later. The fix is a rebuild, and the operator should learn that
 # here rather than with a card in their hand.
+# =============================================================================
+# AN IMAGE THAT CANNOT REACH THE CLOUD IS REFUSED, NOT WARNED.
+#
+# These three values are command-line inputs, not source. When they are absent
+# the build used to WARN and carry on, producing an image that looks perfect,
+# passes every gate, and is inert: no registration route, no profile key, no
+# root pin. On 2026-09-10 exactly that happened — both images were rebuilt with
+# none of them, two SD cards were flashed, and the boards booted and sat there.
+# The warnings were in the build log and were not read.
+#
+# A warning that is routinely ignored is not a control. This refuses.
+#
+# `--allow-unconfigured-image` is the deliberate escape hatch, for building a
+# rootfs whose cloud wiring is supplied some other way. It has to be typed.
+# =============================================================================
+if [[ "$ALLOW_UNCONFIGURED" != "yes" ]]; then
+  MISSING=()
+  [[ -n "$REGISTRATION_URL" ]] || MISSING+=("--registration-url        (the device cannot register at all)")
+  [[ -n "$HARDWARE_PROFILE_KEY" ]] || MISSING+=("--hardware-profile-key    (registration is refused KLUY-REG-UNKNOWN-PROFILE)")
+  [[ -n "${KITLUY_DEV_PKI_DIR:-}" ]] || MISSING+=("\$KITLUY_DEV_PKI_DIR       (no root pin: no operational certificate can be adopted)")
+  [[ -n "$ENROLLMENT_URL" ]] || MISSING+=("--enrollment-url          (no operational certificate: terminal-edge stays NOT_ACTIVATED, never SERVING)")
+  if [[ ${#MISSING[@]} -gt 0 ]]; then
+    printf '\n[%s] REFUSED: this image would be inert on the bench.\n\n' "kitluy-os-image" >&2
+    printf '  missing: %s\n' "${MISSING[@]}" >&2
+    printf '\n  The rootfs is read-only, so none of these can be corrected on the card:\n' >&2
+    printf '  the only fix is a rebuild and another flash.\n\n' >&2
+    printf '  Example:\n' >&2
+    printf '    KITLUY_DEV_SSH_PUBKEY=$HOME/.ssh/id_ed25519.pub \\\n' >&2
+    printf '    KITLUY_DEV_PKI_DIR=<workspace>/local-config/het-kitluy-project/dev-pki \\\n' >&2
+    printf '      %s --profile %s --environment development \\\n' "$0" "$PROFILE" >&2
+    printf '        --registration-url http://<lan-ip>:54371/functions/v1/device-registration \\\n' >&2
+    printf '        --enrollment-url http://<lan-ip>:8787 \\\n' >&2
+    printf '        --hardware-profile-key <KEY>\n\n' >&2
+    printf '  Deliberately building an unconfigured rootfs? Pass --allow-unconfigured-image.\n\n' >&2
+    exit 2
+  fi
+fi
+
 if [[ -n "$REGISTRATION_URL" ]]; then
   RIG_OVERRIDES+=("IGconf_kitluy_registration_url=${REGISTRATION_URL}")
   log "cloud registration route baked: ${REGISTRATION_URL}"
@@ -437,6 +499,43 @@ if [[ -n "${KITLUY_DEV_PKI_DIR:-}" && -f "${KITLUY_DEV_PKI_DIR}/dev-root-ca.crt.
 else
   warn "no \$KITLUY_DEV_PKI_DIR: the image carries NO root pin, and this device"
   warn "  will refuse to adopt any operational certificate until one is built in."
+fi
+
+# ---------------------------------------------------------------------------
+# THE RELEASE TRUST ANCHOR AND THE RELEASE SOURCE (U1)
+# ---------------------------------------------------------------------------
+# The anchor is the PUBLIC record the development PKI writes beside the signing
+# key. It is read as text and passed through; the layer refuses it if it ever
+# contains a private key block, and this refuses to read anything but the public
+# record's own filename.
+#
+# ABSENT IS SAFE here too: with no anchor the update agent refuses every payload
+# rather than accepting an unverified one, so a CI build without the development
+# PKI produces an image that is inert on this path.
+if [[ -n "${KITLUY_DEV_PKI_DIR:-}" && -f "${KITLUY_DEV_PKI_DIR}/dev-release-signing.json" ]]; then
+  # COMPACTED TO ONE LINE. rpi-image-gen parses overrides as `key=value` pairs
+  # and refuses anything containing a newline ("Overrides must be provided as
+  # key=value pairs"), so the pretty-printed record on disk cannot be passed
+  # through as it is. The JSON is identical; only the whitespace differs, and
+  # the PEM's own newlines are already \n escapes inside the string.
+  RELEASE_TRUST_RECORD="$(node -e 'process.stdout.write(JSON.stringify(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))))' "${KITLUY_DEV_PKI_DIR}/dev-release-signing.json")"
+  if grep -q "PRIVATE KEY" <<<"$RELEASE_TRUST_RECORD"; then
+    die "${KITLUY_DEV_PKI_DIR}/dev-release-signing.json contains a PRIVATE KEY block. A device carries public material only."
+  fi
+  RIG_OVERRIDES+=("IGconf_kitluy_release_trust_record=${RELEASE_TRUST_RECORD}")
+  RELEASE_KEY_ID="$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).keyId)' "${KITLUY_DEV_PKI_DIR}/dev-release-signing.json")"
+  log "release trust anchor baked: ${RELEASE_KEY_ID:0:16}... (release_signing, development)"
+else
+  warn "no release trust anchor: this image REFUSES every release payload."
+  warn "  Run: pnpm pki:bootstrap-dev --dir \$KITLUY_DEV_PKI_DIR --release-key-only"
+fi
+
+if [[ -n "$RELEASE_SOURCE" ]]; then
+  RIG_OVERRIDES+=("IGconf_kitluy_release_source=${RELEASE_SOURCE}")
+  log "release source default: ${RELEASE_SOURCE} (overridable on the device)"
+else
+  warn "no --release-source: the image bakes an empty default. Set one on the"
+  warn "  device at /persistent/shared/kitluy/release-source.env, or rebuild."
 fi
 
 [[ ${#RIG_OVERRIDES[@]} -gt 0 ]] && RIG_ARGS+=(-- "${RIG_OVERRIDES[@]}")

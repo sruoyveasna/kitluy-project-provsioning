@@ -64,7 +64,13 @@ LockPersonality=yes
 RestrictRealtime=yes
 # Binds 7443 on the Store LAN, so it needs the network namespace — unlike the
 # storage and database units, which are deliberately PrivateNetwork=yes.
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# AF_NETLINK is not optional. libuv enumerates local interfaces with a netlink
+# socket, so without it Node fails at startup with
+#   uv_interface_addresses returned Unknown system error 97 (EAFNOSUPPORT)
+# and the agent never reaches its own bind-host resolution (hardware,
+# 2026-09-10). It grants no route off the device: netlink talks to the local
+# kernel only.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
 CapabilityBoundingSet=
 # The agent reads its identity and credential from /var/lib/kitluy, and the
 # database socket from /run/postgresql. Both scoped explicitly.

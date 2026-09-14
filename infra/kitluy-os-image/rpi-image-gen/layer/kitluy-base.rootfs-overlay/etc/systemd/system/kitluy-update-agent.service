@@ -4,9 +4,29 @@ After=kitluy-firstboot.service network-online.target
 Wants=network-online.target
 Requires=kitluy-firstboot.service
 ConditionPathExists=/usr/lib/kitluy/update-agent
+# The release store lives on the persistent partition, so this unit must not be
+# started before that partition is mounted. Naming the path makes systemd order
+# the unit after `persistent.mount` and refuse to start it when the mount is
+# absent — without which ExecStartPre= below would attempt to create the store
+# on the read-only erofs root and fail with an error about permissions rather
+# than about the missing filesystem it really is.
+RequiresMountsFor=/persistent/shared
+Requires=kitluy-persistent-store-init.service
+After=kitluy-persistent-store-init.service
 
 [Service]
 Type=simple
+# The store directory is created by kitluy-persistent-store-init.service, a
+# SEPARATE unit, because `ReadWritePaths=` below requires the path to exist
+# before this unit's mount namespace can be built.
+#
+# It was briefly an `ExecStartPre=+/usr/bin/install -d …` here. That cannot
+# work: on systemd 252 the `+` prefix drops privilege restrictions but the
+# namespace is still constructed for the command, so the thing meant to create
+# the directory was refused by the namespace that needed it — `(install)` dying
+# at `status=226/NAMESPACE` on every boot, exactly like the agent it was added
+# to rescue. `Requires=` makes that unit's failure this unit's failure, rather
+# than letting the agent start into a namespace it cannot form.
 ExecStart=/usr/lib/kitluy/update-agent
 User=root
 Restart=always
@@ -22,7 +42,17 @@ RestrictSUIDSGID=yes
 LockPersonality=yes
 RestrictRealtime=yes
 CapabilityBoundingSet=
-ReadWritePaths=/var/lib/kitluy/update
+# The download work area, and the RELEASE STORE.
+#
+# `/persistent/shared/kitluy` is on the persistent partition, which is mounted
+# before local-fs.target by the upstream slot-perst-generator and is SHARED
+# ACROSS A/B SLOTS. That last property is why the store is there and not under
+# /var: /var is bind-mounted per slot, so a store beneath it would vanish on the
+# first system update, taking every installed application with it.
+#
+# ProtectSystem=strict makes everything read-only by default, so this is the
+# only path outside the state directory this unit can write.
+ReadWritePaths=/var/lib/kitluy/update /persistent/shared/kitluy
 StateDirectory=kitluy
 # 0751 — the SAME value every KitLuy unit sharing /var/lib/kitluy declares.
 #

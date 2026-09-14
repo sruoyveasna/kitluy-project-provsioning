@@ -494,5 +494,108 @@ else
   bad "no development root pin is committed to the repository" "CA material in git"
 fi
 
+# ===========================================================================
+# U1 RELEASE DELIVERY, IN THE BUILT ROOTFS
+# ===========================================================================
+# Everything above this point is checked in the SOURCE tree. These are checked
+# in the rootfs the builder actually produced, which is the only place a
+# packaging mistake shows up.
+
+# The image copy of the Device Shell is the FLOOR and must always be there.
+if [[ -f "${ROOTFS}/usr/lib/kitluy/lib/device-shell/package.json" ]]; then
+  ok "the image carries its own Device Shell (the fallback floor)"
+else
+  bad "the image carries its own Device Shell (the fallback floor)" \
+      "a failed release would leave the board with no screen at all"
+fi
+
+# The launcher, as built.
+if grep -qs 'STORE_APP=/persistent/shared/kitluy/releases' "${ROOTFS}/usr/lib/kitluy/device-shell"; then
+  ok "the built launcher prefers an installed release"
+else
+  bad "the built launcher prefers an installed release" "a release would be installed and never run"
+fi
+if grep -qs 'running-source.json' "${ROOTFS}/usr/lib/kitluy/device-shell"; then
+  ok "the built launcher records what it started"
+else
+  bad "the built launcher records what it started" "the image fallback would be invisible"
+fi
+
+# The release runtime modules must be in the shipped closure.
+REL_MISSING=""
+for m in durable-write release-store release-verify release-trust release-archive \
+         release-artifact release-assignment release-install release-status release-runtime; do
+  [[ -f "${ROOTFS}/usr/lib/kitluy/lib/firstboot-agent/${m}.js" ]] || REL_MISSING="${REL_MISSING} ${m}"
+done
+[[ -f "${ROOTFS}/usr/lib/kitluy/lib/firstboot-agent/adapters/http-release-source.js" ]] \
+  || REL_MISSING="${REL_MISSING} adapters/http-release-source"
+if [[ -z "$REL_MISSING" ]]; then
+  ok "the release runtime is in the shipped device closure"
+else
+  bad "the release runtime is in the shipped device closure" "missing:${REL_MISSING}"
+fi
+
+# THE IGNITION. The closure carrying the installer proves nothing if the shipped
+# entrypoint never calls it — which is exactly the defect found before the first
+# flash: a correct image that reported `ready` for ever and installed nothing.
+ENTRY="${ROOTFS}/usr/lib/kitluy/lib/firstboot-agent/bin/update-bootstrap.js"
+if grep -qs "runInstallPass" "$ENTRY" && grep -qs "composeInstallDependencies" "$ENTRY"; then
+  ok "the shipped update agent reaches the install pass"
+else
+  bad "the shipped update agent reaches the install pass" \
+      "the image would boot, register, pair, report ready — and never install anything"
+fi
+
+# The trust registry directory exists, and carries PUBLIC material only.
+if [[ -d "${ROOTFS}/etc/kitluy/trust" ]]; then
+  ok "the trust registry directory exists"
+else
+  bad "the trust registry directory exists" "the update agent would report no_trust_anchor for ever"
+fi
+if ! grep -rqs "PRIVATE KEY" "${ROOTFS}/etc/kitluy/trust" 2>/dev/null; then
+  ok "NO private key material anywhere in the trust registry"
+else
+  bad "NO private key material anywhere in the trust registry" "a signing key reached the image"
+fi
+
+# The baked release source exists as a file (even if empty).
+if [[ -f "${ROOTFS}/etc/kitluy/release.env" ]]; then
+  ok "the baked release source file exists"
+else
+  bad "the baked release source file exists" "the agent's EnvironmentFile-style read would find nothing"
+fi
+
+# THE ENROLLMENT ORIGIN MUST NOT BE EMPTY ON A TERMINAL IMAGE.
+#
+# `KITLUY_ENROLLMENT_BASE_URL=` with no value is how a terminal ends up unable
+# to obtain its operational certificate. operational-tls then logs
+#   waiting: no KITLUY_ENROLLMENT_BASE_URL in /etc/kitluy/image.env
+# every 30s for ever, terminal-edge stays NOT_ACTIVATED, and the board never
+# reaches SERVING — while registering, pairing and drawing its screen normally.
+# The builder refuses this now; this gate is the second wall, because the
+# builder has a documented escape hatch and the image is what gets flashed.
+ENROLL="$(sed -n 's/^KITLUY_ENROLLMENT_BASE_URL=//p' "${ROOTFS}/etc/kitluy/image.env" 2>/dev/null)"
+if [[ -n "$ENROLL" ]]; then
+  ok "the image states a fleet enrollment origin" "$ENROLL"
+else
+  bad "the image states a fleet enrollment origin" \
+      "empty — the terminal can never obtain an operational certificate, and the rootfs is read-only"
+fi
+
+# The image must ship NOTHING in the release store: it is created at runtime,
+# and anything shipped there would be restored over an operator's edit.
+if [[ ! -e "${ROOTFS}/persistent/shared/kitluy/releases" ]]; then
+  ok "the image ships no release store (it is created at runtime)"
+else
+  bad "the image ships no release store (it is created at runtime)" \
+      "shipped content here would overwrite what a device installed"
+fi
+if [[ ! -e "${ROOTFS}/persistent/shared/kitluy/release-source.env" ]]; then
+  ok "the image ships no release-source override (an edit would be overwritten)"
+else
+  bad "the image ships no release-source override (an edit would be overwritten)" \
+      "the override would be restored from the image on every boot"
+fi
+
 printf '\n  %d passed, %d failed, %d skipped\n\n' "$PASS" "$FAIL" "$SKIP"
 [[ $FAIL -eq 0 ]] || exit 1

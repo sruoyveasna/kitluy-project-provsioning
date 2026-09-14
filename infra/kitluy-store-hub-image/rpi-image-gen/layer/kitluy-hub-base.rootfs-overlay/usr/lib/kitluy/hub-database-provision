@@ -48,12 +48,17 @@ mountpoint -q "$DATA_VOLUME" \
 
 [ -x "${PG_BIN}/initdb" ] || die "PostgreSQL 15 is not installed at ${PG_BIN}"
 
-# THE SOCKET DIRECTORY, LEFT TO THE OS WHEN THE OS ALREADY MADE IT.
+# THE SOCKET DIRECTORY, WHICH THE UNIT NOW OWNS.
 #
-# postgresql-common ships a tmpfiles rule that creates /run/postgresql at boot
-# (mode 2775, owner postgres), and /run is a writable tmpfs even under
-# ProtectSystem=full. So it is created here ONLY when that has not happened, and
-# it is NEVER re-chmod'd. Forcing `install -d -m 0755` on the already-created
+# `kitluy-hub-database.service` declares RuntimeDirectory=postgresql, so PID 1
+# creates /run/postgresql (mode 2775, root:postgres) before this script runs.
+# postgresql-common's tmpfiles rule does NOT do it here, whatever its presence
+# in /usr/lib/tmpfiles.d suggests: the root filesystem is read-only erofs, so
+# systemd-tmpfiles-setup.service is condition-skipped and the rule never
+# executes. Believing otherwise cost a full hardware bring-up (2026-09-10).
+#
+# What remains below is a fallback for a unit older than this script, and it is
+# NEVER re-chmod'd. Forcing `install -d -m 0755` on the already-created
 # directory failed on a real Store Hub boot (2026-09-04) with
 #   install: cannot change permissions of '/run/postgresql': Operation not permitted
 # because the unit had it in ReadWritePaths= and systemd bind-mounts such a
@@ -61,8 +66,16 @@ mountpoint -q "$DATA_VOLUME" \
 # whole Hub down (kitluy-hub-database then kitluy-hub-agent never started). The
 # unit no longer lists /run/postgresql for the same reason. The setgid bit
 # (2775) is preserved so sockets created there inherit the postgres group.
+#
+# NO SETGID BIT IN THE FALLBACK. The unit sets RestrictSUIDSGID=yes, which blocks
+# mkdir with S_ISGID, so `install -d -m 2775` never creates the directory at all
+# and then reports the chown step's confusing
+#   install: cannot change owner and permissions of '/run/postgresql': No such file or directory
+# 0775 postgres:postgres makes the socket reachable just as well; the setgid bit
+# is applied by the manager via RuntimeDirectoryMode=, where the filter does not
+# reach.
 if [ ! -d "$SOCKET_DIR" ]; then
-  install -d -m 2775 -o postgres -g postgres "$SOCKET_DIR"
+  install -d -m 0775 -o postgres -g postgres "$SOCKET_DIR"
 fi
 
 # THE CLUSTER IS OWNED BY `postgres`, AND `postgres` HAS TO REACH IT.

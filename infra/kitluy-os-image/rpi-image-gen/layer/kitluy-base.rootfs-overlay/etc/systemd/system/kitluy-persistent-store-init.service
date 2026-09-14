@@ -1,0 +1,65 @@
+[Unit]
+Description=KitLuy release store directory
+Documentation=docs/reports/2026-09-12__U1-HARDWARE-ACCEPTANCE-STOPPED-DEFECTS-AND-CORRECTIONS.md
+
+# WHY THIS UNIT EXISTS INSTEAD OF AN ExecStartPre= ON THE AGENT.
+#
+# The agent declares `ReadWritePaths=/persistent/shared/kitluy`, and systemd
+# requires that path to EXIST when it builds the unit's mount namespace.
+# Nothing else creates it: the release store is deliberately NOT a declared
+# slot-shared path, because those are rsynced from the image on every boot and
+# would restore image content over whatever the device had installed.
+#
+# The obvious fix — `ExecStartPre=+/usr/bin/install -d …` on the agent itself —
+# DOES NOT WORK, and was shipped once before this unit replaced it. systemd's
+# `+` prefix drops privilege restrictions but, on systemd 252, the mount
+# namespace is still constructed for that command, so the command meant to
+# create the directory is itself refused by the namespace that needs it:
+#
+#   (install)[878]: Failed to set up mount namespacing:
+#     /run/systemd/unit-root/persistent/shared/kitluy: No such file or directory
+#   (install)[878]: Failed at step NAMESPACE spawning /usr/bin/install
+#   status=226/NAMESPACE
+#
+# A SEPARATE unit has no namespacing of its own to fight, which is the whole
+# point. Verified on hardware (pi5-jkided, systemd 252.39-1~deb12u2): the agent
+# reached `active` with NRestarts=0 for the first time.
+#
+# `RequiresMountsFor=` makes systemd order this after the mount that carries the
+# path and refuse to run it when that mount is absent — without which the
+# directory would be created on the read-only erofs root instead, and the error
+# would talk about permissions rather than the missing filesystem it really is.
+RequiresMountsFor=/persistent/shared
+Before=kitluy-update-agent.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# HARDENED, AND STILL ABLE TO BUILD ITS NAMESPACE.
+#
+# The distinction that matters is not "sandboxed or not" — it is whether every
+# path the sandbox NAMES already exists. `/persistent/shared` always does: it is
+# on the persistent partition and `RequiresMountsFor=` above guarantees the
+# mount. `/persistent/shared/kitluy` is the one that does not, which is exactly
+# why it is created here rather than named in a ReadWritePaths= somewhere.
+#
+# Verified in this configuration on hardware (pi5-jkided, systemd 252): the
+# directory is created 0755 root:root and the agent then reaches `active` with
+# NRestarts=0.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictRealtime=yes
+ReadWritePaths=/persistent/shared
+# 0755 because the Device Shell runs as `kitluy-terminal` and has to traverse
+# the store to reach an installed payload. Idempotent.
+ExecStart=/usr/bin/install -d -m 0755 -o root -g root /persistent/shared/kitluy
+
+[Install]
+WantedBy=multi-user.target

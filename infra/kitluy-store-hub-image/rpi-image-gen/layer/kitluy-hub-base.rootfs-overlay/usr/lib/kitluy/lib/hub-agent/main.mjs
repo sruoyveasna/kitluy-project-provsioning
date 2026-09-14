@@ -1195,7 +1195,7 @@ var require_utils2 = __commonJS({
     var nodeCrypto = __require("crypto");
     module.exports = {
       postgresMd5PasswordHash,
-      randomBytes: randomBytes2,
+      randomBytes: randomBytes3,
       deriveKey,
       sha256,
       hashByName,
@@ -1205,7 +1205,7 @@ var require_utils2 = __commonJS({
     var webCrypto = nodeCrypto.webcrypto || globalThis.crypto;
     var subtleCrypto = webCrypto.subtle;
     var textEncoder = new TextEncoder();
-    function randomBytes2(length) {
+    function randomBytes3(length) {
       return webCrypto.getRandomValues(Buffer.alloc(length));
     }
     async function md5(string) {
@@ -5190,6 +5190,148 @@ var require_lib2 = __commonJS({
   }
 });
 
+// ../../node_modules/.pnpm/pg@8.22.0/node_modules/pg/esm/index.mjs
+var import_lib, Client, Pool, Connection, types, Query, DatabaseError, escapeIdentifier, escapeLiteral, Result, TypeOverrides, defaults, esm_default;
+var init_esm = __esm({
+  "../../node_modules/.pnpm/pg@8.22.0/node_modules/pg/esm/index.mjs"() {
+    import_lib = __toESM(require_lib2(), 1);
+    Client = import_lib.default.Client;
+    Pool = import_lib.default.Pool;
+    Connection = import_lib.default.Connection;
+    types = import_lib.default.types;
+    Query = import_lib.default.Query;
+    DatabaseError = import_lib.default.DatabaseError;
+    escapeIdentifier = import_lib.default.escapeIdentifier;
+    escapeLiteral = import_lib.default.escapeLiteral;
+    Result = import_lib.default.Result;
+    TypeOverrides = import_lib.default.TypeOverrides;
+    defaults = import_lib.default.defaults;
+    esm_default = import_lib.default;
+  }
+});
+
+// src/hub-database.ts
+function hubDatabaseUrl(env = process.env) {
+  const url = env[HUB_DB_URL_ENV];
+  if (url === void 0 || url.trim() === "") {
+    throw new Error(
+      `${HUB_DB_URL_ENV} is not set. A Hub connects to the database it was told to and never to a default: a silent fallback points a Store's authority at whatever happens to answer on a well-known port. Fail closed.`
+    );
+  }
+  if (!/localhost|127\.0\.0\.1/.test(url)) {
+    throw new Error(
+      `${HUB_DB_URL_ENV} must point at a local development database (KL-INF-P1-037).`
+    );
+  }
+  return url;
+}
+function canonicalJson(value) {
+  if (value === null) return "null";
+  switch (typeof value) {
+    case "boolean":
+      return value ? "true" : "false";
+    case "number":
+      if (!Number.isFinite(value)) {
+        throw new Error("Canonical JSON cannot represent NaN or Infinity (RFC 8785).");
+      }
+      return JSON.stringify(value);
+    case "string":
+      return JSON.stringify(value);
+    case "bigint":
+      throw new Error("Convert bigint to a string before hashing (money contract \xA74).");
+    case "object": {
+      if (Array.isArray(value)) {
+        return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
+      }
+      const entries = Object.entries(value).filter(([, v]) => v !== void 0).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+      return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`).join(",")}}`;
+    }
+    default:
+      throw new Error(`Canonical JSON cannot represent ${typeof value}.`);
+  }
+}
+var HUB_DB_URL_ENV, UUID_PATTERN, CANONICAL_IDEMPOTENCY_KEY_REGEX;
+var init_hub_database = __esm({
+  "src/hub-database.ts"() {
+    "use strict";
+    HUB_DB_URL_ENV = "KITLUY_HUB_DB_URL";
+    UUID_PATTERN = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}";
+    CANONICAL_IDEMPOTENCY_KEY_REGEX = new RegExp(`^kl1\\.(${UUID_PATTERN})\\.([0-9]{1,20})$`);
+  }
+});
+
+// src/hub/db.ts
+function createHubPool(env = process.env, max = 8) {
+  return new esm_default.Pool({ connectionString: hubDatabaseUrl(env), max });
+}
+async function isHubDatabaseReachable(env = process.env) {
+  let pool;
+  try {
+    pool = new esm_default.Pool({
+      connectionString: hubDatabaseUrl(env),
+      max: 1,
+      connectionTimeoutMillis: 2e3
+    });
+  } catch {
+    return false;
+  }
+  try {
+    await pool.query("select 1");
+    return true;
+  } catch {
+    return false;
+  } finally {
+    await pool.end().catch(() => void 0);
+  }
+}
+async function assumeRole(client, role) {
+  try {
+    await client.query(`set local role ${role}`);
+    return true;
+  } catch (error) {
+    if (error?.code !== "42501") throw error;
+    if (!roleFallbackWarned) {
+      roleFallbackWarned = true;
+      console.warn(
+        `kitluy-hub-agent: cannot 'set local role ${role}' (insufficient_privilege). Running as the connected user; the schema contract \xA73 GRANT surface is NOT exercised. Grant the role to the connecting user to restore it.`
+      );
+    }
+    return false;
+  }
+}
+async function runInTransaction(pool, begin, fn, role) {
+  const client = await pool.connect();
+  try {
+    await client.query(begin);
+    await assumeRole(client, role);
+    const result = await fn(client);
+    await client.query("commit");
+    return result;
+  } catch (error) {
+    await client.query("rollback").catch(() => void 0);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+async function withHubTransaction(pool, fn, role = HUB_RUNTIME_ROLE) {
+  return runInTransaction(pool, "begin", fn, role);
+}
+async function withSerializableHubTransaction(pool, fn, role = HUB_RUNTIME_ROLE) {
+  return runInTransaction(pool, "begin isolation level serializable", fn, role);
+}
+var HUB_RUNTIME_ROLE, roleFallbackWarned;
+var init_db = __esm({
+  "src/hub/db.ts"() {
+    "use strict";
+    init_esm();
+    init_hub_database();
+    esm_default.types.setTypeParser(20, (value) => BigInt(value));
+    HUB_RUNTIME_ROLE = "kitluy_hub_runtime";
+    roleFallbackWarned = false;
+  }
+});
+
 // ../../packages/device-identity/dist/environments.js
 var init_environments = __esm({
   "../../packages/device-identity/dist/environments.js"() {
@@ -5278,6 +5420,365 @@ var init_dev_crypto = __esm({
   }
 });
 
+// src/hub/sync/errors.ts
+var SYNC_TRANSIENT_ERROR_CODES, SYNC_DURABLE_REJECTION_CODES, TRANSIENT, DURABLE, SyncDeliveryError;
+var init_errors2 = __esm({
+  "src/hub/sync/errors.ts"() {
+    "use strict";
+    SYNC_TRANSIENT_ERROR_CODES = [
+      "EDGE_TRANSPORT_UNREACHABLE",
+      "EDGE_TRANSPORT_TIMEOUT",
+      "EDGE_TRANSPORT_INTERRUPTED",
+      "EDGE_CLOUD_UNAVAILABLE",
+      "EDGE_CLOUD_RATE_LIMITED",
+      "EDGE_LEASE_EXPIRED",
+      "EDGE_WORKER_SHUTDOWN",
+      "EDGE_OPERATOR_PAUSED"
+    ];
+    SYNC_DURABLE_REJECTION_CODES = [
+      "EDGE_CLOUD_REJECTED_SCHEMA",
+      "EDGE_CLOUD_REJECTED_SCOPE",
+      "EDGE_CLOUD_REJECTED_SIGNATURE",
+      "EDGE_CLOUD_REJECTED_BUSINESS_RULE",
+      "EDGE_CLOUD_REJECTED_UNKNOWN_AGGREGATE",
+      "EDGE_CLOUD_REJECTED_PERMANENT"
+    ];
+    TRANSIENT = new Set(SYNC_TRANSIENT_ERROR_CODES);
+    DURABLE = new Set(SYNC_DURABLE_REJECTION_CODES);
+    SyncDeliveryError = class extends Error {
+      constructor(code, message, details = {}) {
+        super(message);
+        this.code = code;
+        this.details = details;
+        this.name = "SyncDeliveryError";
+      }
+    };
+  }
+});
+
+// src/hub/sync/configuration.ts
+import { createHash as createHash8 } from "node:crypto";
+function snapshotManifest(snapshot) {
+  return canonicalJson({
+    snapshot_id: snapshot.snapshotId,
+    tenant_id: snapshot.tenantId,
+    digital_store_id: snapshot.digitalStoreId,
+    location_id: snapshot.locationId,
+    snapshot_version: snapshot.snapshotVersion.toString(),
+    schema_version: snapshot.schemaVersion,
+    not_before: snapshot.notBefore.toISOString(),
+    expires_at: snapshot.expiresAt?.toISOString() ?? null,
+    minimum_hub_version: snapshot.minimumHubVersion,
+    maximum_hub_version: snapshot.maximumHubVersion,
+    sections: [...snapshot.sections].map((s) => ({
+      section_code: s.sectionCode,
+      section_version: s.sectionVersion.toString(),
+      required: s.required,
+      content_sha256: sectionDigest(s)
+    })).sort((a, b) => a.section_code < b.section_code ? -1 : 1)
+  });
+}
+function sectionDigest(section) {
+  return createHash8("sha256").update(canonicalJson(section.content), "utf8").digest("hex");
+}
+function snapshotManifestSha256(snapshot) {
+  return createHash8("sha256").update(snapshotManifest(snapshot), "utf8").digest("hex");
+}
+async function recordDownloadedSnapshot(client, snapshot) {
+  await client.query(
+    `insert into edge_config.configuration_snapshot
+       (id, tenant_id, digital_store_id, location_id, snapshot_version, schema_version,
+        created_at, not_before, expires_at, minimum_hub_version, maximum_hub_version,
+        manifest_sha256, signature_algorithm, signature, signing_key_id, state, downloaded_at)
+     values ($1, $2, $3, $4, $5::bigint, $6, now(), $7, $8, $9, $10, $11, $12, $13, $14,
+             'downloaded', now())`,
+    [
+      snapshot.snapshotId,
+      snapshot.tenantId,
+      snapshot.digitalStoreId,
+      snapshot.locationId,
+      snapshot.snapshotVersion.toString(),
+      snapshot.schemaVersion,
+      snapshot.notBefore,
+      snapshot.expiresAt,
+      snapshot.minimumHubVersion,
+      snapshot.maximumHubVersion,
+      snapshotManifestSha256(snapshot),
+      snapshot.signatureAlgorithm,
+      snapshot.signature,
+      snapshot.signingKeyId
+    ]
+  );
+  for (const section of snapshot.sections) {
+    await client.query(
+      `insert into edge_config.configuration_section
+         (id, snapshot_id, section_code, section_version, content_sha256, content_json,
+          required, validation_state)
+       values (gen_random_uuid(), $1, $2, $3::bigint, $4, $5::jsonb, $6, 'pending')`,
+      [
+        snapshot.snapshotId,
+        section.sectionCode,
+        section.sectionVersion.toString(),
+        sectionDigest(section),
+        JSON.stringify(section.content),
+        section.required
+      ]
+    );
+  }
+}
+async function verifySnapshot(client, snapshot, verifier) {
+  const manifest = snapshotManifest(snapshot);
+  const signatureValid = verifier.verify(manifest, {
+    algorithm: snapshot.signatureAlgorithm,
+    keyId: snapshot.signingKeyId,
+    signature: snapshot.signature.toString("base64")
+  });
+  if (!signatureValid) {
+    await client.query(
+      `update edge_config.configuration_snapshot set state = 'rejected' where id = $1`,
+      [snapshot.snapshotId]
+    );
+    return {
+      verified: false,
+      reason: `Snapshot ${snapshot.snapshotId} did not verify against signing key ${snapshot.signingKeyId}.`
+    };
+  }
+  try {
+    await client.query(`select edge_config.mark_snapshot_verified($1::uuid, $2::char(64))`, [
+      snapshot.snapshotId,
+      snapshotManifestSha256(snapshot)
+    ]);
+  } catch (error) {
+    throw new SyncDeliveryError("EDGE_SNAPSHOT_MANIFEST_MISMATCH", error.message, {
+      snapshotId: snapshot.snapshotId
+    });
+  }
+  return { verified: true };
+}
+async function activateSnapshot(client, input) {
+  const result = await client.query(
+    `select edge_config.activate_snapshot($1::uuid, $2::uuid, $3::text, $4::uuid, $5::jsonb)`,
+    [
+      input.activationId,
+      input.snapshotId,
+      input.actorType,
+      input.actorId ?? null,
+      JSON.stringify(input.healthCheck ?? {})
+    ]
+  );
+  return {
+    activationId: input.activationId,
+    snapshotId: input.snapshotId,
+    previousSnapshotId: result.rows[0]?.activate_snapshot ?? null
+  };
+}
+var init_configuration = __esm({
+  "src/hub/sync/configuration.ts"() {
+    "use strict";
+    init_hub_database();
+    init_errors2();
+  }
+});
+
+// src/hub/sync/signing.ts
+import { createHmac, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
+var DEV_MIN_SIGNING_KEY_BYTES, DevelopmentHmacBatchSigner;
+var init_signing = __esm({
+  "src/hub/sync/signing.ts"() {
+    "use strict";
+    init_errors2();
+    DEV_MIN_SIGNING_KEY_BYTES = 32;
+    DevelopmentHmacBatchSigner = class {
+      constructor(keyId, secret) {
+        this.keyId = keyId;
+        this.secret = secret;
+        if (secret.length < DEV_MIN_SIGNING_KEY_BYTES) {
+          throw new SyncDeliveryError(
+            "EDGE_BATCH_SIGNATURE_MISSING",
+            `The development batch signing key must be at least ${DEV_MIN_SIGNING_KEY_BYTES} bytes.`
+          );
+        }
+      }
+      algorithm = "hmac-sha256-development";
+      sign(manifest) {
+        return {
+          algorithm: this.algorithm,
+          keyId: this.keyId,
+          signature: createHmac("sha256", this.secret).update(manifest, "utf8").digest("base64")
+        };
+      }
+      verify(manifest, signature) {
+        if (signature.algorithm !== this.algorithm || signature.keyId !== this.keyId) return false;
+        const expected = Buffer.from(this.sign(manifest).signature, "base64");
+        let presented;
+        try {
+          presented = Buffer.from(signature.signature, "base64");
+        } catch {
+          return false;
+        }
+        if (expected.length !== presented.length) return false;
+        return timingSafeEqual2(expected, presented);
+      }
+    };
+  }
+});
+
+// src/hub/dev-configuration.ts
+var dev_configuration_exports = {};
+__export(dev_configuration_exports, {
+  DEV_CONFIGURATION_KEY_ID: () => DEV_CONFIGURATION_KEY_ID,
+  DEV_CONFIGURATION_KEY_PATH: () => DEV_CONFIGURATION_KEY_PATH,
+  DevelopmentConfigurationRefused: () => DevelopmentConfigurationRefused,
+  TERMINAL_PROFILES_SECTION: () => TERMINAL_PROFILES_SECTION,
+  loadOrCreateDevelopmentSigner: () => loadOrCreateDevelopmentSigner,
+  publishDevelopmentConfiguration: () => publishDevelopmentConfiguration
+});
+import { randomBytes as randomBytes2, randomUUID as randomUUID8 } from "node:crypto";
+import { chmodSync, mkdirSync, readFileSync as readFileSync3, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+function loadOrCreateDevelopmentSigner(path = DEV_CONFIGURATION_KEY_PATH) {
+  let secret;
+  try {
+    secret = Buffer.from(readFileSync3(path, "utf8").trim(), "base64");
+  } catch {
+    secret = randomBytes2(32);
+    mkdirSync(dirname(path), { recursive: true, mode: 448 });
+    writeFileSync(path, `${secret.toString("base64")}
+`, { mode: 384 });
+    chmodSync(path, 384);
+  }
+  return new DevelopmentHmacBatchSigner(DEV_CONFIGURATION_KEY_ID, secret);
+}
+async function publishDevelopmentConfiguration(pool, input) {
+  if (input.environment !== "development") {
+    throw new DevelopmentConfigurationRefused(
+      "KLUY-HUB-DEV-CONFIG-ENVIRONMENT",
+      `this Hub declares environment '${input.environment}'; a development-signed configuration is permitted in development only (owner decision 2026-09-10)`
+    );
+  }
+  if (input.grants.length === 0) {
+    throw new DevelopmentConfigurationRefused(
+      "KLUY-HUB-DEV-CONFIG-EMPTY",
+      "no profile grants were given; an empty configuration would activate and grant nothing"
+    );
+  }
+  const signer = input.signer ?? loadOrCreateDevelopmentSigner();
+  const now = input.now ?? /* @__PURE__ */ new Date();
+  return withHubTransaction(
+    pool,
+    async (client) => {
+      const versions = await client.query(
+        `select coalesce(max(snapshot_version), 0) + 1 as next
+           from edge_config.configuration_snapshot where location_id = $1::uuid`,
+        [input.locationId]
+      );
+      const snapshotVersion = BigInt(versions.rows[0]?.next ?? "1");
+      const section = {
+        sectionCode: TERMINAL_PROFILES_SECTION,
+        sectionVersion: snapshotVersion,
+        required: true,
+        content: {
+          grants: input.grants.map((grant) => ({
+            terminal_device_id: grant.terminalDeviceId,
+            profile_codes: [...grant.profileCodes].sort()
+          }))
+        }
+      };
+      const unsigned = {
+        snapshotId: randomUUID8(),
+        tenantId: input.tenantId,
+        digitalStoreId: input.digitalStoreId,
+        locationId: input.locationId,
+        snapshotVersion,
+        schemaVersion: 1,
+        notBefore: now,
+        expiresAt: null,
+        minimumHubVersion: "0.1.0",
+        maximumHubVersion: null,
+        sections: [section]
+      };
+      const signature = signer.sign(
+        snapshotManifest({
+          ...unsigned,
+          signatureAlgorithm: signer.algorithm,
+          signature: Buffer.alloc(0),
+          signingKeyId: signer.keyId
+        })
+      );
+      const snapshot = {
+        ...unsigned,
+        signatureAlgorithm: signature.algorithm,
+        signature: Buffer.from(signature.signature, "base64"),
+        signingKeyId: signature.keyId
+      };
+      await recordDownloadedSnapshot(client, snapshot);
+      const verdict = await verifySnapshot(client, snapshot, signer);
+      if (!verdict.verified) {
+        throw new DevelopmentConfigurationRefused(
+          "KLUY-HUB-DEV-CONFIG-SIGNATURE",
+          verdict.reason ?? "the snapshot did not verify against its own signer"
+        );
+      }
+      const activation = await activateSnapshot(client, {
+        activationId: randomUUID8(),
+        snapshotId: snapshot.snapshotId,
+        actorType: "service",
+        healthCheck: { source: "development-configuration-publisher" }
+      });
+      let grantsWritten = 0;
+      for (const grant of input.grants) {
+        for (const profileCode of grant.profileCodes) {
+          await client.query(
+            `insert into edge_config.terminal_profile_assignment
+               (id, tenant_id, digital_store_id, location_id, terminal_device_id, profile_code,
+                assignment_version, enabled, effective_from, effective_until, source_snapshot_id)
+             values (gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5,
+                     $6::bigint, true, $7, null, $8::uuid)`,
+            [
+              input.tenantId,
+              input.digitalStoreId,
+              input.locationId,
+              grant.terminalDeviceId,
+              profileCode,
+              snapshotVersion.toString(),
+              now,
+              snapshot.snapshotId
+            ]
+          );
+          grantsWritten += 1;
+        }
+      }
+      return {
+        snapshotId: snapshot.snapshotId,
+        snapshotVersion: snapshotVersion.toString(),
+        previousSnapshotId: activation.previousSnapshotId,
+        grantsWritten
+      };
+    },
+    HUB_RUNTIME_ROLE
+  );
+}
+var DEV_CONFIGURATION_KEY_PATH, DEV_CONFIGURATION_KEY_ID, TERMINAL_PROFILES_SECTION, DevelopmentConfigurationRefused;
+var init_dev_configuration = __esm({
+  "src/hub/dev-configuration.ts"() {
+    "use strict";
+    init_esm();
+    init_db();
+    init_configuration();
+    init_signing();
+    DEV_CONFIGURATION_KEY_PATH = "/var/lib/kitluy/operational/development-configuration-signing.key";
+    DEV_CONFIGURATION_KEY_ID = "kitluy.development-configuration-signer.v1";
+    TERMINAL_PROFILES_SECTION = "terminal_profiles";
+    DevelopmentConfigurationRefused = class extends Error {
+      constructor(code, detail) {
+        super(`${code}: ${detail}`);
+        this.code = code;
+        this.name = "DevelopmentConfigurationRefused";
+      }
+    };
+  }
+});
+
 // ../../packages/observability/dist/index.js
 var SECRET_FIELD_PATTERN = /(password|secret|token|api[_-]?key|service[_-]?role|credential)/i;
 function redactFields(fields) {
@@ -5325,128 +5826,8 @@ var REJECTED_TERMINAL_IDENTIFIERS = [
 var SERVICE_NAME = "kitluy-hub-agent";
 var SERVICE_VERSION = "0.1.0";
 
-// ../../node_modules/.pnpm/pg@8.22.0/node_modules/pg/esm/index.mjs
-var import_lib = __toESM(require_lib2(), 1);
-var Client = import_lib.default.Client;
-var Pool = import_lib.default.Pool;
-var Connection = import_lib.default.Connection;
-var types = import_lib.default.types;
-var Query = import_lib.default.Query;
-var DatabaseError = import_lib.default.DatabaseError;
-var escapeIdentifier = import_lib.default.escapeIdentifier;
-var escapeLiteral = import_lib.default.escapeLiteral;
-var Result = import_lib.default.Result;
-var TypeOverrides = import_lib.default.TypeOverrides;
-var defaults = import_lib.default.defaults;
-var esm_default = import_lib.default;
-
-// src/hub-database.ts
-var HUB_DB_URL_ENV = "KITLUY_HUB_DB_URL";
-function hubDatabaseUrl(env = process.env) {
-  const url = env[HUB_DB_URL_ENV];
-  if (url === void 0 || url.trim() === "") {
-    throw new Error(
-      `${HUB_DB_URL_ENV} is not set. A Hub connects to the database it was told to and never to a default: a silent fallback points a Store's authority at whatever happens to answer on a well-known port. Fail closed.`
-    );
-  }
-  if (!/localhost|127\.0\.0\.1/.test(url)) {
-    throw new Error(
-      `${HUB_DB_URL_ENV} must point at a local development database (KL-INF-P1-037).`
-    );
-  }
-  return url;
-}
-var UUID_PATTERN = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}";
-var CANONICAL_IDEMPOTENCY_KEY_REGEX = new RegExp(`^kl1\\.(${UUID_PATTERN})\\.([0-9]{1,20})$`);
-function canonicalJson(value) {
-  if (value === null) return "null";
-  switch (typeof value) {
-    case "boolean":
-      return value ? "true" : "false";
-    case "number":
-      if (!Number.isFinite(value)) {
-        throw new Error("Canonical JSON cannot represent NaN or Infinity (RFC 8785).");
-      }
-      return JSON.stringify(value);
-    case "string":
-      return JSON.stringify(value);
-    case "bigint":
-      throw new Error("Convert bigint to a string before hashing (money contract \xA74).");
-    case "object": {
-      if (Array.isArray(value)) {
-        return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
-      }
-      const entries = Object.entries(value).filter(([, v]) => v !== void 0).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
-      return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`).join(",")}}`;
-    }
-    default:
-      throw new Error(`Canonical JSON cannot represent ${typeof value}.`);
-  }
-}
-
-// src/hub/db.ts
-esm_default.types.setTypeParser(20, (value) => BigInt(value));
-var HUB_RUNTIME_ROLE = "kitluy_hub_runtime";
-function createHubPool(env = process.env, max = 8) {
-  return new esm_default.Pool({ connectionString: hubDatabaseUrl(env), max });
-}
-async function isHubDatabaseReachable(env = process.env) {
-  let pool;
-  try {
-    pool = new esm_default.Pool({
-      connectionString: hubDatabaseUrl(env),
-      max: 1,
-      connectionTimeoutMillis: 2e3
-    });
-  } catch {
-    return false;
-  }
-  try {
-    await pool.query("select 1");
-    return true;
-  } catch {
-    return false;
-  } finally {
-    await pool.end().catch(() => void 0);
-  }
-}
-var roleFallbackWarned = false;
-async function assumeRole(client, role) {
-  try {
-    await client.query(`set local role ${role}`);
-    return true;
-  } catch (error) {
-    if (error?.code !== "42501") throw error;
-    if (!roleFallbackWarned) {
-      roleFallbackWarned = true;
-      console.warn(
-        `kitluy-hub-agent: cannot 'set local role ${role}' (insufficient_privilege). Running as the connected user; the schema contract \xA73 GRANT surface is NOT exercised. Grant the role to the connecting user to restore it.`
-      );
-    }
-    return false;
-  }
-}
-async function runInTransaction(pool, begin, fn, role) {
-  const client = await pool.connect();
-  try {
-    await client.query(begin);
-    await assumeRole(client, role);
-    const result = await fn(client);
-    await client.query("commit");
-    return result;
-  } catch (error) {
-    await client.query("rollback").catch(() => void 0);
-    throw error;
-  } finally {
-    client.release();
-  }
-}
-async function withHubTransaction(pool, fn, role = HUB_RUNTIME_ROLE) {
-  return runInTransaction(pool, "begin", fn, role);
-}
-async function withSerializableHubTransaction(pool, fn, role = HUB_RUNTIME_ROLE) {
-  return runInTransaction(pool, "begin isolation level serializable", fn, role);
-}
+// src/bin/hub-agent.ts
+init_db();
 
 // ../../packages/api-errors/dist/index.js
 var ERROR_CODES = {
@@ -6221,7 +6602,7 @@ function decideStartup(observations) {
 
 // src/hub/edge/development-listener.ts
 import { readFileSync as readFileSync2 } from "node:fs";
-import { createPrivateKey as createPrivateKey2, createPublicKey as createPublicKey2, sign as cryptoSign } from "node:crypto";
+import { createHash as createHash7, createPrivateKey as createPrivateKey2, createPublicKey as createPublicKey2, sign as cryptoSign } from "node:crypto";
 import { hostname as osHostname } from "node:os";
 import { join } from "node:path";
 
@@ -6595,6 +6976,9 @@ init_dev_crypto();
 // ../../packages/device-identity/dist/device-registration-request.js
 init_dev_crypto();
 
+// src/hub/pairing.ts
+init_db();
+
 // ../../packages/event-contracts/dist/index.js
 var EVENT_NAME_PATTERN = /^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/;
 var PAYLOAD_SHA256_PATTERN = /^[a-f0-9]{64}$/;
@@ -6687,6 +7071,7 @@ var asId = {
 
 // src/hub/outbox.ts
 import { createHash as createHash4 } from "node:crypto";
+init_hub_database();
 function sha256Hex2(input) {
   return createHash4("sha256").update(input, "utf8").digest("hex");
 }
@@ -7464,9 +7849,11 @@ var EdgeDiscoveryAuthority = class {
 
 // src/hub/edge/routes.ts
 import { randomUUID as randomUUID7 } from "node:crypto";
+init_db();
 
 // src/hub/terminal-health.ts
 import { randomUUID as randomUUID4 } from "node:crypto";
+init_db();
 var TERMINAL_HEALTH_EVENT_NAME = "device_fleet.health_projection_reported";
 var TERMINAL_HEALTH_SCHEMA_VERSION = 1;
 var TERMINAL_HEALTH_AGGREGATE_TYPE = "device_fleet_health";
@@ -7826,6 +8213,8 @@ async function acceptTerminalHeartbeat(pool, terminalDeviceId, body, environment
 
 // src/hub/edge/runtime-bootstrap.ts
 import { createHash as createHash5, randomUUID as randomUUID5, scryptSync, timingSafeEqual } from "node:crypto";
+init_db();
+init_hub_database();
 var RUNTIME_PROTOCOL_VERSION = "1.0";
 var AUTHORITY_TIME_MAX_CACHE_AGE_SECONDS = 30;
 var DEV_STAFF_SESSION_LIFETIME_MINUTES = 30;
@@ -8495,6 +8884,7 @@ async function closeStaffSession(pool, input) {
 
 // src/hub/t1-intake.ts
 import { createHash as createHash6, randomUUID as randomUUID6 } from "node:crypto";
+init_db();
 var CUSTOMER_CREATED_EVENT_NAME = "customer.local_customer_created";
 var CONSENT_DECISION_EVENT_NAME = "customer.consent_decision_recorded";
 var BOOKING_DRAFT_EVENT_NAME = "laundry.booking_draft_recorded";
@@ -10701,8 +11091,9 @@ function composeDevelopmentListener(inputs) {
   try {
     const privateKey = createPrivateKey2(read(inputs.identityKeyPath ?? DEVICE_IDENTITY_KEY_PATH));
     const publicKeyPem = createPublicKey2(privateKey).export({ type: "spki", format: "pem" }).toString();
+    const signingCredentialSerial = createHash7("sha256").update(createPublicKey2(publicKeyPem).export({ type: "spki", format: "der" })).digest("hex");
     signer = {
-      certificateSerial,
+      certificateSerial: signingCredentialSerial,
       publicKeyPem,
       sign: (payload) => cryptoSign(null, Buffer.from(payload), privateKey)
     };
@@ -10745,7 +11136,21 @@ async function startDevelopmentListener(options) {
     // Fails closed as UNREACHABLE. Terminal activation is not this milestone.
     activationGateway: unavailableActivationGateway(),
     discovery,
-    // `deliverySigner` omitted on purpose — see the header.
+    // THE DELIVERY SIGNER, IN DEVELOPMENT ONLY (owner decision 2026-09-10).
+    //
+    // This was omitted, so `/edge/v1/configuration/current` failed closed with
+    // DELIVERY_SIGNER_UNAVAILABLE rather than serving a configuration signed by
+    // a development key. On hardware that left a genuine, recognised, paired Pi
+    // Terminal unable to read the configuration it needs to trade, with no path
+    // forward short of the BLK-006 cloud publisher.
+    //
+    // The GUARD is the point: it is wired only when the image declares
+    // `development`, so pilot and production reach the same fail-closed refusal
+    // they always did and BLK-005 signer custody is untouched.
+    // `composeDevelopmentListener` already refuses to build any signer at all
+    // outside development (KLUY-HUB-EDGE-BLK005); this is the second lock on
+    // the same door.
+    ...options.environment === "development" ? { deliverySigner: options.composition.signer } : {},
     ...options.logger === void 0 ? {} : { logger: options.logger }
   });
   const server = createEdgeTlsServer({
@@ -10911,9 +11316,63 @@ async function main() {
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT", () => shutdown("SIGINT"));
 }
-main().catch((error) => {
-  log.error("Store Hub agent failed to start", {
-    error: error instanceof Error ? error.message : String(error)
+async function publishDevelopmentConfigurationCommand(path) {
+  const { readFileSync: readFileSync4 } = await import("node:fs");
+  const { publishDevelopmentConfiguration: publishDevelopmentConfiguration2 } = await Promise.resolve().then(() => (init_dev_configuration(), dev_configuration_exports));
+  const environment = process.env.KITLUY_ENVIRONMENT ?? "unknown";
+  const delivery = JSON.parse(readFileSync4(path, "utf8"));
+  const required = ["terminalDeviceId", "tenantId", "digitalStoreId", "storeLocationId"];
+  for (const field of required) {
+    if (typeof delivery[field] !== "string" || delivery[field] === "") {
+      throw new Error(`the delivery has no ${field}`);
+    }
+  }
+  const profileCodes = delivery.profileCodes ?? [];
+  if (profileCodes.length === 0) {
+    throw new Error(
+      "the delivery grants no profiles; the Hub would activate a configuration that permits nothing and every pairing would still be refused"
+    );
+  }
+  const pool = createHubPool();
+  try {
+    const outcome = await publishDevelopmentConfiguration2(pool, {
+      tenantId: delivery.tenantId,
+      digitalStoreId: delivery.digitalStoreId,
+      locationId: delivery.storeLocationId,
+      environment,
+      grants: [
+        { terminalDeviceId: delivery.terminalDeviceId, profileCodes }
+      ]
+    });
+    log.info("development configuration activated", {
+      snapshotId: outcome.snapshotId,
+      snapshotVersion: outcome.snapshotVersion,
+      previousSnapshotId: outcome.previousSnapshotId,
+      grantsWritten: outcome.grantsWritten,
+      profiles: profileCodes.join(", ")
+    });
+  } finally {
+    await pool.end().catch(() => void 0);
+  }
+}
+var subcommand = process.argv[2];
+if (subcommand === "publish-development-configuration") {
+  const path = process.argv[3];
+  if (path === void 0) {
+    log.error("publish-development-configuration needs the delivery file path");
+    process.exit(2);
+  }
+  publishDevelopmentConfigurationCommand(path).catch((error) => {
+    log.error("development configuration was REFUSED", {
+      error: error instanceof Error ? error.message : String(error)
+    });
+    process.exit(1);
   });
-  process.exit(1);
-});
+} else {
+  main().catch((error) => {
+    log.error("Store Hub agent failed to start", {
+      error: error instanceof Error ? error.message : String(error)
+    });
+    process.exit(1);
+  });
+}

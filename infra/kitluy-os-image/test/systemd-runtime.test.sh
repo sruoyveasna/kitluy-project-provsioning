@@ -51,6 +51,10 @@ bad() { printf '  FAIL %s\n     %s\n' "$1" "${2:-}"; FAIL=$((FAIL + 1)); }
 # binary, which is worth noticing in review rather than inferring at runtime.
 declare -A PACKAGE_PROVIDING=(
   [/usr/bin/ssh-keygen]=openssh-server
+  # coreutils is Essential:yes on Debian, so it is present in every rootfs this
+  # builder can produce; it is recorded here because the gate asks for a NAME,
+  # not because its presence is in doubt.
+  [/usr/bin/install]=coreutils
 )
 
 printf '\nKitLuy Pi Terminal image — systemd runtime integrity\n\n'
@@ -829,6 +833,75 @@ if [[ -f "$ELECTRON_PIN" ]]; then
   fi
 else
   bad "device shell: the Electron runtime is pinned" "no electron.pin"
+fi
+
+# ---------------------------------------------------------------------------
+# THE LINK TO THE STORE HUB.
+#
+# A Pi Terminal that holds an operational certificate and cannot use it is not a
+# till. Until 2026-09-10 the image shipped no client at all: the Hub was
+# reachable, the certificate was adopted, and nothing on the terminal ever
+# dialled /edge/v1. These assertions are what stop that shipping again.
+# ---------------------------------------------------------------------------
+EDGE_UNIT="${LAYER_DIR}/kitluy-pi-terminal.rootfs-overlay/etc/systemd/system/kitluy-terminal-edge.service"
+EDGE_WRAPPER="${LAYER_DIR}/kitluy-base.rootfs-overlay/usr/lib/kitluy/terminal-edge"
+
+if [[ -f "$EDGE_UNIT" ]]; then
+  ok "terminal edge: the unit is shipped"
+
+  if grep -qE '^RestrictAddressFamilies=.*AF_NETLINK' "$EDGE_UNIT"; then
+    ok "terminal edge: RestrictAddressFamilies includes AF_NETLINK"
+  else
+    bad "terminal edge: RestrictAddressFamilies includes AF_NETLINK" \
+        "libuv cannot join the mDNS multicast group and the Hub is never discovered"
+  fi
+
+  if grep -qE '^Restart=always' "$EDGE_UNIT"; then
+    ok "terminal edge: Restart=always (a clean exit is as unexpected as a crash)"
+  else
+    bad "terminal edge: Restart=always" \
+        "the loop reports shop states; stopping on any exit leaves the till mute"
+  fi
+
+  if grep -qE '^ReadWritePaths=.*(/var/lib/kitluy)' "$EDGE_UNIT"; then
+    ok "terminal edge: names its writable path"
+  else
+    bad "terminal edge: names its writable path" "ProtectSystem=strict would deny the status write"
+  fi
+
+  if grep -qE '^After=.*kitluy-operational-tls' "$EDGE_UNIT"; then
+    ok "terminal edge: ordered after the operational certificate"
+  else
+    bad "terminal edge: ordered after the operational certificate" \
+        "it would report NOT_ACTIVATED on a board about to be issued one"
+  fi
+else
+  bad "terminal edge: the unit is shipped" "no kitluy-terminal-edge.service in the terminal overlay"
+fi
+
+if [[ -L "${LAYER_DIR}/kitluy-pi-terminal.rootfs-overlay/etc/systemd/system/multi-user.target.wants/kitluy-terminal-edge.service" ]]; then
+  ok "terminal edge: enabled, not merely defined"
+else
+  bad "terminal edge: enabled, not merely defined" "no multi-user.target.wants symlink"
+fi
+
+if [[ -x "$EDGE_WRAPPER" ]] && grep -q 'bin/terminal-edge.js' "$EDGE_WRAPPER"; then
+  ok "terminal edge: the wrapper execs a packaged bin"
+else
+  bad "terminal edge: the wrapper execs a packaged bin" "no executable /usr/lib/kitluy/terminal-edge"
+fi
+
+# The closure list is what actually puts the modules on the card.
+PKG="${ROOT}/scripts/package-bootstrap-runtime.sh"
+EDGE_MISSING=""
+for m in edge-transport edge-mdns edge-discovery-record edge-pairing edge-session bin/terminal-edge; do
+  grep -qE "(^|[[:space:]])${m}([[:space:]]|$)" "$PKG" || EDGE_MISSING="${EDGE_MISSING} ${m}"
+done
+if [[ -z "$EDGE_MISSING" ]]; then
+  ok "terminal edge: every module is in the packaged closure"
+else
+  bad "terminal edge: every module is in the packaged closure" \
+      "absent from DEVICE_MODULES:${EDGE_MISSING}"
 fi
 
 printf '\n  %d passed, %d failed\n\n' "$PASS" "$FAIL"

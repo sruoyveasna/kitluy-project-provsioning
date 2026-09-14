@@ -259,5 +259,211 @@ else
   bad "staged root digest is deterministic" "$D1 != $D2"
 fi
 
+# ---------------------------------------------------------------------------
+# AN IMAGE THAT CANNOT REACH THE CLOUD MUST BE REFUSED, NOT WARNED.
+#
+# On 2026-09-10 both images were rebuilt with no registration URL, no hardware
+# profile key and no root pin. The build WARNED and carried on; the warnings
+# were in the log and were not read; two SD cards were flashed and both boards
+# booted inert. A warning that is routinely scrolled past is not a control.
+#
+# This asserts the refusal is still a refusal.
+# ---------------------------------------------------------------------------
+GUARD_OUT="$(KITLUY_DEV_SSH_PUBKEY="${HOME}/.ssh/id_ed25519.pub" KITLUY_DEV_PKI_DIR= \
+  timeout 120 bash "${ROOT}/scripts/build-rpi-image.sh" --profile pi-terminal --environment development \
+    --skip-doctor --skip-packaging --collect-only 2>&1)"
+GUARD_RC=$?
+if [[ $GUARD_RC -ne 0 && "$GUARD_OUT" == *"inert on the bench"* ]]; then
+  ok "an image with no registration URL, profile key or root pin is REFUSED"
+else
+  bad "an image with no registration URL, profile key or root pin is REFUSED" \
+      "the build exited ${GUARD_RC} and would have produced a card that can never register"
+fi
+
+# The escape hatch must exist, or every legitimate unconfigured build is blocked.
+if [[ "$GUARD_OUT" == *"--allow-unconfigured-image"* ]]; then
+  ok "the refusal names its deliberate escape hatch"
+else
+  bad "the refusal names its deliberate escape hatch" \
+      "an operator with a genuine reason has no documented way through"
+fi
+
+# ===========================================================================
+# U1 RELEASE DELIVERY
+# ===========================================================================
+MANIFEST="${ROOT}/runtime-manifest.json"
+LAUNCHER="${ROOT}/rpi-image-gen/layer/kitluy-pi-terminal.rootfs-overlay/usr/lib/kitluy/device-shell"
+BASE_LAYER="${ROOT}/rpi-image-gen/layer/kitluy-base.yaml"
+AGENT_UNIT="${ROOT}/rpi-image-gen/layer/kitluy-base.rootfs-overlay/etc/systemd/system/kitluy-update-agent.service"
+
+# --- the scope fence (owner ruling OD-U1-2 = C) -----------------------------
+# The manifest names the ONE product a release may replace. Anything else must
+# stay image-only until the owner rules at U3, and a fence that is only a
+# sentence in a document is not a fence.
+UPDATABLE="$(node -e 'const m=require(process.argv[1]);process.stdout.write((m.releaseStore?.updatableProducts??[]).join(","))' "$MANIFEST")"
+if [[ "$UPDATABLE" == "device-shell" ]]; then
+  ok "exactly ONE product is updatable, and it is the Device Shell"
+else
+  bad "exactly ONE product is updatable, and it is the Device Shell" "manifest says '${UPDATABLE}'"
+fi
+FENCE_BREACH=""
+for forbidden in terminal-edge firstboot-identity cloud-registration update-agent health-reporter operational-tls hub-agent terminal-client; do
+  [[ ",${UPDATABLE}," == *",${forbidden},"* ]] && FENCE_BREACH="$forbidden"
+done
+if [[ -z "$FENCE_BREACH" ]]; then
+  ok "no bootstrap or runtime component is declared updatable"
+else
+  bad "no bootstrap or runtime component is declared updatable" "'${FENCE_BREACH}' was reclassified without an owner ruling"
+fi
+
+# --- the launcher prefers a release and FALLS BACK to the image -------------
+if grep -q 'IMAGE_APP=/usr/lib/kitluy/lib/device-shell' "$LAUNCHER" \
+   && grep -q 'STORE_APP=/persistent/shared/kitluy/releases/device-shell/current/payload' "$LAUNCHER"; then
+  ok "the launcher knows both app roots"
+else
+  bad "the launcher knows both app roots" "a release could never run, or the image copy could never be the floor"
+fi
+# `-f package.json`, never `-d payload`: a half-unpacked directory must not be
+# selected, and this is the test that keeps the launcher and the update runtime
+# applying the SAME predicate.
+if grep -q 'if \[ -f "\$STORE_APP/package.json" \]' "$LAUNCHER"; then
+  ok "the launcher tests for a COMPLETE payload, not merely a directory"
+else
+  bad "the launcher tests for a COMPLETE payload, not merely a directory" \
+      "a half-unpacked release would be started and the screen would be blank"
+fi
+if grep -q 'running-source.json' "$LAUNCHER"; then
+  ok "the launcher records which app it actually started"
+else
+  bad "the launcher records which app it actually started" \
+      "a board on the image fallback would be indistinguishable from one running the release"
+fi
+
+# --- trust and source injection --------------------------------------------
+if grep -q 'IGconf_kitluy_release_trust_record' "$BASE_LAYER" \
+   && grep -q 'etc/kitluy/trust/release-signing.json' "$BASE_LAYER"; then
+  ok "the layer can bake a release trust anchor"
+else
+  bad "the layer can bake a release trust anchor" "the update agent would refuse every payload for ever"
+fi
+if grep -q 'PRIVATE KEY' "$BASE_LAYER"; then
+  ok "the layer refuses a trust record containing a private key"
+else
+  bad "the layer refuses a trust record containing a private key" "a signing key could reach an image"
+fi
+if grep -q 'IGconf_kitluy_release_source' "$BASE_LAYER"; then
+  ok "the layer can bake a DEFAULT release source"
+else
+  bad "the layer can bake a DEFAULT release source" "the source could only ever be set on the device"
+fi
+
+# --- the override, which is what makes a reflash unnecessary ----------------
+OVERRIDE="$(node -e 'const m=require(process.argv[1]);process.stdout.write(m.releaseSource?.runtimeOverride??"")' "$MANIFEST")"
+if [[ "$OVERRIDE" == /persistent/* ]]; then
+  ok "the release source is overridable from the persistent partition"
+else
+  bad "the release source is overridable from the persistent partition" \
+      "override='${OVERRIDE}' — a workstation changing address would cost a reflash"
+fi
+# The override must NOT be a declared slot-shared path: those are rsynced FROM
+# the image on every boot, which would silently restore the baked value.
+if ! grep -rqs "release-source" "${ROOT}/rpi-image-gen/layer/kitluy-base.rootfs-overlay/etc/rpi-image-gen/slot-shared.d/"; then
+  ok "the override is not a slot-shared path the image would overwrite each boot"
+else
+  bad "the override is not a slot-shared path the image would overwrite each boot" \
+      "persistent-shared-init rsyncs image content into shared paths; an edit would not survive a reboot"
+fi
+
+# --- the update agent can actually write the store --------------------------
+if grep -q 'ReadWritePaths=.*persistent/shared/kitluy' "$AGENT_UNIT"; then
+  ok "the update agent may write the release store"
+else
+  bad "the update agent may write the release store" "ProtectSystem=strict would make every install fail"
+fi
+
+# ...and every writable path it declares on the persistent partition must be
+# created by a SEPARATE, UNSANDBOXED unit ordered before it.
+#
+# THIS GATE HAS BEEN WRONG ONCE, WHICH IS WHY IT TESTS WHAT IT TESTS.
+#
+# systemd requires each ReadWritePaths= entry to exist when it builds the mount
+# namespace. The first version of this gate asserted an
+# `ExecStartPre=+/usr/bin/install -d ...` on the agent itself and passed happily
+# — and the image it passed could not start the agent on any boot:
+#
+#   (install): Failed to set up mount namespacing:
+#     /run/systemd/unit-root/persistent/shared/kitluy: No such file or directory
+#   status=226/NAMESPACE
+#
+# The `+` prefix drops privilege restrictions; on systemd 252 the namespace is
+# STILL built for that command, so the command meant to create the directory is
+# refused by the namespace that needs it. A gate that asserts a MECHANISM is
+# only ever as right as the author's belief about that mechanism. This one
+# asserts the arrangement verified on hardware, and refuses the broken form by
+# name so it cannot come back.
+STORE_INIT="${ROOT}/rpi-image-gen/layer/kitluy-base.rootfs-overlay/etc/systemd/system/kitluy-persistent-store-init.service"
+RW_PERSISTENT="$(sed -n 's/^ReadWritePaths=//p' "$AGENT_UNIT" | tr ' ' '\n' | sed 's/^-//' | grep '^/persistent/' || true)"
+
+if grep -qE '^ExecStartPre=\+.*(install -d|mkdir).*/persistent/' "$AGENT_UNIT"; then
+  bad "the agent does not try to create its store dir from inside its own sandbox" \
+      "ExecStartPre=+ is still namespaced on systemd 252 — this exact form shipped and died at step NAMESPACE"
+else
+  ok "the agent does not try to create its store dir from inside its own sandbox"
+fi
+
+MISSING_MKDIR=""
+for RWP in $RW_PERSISTENT; do
+  grep -qE "^ExecStart=[^ ]*(install -d|mkdir).* ${RWP}( |\$)" "$STORE_INIT" 2>/dev/null \
+    || MISSING_MKDIR="${MISSING_MKDIR} ${RWP}"
+done
+if [[ -n "$RW_PERSISTENT" && -z "$MISSING_MKDIR" ]]; then
+  ok "a separate unit creates every persistent path the agent declares writable"
+else
+  bad "a separate unit creates every persistent path the agent declares writable" \
+      "not created:${MISSING_MKDIR:- (none declared)} — the agent dies at step NAMESPACE before main()"
+fi
+
+# The creator may be hardened — but every path its own sandbox NAMES must
+# already exist, or it dies exactly as the agent did. `/persistent/shared` is on
+# the persistent partition and RequiresMountsFor= guarantees it; the subdirectory
+# it creates must NOT appear in its own ReadWritePaths=.
+INIT_RW="$(sed -n 's/^ReadWritePaths=//p' "$STORE_INIT" 2>/dev/null | tr ' ' '\n' | sed 's/^-//' | grep '^/persistent/' || true)"
+SELF_REF=""
+for RWP in $RW_PERSISTENT; do
+  for IRW in $INIT_RW; do
+    [[ "$IRW" == "$RWP" ]] && SELF_REF="${SELF_REF} ${IRW}"
+  done
+done
+if [[ -z "$SELF_REF" ]]; then
+  ok "the creating unit never names the directory it is there to create"
+else
+  bad "the creating unit never names the directory it is there to create" \
+      "self-referential:${SELF_REF} — its own namespace cannot be built, same failure as the agent"
+fi
+
+if grep -qE '^(Requires|After)=kitluy-persistent-store-init\.service' "$AGENT_UNIT" \
+   && grep -q '^Before=kitluy-update-agent.service' "$STORE_INIT" 2>/dev/null; then
+  ok "the agent requires and follows the unit that creates its store"
+else
+  bad "the agent requires and follows the unit that creates its store" \
+      "without Requires= + After= the agent can start before the directory exists"
+fi
+
+if grep -q '^RequiresMountsFor=/persistent' "$STORE_INIT" 2>/dev/null; then
+  ok "the creating unit waits for the persistent partition to be mounted"
+else
+  bad "the creating unit waits for the persistent partition to be mounted" \
+      "the store could be created on the read-only root, or before the mount shadows it"
+fi
+
+# And the store must NOT be under /var, which is per-slot.
+STORE_ROOT="$(node -e 'const m=require(process.argv[1]);process.stdout.write(m.releaseStore?.root??"")' "$MANIFEST")"
+if [[ "$STORE_ROOT" == /persistent/* ]]; then
+  ok "the release store is on the persistent partition, not per-slot /var"
+else
+  bad "the release store is on the persistent partition, not per-slot /var" \
+      "root='${STORE_ROOT}' — every installed application would vanish on the first A/B update"
+fi
+
 printf '\n  %d passed, %d failed\n\n' "$PASS" "$FAIL"
 [[ $FAIL -eq 0 ]] || exit 1

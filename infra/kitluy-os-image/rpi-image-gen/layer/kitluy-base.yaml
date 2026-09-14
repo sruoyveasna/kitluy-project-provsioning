@@ -32,6 +32,13 @@
 # stage; a terminal's credential custody is a later slice.
 mmdebstrap:
   packages:
+    # `install(1)`, used by kitluy-persistent-store-init.service to create
+    # the release store directory. coreutils is Essential:yes, so this
+    # declares a package that is already present rather than adding one:
+    # the systemd runtime gate requires every ExecStart binary outside
+    # /usr/lib/kitluy to name a declared provider, and Essential still
+    # means provided.
+    - coreutils
     # Device agent runtime. Node is the runtime the KitLuy agents are written
     # in. The bootstrap agents are baked (KLD-2026-08-11-DEVICE-BOOTSTRAP-
     # RUNTIME-001); the business application is a governed release and is NOT.
@@ -115,6 +122,9 @@ mmdebstrap:
     # from this image (KLD-2026-09-03-FACTORY-ENROLLMENT-001).
     - install -d -m 0700 "$1/var/lib/kitluy/health"
     - install -d -m 0700 "$1/var/lib/kitluy/update"
+    # The release trust registry. Public material only; 0755 so the update agent
+    # can read it without holding any capability.
+    - install -d -m 0755 "$1/etc/kitluy/trust"
     # THE KIOSK USER, CREATED AT BUILD TIME.
     #
     # `etc/sysusers.d/60-kitluy-terminal.conf` declares this user, and
@@ -214,6 +224,56 @@ mmdebstrap:
           > "$1/etc/kitluy/development-root.sha256"
         chmod 0644 "$1/etc/kitluy/development-root.sha256"
       fi
+
+      # ---------------------------------------------------------------------
+      # THE RELEASE TRUST ANCHOR (U1). PUBLIC MATERIAL ONLY.
+      # ---------------------------------------------------------------------
+      # A `kitluy.release-trust-key.v1` record: a key id, a version, a PURPOSE
+      # and an SPKI public key. Never a private key — the device verifies
+      # releases and signs nothing, and the loader refuses any record whose text
+      # contains a PRIVATE KEY block even if every other field is right.
+      #
+      # ABSENT IS SAFE, and deliberately not fatal to the build. The update
+      # agent already refuses to look for a payload when it holds no trust
+      # material ("no public release trust anchor ... refusing to consider any
+      # payload"), so an image built without one is inert on this path rather
+      # than dangerous. Failing the build here would also make the image
+      # unbuildable on any machine without the development PKI, which is every
+      # CI runner — the same reasoning the development root pin above records.
+      if [ -n "${IGconf_kitluy_release_trust_record:-}" ]; then
+        printf '%s\n' "${IGconf_kitluy_release_trust_record}" \
+          > "$1/etc/kitluy/trust/release-signing.json"
+        chmod 0644 "$1/etc/kitluy/trust/release-signing.json"
+        if grep -q "PRIVATE KEY" "$1/etc/kitluy/trust/release-signing.json"; then
+          echo "REFUSED: the release trust record contains a PRIVATE KEY block" >&2
+          exit 1
+        fi
+      else
+        echo "kitluy: no release trust anchor supplied; the update agent will refuse every payload" >&2
+      fi
+
+      # ---------------------------------------------------------------------
+      # THE RELEASE SOURCE — a DEFAULT, not the last word.
+      # ---------------------------------------------------------------------
+      # Baked into a read-only rootfs, so on a development terminal this pins
+      # the source to whatever address the workstation had at build time. That
+      # is fine as a bootstrap and unacceptable as the only answer: a DHCP lease
+      # changing would otherwise cost a reflash, which is the opposite of what
+      # U1 exists for.
+      #
+      # `/persistent/shared/kitluy/release-source.env` overrides it at runtime.
+      # That path is on the persistent partition — mounted before local-fs by
+      # the upstream slot-perst-generator, shared across A/B slots, and NEVER
+      # written by the image, so an edit there is not restored from the image on
+      # the next boot the way a declared slot-shared path would be.
+      if [ -n "${IGconf_kitluy_release_source:-}" ]; then
+        printf 'KITLUY_RELEASE_SOURCE=%s\n' "${IGconf_kitluy_release_source}" \
+          > "$1/etc/kitluy/release.env"
+      else
+        printf 'KITLUY_RELEASE_SOURCE=\n' > "$1/etc/kitluy/release.env"
+        echo "kitluy: no release source baked; set one at runtime in /persistent/shared/kitluy/release-source.env" >&2
+      fi
+      chmod 0644 "$1/etc/kitluy/release.env"
       # THE ENVIRONMENT IS REQUIRED, VALIDATED, AND ASSERTED.
       #
       # Not "injected if supplied", like the values above. Those are addresses:

@@ -24,13 +24,38 @@ LockPersonality=yes
 # The database is reachable over a UNIX socket only; it never listens on TCP, so
 # it needs no network at all.
 PrivateNetwork=yes
-# NOT /run/postgresql: it is on the writable /run tmpfs and postgresql-common's
-# tmpfiles already creates it (mode 2775, owner postgres) before this unit runs.
-# Listing it here made systemd bind-mount the existing directory, and the
-# provision script's chmod of that mount root then failed with EPERM
-# (Operation not permitted) on real hardware, taking the whole Hub down
-# (2026-09-04). The provision script creates it only if absent and never
-# re-chmods it.
+# THE SOCKET DIRECTORY IS THE MANAGER'S JOB, NOT THE SCRIPT'S.
+#
+# This unit used to assume postgresql-common's tmpfiles rule had already made
+# /run/postgresql. On a Store Hub it never has. The root filesystem is read-only
+# erofs, so systemd-tmpfiles-setup.service is condition-skipped
+# (ConditionResult=no) and nothing ever applies
+# /usr/lib/tmpfiles.d/postgresql-common.conf.
+#
+# The provision script's fallback could not cover for it either, because
+# `install -d -m 2775` sets the SETGID bit and RestrictSUIDSGID=yes below blocks
+# exactly that syscall. The directory was therefore never created, and install
+# reported the misleading
+#   install: cannot change owner and permissions of '/run/postgresql': No such file or directory
+# which is the chown step complaining about a directory the blocked mkdir never
+# made. This unit then failed at every boot, kitluy-hub-agent refused with
+# KLUY-HUB-DB-UNREACHABLE against a database that had never started, and the Hub
+# served no terminals at all (found on hardware 2026-09-10).
+#
+# RuntimeDirectory= is created by PID 1 BEFORE the sandbox exists, so the setgid
+# mode is applied by the manager and never meets this unit's seccomp filter.
+# Preserve=yes keeps it across a restart of this unit: postgres keeps running
+# and must not have its socket removed from underneath it.
+RuntimeDirectory=postgresql
+RuntimeDirectoryMode=2775
+RuntimeDirectoryPreserve=yes
+# The manager chowns the runtime directory to User=/Group=, so this makes it
+# root:postgres; the 2775 group-write bit is what lets postgres, which runs the
+# cluster, create the socket inside it.
+Group=postgres
+# Still NOT /run/postgresql: listing it here makes systemd bind-mount it, and a
+# chmod of a mount root returns EPERM (that failure took the Hub down on
+# 2026-09-04). RuntimeDirectory= grants write access without a bind-mount.
 ReadWritePaths=/var/lib/kitluy/hub
 Restart=no
 

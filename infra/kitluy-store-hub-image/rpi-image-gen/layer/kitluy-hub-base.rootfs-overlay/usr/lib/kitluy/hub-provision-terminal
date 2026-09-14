@@ -1,0 +1,403 @@
+#!/bin/sh
+# =============================================================================
+# KitLuy Store Hub — DEVELOPMENT terminal projection door.
+#
+# WHAT THIS IS, AND WHAT IT IS NOT
+#
+# The CLOUD is the credential authority. A Store Hub never authors a terminal's
+# identity; it holds a PROJECTION delivered to it, signed, through
+# `edge_sync.inbox` (hub/migrations/0033, WS-11-T004-P04C1 §15-§16). That
+# delivery has two halves: the Hub-side CONSUMER, which is built and proven, and
+# the cloud-side PRODUCER and its transport, which are NOT built and are blocked
+# on BLK-006.
+#
+# Until the producer exists, a Store Hub on real hardware knows no terminals at
+# all: `edge_identity.terminal_device` is empty, so every `/edge/v1` call from a
+# genuine, activated, certificate-holding Pi Terminal is refused
+# TERMINAL_NOT_RECOGNIZED. The Hub serves nothing and the shop cannot trade.
+#
+# This door is the DEVELOPMENT stand-in for that producer, and nothing more. It
+# is the same thing `hub/seed/dev-fixtures.sql` already does for fixture
+# terminals, applied to a real board instead of a fixture: an operator, who is
+# the authority here, states what the cloud would have said.
+#
+# It is NOT a second write path for production. It refuses outright unless the
+# image declares KITLUY_ENVIRONMENT=development, and it refuses any delivery
+# whose scope is not this Hub's OWN Store. A Hub projecting a terminal belonging
+# to someone else's Store is the failure this check exists to prevent.
+#
+# When the BLK-006 producer lands, this door is deleted, not kept as a fallback.
+# =============================================================================
+set -eu
+
+# `runuser -u postgres` inherits the caller's cwd, and an operator's home is not
+# readable by postgres — psql then prints `could not change directory to ...`
+# before every statement, which reads like a fault and is not one.
+cd /
+
+log() { printf '[hub-provision-terminal] %s\n' "$*"; }
+die() { printf '[hub-provision-terminal] REFUSED: %s\n' "$*" >&2; exit 1; }
+
+PG_BIN="/usr/lib/postgresql/15/bin"
+SOCKET_DIR="/run/postgresql"
+HUB_DB="kitluy_hub"
+PAIRING_STATE="/var/lib/kitluy/pairing-state.json"
+DELIVERY=""
+ACTION="apply"
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  hub-provision-terminal --delivery <file.json>   project a terminal into this Hub
+  hub-provision-terminal --hub-self               project THIS Hub's own identity
+  hub-provision-terminal --list                   list the terminals this Hub holds
+  hub-provision-terminal --help
+
+--hub-self is needed before any terminal can read its eligibility: that route
+reads edge_identity.hub_device and refuses HUB_NOT_OPERATIONAL when the Hub
+holds no record of itself. Like the terminal projection, that record is
+normally cloud-delivered.
+
+The delivery file is produced by the development producer on a workstation:
+  pnpm hub:terminal-projection --serial DEV-XXXXXXXXXXXXXXXX > delivery.json
+
+It is NOT a credential and carries no secret: identifiers, a certificate serial,
+a public-key fingerprint and a validity window — all of them public facts about
+a certificate the cloud already issued.
+USAGE
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --delivery) DELIVERY="${2:?--delivery needs a path}"; shift 2 ;;
+    --hub-self) ACTION="hub-self"; shift ;;
+    --list) ACTION="list"; shift ;;
+    --help|-h) usage; exit 0 ;;
+    *) die "unknown argument '$1' (try --help)" ;;
+  esac
+done
+
+[ -x "${PG_BIN}/psql" ] || die "PostgreSQL 15 is not installed at ${PG_BIN}"
+[ -S "${SOCKET_DIR}/.s.PGSQL.5432" ] || die "the Hub database is not running; start kitluy-hub-database.service first"
+
+psql_hub() {
+  runuser -u postgres -- /bin/sh -c "${PG_BIN}/psql -h '${SOCKET_DIR}' -d '${HUB_DB}' -v ON_ERROR_STOP=1 $*"
+}
+
+if [ "$ACTION" = "list" ]; then
+  psql_hub "-P pager=off -c \"select terminal_name, certificate_serial, lifecycle_status, last_seen_at from edge_identity.terminal_device order by terminal_name\""
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# 1. Development only. The environment the IMAGE declares, never a flag.
+# ---------------------------------------------------------------------------
+[ -f /etc/kitluy/image.env ] && . /etc/kitluy/image.env
+ENVIRONMENT="${KITLUY_ENVIRONMENT:-unknown}"
+[ "$ENVIRONMENT" = "development" ] \
+  || die "this image declares KITLUY_ENVIRONMENT='${ENVIRONMENT}'; an operator-authored terminal projection is a development stand-in for the BLK-006 cloud producer and is refused anywhere else"
+
+[ -r "$PAIRING_STATE" ] || die "this Hub has no pairing state at ${PAIRING_STATE}; pair it with a Store first"
+
+if [ "$ACTION" = "hub-self" ]; then
+  # ---------------------------------------------------------------------------
+  # THE HUB'S OWN PROJECTION.
+  #
+  # `edge_identity.hub_device` carries manufacturing evidence — a factory DUID
+  # hash and a root key fingerprint — that exists nowhere in this development
+  # cloud. Those two are written as SELF-DESCRIBING DEVELOPMENT PLACEHOLDERS,
+  # the same way hub/seed/dev-fixtures.sql writes sha256('fixture:...'), so
+  # nothing here can be mistaken for real manufacturing evidence.
+  #
+  # The rest are real: the board serial is read from the device tree, the scope
+  # from this Hub's own pairing state, and the certificate serial from the
+  # operational certificate the cloud actually issued.
+  # ---------------------------------------------------------------------------
+  SERIAL_FILE="/sys/firmware/devicetree/base/serial-number"
+  [ -r "$SERIAL_FILE" ] || die "cannot read the board serial at ${SERIAL_FILE}"
+  BOARD_SERIAL="$(tr -d '\000' < "$SERIAL_FILE" | tr -d ' \t\n')"
+  [ -n "$BOARD_SERIAL" ] || die "the board serial read back empty"
+
+  CERT="/var/lib/kitluy/operational/operational-tls.crt.pem"
+  [ -r "$CERT" ] || die "this Hub has no operational certificate at ${CERT}; it is not activated"
+  HUB_X509_SERIAL="$(openssl x509 -in "$CERT" -noout -serial | sed 's/^serial=//' | tr 'A-Z' 'a-z')"
+  [ -n "$HUB_X509_SERIAL" ] || die "could not read the operational certificate serial"
+
+  # THE HUB NEEDS A CREDENTIAL ROW OF ITS OWN, NOT JUST AN ASSIGNMENT.
+  #
+  # begin_terminal_pairing_v1 (0032) looks up device_credential by
+  # hub_assignment.operational_cert_serial and refuses
+  # KLUY-EDGE-PAIRING-CERT-INVALID when it is absent. Projecting the Hub without
+  # it produced a Hub that served, recognised the terminal, and then refused
+  # every pairing as a certificate failure (hardware, 2026-09-11).
+  #
+  # Every field is read from the Hub OWN certificate, so nothing is invented and
+  # no cloud round trip is needed. The fingerprint is SHA-256 over the SPKI DER,
+  # the same form publicKeyFingerprint() produces on both sides.
+  HUB_FP="$(openssl x509 -in "$CERT" -noout -pubkey \
+    | openssl pkey -pubin -outform DER 2>/dev/null \
+    | openssl dgst -sha256 -hex | sed 's/^.*= //')"
+  [ -n "$HUB_FP" ] || die "could not compute the operational public key fingerprint"
+  HUB_NOT_BEFORE="$(date -u -d "$(openssl x509 -in "$CERT" -noout -startdate | sed 's/^notBefore=//')" +%Y-%m-%dT%H:%M:%SZ)"
+  HUB_NOT_AFTER="$(date -u -d "$(openssl x509 -in "$CERT" -noout -enddate | sed 's/^notAfter=//')" +%Y-%m-%dT%H:%M:%SZ)"
+  HUB_ISSUER="$(openssl x509 -in "$CERT" -noout -issuer | sed 's/^issuer=//' | cut -c1-180)"
+
+  # THE HUB SIGNING KEY. composeDevelopmentListener builds the pairing signer
+  # from the Ed25519 device identity key, so the Hub half of the handshake is
+  # verified against THIS fingerprint, not the operational one (migration 0042).
+  IDKEY="/var/lib/kitluy/identity/device-identity.key.pem"
+  HUB_IDENTITY_FP=""
+  if [ -r "$IDKEY" ]; then
+    HUB_IDENTITY_FP="$(openssl pkey -in "$IDKEY" -pubout -outform DER 2>/dev/null \
+      | openssl dgst -sha256 -hex | sed 's/^.*= //')"
+  fi
+
+  HUB_FIELDS="$(node -e '
+const { readFileSync } = require("node:fs");
+const hub = JSON.parse(readFileSync(process.argv[1], "utf8"));
+const fail = (m) => { console.error(m); process.exit(2); };
+if (hub.phase !== "PAIRED") fail(`this Hub is ${JSON.stringify(hub.phase)}, not PAIRED`);
+for (const k of ["deviceRecordId", "assignmentId", "tenantId", "digitalStoreId", "storeLocationId"]) {
+  if (typeof hub[k] !== "string" || hub[k] === "") fail(`the pairing state has no ${k}`);
+}
+console.log(`HUB_ID=${hub.deviceRecordId}`);
+console.log(`HUB_ASSIGNMENT=${hub.assignmentId}`);
+console.log(`HUB_TENANT=${hub.tenantId}`);
+console.log(`HUB_STORE=${hub.digitalStoreId}`);
+console.log(`HUB_LOCATION=${hub.storeLocationId}`);
+' "$PAIRING_STATE")" || die "the pairing state was refused (see above)"
+
+  # shellcheck disable=SC2046
+  eval $(printf '%s\n' "$HUB_FIELDS" | sed "s/^\([A-Z_]*\)=\(.*\)$/\1='\2'/")
+
+  log "projecting this Hub (${HUB_ID}) as trusted and deployed"
+  psql_hub "-q -c \"
+insert into edge_identity.hub_device
+  (id, asset_number, device_kind, lifecycle_status, trust_status,
+   board_serial_hash, factory_duid_hash, root_key_fingerprint,
+   manufacturing_cert_serial, created_at, updated_at)
+values ('${HUB_ID}', 'KITLUY-DEV-HUB', 'store_hub', 'deployed', 'trusted',
+        encode(sha256('${BOARD_SERIAL}'::bytea), 'hex'),
+        encode(sha256('kitluy.development-projection.factory-duid:${HUB_ID}'::bytea), 'hex'),
+        encode(sha256('kitluy.development-projection.root-key:${HUB_ID}'::bytea), 'hex'),
+        '${HUB_X509_SERIAL}', now(), now())
+on conflict (id) do update
+   set lifecycle_status = 'deployed',
+       trust_status = 'trusted',
+       manufacturing_cert_serial = excluded.manufacturing_cert_serial,
+       updated_at = now();
+
+insert into edge_identity.hub_assignment
+  (id, hub_device_id, tenant_id, digital_store_id, location_id,
+   assignment_generation, assigned_at, ended_at, status, operational_cert_serial)
+values ('${HUB_ASSIGNMENT}', '${HUB_ID}', '${HUB_TENANT}', '${HUB_STORE}', '${HUB_LOCATION}',
+        1, now(), null, 'active', '${HUB_X509_SERIAL}')
+on conflict (id) do update
+   set ended_at = null,
+       status = 'active',
+       operational_cert_serial = excluded.operational_cert_serial;
+
+insert into edge_identity.device_credential
+  (id, device_id, credential_type, public_key_fingerprint, certificate_serial,
+   issuer, issued_at, expires_at, status, rotation_generation)
+values (md5('kitluy.hub-operational-credential:${HUB_X509_SERIAL}')::uuid,
+        '${HUB_ID}', 'operational_tls', '${HUB_FP}', '${HUB_X509_SERIAL}',
+        '${HUB_ISSUER}', '${HUB_NOT_BEFORE}', '${HUB_NOT_AFTER}', 'active', 1)
+on conflict (id) do update
+   set public_key_fingerprint = excluded.public_key_fingerprint,
+       expires_at = excluded.expires_at,
+       status = 'active',
+       revoked_at = null,
+       revocation_reason = null;
+
+-- The Hub OWN signing credential (ed25519 device identity), when the key is
+-- readable. Its validity window follows the operational certificate: the key
+-- itself does not expire, and inventing a window for it would state a fact
+-- nobody checked.
+insert into edge_identity.device_credential
+  (id, device_id, credential_type, public_key_fingerprint, certificate_serial,
+   issuer, issued_at, expires_at, status, rotation_generation)
+select md5('kitluy.hub-identity-credential:' || '${HUB_IDENTITY_FP}')::uuid,
+       '${HUB_ID}', 'device_identity', '${HUB_IDENTITY_FP}', '${HUB_IDENTITY_FP}',
+       '${HUB_ISSUER}', '${HUB_NOT_BEFORE}', '${HUB_NOT_AFTER}', 'active', 1
+ where '${HUB_IDENTITY_FP}' <> ''
+on conflict (id) do update
+   set public_key_fingerprint = excluded.public_key_fingerprint,
+       expires_at = excluded.expires_at,
+       status = 'active',
+       revoked_at = null,
+       revocation_reason = null;\"" >/dev/null
+  log "projected. This Hub now holds a record of itself and its Store."
+  [ -n "$HUB_IDENTITY_FP" ] \
+    && log "  signing credential (ed25519 device identity) projected too" \
+    || log "  NO device identity key readable: the Hub half of pairing will be refused"
+  exit 0
+fi
+
+[ -n "$DELIVERY" ] || die "no delivery file given (try --help)"
+[ -r "$DELIVERY" ] || die "cannot read the delivery file '${DELIVERY}'"
+command -v node >/dev/null 2>&1 || die "node is not installed; the delivery is JSON and is parsed, never pattern-matched"
+
+# ---------------------------------------------------------------------------
+# 2. Read and validate the delivery, and refuse a foreign Store.
+#
+# Parsed by node rather than grep: a delivery is structured data, and a shell
+# pattern match over JSON accepts things that are not the field it looks like.
+# ---------------------------------------------------------------------------
+FIELDS="$(node -e '
+const { readFileSync } = require("node:fs");
+const fail = (m) => { console.error(m); process.exit(2); };
+const read = (p) => { try { return JSON.parse(readFileSync(p, "utf8")); } catch { fail("the delivery is not valid JSON"); } };
+
+const d = read(process.argv[1]);
+const hub = read(process.argv[2]);
+
+const KIND = "kitluy.hub.development-terminal-projection.v1";
+if (d.kind !== KIND) fail(`the delivery kind is ${JSON.stringify(d.kind)}, not ${KIND}`);
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const uuid = (k) => { const v = d[k]; if (typeof v !== "string" || !UUID.test(v)) fail(`${k} is not a uuid`); return v; };
+const text = (k, re, max) => {
+  const v = d[k];
+  if (typeof v !== "string" || v === "" || v.length > max) fail(`${k} is missing or too long`);
+  if (re && !re.test(v)) fail(`${k} is not the expected shape`);
+  return v;
+};
+const when = (k) => {
+  const v = d[k];
+  if (typeof v !== "string" || Number.isNaN(Date.parse(v))) fail(`${k} is not a timestamp`);
+  return new Date(v).toISOString();
+};
+
+const out = {
+  TERMINAL_ID: uuid("terminalDeviceId"),
+  CREDENTIAL_ID: uuid("credentialId"),
+  TENANT_ID: uuid("tenantId"),
+  STORE_ID: uuid("digitalStoreId"),
+  LOCATION_ID: uuid("storeLocationId"),
+  INSTALLATION_ID: uuid("installationId"),
+  // The serial the HUB OBSERVES on the wire: the X.509 serial carried by the
+  // certificate itself, lowercase hex, as normalizeHex(serialNumber) produces
+  // it. The KitLuy DEV-... label rides along for humans and is never matched.
+  // NOTE: no apostrophes anywhere in this node script. It is embedded in a
+  // single-quoted shell string, and one would end it.
+  SERIAL: text("x509CertificateSerial", /^[0-9a-f]{2,80}$/, 80),
+  LABEL: text("credentialSerialLabel", /^[A-Za-z0-9._:-]+$/, 120),
+  FINGERPRINT: text("publicKeyFingerprint", /^[0-9a-f]{64}$/, 64),
+  // The Ed25519 device identity key fingerprint. OPTIONAL, because a delivery
+  // produced before hub migration 0042 does not carry one; the door then
+  // projects only the operational credential and pairing stays refused, which
+  // is the same behaviour as before rather than a new failure.
+  IDENTITY_FP: (function () {
+    var v = d.identityKeyFingerprint;
+    if (v === null || v === undefined) return "";
+    if (typeof v !== "string" || !/^[0-9a-f]{64}$/.test(v)) fail("identityKeyFingerprint is not a sha256 hex digest");
+    return v;
+  })(),
+  ISSUER: text("issuer", null, 200),
+  NAME: text("terminalName", /^[A-Za-z0-9 ._:-]+$/, 80),
+  PROFILE: text("hardwareProfileCode", /^[a-z0-9_.]+$/, 80),
+  ISSUED_AT: when("issuedAt"),
+  EXPIRES_AT: when("expiresAt"),
+};
+
+const generation = d.assignmentGeneration;
+if (!Number.isInteger(generation) || generation < 1) fail("assignmentGeneration must be a positive integer");
+out.GENERATION = String(generation);
+
+if (Date.parse(out.EXPIRES_AT) <= Date.parse(out.ISSUED_AT)) fail("the credential window is empty (expiresAt <= issuedAt)");
+if (Date.parse(out.EXPIRES_AT) <= Date.now()) fail("the credential has already expired; project a current one");
+
+// THE SCOPE CHECK. A Hub holds terminals of its OWN Store and no other.
+if (hub.phase !== "PAIRED") fail(`this Hub is ${JSON.stringify(hub.phase)}, not PAIRED; it has no Store to hold terminals for`);
+for (const [field, mine] of [["tenantId", hub.tenantId], ["digitalStoreId", hub.digitalStoreId], ["storeLocationId", hub.storeLocationId]]) {
+  if (d[field] !== mine) {
+    fail(`the delivery ${field} ${JSON.stringify(d[field])} is not this Hub'"'"'s ${JSON.stringify(mine)}; a Hub does not hold another Store'"'"'s terminals`);
+  }
+}
+
+for (const [k, v] of Object.entries(out)) console.log(`${k}=${v}`);
+' "$DELIVERY" "$PAIRING_STATE")" || die "the delivery was refused (see above)"
+
+# shellcheck disable=SC2046
+eval $(printf '%s\n' "$FIELDS" | sed "s/^\([A-Z_]*\)=\(.*\)$/\1='\2'/")
+
+# ---------------------------------------------------------------------------
+# 3. Apply it. Idempotent: re-running the same delivery changes nothing but the
+#    updated_at stamp, so a re-run after a Hub restart is safe.
+# ---------------------------------------------------------------------------
+log "projecting terminal ${NAME} (${LABEL}, x509 serial ${SERIAL}) into ${HUB_DB}"
+
+psql_hub "-q -c \"
+begin;
+
+do \\\$\\\$
+begin
+  if not exists (select 1 from edge_config.hardware_profile where profile_code = '${PROFILE}') then
+    raise exception 'KLUY-HUB-PROVISION-TERMINAL: this Hub holds no hardware profile %', '${PROFILE}'
+      using errcode = 'P0001';
+  end if;
+end
+\\\$\\\$;
+
+insert into edge_identity.terminal_device
+  (id, tenant_id, digital_store_id, location_id, terminal_name, hardware_profile_id,
+   installation_id, certificate_serial, assignment_generation, lifecycle_status,
+   last_client_sequence, last_seen_at, created_at, updated_at)
+select '${TERMINAL_ID}', '${TENANT_ID}', '${STORE_ID}', '${LOCATION_ID}', '${NAME}',
+       hp.id, '${INSTALLATION_ID}', '${SERIAL}', ${GENERATION}, 'active',
+       0, now(), now(), now()
+  from edge_config.hardware_profile hp
+ where hp.profile_code = '${PROFILE}'
+on conflict (id) do update
+   set certificate_serial    = excluded.certificate_serial,
+       terminal_name         = excluded.terminal_name,
+       assignment_generation = excluded.assignment_generation,
+       lifecycle_status      = 'active',
+       updated_at            = now();
+
+insert into edge_identity.device_credential
+  (id, device_id, credential_type, public_key_fingerprint, certificate_serial,
+   issuer, issued_at, expires_at, status, rotation_generation)
+values ('${CREDENTIAL_ID}', '${TERMINAL_ID}', 'operational_tls', '${FINGERPRINT}', '${SERIAL}',
+        '${ISSUER}', '${ISSUED_AT}', '${EXPIRES_AT}', 'active', ${GENERATION})
+on conflict (id) do update
+   set certificate_serial = excluded.certificate_serial,
+       public_key_fingerprint = excluded.public_key_fingerprint,
+       expires_at = excluded.expires_at,
+       status = 'active',
+       revoked_at = null,
+       revocation_reason = null;
+
+-- THE SIGNING CREDENTIAL, when the delivery carries one.
+--
+-- Hub migration 0042 binds the pairing transcript to the credential the
+-- terminal SIGNS with, which is its Ed25519 device identity key -- not the
+-- RSA operational key that carries mutual TLS. Both rows are projected: one
+-- for the transport, one for the proof. The id is derived from the fingerprint
+-- so a re-run updates the same row.
+--
+-- `certificate_serial` carries the identity fingerprint here because this
+-- credential has no X.509 certificate of its own; nothing matches a peer on it,
+-- and the column is not null.
+insert into edge_identity.device_credential
+  (id, device_id, credential_type, public_key_fingerprint, certificate_serial,
+   issuer, issued_at, expires_at, status, rotation_generation)
+select md5('kitluy.terminal-identity-credential:' || '${IDENTITY_FP}')::uuid,
+       '${TERMINAL_ID}', 'device_identity', '${IDENTITY_FP}', '${IDENTITY_FP}',
+       '${ISSUER}', '${ISSUED_AT}', '${EXPIRES_AT}', 'active', ${GENERATION}
+ where '${IDENTITY_FP}' <> ''
+on conflict (id) do update
+   set public_key_fingerprint = excluded.public_key_fingerprint,
+       expires_at = excluded.expires_at,
+       status = 'active',
+       revoked_at = null,
+       revocation_reason = null;
+
+commit;\"" >/dev/null
+
+log "projected. ${NAME} is now a terminal this Hub recognises."
+[ -n "$IDENTITY_FP" ] \
+  && log "  signing credential (ed25519 device identity) projected too" \
+  || log "  NO identity fingerprint in the delivery: pairing will be refused"
+log "the Hub agent re-derives authorization per request, so no restart is needed."

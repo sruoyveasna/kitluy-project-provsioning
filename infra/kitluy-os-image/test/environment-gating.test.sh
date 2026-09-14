@@ -42,8 +42,14 @@ export KITLUY_DEV_SSH_PUBKEY="${TMP}/probe.pub"
 # `--collect-only` branches AFTER the environment override is assembled, so the
 # gate and its log line are exercised with no image build.
 run_build() {
+  # `--allow-unconfigured-image` because this suite is ABOUT environment
+  # plumbing, not cloud wiring: it deliberately builds with no registration
+  # URL, profile key or root pin. Without the flag the 2026-09-10 guard refuses
+  # first and the overrides under test are never assembled. The guard is what
+  # stops an inert image reaching an SD card; saying so here is the difference
+  # between a deliberate unconfigured build and an accidental one.
   OUT="$(timeout 180 bash "$BUILD" --profile pi-terminal --skip-doctor --skip-packaging \
-          --collect-only --environment "$1" 2>&1)"
+          --collect-only --allow-unconfigured-image --environment "$1" 2>&1)"
   RC=$?
 }
 

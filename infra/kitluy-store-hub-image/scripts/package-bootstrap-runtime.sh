@@ -82,6 +82,13 @@ DEVICE_MODULES=(
   operational-key operational-csr-bytes operational-credential-state
   operational-certificate-verification operational-tls-client
   adapters/http-operational-certificate-client
+  # `paired-identity` reads the seat a device was given: the Hub console's
+  # `pairing-state.json` first, then a Terminal's `assignment.json`. The Hub
+  # image needs it for the same reason the Terminal image does — `bin/operational-tls`
+  # imports it to answer "is this board paired yet?" before asking for a
+  # certificate. Its absence here refused the build with an unpackaged import
+  # rather than shipping a closure that would die at the first boot.
+  paired-identity
   bin/operational-tls
 )
 rm -rf "$LIB_DIR"

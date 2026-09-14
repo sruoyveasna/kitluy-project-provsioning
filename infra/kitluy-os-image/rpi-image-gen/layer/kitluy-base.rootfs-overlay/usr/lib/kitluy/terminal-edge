@@ -1,0 +1,3 @@
+#!/bin/sh
+set -eu
+exec /usr/bin/node /usr/lib/kitluy/lib/firstboot-agent/bin/terminal-edge.js "$@"

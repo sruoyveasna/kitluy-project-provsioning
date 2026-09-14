@@ -166,5 +166,9 @@
   {
     "filename": "0041_booking_draft_sync_acknowledgment.sql",
     "checksumSha256": "67840cc2609b225cb6ab2813bb67f5e36bd5b680fbf0e96efc1f05828ed3a0bb"
+  },
+  {
+    "filename": "0042_terminal_pairing_signing_credential.sql",
+    "checksumSha256": "a06a37a10c040c472986e5a57efafa69048ecdb6eebec385f7b8c024a9e85370"
   }
 ]

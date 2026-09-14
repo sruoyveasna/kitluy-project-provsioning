@@ -16,13 +16,57 @@
 set -eu
 
 ELECTRON=/usr/lib/kitluy/electron/electron
-APP=/usr/lib/kitluy/lib/device-shell
+
+# ===========================================================================
+# WHICH DEVICE SHELL RUNS: AN INSTALLED RELEASE, OR THE IMAGE'S OWN COPY
+# ===========================================================================
+# The image copy is the FLOOR. It is on the read-only rootfs, it is never
+# written, and it is never removed — so however badly an update goes, this
+# script can always start something. A release is PREFERRED when one is
+# installed and complete.
+#
+# `-f .../package.json` and not `-d .../payload`: a half-unpacked payload has a
+# directory and no manifest, and selecting it would trade a working screen for a
+# blank one. The update runtime applies exactly the same test, so the two agree
+# by construction rather than by comment.
+IMAGE_APP=/usr/lib/kitluy/lib/device-shell
+STORE_APP=/persistent/shared/kitluy/releases/device-shell/current/payload
+
+APP="$IMAGE_APP"
+SOURCE=IMAGE_FALLBACK
+if [ -f "$STORE_APP/package.json" ]; then
+  APP="$STORE_APP"
+  SOURCE=RELEASE
+fi
+
+# ===========================================================================
+# SAY WHICH ONE, BEFORE HANDING OVER
+# ===========================================================================
+# This script is the ONLY thing that knows what it actually exec'd. The release
+# journal says what is INSTALLED, which can differ — a release that landed after
+# this process started is installed and not running. Reporting the journal alone
+# would show the new version on a board still running the old one, and somebody
+# would spend an afternoon on it.
+#
+# Written before exec, best-effort: a failure to record must never stop the
+# screen coming up. `/var/lib/kitluy/terminal` is already owned by this unit's
+# user (the unit chowns it in ExecStartPre), so no privilege is needed.
+WITNESS=/var/lib/kitluy/terminal/running-source.json
+if [ -d /var/lib/kitluy/terminal ]; then
+  printf '{"source":"%s","app":"%s","at":"%s"}\n' \
+    "$SOURCE" "$APP" "$(date -Is 2>/dev/null || echo unknown)" \
+    > "$WITNESS.tmp" 2>/dev/null \
+    && mv -f "$WITNESS.tmp" "$WITNESS" 2>/dev/null \
+    || rm -f "$WITNESS.tmp" 2>/dev/null || :
+fi
 
 # Fail with the reason rather than with a stack trace from cage. The unit's
 # ConditionPathExists already keeps a normal boot from getting here, so this is
 # for the hand-started case during support.
 [ -x "$ELECTRON" ] || { echo "no Electron runtime at $ELECTRON" >&2; exit 1; }
 [ -f "$APP/package.json" ] || { echo "no Device Shell app at $APP" >&2; exit 1; }
+
+echo "kitluy: starting Device Shell from $SOURCE ($APP)" >&2
 
 # --sandbox is Electron's own; the CHROMIUM sandbox needs either a setuid helper
 # or user namespaces. The image allows unprivileged user namespaces, so the

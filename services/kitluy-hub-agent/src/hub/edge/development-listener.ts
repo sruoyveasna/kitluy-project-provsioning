@@ -41,15 +41,17 @@
  *   - `activationGateway` is `unavailableActivationGateway()`, the shipped
  *     default: every cloud activation reports UNREACHABLE. Terminal activation
  *     is not part of this milestone and must not appear to work.
- *   - `deliverySigner` is deliberately OMITTED, so the configuration route
- *     fails closed with DELIVERY_SIGNER_UNAVAILABLE rather than delivering a
- *     configuration signed by a development key.
+ *   - `deliverySigner` is wired ONLY when the image declares `development`
+ *     (owner decision 2026-09-10). It used to be omitted unconditionally, and
+ *     on hardware that left a recognised, paired Pi Terminal unable to read its
+ *     configuration at all. Outside development the route still fails closed
+ *     with DELIVERY_SIGNER_UNAVAILABLE, and BLK-005 signer custody is untouched.
  *   - mTLS is mandatory in the transport itself: `requestCert` and
  *     `rejectUnauthorized` are both set, TLS 1.3 is pinned at both ends, and an
  *     uncertified peer is dropped during the handshake, before any route.
  */
 import { readFileSync } from "node:fs";
-import { createPrivateKey, createPublicKey, sign as cryptoSign } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, sign as cryptoSign } from "node:crypto";
 import { hostname as osHostname } from "node:os";
 import { join } from "node:path";
 
@@ -176,8 +178,23 @@ export function composeDevelopmentListener(inputs: ComposeInputs): ListenerCompo
     const publicKeyPem = createPublicKey(privateKey)
       .export({ type: "spki", format: "pem" })
       .toString();
+    // THE SIGNER DECLARES THE CREDENTIAL ITS KEY BELONGS TO.
+    //
+    // It signs with the Ed25519 DEVICE IDENTITY key above, but used to declare
+    // the serial of the TLS OPERATIONAL certificate -- a different key
+    // entirely. complete_terminal_pairing_v1 checks the receipt signer against
+    // the session Hub credential and refused every completion with
+    //   KLUY-EDGE-PAIRING-CERT-INVALID: the receipt signer is not this
+    //   session's Hub credential
+    // once migration 0042 bound the transcript to the signing credential
+    // (hardware, 2026-09-11). A device-identity credential has no certificate
+    // of its own, so the projection uses its SPKI fingerprint as the serial and
+    // this states the same value.
+    const signingCredentialSerial = createHash("sha256")
+      .update(createPublicKey(publicKeyPem).export({ type: "spki", format: "der" }))
+      .digest("hex");
     signer = {
-      certificateSerial: certificateSerial!,
+      certificateSerial: signingCredentialSerial,
       publicKeyPem,
       sign: (payload: Uint8Array) => cryptoSign(null, Buffer.from(payload), privateKey),
     };
@@ -242,7 +259,23 @@ export async function startDevelopmentListener(options: {
     // Fails closed as UNREACHABLE. Terminal activation is not this milestone.
     activationGateway: unavailableActivationGateway(),
     discovery,
-    // `deliverySigner` omitted on purpose — see the header.
+    // THE DELIVERY SIGNER, IN DEVELOPMENT ONLY (owner decision 2026-09-10).
+    //
+    // This was omitted, so `/edge/v1/configuration/current` failed closed with
+    // DELIVERY_SIGNER_UNAVAILABLE rather than serving a configuration signed by
+    // a development key. On hardware that left a genuine, recognised, paired Pi
+    // Terminal unable to read the configuration it needs to trade, with no path
+    // forward short of the BLK-006 cloud publisher.
+    //
+    // The GUARD is the point: it is wired only when the image declares
+    // `development`, so pilot and production reach the same fail-closed refusal
+    // they always did and BLK-005 signer custody is untouched.
+    // `composeDevelopmentListener` already refuses to build any signer at all
+    // outside development (KLUY-HUB-EDGE-BLK005); this is the second lock on
+    // the same door.
+    ...(options.environment === "development"
+      ? { deliverySigner: options.composition.signer }
+      : {}),
     ...(options.logger === undefined ? {} : { logger: options.logger }),
   });
 

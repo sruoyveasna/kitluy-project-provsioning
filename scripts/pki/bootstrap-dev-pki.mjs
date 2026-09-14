@@ -70,7 +70,22 @@ const FILES = {
   canonicalRootKey: "dev-canonical-root.key.pem",
   canonicalIntermediateKey: "dev-canonical-intermediate.key.pem",
   canonicalChain: "dev-canonical-chain.json",
+  // RELEASE SIGNING — a THIRD key, and a separate one on purpose.
+  //
+  // KLD-2026-07-28-002 §1 requires the six signing purposes to stay separate:
+  // "a key used for one purpose must not be reused for another". Release
+  // manifests are `release_signing`; the two chains above are device identity
+  // and TLS. Reusing either of them here would collapse a separation the owner
+  // decision names explicitly, so this key signs release manifests and nothing
+  // else, and the trust record beside it SAYS so — the device refuses a key
+  // whose declared purpose is not `release_signing` (U1 requirement §12).
+  releaseSigningKey: "dev-release-signing.key.pem",
+  releaseSigningPublicKey: "dev-release-signing.pub.pem",
+  releaseSigningTrustRecord: "dev-release-signing.json",
 };
+
+/** Bumped only when a release-signing key is deliberately replaced. */
+const RELEASE_SIGNING_KEY_VERSION = 1;
 
 function die(message) {
   console.error(`REFUSED: ${message}`);
@@ -79,16 +94,26 @@ function die(message) {
 
 function parseArgs(argv) {
   let dir = process.env.KITLUY_DEV_PKI_DIR ?? "";
+  // ADD THE RELEASE KEY TO AN EXISTING PKI, without touching the CA.
+  //
+  // The release-signing key arrived with U1, after development PKIs had already
+  // been created. Regenerating the whole directory to get one new key would
+  // orphan every certificate already chained to the existing root — precisely
+  // what the never-overwrite rule exists to prevent. So this mode mints ONLY
+  // the release key, and still refuses if that key is already there.
+  let releaseKeyOnly = false;
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === "--dir") {
       dir = argv[i + 1] ?? "";
       i += 1;
+    } else if (argv[i] === "--release-key-only") {
+      releaseKeyOnly = true;
     }
   }
   if (dir.trim() === "") {
     die("no directory given. Pass --dir <path> or set KITLUY_DEV_PKI_DIR.");
   }
-  return resolve(dir.trim());
+  return { directory: resolve(dir.trim()), releaseKeyOnly };
 }
 
 /**
@@ -126,7 +151,9 @@ function subject(commonName) {
   const ascii = /^[\x20-\x7e]+$/;
   for (const value of [commonName, "KitLuy Suite", "NON-PRODUCTION development PKI"]) {
     if (!ascii.test(value)) {
-      die(`subject value ${JSON.stringify(value)} contains a non-ASCII character; an X.509 PrintableString cannot carry it`);
+      die(
+        `subject value ${JSON.stringify(value)} contains a non-ASCII character; an X.509 PrintableString cannot carry it`,
+      );
     }
   }
   return [
@@ -144,13 +171,23 @@ function validity(certificate, years) {
 }
 
 function main() {
-  const directory = parseArgs(process.argv.slice(2));
+  const { directory, releaseKeyOnly } = parseArgs(process.argv.slice(2));
   assertOutsideRepository(directory);
 
   const paths = Object.fromEntries(
     Object.entries(FILES).map(([key, name]) => [key, join(directory, name)]),
   );
-  for (const [key, path] of Object.entries(paths)) {
+  const RELEASE_KEYS = new Set([
+    "releaseSigningKey",
+    "releaseSigningPublicKey",
+    "releaseSigningTrustRecord",
+  ]);
+  // In release-key-only mode the CA files are EXPECTED to exist; only the three
+  // release files must not.
+  const guarded = releaseKeyOnly
+    ? Object.entries(paths).filter(([key]) => RELEASE_KEYS.has(key))
+    : Object.entries(paths);
+  for (const [key, path] of guarded) {
     if (existsSync(path)) {
       die(
         `${path} already exists (${key}). This script never overwrites CA material: replacing a root that certificates already chain to is indistinguishable, to a device, from an attacker substituting the CA. Use a NEW directory and re-issue deliberately.`,
@@ -160,6 +197,68 @@ function main() {
 
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   chmodSync(directory, 0o700);
+
+  const write = (path, contents, mode) => {
+    writeFileSync(path, contents, { mode });
+    chmodSync(path, mode);
+    const actual = statSync(path).mode & 0o777;
+    if (actual !== mode) {
+      die(`${path} was written but is mode ${actual.toString(8)}, expected ${mode.toString(8)}`);
+    }
+  };
+
+  const edKeyPair = (label) => {
+    const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+    const publicKeyPem = publicKey.export({ type: "spki", format: "pem" }).toString();
+    const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+    const fingerprint = createHash("sha256")
+      .update(publicKey.export({ type: "spki", format: "der" }))
+      .digest("hex");
+    return { label, publicKeyPem, privateKeyPem, privateKey, fingerprint };
+  };
+
+  const mintReleaseSigningKey = () => {
+    console.log("[dev-pki] generating the release-signing key (purpose: release_signing)");
+    const signing = edKeyPair("release-signing");
+    write(paths.releaseSigningKey, signing.privateKeyPem, 0o600);
+    write(paths.releaseSigningPublicKey, signing.publicKeyPem, 0o644);
+    write(
+      paths.releaseSigningTrustRecord,
+      `${JSON.stringify(
+        {
+          kind: "kitluy.release-trust-key.v1",
+          keyId: signing.fingerprint,
+          keyVersion: RELEASE_SIGNING_KEY_VERSION,
+          algorithm: "ed25519",
+          purpose: "release_signing",
+          environment: "development",
+          productionEligible: false,
+          state: "current",
+          publicKeyPem: signing.publicKeyPem,
+        },
+        null,
+        2,
+      )}\n`,
+      0o644,
+    );
+    console.log("");
+    console.log(
+      `[dev-pki]   release signing  ${signing.fingerprint} (v${RELEASE_SIGNING_KEY_VERSION})`,
+    );
+    console.log(
+      "[dev-pki] The PUBLIC record is the trust anchor an image carries — never the key:",
+    );
+    console.log(`[dev-pki]   ${paths.releaseSigningTrustRecord}`);
+    return signing;
+  };
+
+  if (releaseKeyOnly) {
+    if (!existsSync(paths.rootCertificate)) {
+      die(`${directory} has no development CA. Create one first without --release-key-only.`);
+    }
+    mintReleaseSigningKey();
+    return;
+  }
 
   console.log(`[dev-pki] generating a ${KEY_BITS}-bit root (this takes a moment)`);
   const rootKeys = forge.pki.rsa.generateKeyPair(KEY_BITS);
@@ -194,15 +293,6 @@ function main() {
     { name: "subjectKeyIdentifier" },
   ]);
   intermediate.sign(rootKeys.privateKey, forge.md.sha256.create());
-
-  const write = (path, contents, mode) => {
-    writeFileSync(path, contents, { mode });
-    chmodSync(path, mode);
-    const actual = statSync(path).mode & 0o777;
-    if (actual !== mode) {
-      die(`${path} was written but is mode ${actual.toString(8)}, expected ${mode.toString(8)}`);
-    }
-  };
 
   // Certificates are public. Keys are 0600 and verified after writing, because
   // an umask or a filesystem can disagree with the create flag.
@@ -294,11 +384,15 @@ function main() {
     intermediateKeyId: canonicalIntermediate.fingerprint,
     rootCertificate: {
       tbs: rootTbs,
-      signatureB64: Buffer.from(edSign(null, tbsBytes(rootTbs), canonicalRoot.privateKey)).toString("base64"),
+      signatureB64: Buffer.from(edSign(null, tbsBytes(rootTbs), canonicalRoot.privateKey)).toString(
+        "base64",
+      ),
     },
     intermediateCertificate: {
       tbs: intermediateTbs,
-      signatureB64: Buffer.from(edSign(null, tbsBytes(intermediateTbs), canonicalRoot.privateKey)).toString("base64"),
+      signatureB64: Buffer.from(
+        edSign(null, tbsBytes(intermediateTbs), canonicalRoot.privateKey),
+      ).toString("base64"),
     },
   };
 
@@ -306,6 +400,8 @@ function main() {
   write(paths.canonicalIntermediateKey, canonicalIntermediate.privateKeyPem, 0o600);
   // Public material only: two TBS structures and their signatures. No key.
   write(paths.canonicalChain, `${JSON.stringify(canonicalChain, null, 2)}\n`, 0o644);
+
+  const releaseSigning = mintReleaseSigningKey();
 
   const fingerprint = (certificate) =>
     forge.md.sha256
@@ -321,6 +417,13 @@ function main() {
   console.log(`[dev-pki]   issuing CA    ${fingerprint(intermediate)}`);
   console.log(`[dev-pki]   canonical root        ${canonicalRoot.fingerprint}`);
   console.log(`[dev-pki]   canonical intermediate ${canonicalIntermediate.fingerprint}`);
+  console.log(
+    `[dev-pki]   release signing       ${releaseSigning.fingerprint} (v${RELEASE_SIGNING_KEY_VERSION}, purpose release_signing)`,
+  );
+  console.log("");
+  console.log("[dev-pki] The release trust anchor a Pi Terminal image must carry is the PUBLIC");
+  console.log("[dev-pki] record beside it — never the key:");
+  console.log(`[dev-pki]   ${join(directory, FILES.releaseSigningTrustRecord)}`);
   console.log("");
   console.log("[dev-pki] Point the issuing service at it and keep it out of every image:");
   console.log(`[dev-pki]   export KITLUY_DEV_PKI_DIR=${directory}`);

@@ -215,5 +215,34 @@ else
   bad "staged root digest is deterministic" "$D1 != $D2"
 fi
 
+# ---------------------------------------------------------------------------
+# AN IMAGE THAT CANNOT REACH THE CLOUD MUST BE REFUSED, NOT WARNED.
+#
+# On 2026-09-10 both images were rebuilt with no registration URL, no hardware
+# profile key and no root pin. The build WARNED and carried on; the warnings
+# were in the log and were not read; two SD cards were flashed and both boards
+# booted inert. A warning that is routinely scrolled past is not a control.
+#
+# This asserts the refusal is still a refusal.
+# ---------------------------------------------------------------------------
+GUARD_OUT="$(KITLUY_DEV_SSH_PUBKEY="${HOME}/.ssh/id_ed25519.pub" KITLUY_DEV_PKI_DIR= \
+  timeout 120 bash "${ROOT}/scripts/build-rpi-image.sh" --profile store-hub --environment development \
+    --skip-doctor --skip-packaging --collect-only 2>&1)"
+GUARD_RC=$?
+if [[ $GUARD_RC -ne 0 && "$GUARD_OUT" == *"inert on the bench"* ]]; then
+  ok "an image with no registration URL, profile key or root pin is REFUSED"
+else
+  bad "an image with no registration URL, profile key or root pin is REFUSED" \
+      "the build exited ${GUARD_RC} and would have produced a card that can never register"
+fi
+
+# The escape hatch must exist, or every legitimate unconfigured build is blocked.
+if [[ "$GUARD_OUT" == *"--allow-unconfigured-image"* ]]; then
+  ok "the refusal names its deliberate escape hatch"
+else
+  bad "the refusal names its deliberate escape hatch" \
+      "an operator with a genuine reason has no documented way through"
+fi
+
 printf '\n  %d passed, %d failed\n\n' "$PASS" "$FAIL"
 [[ $FAIL -eq 0 ]] || exit 1

@@ -14,7 +14,7 @@
  * ONE rather than a denylist someone could add a value past.
  */
 import { describe, expect, it } from "vitest";
-import { generateKeyPairSync, verify as cryptoVerify } from "node:crypto";
+import { createHash, createPublicKey, generateKeyPairSync, verify as cryptoVerify } from "node:crypto";
 
 import {
   edgeDiscoveryRecordBytes,
@@ -165,10 +165,24 @@ describe("the composed signer is the one a terminal can verify", () => {
     expect(result.signer.publicKeyPem).toContain("BEGIN PUBLIC KEY");
   });
 
-  it("carries the certificate serial from the adopted credential", () => {
+  it("declares the credential its own key belongs to, not the TLS certificate", () => {
+    // IT SIGNS WITH THE DEVICE IDENTITY KEY, so that is the credential it must
+    // name. It used to declare the adopted TLS certificate's serial
+    // (`DEV-F05936A833810D35`) while signing with a different key entirely, and
+    // `complete_terminal_pairing_v1` refused every completion with
+    //   KLUY-EDGE-PAIRING-CERT-INVALID: the receipt signer is not this
+    //   session's Hub credential
+    // once hub migration 0042 bound the transcript to the signing credential
+    // (hardware, 2026-09-11). A device-identity credential has no certificate,
+    // so its SPKI fingerprint is its serial on both sides.
     const result = compose("development");
     if (result.kind !== "composed") throw new Error("expected a composition");
-    expect(result.signer.certificateSerial).toBe("DEV-F05936A833810D35");
+
+    const expected = createHash("sha256")
+      .update(createPublicKey(result.signer.publicKeyPem).export({ type: "spki", format: "der" }))
+      .digest("hex");
+    expect(result.signer.certificateSerial).toBe(expected);
+    expect(result.signer.certificateSerial).not.toBe("DEV-F05936A833810D35");
   });
 
   it("produces a discovery record a terminal accepts", () => {

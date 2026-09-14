@@ -520,29 +520,119 @@ if grep -qE '^Requires=.*kitluy-hub-pairing' "$OPTLS_UNIT"; then
 else
   ok "operational-tls: does not Requires= the pairing console"
 fi
-# THE STORE HUB DATABASE UNIT MUST NOT BIND-MOUNT /run/postgresql.
+# THE STORE HUB DATABASE UNIT MUST CREATE ITS OWN SOCKET DIRECTORY.
 #
-# postgresql-common creates /run/postgresql (mode 2775, owner postgres) via
-# tmpfiles at boot, and /run is a writable tmpfs under ProtectSystem=full.
-# Listing /run/postgresql in ReadWritePaths made systemd bind-mount the
-# already-created directory, and the provision script's chmod of that mount
-# root then failed EPERM on real hardware (2026-09-04), taking the whole Hub
-# down. The unit reaches the socket through the shared /run without listing it.
+# Two beliefs about /run/postgresql each took the whole Hub down on hardware,
+# and both are asserted against here.
+#
+# 2026-09-04: listing /run/postgresql in ReadWritePaths made systemd bind-mount
+# it, and the provision script's chmod of a mount root returned EPERM.
+#
+# 2026-09-10: with the bind-mount gone, nothing created the directory at all.
+# postgresql-common's tmpfiles rule does not run on a read-only erofs root
+# (systemd-tmpfiles-setup.service is condition-skipped), and the script's
+# `install -d -m 2775` fallback is blocked by RestrictSUIDSGID=yes because 2775
+# carries the setgid bit — so the database never started and the agent refused
+# with KLUY-HUB-DB-UNREACHABLE.
+#
+# RuntimeDirectory= satisfies both: PID 1 creates it with the setgid mode before
+# the sandbox exists, and no bind-mount of an existing path is involved.
 DB_UNIT="${LAYER_DIR}/kitluy-hub-base.rootfs-overlay/etc/systemd/system/kitluy-hub-database.service"
 if [ -f "$DB_UNIT" ]; then
   if grep -qE '^ReadWritePaths=.*(/run/postgresql)' "$DB_UNIT"; then
     bad "hub database: /run/postgresql is NOT in ReadWritePaths" \
-        "bind-mounting the tmpfiles-created socket dir makes the provision chmod fail EPERM"
+        "bind-mounting the socket dir makes the provision chmod fail EPERM"
   else
     ok "hub database: /run/postgresql is not in ReadWritePaths (no bind-mount of the socket dir)"
   fi
-  DB_PROVISION="${LAYER_DIR}/kitluy-hub-base.rootfs-overlay/usr/lib/kitluy/hub-database-provision"
-  if [ -f "$DB_PROVISION" ] && grep -qE 'install -d[^\n]*-m 0755[^\n]*SOCKET_DIR' "$DB_PROVISION"; then
-    bad "hub database: the socket dir is created idempotently, never force-chmod'd" \
-        "install -d -m 0755 on an existing /run/postgresql fails EPERM inside the unit namespace"
+
+  if grep -qE '^RuntimeDirectory=postgresql$' "$DB_UNIT"; then
+    ok "hub database: declares RuntimeDirectory=postgresql"
   else
-    ok "hub database: the socket dir is created only when absent, never force-chmod'd"
+    bad "hub database: declares RuntimeDirectory=postgresql" \
+        "nothing else creates /run/postgresql on a read-only erofs root; the cluster cannot open a socket"
   fi
+
+  if grep -qE '^RuntimeDirectoryMode=2775$' "$DB_UNIT"; then
+    ok "hub database: RuntimeDirectoryMode=2775 (setgid, applied by the manager)"
+  else
+    bad "hub database: RuntimeDirectoryMode=2775" \
+        "postgres needs group-write on the socket dir, and the payload cannot set setgid under RestrictSUIDSGID"
+  fi
+
+  if grep -qE '^RuntimeDirectoryPreserve=yes$' "$DB_UNIT"; then
+    ok "hub database: RuntimeDirectoryPreserve=yes (a unit restart keeps the live socket)"
+  else
+    bad "hub database: RuntimeDirectoryPreserve=yes" \
+        "restarting the unit would delete /run/postgresql while postgres is still running"
+  fi
+
+  if grep -qE '^Group=postgres$' "$DB_UNIT"; then
+    ok "hub database: Group=postgres (the manager chowns the runtime dir root:postgres)"
+  else
+    bad "hub database: Group=postgres" \
+        "without it the runtime dir is root:root and postgres cannot create the socket"
+  fi
+
+  DB_PROVISION="${LAYER_DIR}/kitluy-hub-base.rootfs-overlay/usr/lib/kitluy/hub-database-provision"
+  if [ -f "$DB_PROVISION" ]; then
+    if grep -qE 'install -d[^\n]*-m 0755[^\n]*SOCKET_DIR' "$DB_PROVISION"; then
+      bad "hub database: the socket dir is created idempotently, never force-chmod'd" \
+          "install -d -m 0755 on an existing /run/postgresql fails EPERM inside the unit namespace"
+    else
+      ok "hub database: the socket dir is created only when absent, never force-chmod'd"
+    fi
+    if grep -qE 'install -d[^\n]*-m [0-7]?[1-7][0-7]{3}[^\n]*SOCKET_DIR' "$DB_PROVISION"; then
+      bad "hub database: the fallback socket dir carries no setgid/setuid bit" \
+          "RestrictSUIDSGID=yes blocks mkdir with S_ISGID, so install -d -m 2775 creates nothing"
+    else
+      ok "hub database: the fallback socket dir carries no setgid/setuid bit"
+    fi
+  fi
+fi
+
+# THE HUB AGENT NEEDS AF_NETLINK.
+#
+# libuv enumerates local interfaces through a netlink socket. Without the family
+# Node dies at startup with "uv_interface_addresses returned Unknown system
+# error 97" before the agent can resolve its own bind host (hardware,
+# 2026-09-10). Netlink reaches the local kernel only; it is not a route off the
+# device.
+AGENT_UNIT="${LAYER_DIR}/kitluy-hub-base.rootfs-overlay/etc/systemd/system/kitluy-hub-agent.service"
+if [ -f "$AGENT_UNIT" ]; then
+  if grep -qE '^RestrictAddressFamilies=.*AF_NETLINK' "$AGENT_UNIT"; then
+    ok "hub agent: RestrictAddressFamilies includes AF_NETLINK"
+  else
+    bad "hub agent: RestrictAddressFamilies includes AF_NETLINK" \
+        "libuv cannot enumerate interfaces and the agent exits before serving"
+  fi
+fi
+
+# THE HUB DSN MUST NAME THE OS USER THE AGENT RUNS AS.
+#
+# The cluster is initdb'd --auth=peer, which demands a database role named after
+# the connecting uid. kitluy-hub-agent.service runs as root, so a DSN saying
+# `postgres` is refused "Peer authentication failed" — and that refusal is
+# swallowed into KLUY-HUB-DB-UNREACHABLE, which reads as a storage or migration
+# fault and is neither (hardware, 2026-09-10).
+HUB_LAYER_YAML="${LAYER_DIR}/kitluy-store-hub.yaml"
+if [ -f "$HUB_LAYER_YAML" ]; then
+  DSN_LINE="$(grep -E '^[[:space:]]*KITLUY_HUB_DB_URL=' "$HUB_LAYER_YAML" | head -1)"
+  AGENT_USER="$(grep -E '^User=' "$AGENT_UNIT" 2>/dev/null | head -1 | cut -d= -f2)"
+  case "$DSN_LINE" in
+    *"://${AGENT_USER}@"*)
+      ok "hub agent: the DSN connects as '${AGENT_USER}', the uid peer auth will see" ;;
+    *)
+      bad "hub agent: the DSN connects as the unit's own User= ('${AGENT_USER}')" \
+          "peer auth refuses any other role name and the Hub reports KLUY-HUB-DB-UNREACHABLE" ;;
+  esac
+  case "$DSN_LINE" in
+    *localhost*|*127.0.0.1*)
+      ok "hub agent: the DSN keeps the load-bearing localhost literal" ;;
+    *)
+      bad "hub agent: the DSN keeps the load-bearing localhost literal" \
+          "hubDatabaseUrl() refuses a DSN without localhost/127.0.0.1 (KL-INF-P1-037)" ;;
+  esac
 fi
 
 if grep -qE '^ReadWritePaths=/var/lib/kitluy' "$OPTLS_UNIT"; then
@@ -714,6 +804,58 @@ if [[ -f "$TMP_UNIT" ]]; then
 else
   bad "a tmpfs /tmp is shipped (the erofs root cannot provide one)" \
       "without it cage cannot start Xwayland and the Device Shell crash-loops"
+fi
+
+# ---------------------------------------------------------------------------
+# THE DEVELOPMENT TERMINAL PROJECTION DOOR.
+#
+# A Store Hub holds no terminals until the cloud delivers them, and that
+# producer is BLK-006. Without a stand-in, every /edge/v1 call from a genuine
+# activated Pi Terminal is refused TERMINAL_NOT_RECOGNIZED and the shop cannot
+# trade. This door is the development stand-in, and these assertions are what
+# keep it a stand-in rather than a second write path.
+# ---------------------------------------------------------------------------
+PROVISION="${LAYER_DIR}/kitluy-hub-base.rootfs-overlay/usr/lib/kitluy/hub-provision-terminal"
+if [ -f "$PROVISION" ]; then
+  ok "terminal projection: the door is shipped"
+
+  if [ -x "$PROVISION" ]; then
+    ok "terminal projection: the door is executable"
+  else
+    bad "terminal projection: the door is executable" "an operator cannot run it"
+  fi
+
+  if grep -q 'KITLUY_ENVIRONMENT' "$PROVISION" && grep -q 'ENVIRONMENT" = "development"' "$PROVISION"; then
+    ok "terminal projection: refused outside development"
+  else
+    bad "terminal projection: refused outside development" \
+        "an operator-authored identity projection must never run in pilot or production"
+  fi
+
+  # A Hub holds terminals of its OWN Store. Without this it would hold anyone's.
+  if grep -q 'storeLocationId' "$PROVISION" && grep -q 'pairing-state.json' "$PROVISION"; then
+    ok "terminal projection: the delivery scope is checked against this Hub's own pairing state"
+  else
+    bad "terminal projection: the delivery scope is checked against the Hub's pairing state" \
+        "a Hub would accept a projection for another Store"
+  fi
+
+  # The serial the Hub matches is the X.509 one it observes in the handshake.
+  # Projecting the KitLuy DEV-... label produces a row that matches nothing.
+  if grep -q 'x509CertificateSerial' "$PROVISION"; then
+    ok "terminal projection: keyed on the X.509 serial the handshake presents"
+  else
+    bad "terminal projection: keyed on the X.509 serial" \
+        "a projection keyed on the KitLuy label is refused TERMINAL_NOT_RECOGNIZED"
+  fi
+
+  if sh -n "$PROVISION" 2>/dev/null; then
+    ok "terminal projection: the door parses as POSIX sh"
+  else
+    bad "terminal projection: the door parses as POSIX sh" "it would fail at the first run"
+  fi
+else
+  bad "terminal projection: the door is shipped" "no hub-provision-terminal in the Hub overlay"
 fi
 
 printf '\n  %d passed, %d failed\n\n' "$PASS" "$FAIL"

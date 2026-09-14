@@ -93,6 +93,7 @@ while [[ $# -gt 0 ]]; do
     # endpoint because it is a different service: Supabase does not serve
     # /v1/device-enrollment, and the fleet service does not serve this.
     --registration-url) REGISTRATION_URL="${2:-}"; shift 2 ;;
+    --allow-unconfigured-image) ALLOW_UNCONFIGURED="yes"; shift ;;
     # A stable hardware profile KEY (never a UUID) so the image stays generic.
     --hardware-profile-key) HARDWARE_PROFILE_KEY="${2:-}"; shift 2 ;;
     --build-dir)       BUILD_DIR="${2:-}"; shift 2 ;;
@@ -208,6 +209,7 @@ mkdir -p "$BUILD_DIR"
 RIG_OVERRIDES=()
 ENROLLMENT_URL="${ENROLLMENT_URL:-${KITLUY_ENROLLMENT_BASE_URL:-}}"
 REGISTRATION_URL="${REGISTRATION_URL:-${KITLUY_REGISTRATION_URL:-}}"
+ALLOW_UNCONFIGURED="${ALLOW_UNCONFIGURED:-no}"
 HARDWARE_PROFILE_KEY="${HARDWARE_PROFILE_KEY:-${KITLUY_HARDWARE_PROFILE_KEY:-}}"
 if [[ -n "${KITLUY_DEV_SSH_PUBKEY:-}" ]]; then
   [[ -f "$KITLUY_DEV_SSH_PUBKEY" ]] \
@@ -371,6 +373,42 @@ fi
 # can add it later. Warned about in the same terms as the fleet endpoint, and
 # for the same reason: the fix is a rebuild, and the operator should learn that
 # here rather than with a card in their hand.
+# =============================================================================
+# AN IMAGE THAT CANNOT REACH THE CLOUD IS REFUSED, NOT WARNED.
+#
+# These three values are command-line inputs, not source. When they are absent
+# the build used to WARN and carry on, producing an image that looks perfect,
+# passes every gate, and is inert: no registration route, no profile key, no
+# root pin. On 2026-09-10 exactly that happened — both images were rebuilt with
+# none of them, two SD cards were flashed, and the boards booted and sat there.
+# The warnings were in the build log and were not read.
+#
+# A warning that is routinely ignored is not a control. This refuses.
+#
+# `--allow-unconfigured-image` is the deliberate escape hatch, for building a
+# rootfs whose cloud wiring is supplied some other way. It has to be typed.
+# =============================================================================
+if [[ "$ALLOW_UNCONFIGURED" != "yes" ]]; then
+  MISSING=()
+  [[ -n "$REGISTRATION_URL" ]] || MISSING+=("--registration-url        (the device cannot register at all)")
+  [[ -n "$HARDWARE_PROFILE_KEY" ]] || MISSING+=("--hardware-profile-key    (registration is refused KLUY-REG-UNKNOWN-PROFILE)")
+  [[ -n "${KITLUY_DEV_PKI_DIR:-}" ]] || MISSING+=("\$KITLUY_DEV_PKI_DIR       (no root pin: no operational certificate can be adopted)")
+  if [[ ${#MISSING[@]} -gt 0 ]]; then
+    printf '\n[%s] REFUSED: this image would be inert on the bench.\n\n' "kitluy-store-hub-image" >&2
+    printf '  missing: %s\n' "${MISSING[@]}" >&2
+    printf '\n  The rootfs is read-only, so none of these can be corrected on the card:\n' >&2
+    printf '  the only fix is a rebuild and another flash.\n\n' >&2
+    printf '  Example:\n' >&2
+    printf '    KITLUY_DEV_SSH_PUBKEY=$HOME/.ssh/id_ed25519.pub \\\n' >&2
+    printf '    KITLUY_DEV_PKI_DIR=<workspace>/local-config/het-kitluy-project/dev-pki \\\n' >&2
+    printf '      %s --profile %s --environment development \\\n' "$0" "$PROFILE" >&2
+    printf '        --registration-url http://<lan-ip>:54371/functions/v1/device-registration \\\n' >&2
+    printf '        --hardware-profile-key <KEY>\n\n' >&2
+    printf '  Deliberately building an unconfigured rootfs? Pass --allow-unconfigured-image.\n\n' >&2
+    exit 2
+  fi
+fi
+
 if [[ -n "$REGISTRATION_URL" ]]; then
   RIG_OVERRIDES+=("IGconf_kitluy_registration_url=${REGISTRATION_URL}")
   log "cloud registration route baked: ${REGISTRATION_URL}"

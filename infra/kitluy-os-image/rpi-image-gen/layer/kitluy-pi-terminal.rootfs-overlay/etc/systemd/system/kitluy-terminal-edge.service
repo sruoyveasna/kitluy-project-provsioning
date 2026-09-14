@@ -1,0 +1,36 @@
+[Unit]
+Description=KitLuy Pi Terminal link to the Store Hub (LAN mTLS /edge/v1)
+Documentation=https://github.com/Soenghak3301/HET-KITLUY-PROJECT
+# The certificate first, the network second. Without the adopted operational
+# material this service can only report NOT_ACTIVATED, which is true but useless
+# noise on a board that is about to be issued one.
+After=kitluy-firstboot.service kitluy-operational-tls.service network-online.target
+Wants=network-online.target kitluy-operational-tls.service
+Requires=kitluy-firstboot.service
+ConditionPathExists=/usr/lib/kitluy/terminal-edge
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/kitluy/terminal-edge
+# Always, not on-failure: this service is a loop that reports shop states, so a
+# clean exit is as unexpected as a crash and both must bring it back.
+Restart=always
+RestartSec=30
+UMask=0077
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+RestrictSUIDSGID=yes
+# AF_NETLINK is required: the mDNS query joins a multicast group, and libuv
+# enumerates interfaces through netlink to do it. Omitting it cost the Store Hub
+# agent a whole bring-up (uv_interface_addresses, EAFNOSUPPORT) on 2026-09-10.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+# It reads the operational key (0700 root) and the device identity key, and
+# writes only the status file the Device Shell reads.
+ReadWritePaths=/var/lib/kitluy
+StateDirectory=kitluy
+StateDirectoryMode=0751
+
+[Install]
+WantedBy=multi-user.target

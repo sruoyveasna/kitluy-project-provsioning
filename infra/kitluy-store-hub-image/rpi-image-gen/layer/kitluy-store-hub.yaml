@@ -61,7 +61,18 @@ mmdebstrap:
       # DSN not containing `localhost` or `127.0.0.1` (KL-INF-P1-037, owner-
       # locked) — a socket DSN without it fails closed at startup, which reads as
       # a Hub bug rather than the guard doing its job.
-      KITLUY_HUB_DB_URL=postgresql://postgres@localhost/kitluy_hub?host=/run/postgresql
+      #
+      # THE USERNAME IS `root`, AND IT HAS TO BE. Peer auth authenticates by the
+      # OS uid and demands a database role of the SAME NAME.
+      # `kitluy-hub-agent.service` runs as root, so a DSN saying `postgres` is
+      # refused with "Peer authentication failed for user postgres" — which
+      # `isHubDatabaseReachable()` swallows into a bare false, and the Hub then
+      # reports KLUY-HUB-DB-UNREACHABLE against a database that is up, migrated
+      # and answering psql on the same socket (found on hardware 2026-09-10).
+      # `hub-database-provision` creates the `root` login role for exactly this
+      # and grants it membership of the governed runtime roles; the role holds no
+      # privilege of its own.
+      KITLUY_HUB_DB_URL=postgresql://root@localhost/kitluy_hub?host=/run/postgresql
 
       # What migration set THIS release expects. Absent, the agent reports
       # SCHEMA-AHEAD against any real database and refuses — correctly, since a

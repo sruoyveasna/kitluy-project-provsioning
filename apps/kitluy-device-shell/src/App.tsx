@@ -7,7 +7,12 @@ import { useCallback, useEffect, useMemo, useReducer, useState, type JSX } from 
 import { DEFAULT_LOCALE, type KitluyLocale } from "@kitluy/localization";
 import "./bridge.js";
 import { messagesFor } from "./messages.js";
-import { deriveScreen, pairingMessageKey, type ShellSnapshot } from "./model/shell-state.js";
+import {
+  deriveScreen,
+  pairingMessageKey,
+  releaseCaption,
+  type ShellSnapshot,
+} from "./model/shell-state.js";
 import {
   emptyCodeEntry,
   reduceCodeEntry,
@@ -349,6 +354,7 @@ export function App(): JSX.Element {
       onToggleLocale={toggleLocale}
       settingsOpen={settingsOpen}
       onToggleSettings={() => setSettingsOpen((open) => !open)}
+      release={snapshot === null ? null : releaseCaption(snapshot)}
     >
       {body}
     </Chrome>

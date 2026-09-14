@@ -19,6 +19,57 @@
  * slice can do (owner decision v2.0.0 §5).
  */
 /**
+ * The one line the screen shows about software. Deliberately short — it sits
+ * under the device label, not in place of the state the shell exists to render.
+ *
+ * Returns null when there is nothing worth saying: a board that has never had a
+ * release and is running the image it was flashed with is the normal case and
+ * does not need a caption.
+ */
+export function releaseCaption(snapshot) {
+    const release = snapshot.release ?? null;
+    if (release === null)
+        return null;
+    if (release.source === "IMAGE_FALLBACK") {
+        // A device with a release installed but the image copy running is the case
+        // that must never look normal.
+        if (release.installedVersion !== null || release.stale) {
+            return {
+                text: `Image software · ${release.installedVersion ?? "an update"} is installed and starts on restart`,
+                tone: "attention",
+            };
+        }
+        if (release.lastOutcome === "ROLLED_BACK" || release.lastOutcome === "REFUSED") {
+            return {
+                text: `Image software · last update ${release.lastOutcome.toLowerCase().replace("_", " ")}`,
+                tone: "attention",
+            };
+        }
+        return null; // never updated, running what it was flashed with
+    }
+    if (release.source === "RELEASE") {
+        // A release IS running but not the one that is installed. The version of
+        // the running one is not recorded — only the committed one is — so this
+        // says what is true rather than guessing a number. Found by a test that
+        // expected a caption here and got none, which is the silent case this
+        // whole function exists to prevent.
+        if (release.runningVersion === null) {
+            return {
+                text: `Older release running · ${release.installedVersion ?? "a newer version"} starts on restart`,
+                tone: "attention",
+            };
+        }
+        if (release.stale) {
+            return {
+                text: `${release.runningVersion} · ${release.installedVersion ?? "a newer version"} starts on restart`,
+                tone: "attention",
+            };
+        }
+        return { text: release.runningVersion, tone: "normal" };
+    }
+    return null;
+}
+/**
  * THE ASSET TAG, DERIVED ONCE — mirror of the agent's `assetTagFromFingerprint`.
  *
  * `KL-` + the first twelve hex digits of the registration key fingerprint. This
