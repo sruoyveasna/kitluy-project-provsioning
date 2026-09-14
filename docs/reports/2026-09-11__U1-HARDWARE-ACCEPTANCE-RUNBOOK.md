@@ -1,10 +1,10 @@
 # U1 hardware acceptance — bench runbook
 
-| Field | Value |
-| --- | --- |
-| Date prepared | 2026-09-11 · Asia/Phnom_Penh |
-| Status | **NOT EXECUTED.** Prepared for the bench; every step below needs physical access. |
-| Claim | **HARDWARE VERIFIED is NOT claimed** and must not be until A/B/C/D all pass on the board. |
+| Field         | Value                                                                                     |
+| ------------- | ----------------------------------------------------------------------------------------- |
+| Date prepared | 2026-09-11 · Asia/Phnom_Penh                                                              |
+| Status        | **NOT EXECUTED.** Prepared for the bench; every step below needs physical access.         |
+| Claim         | **HARDWARE VERIFIED is NOT claimed** and must not be until A/B/C/D all pass on the board. |
 
 ---
 
@@ -75,7 +75,7 @@ sync
 ## 3. Bring the board up
 
 1. Card in, power on.
-2. The screen shows the Device Shell: *"Waiting for approval"*, with the board's
+2. The screen shows the Device Shell: _"Waiting for approval"_, with the board's
    `KL-…` asset tag.
 3. Approve it in the Admin Portal (`#/pending`) — the same tag.
 4. Partner Portal → the Store → Provisioning → Terminals → issue a code; type it on
@@ -149,7 +149,7 @@ Watch the board (the agent polls; `journalctl -fu kitluy-update-agent` shows it)
 - the visible change is on the touchscreen;
 - the footer caption reads `0.4.12-a` with **normal** tone (not "Image software");
 - `pnpm release:verify:terminal --target <TAG> --expect 0.4.12-a --ssh pi@<ip>` is green,
-  including *the shell is running a RELEASE, not the image fallback*;
+  including _the shell is running a RELEASE, not the image fallback_;
 - the terminal is **still paired, still activated, still SERVING**.
 
 The commit is after three consecutive healthy probes at 20 s — about a minute. That is
@@ -168,7 +168,7 @@ Electron main entry), as `0.4.12-c`.
 - the screen works again and shows `0.4.12-a`;
 - the journal records `failed_rolled_back` naming `0.4.12-c`;
 - **publishing the same release again does not reinstall it** —
-  `INSTALL_RETRY_BLOCKED_AFTER_ROLLBACK`. A *different* release must still install.
+  `INSTALL_RETRY_BLOCKED_AFTER_ROLLBACK`. A _different_ release must still install.
 
 ---
 
@@ -177,13 +177,13 @@ Electron main entry), as `0.4.12-c`.
 **Pull the mains. Not `reboot`, not a clean shutdown.** Five windows; cut during each,
 then power on and check:
 
-| # | Window |
-| --- | --- |
-| 1 | during download |
-| 2 | during unpack |
-| 3 | **between journal-intent and the symlink swap** |
-| 4 | **between the symlink swap and the journal advance** |
-| 5 | during the health gate |
+| #   | Window                                               |
+| --- | ---------------------------------------------------- |
+| 1   | during download                                      |
+| 2   | during unpack                                        |
+| 3   | **between journal-intent and the symlink swap**      |
+| 4   | **between the symlink swap and the journal advance** |
+| 5   | during the health gate                               |
 
 Windows 3 and 4 are what the fsync ordering exists to survive — cut each **at least
 three times**. `journalctl -fu kitluy-update-agent` shows which step is live.
@@ -226,7 +226,7 @@ arrives through the governed path.
 
 With a healthy release running:
 
-**D1 — tampered bytes.** Publish, then flip a byte *inside* the artifact on the
+**D1 — tampered bytes.** Publish, then flip a byte _inside_ the artifact on the
 workstation (appending proves nothing — the device reads exactly
 `artifactSizeBytes`):
 

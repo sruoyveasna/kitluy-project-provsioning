@@ -18,11 +18,11 @@ state machine existed too, in `apps/kitluy-pos-desktop-app`.
 
 Three things were missing between them:
 
-| Layer | Before |
-| --- | --- |
-| A client on the Pi Terminal image | none — the image shipped no edge client at all |
-| The Hub knowing its terminals | `edge_identity.terminal_device` was EMPTY |
-| The Hub knowing itself | `hub_device`, `hub_assignment`, `hub_installation` all EMPTY |
+| Layer                             | Before                                                       |
+| --------------------------------- | ------------------------------------------------------------ |
+| A client on the Pi Terminal image | none — the image shipped no edge client at all               |
+| The Hub knowing its terminals     | `edge_identity.terminal_device` was EMPTY                    |
+| The Hub knowing itself            | `hub_device`, `hub_assignment`, `hub_installation` all EMPTY |
 
 The Hub identifies terminals from its OWN local projection, which the cloud
 delivers signed through `edge_sync.inbox`. The Hub-side consumer is built and
@@ -122,19 +122,19 @@ Found on hardware; both sides now name the field `x509CertificateSerial`.
 
 Run from the Hub board against the live Hub, so no key material moved:
 
-| Step | Result |
-| --- | --- |
-| mDNS discovery | found `172.16.13.203:7443` |
-| mutual TLS, device-identity policy | handshake completed |
-| signed discovery record | fetched, 200 |
-| fingerprint binds record to connection | matched `298cb6a1…` |
-| before projection | `TERMINAL_NOT_RECOGNIZED` |
-| after `--delivery` | terminal recognised |
-| `GET /edge/v1/runtime/authority-time` | **ok** |
-| before `--hub-self` | `503 HUB_NOT_OPERATIONAL` |
-| after `--hub-self` | `403 PAIRING_REQUIRED` |
-| pairing session opened, proof signed | `403 PAIR_PROFILE_FORBIDDEN` |
-| `GET /edge/v1/configuration/current` | `503 DELIVERY_SIGNER_UNAVAILABLE` |
+| Step                                   | Result                            |
+| -------------------------------------- | --------------------------------- |
+| mDNS discovery                         | found `172.16.13.203:7443`        |
+| mutual TLS, device-identity policy     | handshake completed               |
+| signed discovery record                | fetched, 200                      |
+| fingerprint binds record to connection | matched `298cb6a1…`               |
+| before projection                      | `TERMINAL_NOT_RECOGNIZED`         |
+| after `--delivery`                     | terminal recognised               |
+| `GET /edge/v1/runtime/authority-time`  | **ok**                            |
+| before `--hub-self`                    | `503 HUB_NOT_OPERATIONAL`         |
+| after `--hub-self`                     | `403 PAIRING_REQUIRED`            |
+| pairing session opened, proof signed   | `403 PAIR_PROFILE_FORBIDDEN`      |
+| `GET /edge/v1/configuration/current`   | `503 DELIVERY_SIGNER_UNAVAILABLE` |
 
 The real terminal `KL-EDD139CCC2C8` is projected into the Hub on
 `3f8bae6ecd675d48` and remains so. A temporary self-projection used to prove the
@@ -144,8 +144,8 @@ SERVING transition was removed afterwards; only the real terminal remains.
 
 Pairing needs a profile grant, and `begin_terminal_pairing_v1` (0031) requires
 the grant to come from an `edge_config.configuration_snapshot` in state
-`active`. That table takes a signature, and its own comment is explicit: *"no
-unsigned snapshot may reach state=active"*.
+`active`. That table takes a signature, and its own comment is explicit: _"no
+unsigned snapshot may reach state=active"_.
 
 Writing an active snapshot with a placeholder signature would fabricate the
 appearance of signed configuration. That is a different act from copying
@@ -182,8 +182,8 @@ entrypoint and `runtime-manifest.json` is checked against that path.
 Four guards, each deliberate:
 
 - **Development only.** Refuses `production`, `pilot` and `unknown` alike — an
-  allow-list, not a production block. It refuses *before it opens a database
-  connection*, which the tests prove with a pool that throws if reached.
+  allow-list, not a production block. It refuses _before it opens a database
+  connection_, which the tests prove with a pool that throws if reached.
 - **The sanctioned signer.** `DevelopmentHmacBatchSigner`, the same development
   signer the sync path already carries. No new scheme.
 - **The key never leaves the board.** Generated on first use at
@@ -261,15 +261,15 @@ identity. **Both are owner decisions.** Options, in the order I would rank them:
 
 `edge-status.json` phases, each a real state of a shop:
 
-| Phase | Meaning |
-| --- | --- |
-| `NOT_ACTIVATED` | no operational certificate yet |
-| `NO_HUB_FOUND` | nothing answered on this network |
-| `HUB_REFUSED` | a Hub answered and its record was refused |
-| `NOT_RECOGNIZED` | the Hub holds no projection for this terminal |
-| `PAIRING_REFUSED` | the Hub holds it but will not pair it |
-| `DEGRADED` | paired and answering, but a Hub-side dependency is down |
-| `SERVING` | every bootstrap read answered |
+| Phase             | Meaning                                                 |
+| ----------------- | ------------------------------------------------------- |
+| `NOT_ACTIVATED`   | no operational certificate yet                          |
+| `NO_HUB_FOUND`    | nothing answered on this network                        |
+| `HUB_REFUSED`     | a Hub answered and its record was refused               |
+| `NOT_RECOGNIZED`  | the Hub holds no projection for this terminal           |
+| `PAIRING_REFUSED` | the Hub holds it but will not pair it                   |
+| `DEGRADED`        | paired and answering, but a Hub-side dependency is down |
+| `SERVING`         | every bootstrap read answered                           |
 
 `DEGRADED` is its own phase deliberately: the link is good and the shop is
 blocked on the Hub, not on this terminal, and collapsing it into `HUB_REFUSED`
@@ -291,7 +291,7 @@ under load and passed on re-run and in isolation, on a clean baseline as well.
 It is crypto-heavy (~10s); worth a timeout rather than a chase.
 
 **Pre-existing scanner failure, unchanged:** `hub-migrations/0038:177` — a false
-positive; that migration deliberately inserts `-----BEGIN PRIVATE KEY-----probe`
+positive; that migration deliberately inserts a PEM `BEGIN PRIVATE KEY` header plus `probe`
 to prove the trust registry CHECK rejects it. Fails on `main` too.
 
 ## 7. Delivery

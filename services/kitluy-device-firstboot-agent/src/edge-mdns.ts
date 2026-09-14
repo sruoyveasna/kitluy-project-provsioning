@@ -212,11 +212,13 @@ export function collectCandidates(
  * Ask the LAN who serves `_kitluy-edge._tcp.local`, and answer with whatever
  * replied inside the window. Never throws: "nobody answered" is an empty list.
  */
-export async function discoverEdgeCandidates(options: {
-  readonly port?: MulticastPort;
-  readonly timeoutMs?: number;
-  readonly serviceType?: string;
-} = {}): Promise<readonly EdgeCandidate[]> {
+export async function discoverEdgeCandidates(
+  options: {
+    readonly port?: MulticastPort;
+    readonly timeoutMs?: number;
+    readonly serviceType?: string;
+  } = {},
+): Promise<readonly EdgeCandidate[]> {
   const serviceType = options.serviceType ?? EDGE_DISCOVERY_SERVICE_TYPE;
   const port = options.port ?? udpMulticastPort();
   const received: Buffer[] = [];

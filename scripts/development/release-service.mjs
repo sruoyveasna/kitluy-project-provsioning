@@ -131,25 +131,25 @@ async function resolveDeviceById(client, id) {
  * The authority route. Everything it returns comes from the governed function;
  * this handler adds the device lookup and nothing else.
  */
-  async function handleAssignment(url, response) {
-    const deviceRef = url.searchParams.get("device");
-    if (deviceRef === null || deviceRef.trim() === "") {
-      return json(response, 400, { error: "a device reference is required" });
-    }
-    const client = await pool.connect();
+async function handleAssignment(url, response) {
+  const deviceRef = url.searchParams.get("device");
+  if (deviceRef === null || deviceRef.trim() === "") {
+    return json(response, 400, { error: "a device reference is required" });
+  }
+  const client = await pool.connect();
+  try {
+    let device;
     try {
-      let device;
-      try {
-        // A DEVICE ID **OR** AN ASSET TAG.
-        //
-        // The device names itself by the id the cloud issued it, because a
-        // locally derived tag stops matching the cloud's the moment a board is
-        // re-flashed (registration contract §9: the server never renames a board
-        // it already knows). Asset tags stay accepted because operators and the
-        // chain check use them, and they read better in a log.
-        device = UUID.test(deviceRef.trim())
-          ? await resolveDeviceById(client, deviceRef.trim())
-          : await resolveDeviceByAssetTag(client, deviceRef.trim());
+      // A DEVICE ID **OR** AN ASSET TAG.
+      //
+      // The device names itself by the id the cloud issued it, because a
+      // locally derived tag stops matching the cloud's the moment a board is
+      // re-flashed (registration contract §9: the server never renames a board
+      // it already knows). Asset tags stay accepted because operators and the
+      // chain check use them, and they read better in a log.
+      device = UUID.test(deviceRef.trim())
+        ? await resolveDeviceById(client, deviceRef.trim())
+        : await resolveDeviceByAssetTag(client, deviceRef.trim());
     } catch {
       // A device this stack does not know is not an error to shout about — a
       // freshly flashed terminal polls before it is approved. 404 and move on.

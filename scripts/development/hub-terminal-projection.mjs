@@ -104,7 +104,9 @@ async function main() {
     process.exit(0);
   }
   if (args.serial === null && args.assetTag === null) {
-    throw new Error("REFUSED: give --serial or --asset-tag; this tool never picks a terminal for you");
+    throw new Error(
+      "REFUSED: give --serial or --asset-tag; this tool never picks a terminal for you",
+    );
   }
 
   const target = resolveDevTarget({ local: args.local });
@@ -150,9 +152,15 @@ async function main() {
   // `X509Certificate.serialNumber` is the same value `normalizeHex(peerCert
   // .serialNumber)` produces on the Hub.
   let x509Serial;
-  if (typeof row.certificate_pem === "string" && row.certificate_pem.includes("BEGIN CERTIFICATE")) {
+  if (
+    typeof row.certificate_pem === "string" &&
+    row.certificate_pem.includes("BEGIN CERTIFICATE")
+  ) {
     x509Serial = new X509Certificate(row.certificate_pem).serialNumber.toLowerCase();
-  } else if (typeof row.certificate_x509_serial === "string" && row.certificate_x509_serial !== "") {
+  } else if (
+    typeof row.certificate_x509_serial === "string" &&
+    row.certificate_x509_serial !== ""
+  ) {
     // No PEM to read: strip the DER pad by hand, and say so.
     x509Serial = row.certificate_x509_serial.toLowerCase().replace(/^00(?=[89a-f])/, "");
     console.error(`  note: no certificate PEM stored; serial de-padded from the column`);
@@ -217,7 +225,9 @@ async function main() {
       `  credential: ${row.serial_number} state=${row.credential_state} env=${row.environment}\n` +
       `  identity key: ${row.identity_key_fingerprint ?? "(none — pairing will be refused)"}\n` +
       `  x509 serial: ${x509Serial}${
-        row.certificate_x509_serial !== x509Serial ? ` (column says ${row.certificate_x509_serial} — DER pad stripped)` : ""
+        row.certificate_x509_serial !== x509Serial
+          ? ` (column says ${row.certificate_x509_serial} — DER pad stripped)`
+          : ""
       }\n` +
       `  profiles: ${(row.profile_keys ?? []).join(", ") || "(none granted)"}\n` +
       `  store: tenant ${row.tenant_id} / store ${row.digital_store_id} / location ${row.store_location_id}\n`,

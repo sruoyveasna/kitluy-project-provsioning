@@ -1,29 +1,29 @@
 # U1 — implementation plan, under owner rulings of 2026-09-11
 
-| Field | Value |
-| --- | --- |
-| Date | 2026-09-11 · Asia/Phnom_Penh |
-| Repository | `het-kitluy-project` @ `bde3490` + uncommitted tree on `claude/fix-firstboot-esm-and-ssh-hostkeys` |
-| Type | **IMPLEMENTATION PLAN — NOT IMPLEMENTATION.** No code, migration, image or documentation changed this turn. Nothing committed or pushed. |
-| Authorises | Nothing on its own. This is the plan the owner asked for before build begins. |
+| Field        | Value                                                                                                                                                                                                    |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Date         | 2026-09-11 · Asia/Phnom_Penh                                                                                                                                                                             |
+| Repository   | `het-kitluy-project` @ `bde3490` + uncommitted tree on `claude/fix-firstboot-esm-and-ssh-hostkeys`                                                                                                       |
+| Type         | **IMPLEMENTATION PLAN — NOT IMPLEMENTATION.** No code, migration, image or documentation changed this turn. Nothing committed or pushed.                                                                 |
+| Authorises   | Nothing on its own. This is the plan the owner asked for before build begins.                                                                                                                            |
 | Predecessors | [`…FEASIBILITY-ASSESSMENT.md`](2026-09-11__DEVICE-UPDATE-WORKFLOW-FEASIBILITY-ASSESSMENT.md) · [`…U1-DEVICE-SHELL-DEVELOPMENT-OTA-PROPOSAL.md`](2026-09-11__U1-DEVICE-SHELL-DEVELOPMENT-OTA-PROPOSAL.md) |
 
 ## Rulings recorded
 
-| ID | Ruling | Effect on this plan |
-| --- | --- | --- |
-| **OD-U1-1 = A** | Device Shell application payload may execute from the governed slot-shared persistent release store. Immutable image copy remains the fallback. `/usr` stays read-only; EROFS/dm-verity not weakened. | §3 store design proceeds. No `/usr` write, no overlayfs, no sysext, no EROFS or verity change anywhere in U1. |
+| ID              | Ruling                                                                                                                                                                                                                                                                                           | Effect on this plan                                                                                            |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| **OD-U1-1 = A** | Device Shell application payload may execute from the governed slot-shared persistent release store. Immutable image copy remains the fallback. `/usr` stays read-only; EROFS/dm-verity not weakened.                                                                                            | §3 store design proceeds. No `/usr` write, no overlayfs, no sysext, no EROFS or verity change anywhere in U1.  |
 | **OD-U1-2 = C** | **For U1 only**, the graphical Device Shell application payload is a governed updatable application. Not to be used to reclassify `terminal-edge`, firstboot identity, cloud registration, `update-agent` or any other bootstrap/runtime component. Broader boundary returns to the owner at U3. | §9 scope fence. Exactly one product key is updatable in U1. The fence is enforced by a test, not by intention. |
-| **OD-U1-3 = A** | Keep the owner-locked health-gate timings. No development-specific timing behaviour. | 20 s probes, 3 consecutive, 5-minute window, one automatic rollback. One code path, no environment branch. |
+| **OD-U1-3 = A** | Keep the owner-locked health-gate timings. No development-specific timing behaviour.                                                                                                                                                                                                             | 20 s probes, 3 consecutive, 5-minute window, one automatic rollback. One code path, no environment branch.     |
 
 ## The four additional requirements, and what each changes
 
-| # | Requirement | Status against the proposal | Change |
-| --- | --- | --- | --- |
-| **1** | Release **assignment** determines what a Terminal may install. Artifact storage/source transports bytes only and is not deployment authority. | **The proposal was wrong here.** Piece 7 was "a static signed-artifact server on your workstation LAN" — a file server that offers releases *is* acting as deployment authority, which this ruling forbids. | **Redesigned.** Two separate sources with different trust weight (§2). The device asks a governed authority "what am I assigned?", learns the release id and digest **first**, and only then fetches bytes. A byte source cannot offer it anything else, because the device already knows what it is looking for. |
-| **2** | Prevent arbitrary signed downgrade. Normal activation corresponds to the governed assigned release. Rollback is an explicit controlled recovery path. | Partially covered (the acceptance gate) but **downgrade was not addressed at all**. | **Added** (§4): install-what-is-assigned as the only normal path, a monotonic assignment sequence that refuses replay of a stale assignment, and rollback as a distinct local operation that never fetches. |
-| **3** | Activation metadata durable across **real power loss**, not merely atomic in-process. Sync/durability behaviour in implementation **and tests**. | The proposal said "atomic" and named `rename(2)`. That is **not sufficient** — a rename is atomic but is not durable until the containing directory is fsynced. | **Redesigned** (§5): an explicit intent-then-act journal with fsync ordering, boot-time reconciliation, and a shared durable-write module. Power-loss is now a test class, not a sentence. |
-| **4** | Hardware acceptance must prove A (A→B OTA), B (unhealthy C → automatic rollback), **C (real power interruption leaves a bootable valid release)**, **D (tampered artifact refused while current keeps running)**. | A and B were planned. **C and D were not.** | **Added** (§8) with an actual bench procedure for each, including where to pull power and how many times. |
+| #     | Requirement                                                                                                                                                                                                       | Status against the proposal                                                                                                                                                                                 | Change                                                                                                                                                                                                                                                                                                            |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **1** | Release **assignment** determines what a Terminal may install. Artifact storage/source transports bytes only and is not deployment authority.                                                                     | **The proposal was wrong here.** Piece 7 was "a static signed-artifact server on your workstation LAN" — a file server that offers releases _is_ acting as deployment authority, which this ruling forbids. | **Redesigned.** Two separate sources with different trust weight (§2). The device asks a governed authority "what am I assigned?", learns the release id and digest **first**, and only then fetches bytes. A byte source cannot offer it anything else, because the device already knows what it is looking for. |
+| **2** | Prevent arbitrary signed downgrade. Normal activation corresponds to the governed assigned release. Rollback is an explicit controlled recovery path.                                                             | Partially covered (the acceptance gate) but **downgrade was not addressed at all**.                                                                                                                         | **Added** (§4): install-what-is-assigned as the only normal path, a monotonic assignment sequence that refuses replay of a stale assignment, and rollback as a distinct local operation that never fetches.                                                                                                       |
+| **3** | Activation metadata durable across **real power loss**, not merely atomic in-process. Sync/durability behaviour in implementation **and tests**.                                                                  | The proposal said "atomic" and named `rename(2)`. That is **not sufficient** — a rename is atomic but is not durable until the containing directory is fsynced.                                             | **Redesigned** (§5): an explicit intent-then-act journal with fsync ordering, boot-time reconciliation, and a shared durable-write module. Power-loss is now a test class, not a sentence.                                                                                                                        |
+| **4** | Hardware acceptance must prove A (A→B OTA), B (unhealthy C → automatic rollback), **C (real power interruption leaves a bootable valid release)**, **D (tampered artifact refused while current keeps running)**. | A and B were planned. **C and D were not.**                                                                                                                                                                 | **Added** (§8) with an actual bench procedure for each, including where to pull power and how many times.                                                                                                                                                                                                         |
 
 ---
 
@@ -35,7 +35,7 @@ One sentence: **you change the Device Shell, run one command, and your existing 
 
 # 2. Assignment authority vs byte transport (requirement 1)
 
-**The rule this encodes:** a device installs what it has been *assigned*, not what it has been *offered*.
+**The rule this encodes:** a device installs what it has been _assigned_, not what it has been _offered_.
 
 ```text
   ┌──────────────────────────────────────────────────────────────┐
@@ -69,14 +69,14 @@ One sentence: **you change the Device Shell, run one command, and your existing 
                     └───────────────────────┘
 ```
 
-**Why this satisfies the ruling structurally rather than by policy.** The device derives nothing from the byte source: not what to install, not whether to install, not which version. It arrives already knowing the release id, the expected SHA-256 and the expected size, all covered by an Ed25519 signature it verified before opening a connection. A byte source that substitutes, downgrades, truncates or corrupts produces a digest mismatch and is refused. A byte source that offers a *different, validly signed* release is ignored, because nothing asks it what it has.
+**Why this satisfies the ruling structurally rather than by policy.** The device derives nothing from the byte source: not what to install, not whether to install, not which version. It arrives already knowing the release id, the expected SHA-256 and the expected size, all covered by an Ed25519 signature it verified before opening a connection. A byte source that substitutes, downgrades, truncates or corrupts produces a digest mismatch and is refused. A byte source that offers a _different, validly signed_ release is ignored, because nothing asks it what it has.
 
 **Two sources, two interfaces, one implementation each in U1:**
 
-| Interface | U1 implementation | U4 implementation (not built now) |
-| --- | --- | --- |
-| `AssignmentSource` | `pnpm dev:release:serve` — a development service that **reads the governed cloud rows** (`device_installations` ⋈ `release_artifacts`), scoped to the calling device, over mTLS using the terminal's existing operational certificate | the Store Hub over `/edge/v1` |
-| `ArtifactSource` | the same service, Range-capable, serving bytes by release id | the Store Hub's `release-cache.ts`, already built |
+| Interface          | U1 implementation                                                                                                                                                                                                                     | U4 implementation (not built now)                 |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| `AssignmentSource` | `pnpm dev:release:serve` — a development service that **reads the governed cloud rows** (`device_installations` ⋈ `release_artifacts`), scoped to the calling device, over mTLS using the terminal's existing operational certificate | the Store Hub over `/edge/v1`                     |
+| `ArtifactSource`   | the same service, Range-capable, serving bytes by release id                                                                                                                                                                          | the Store Hub's `release-cache.ts`, already built |
 
 **REPOSITORY FACT — the precedent for this service already exists.** `scripts/development/fleet-service.mjs` (`pnpm dev:fleet`) runs a real service bound to the workstation LAN, restricted to a loopback stack or the one allowlisted hosted development project, with every precondition checked before it starts and a refusal that names which one failed. The release service is the same shape, the same target restriction, and the same refusal discipline. It is **not** a file server: it answers from the governed tables, so the authority stays in the database where `assign_release_v1` put it.
 
@@ -118,7 +118,7 @@ STORE=/persistent/shared/kitluy/releases/device-shell/current/payload
 
 Three mechanisms, none of which relies on comparing version strings.
 
-**4.1 Install only what is assigned.** The runtime's only normal activation path is `activate(assignment.releaseId)`. There is no "scan the source for something newer", no version comparison, and no local choice. A governed downgrade — the owner assigning an older release — therefore works correctly and deliberately, while an *arbitrary* downgrade has no code path to travel.
+**4.1 Install only what is assigned.** The runtime's only normal activation path is `activate(assignment.releaseId)`. There is no "scan the source for something newer", no version comparison, and no local choice. A governed downgrade — the owner assigning an older release — therefore works correctly and deliberately, while an _arbitrary_ downgrade has no code path to travel.
 
 **4.2 Monotonic assignment sequence — replay refusal.** Every assignment response carries a sequence number derived from the governed row (`device_installations.updated_at` plus campaign id, exposed as a monotonic integer). The device records `lastAssignmentSeq` in the journal. **An assignment whose sequence is lower than the recorded one is refused** and recorded as `ASSIGNMENT_STALE`.
 
@@ -132,7 +132,7 @@ Without this, a replayed or rolled-back assignment response could pin a device t
 
 **The correction.** `rename(2)` is atomic with respect to concurrent readers, but the rename is **not durable** until the containing directory is fsynced. A plan that says only "atomic switch" leaves a window in which a power cut loses the switch while the payload appears installed. The proposal said "atomic"; that was not enough, and this section is the fix.
 
-**REPOSITORY FACT — the correct discipline already exists in this codebase**, in `pairing-state.ts`, `bootstrap-state.ts` and `operational-credential-state.ts`: *write temp → fsync file → rename → fsync directory*. It is duplicated across seven modules with one local `writeAtomic` helper. (Noted, not fixed in U1: `edge-session.ts:121` renames **without** the directory fsync, so `edge-status.json` is atomic but not durable. Recorded as a finding; changing it is outside U1's scope.)
+**REPOSITORY FACT — the correct discipline already exists in this codebase**, in `pairing-state.ts`, `bootstrap-state.ts` and `operational-credential-state.ts`: _write temp → fsync file → rename → fsync directory_. It is duplicated across seven modules with one local `writeAtomic` helper. (Noted, not fixed in U1: `edge-session.ts:121` renames **without** the directory fsync, so `edge-status.json` is atomic but not durable. Recorded as a finding; changing it is outside U1's scope.)
 
 **U1 adds one shared module** — `durable-write.ts` — and uses it everywhere in the release path.
 
@@ -157,16 +157,16 @@ Without this, a replayed or rolled-back assignment response could pin a device t
 
 The runtime's first act on every start is to reconcile the journal against the filesystem. Each state has exactly one defined resolution:
 
-| Journal phase at boot | What the filesystem may show | Resolution |
-| --- | --- | --- |
-| absent / `COMMITTED` | `current` valid | nothing to do |
-| `ACTIVATING` | `current` still points at `previous` | step 5–6 never completed → **discard**; keep running `previous`; record `INTERRUPTED_BEFORE_SWITCH` |
-| `ACTIVATING` | `current` points at target | the switch landed but the journal did not advance → **adopt**, enter `HEALTH_PENDING` |
-| `HEALTH_PENDING` | `current` points at target | the gate never finished → **re-run the gate from zero**, with the one-rollback budget intact |
-| any | `current` dangling or payload incomplete | **restore `previous`**; if `previous` is also unusable, remove `current` entirely → the launcher falls back to the image copy |
-| any | store unreadable/absent | launcher falls back to the image copy; runtime reports and retries |
+| Journal phase at boot | What the filesystem may show             | Resolution                                                                                                                    |
+| --------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| absent / `COMMITTED`  | `current` valid                          | nothing to do                                                                                                                 |
+| `ACTIVATING`          | `current` still points at `previous`     | step 5–6 never completed → **discard**; keep running `previous`; record `INTERRUPTED_BEFORE_SWITCH`                           |
+| `ACTIVATING`          | `current` points at target               | the switch landed but the journal did not advance → **adopt**, enter `HEALTH_PENDING`                                         |
+| `HEALTH_PENDING`      | `current` points at target               | the gate never finished → **re-run the gate from zero**, with the one-rollback budget intact                                  |
+| any                   | `current` dangling or payload incomplete | **restore `previous`**; if `previous` is also unusable, remove `current` entirely → the launcher falls back to the image copy |
+| any                   | store unreadable/absent                  | launcher falls back to the image copy; runtime reports and retries                                                            |
 
-**The invariant U1 must hold, and that acceptance test C exists to prove:** *at every instant between power-on and power-off, the board boots to a valid Device Shell — the assigned one, the previous one, or the image's own.* There is no interleaving that yields a blank screen.
+**The invariant U1 must hold, and that acceptance test C exists to prove:** _at every instant between power-on and power-off, the board boots to a valid Device Shell — the assigned one, the previous one, or the image's own._ There is no interleaving that yields a blank screen.
 
 ## 5.3 Why `.incoming` is a sibling, not a subdirectory
 
@@ -180,59 +180,59 @@ Six phases. Phases 1–3 touch no image and no device; the board keeps running t
 
 ## Phase 1 — signing and trust (workstation only)
 
-| File | Change |
-| --- | --- |
-| `scripts/pki/bootstrap-dev-pki.mjs` | add `dev-release-signing.key.pem` / `.pub.pem` and a `dev-release-signing.json` record (`keyId`, `keyVersion`, `purpose: "release_signing"`, `algorithm: "ed25519"`). Ed25519, same existing refusals: never overwrite, never inside the repository, `NON-PRODUCTION` stamped, 0600 verified after write |
-| `scripts/pki/bootstrap-dev-pki.test.mjs` *(new)* | refuses overwrite · refuses in-repo path · key modes · purpose recorded |
+| File                                             | Change                                                                                                                                                                                                                                                                                                   |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scripts/pki/bootstrap-dev-pki.mjs`              | add `dev-release-signing.key.pem` / `.pub.pem` and a `dev-release-signing.json` record (`keyId`, `keyVersion`, `purpose: "release_signing"`, `algorithm: "ed25519"`). Ed25519, same existing refusals: never overwrite, never inside the repository, `NON-PRODUCTION` stamped, 0600 verified after write |
+| `scripts/pki/bootstrap-dev-pki.test.mjs` _(new)_ | refuses overwrite · refuses in-repo path · key modes · purpose recorded                                                                                                                                                                                                                                  |
 
 **Authority:** within existing rulings — BLK-005 authorises development certificate implementation and a software-backed development signer; owner Decision 3 (2026-08-24) authorises this generator. **No new owner decision is consumed.**
 
-**Wrong-purpose refusal — where it lives, and why not in the shared verifier.** The device-side trust loader (`release-trust.ts`, Phase 3) refuses any trust record whose `purpose` is not `release_signing` **before** the key reaches `verifyReleaseManifestSignature`. Putting the check in the loader rather than in `release-manifest.ts` means: no change to a TESTED-IN-DEV contract, no Hub migration (the Hub's `release_trust_key` table has no purpose column), and no U3/U4 scope creep. Binding purpose *cryptographically* into the manifest body is a manifest-v2 change and stays a pre-Pilot item, as recorded in the feasibility assessment.
+**Wrong-purpose refusal — where it lives, and why not in the shared verifier.** The device-side trust loader (`release-trust.ts`, Phase 3) refuses any trust record whose `purpose` is not `release_signing` **before** the key reaches `verifyReleaseManifestSignature`. Putting the check in the loader rather than in `release-manifest.ts` means: no change to a TESTED-IN-DEV contract, no Hub migration (the Hub's `release_trust_key` table has no purpose column), and no U3/U4 scope creep. Binding purpose _cryptographically_ into the manifest body is a manifest-v2 change and stays a pre-Pilot item, as recorded in the feasibility assessment.
 
 ## Phase 2 — durable store library (no device change)
 
-| File | Change |
-| --- | --- |
-| `services/kitluy-device-firstboot-agent/src/durable-write.ts` *(new)* | `writeDurable()`, `renameDurable()`, `swapSymlinkDurable()`, `fsyncDir()` — the discipline already used in `pairing-state.ts`, extracted once |
-| `services/kitluy-device-firstboot-agent/src/release-store.ts` *(new)* | layout constants, `readJournal`/`writeJournal`, `resolveCurrent`/`resolvePrevious`, `stageIncoming`, `promoteIncoming`, `activate`, `rollback`, `reconcileOnBoot` |
-| `test/durable-write.test.ts`, `test/release-store.test.ts` *(new)* | §7 |
+| File                                                                  | Change                                                                                                                                                            |
+| --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `services/kitluy-device-firstboot-agent/src/durable-write.ts` _(new)_ | `writeDurable()`, `renameDurable()`, `swapSymlinkDurable()`, `fsyncDir()` — the discipline already used in `pairing-state.ts`, extracted once                     |
+| `services/kitluy-device-firstboot-agent/src/release-store.ts` _(new)_ | layout constants, `readJournal`/`writeJournal`, `resolveCurrent`/`resolvePrevious`, `stageIncoming`, `promoteIncoming`, `activate`, `rollback`, `reconcileOnBoot` |
+| `test/durable-write.test.ts`, `test/release-store.test.ts` _(new)_    | §7                                                                                                                                                                |
 
 ## Phase 3 — the update runtime (no device change)
 
-| File | Change |
-| --- | --- |
-| `src/release-trust.ts` *(new)* | load `/etc/kitluy/trust`, **purpose-checked**, → `TrustedReleaseKey[]`. Absent or empty ⇒ refuse, which is what the agent already does today |
-| `src/release-assignment.ts` *(new)* | `AssignmentSource` interface + mTLS HTTP implementation; verifies the signed manifest and the assignment sequence **before returning** |
-| `src/release-artifact.ts` *(new)* | `ArtifactSource` interface + Range-capable resumable fetch, byte-count bounded by the manifest's `artifactSizeBytes` |
-| `src/release-install.ts` *(new)* | the state machine: preconditions → assignment → verify → acceptance gate → disk → fetch → re-prove → stage → preflight → journal → activate → restart → health gate → commit / rollback |
-| `src/bin/update-bootstrap.ts` *(grown)* | keeps `evaluateUpdate`'s three precondition states and its 300 s posture; adds the stages after them. **Nothing deleted** |
-| five new `test/*.test.ts` | §7 |
+| File                                    | Change                                                                                                                                                                                  |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/release-trust.ts` _(new)_          | load `/etc/kitluy/trust`, **purpose-checked**, → `TrustedReleaseKey[]`. Absent or empty ⇒ refuse, which is what the agent already does today                                            |
+| `src/release-assignment.ts` _(new)_     | `AssignmentSource` interface + mTLS HTTP implementation; verifies the signed manifest and the assignment sequence **before returning**                                                  |
+| `src/release-artifact.ts` _(new)_       | `ArtifactSource` interface + Range-capable resumable fetch, byte-count bounded by the manifest's `artifactSizeBytes`                                                                    |
+| `src/release-install.ts` _(new)_        | the state machine: preconditions → assignment → verify → acceptance gate → disk → fetch → re-prove → stage → preflight → journal → activate → restart → health gate → commit / rollback |
+| `src/bin/update-bootstrap.ts` _(grown)_ | keeps `evaluateUpdate`'s three precondition states and its 300 s posture; adds the stages after them. **Nothing deleted**                                                               |
+| five new `test/*.test.ts`               | §7                                                                                                                                                                                      |
 
 **Unit restart — known risk, flagged not hidden.** `kitluy-update-agent.service` runs as root but with an **empty `CapabilityBoundingSet`** and `NoNewPrivileges`. Whether it can drive `systemctl restart kitluy-device-shell.service` over systemd's D-Bus under that sandbox is the kind of thing that works on a workstation and fails on the board. Plan: attempt the direct path first; if the sandbox refuses, add a restart verb to the **existing root config broker** (`kitluy-device-config.service`, which already answers a closed verb list on a unix socket for exactly this "the caller must not hold privileges" reason). Either way the Shell's own sandbox is untouched. This is settled in implementation, but it is the most likely source of a surprise at the bench, so it is named here.
 
 ## Phase 4 — image integration (**the one reflash**)
 
-| File | Change |
-| --- | --- |
-| `infra/kitluy-os-image/runtime-manifest.json` | declare the release store, the trust anchor and the launcher indirection — the manifest is the authority, so packaging refuses on any disagreement |
-| `rpi-image-gen/layer/kitluy-base.yaml` | `IGconf_kitluy_release_trust_pubkey` → `/etc/kitluy/trust/release-signing.pub` + `.json` record; `IGconf_kitluy_release_source` → `/etc/kitluy/release.env`. Both follow `development-root.sha256`'s **absent-is-safe** semantics: no anchor ⇒ the agent refuses, no source ⇒ nothing to check |
-| `…/etc/rpi-image-gen/slot-shared.d/62-kitluy-releases.conf` *(new)* | the store path |
-| `…/etc/systemd/system/kitluy-slot-shared.target` *(new)* | the generalised `.wants` workaround |
-| `…/usr/lib/kitluy/device-shell` | the `APP=` indirection (~4 lines) |
-| `…/etc/systemd/system/kitluy-update-agent.service` | `ReadWritePaths=` gains the store |
-| `scripts/package-bootstrap-runtime.sh` | package the new modules; extend the import-closure verification |
-| `test/build-gates.test.sh`, `systemd-runtime.test.sh`, `image-contents.test.sh` | assert the anchor, the store, all three slot-shared mounts **enabled**, the launcher indirection, and that **only `device-shell`** is store-resolvable (§9 fence) |
+| File                                                                            | Change                                                                                                                                                                                                                                                                                         |
+| ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `infra/kitluy-os-image/runtime-manifest.json`                                   | declare the release store, the trust anchor and the launcher indirection — the manifest is the authority, so packaging refuses on any disagreement                                                                                                                                             |
+| `rpi-image-gen/layer/kitluy-base.yaml`                                          | `IGconf_kitluy_release_trust_pubkey` → `/etc/kitluy/trust/release-signing.pub` + `.json` record; `IGconf_kitluy_release_source` → `/etc/kitluy/release.env`. Both follow `development-root.sha256`'s **absent-is-safe** semantics: no anchor ⇒ the agent refuses, no source ⇒ nothing to check |
+| `…/etc/rpi-image-gen/slot-shared.d/62-kitluy-releases.conf` _(new)_             | the store path                                                                                                                                                                                                                                                                                 |
+| `…/etc/systemd/system/kitluy-slot-shared.target` _(new)_                        | the generalised `.wants` workaround                                                                                                                                                                                                                                                            |
+| `…/usr/lib/kitluy/device-shell`                                                 | the `APP=` indirection (~4 lines)                                                                                                                                                                                                                                                              |
+| `…/etc/systemd/system/kitluy-update-agent.service`                              | `ReadWritePaths=` gains the store                                                                                                                                                                                                                                                              |
+| `scripts/package-bootstrap-runtime.sh`                                          | package the new modules; extend the import-closure verification                                                                                                                                                                                                                                |
+| `test/build-gates.test.sh`, `systemd-runtime.test.sh`, `image-contents.test.sh` | assert the anchor, the store, all three slot-shared mounts **enabled**, the launcher indirection, and that **only `device-shell`** is store-resolvable (§9 fence)                                                                                                                              |
 
 ## Phase 5 — publish tooling (workstation only)
 
-| File | Change |
-| --- | --- |
-| `scripts/development/release-pack.mjs` *(new)* | build → `tar.zst` → SHA-256 → manifest body, with **`buildId` = git SHA + dirty flag** (requirement §7 traceability; today's build manifest records only the *upstream builder's* commit) |
-| `scripts/development/release-publish.mjs` *(new)* | sign → `create_release_draft_v1` → `sign_release_v1` → `promote_release_v1(…,'internal')` → `assign_release_v1`. Target restriction and precondition refusals modelled on `fleet-service.mjs` |
-| `scripts/development/release-service.mjs` *(new)* | `AssignmentSource` + `ArtifactSource` over mTLS; answers from the governed rows, **not** from a directory listing |
-| `scripts/development/verify-terminal.mjs` *(new)* | automated acceptance: unit active · expected version reported · `edge-status.json` phase `SERVING` · Hub reachable |
-| `package.json` | `dev:release`, `dev:release:serve`, `dev:verify:terminal` |
-| `apps/kitluy-device-shell` | render running version + last update result; one field through the existing snapshot path, guarded by the existing drift test |
+| File                                              | Change                                                                                                                                                                                        |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scripts/development/release-pack.mjs` _(new)_    | build → `tar.zst` → SHA-256 → manifest body, with **`buildId` = git SHA + dirty flag** (requirement §7 traceability; today's build manifest records only the _upstream builder's_ commit)     |
+| `scripts/development/release-publish.mjs` _(new)_ | sign → `create_release_draft_v1` → `sign_release_v1` → `promote_release_v1(…,'internal')` → `assign_release_v1`. Target restriction and precondition refusals modelled on `fleet-service.mjs` |
+| `scripts/development/release-service.mjs` _(new)_ | `AssignmentSource` + `ArtifactSource` over mTLS; answers from the governed rows, **not** from a directory listing                                                                             |
+| `scripts/development/verify-terminal.mjs` _(new)_ | automated acceptance: unit active · expected version reported · `edge-status.json` phase `SERVING` · Hub reachable                                                                            |
+| `package.json`                                    | `dev:release`, `dev:release:serve`, `dev:verify:terminal`                                                                                                                                     |
+| `apps/kitluy-device-shell`                        | render running version + last update result; one field through the existing snapshot path, guarded by the existing drift test                                                                 |
 
 ## Phase 6 — hardware acceptance (§8)
 
@@ -244,7 +244,7 @@ Six phases. Phases 1–3 touch no image and no device; the board keeps running t
 
 **Downgrade (requirement 2).** Stale assignment sequence refused · an assignment for a release id other than the one fetched is refused · rollback performs no network call (asserted by a source double that fails the test if touched) · after `failed_rolled_back`, the same release id is refused automatically.
 
-**Trust.** Wrong-purpose key refused · revoked key refused · unknown key id refused · correct key with wrong key *version* refused · missing anchor refuses before any fetch.
+**Trust.** Wrong-purpose key refused · revoked key refused · unknown key id refused · correct key with wrong key _version_ refused · missing anchor refuses before any fetch.
 
 **Integrity.** Tampered byte caught by the re-proof over received bytes · truncated artifact refused on size · digest mismatch refused · resume-from-offset produces a byte-identical artifact.
 
@@ -265,19 +265,24 @@ Six phases. Phases 1–3 touch no image and no device; the board keeps running t
 On the physical Pi Terminal, after the Phase 4 reflash. **No SD card is touched in any of the four tests.**
 
 ### A — successful A→B OTA
+
 Shell at A → make a visible UI change → `pnpm dev:release device-shell --target KL-TERM-001` → observe download, verify, stage, activate, restart → **the change is visible on the touchscreen** → it reports B → **and the terminal is still enrolled, still paired, still activated, `edge-status.json` phase `SERVING`.**
 
 ### B — unhealthy C → automatic rollback to B
+
 Publish C whose Shell exits immediately → assigned, fetched, verified, staged, activated → the gate fails → **B is restored automatically**, the Shell works again, the rollback is recorded in the journal and shown on screen → and re-running the loop does **not** silently reinstall C.
 
-### C — real power interruption leaves a bootable valid release *(new)*
+### C — real power interruption leaves a bootable valid release _(new)_
+
 **Procedure — physical power removal, not a reboot command**, one cut per window, repeated:
+
 1. during download · 2. during unpack · 3. between journal-intent and symlink swap · 4. between symlink swap and journal advance · 5. during the health gate.
 
 After each cut, power on and assert: **the board boots to a working Device Shell**; the journal and the filesystem agree; the version on screen is either the assigned one or the previous one and never a half-installed mixture; and the terminal is still paired and `SERVING`. Windows 3 and 4 are the ones §5.1's ordering exists to survive, so each is cut **at least three times**.
 
-### D — tampered artifact refused while the current release keeps running *(new)*
-With B running and healthy, publish an artifact whose bytes are altered after signing (digest no longer matches the signed manifest). Assert: the fetch completes, the **re-proof over received bytes fails**, the release is refused with its exact code, **nothing is staged or activated**, `current` is untouched, the Shell keeps running B without interruption, and the refusal is recorded and visible without SSH. Repeat with a valid artifact carrying a tampered *manifest* (signature no longer verifies) — refused **before any byte is fetched**.
+### D — tampered artifact refused while the current release keeps running _(new)_
+
+With B running and healthy, publish an artifact whose bytes are altered after signing (digest no longer matches the signed manifest). Assert: the fetch completes, the **re-proof over received bytes fails**, the release is refused with its exact code, **nothing is staged or activated**, `current` is untouched, the Shell keeps running B without interruption, and the refusal is recorded and visible without SSH. Repeat with a valid artifact carrying a tampered _manifest_ (signature no longer verifies) — refused **before any byte is fetched**.
 
 **Reporting.** Only after A, B, C and D all pass is U1 `HARDWARE VERIFIED`. Anything less is reported as `TESTED-IN-DEV` or `IMAGE VERIFIED`, with the failing test named. Per the owner's §18: an update runtime existing, a release schema existing and A/B partitions existing are **not** evidence that OTA works.
 
@@ -304,14 +309,14 @@ With B running and healthy, publish an artifact whose bytes are altered after si
 
 # 10. Risks
 
-| Risk | Likelihood | Handling |
-| --- | --- | --- |
-| The update-agent's empty `CapabilityBoundingSet` blocks `systemctl restart` | **medium** | try direct, fall back to a restart verb on the existing root config broker (§6 Phase 3) |
-| The slot-shared `.wants` bug bites on a third declared path | **medium** | generalised target + a systemd-runtime test asserting all three mounts enabled, before hardware |
-| mTLS from the terminal to a workstation service needs SAN/trust work the Hub path already solved differently | medium | reuse the operational certificate and the dev PKI chain; if the terminal's client-auth posture needs work, it surfaces in Phase 5 on the workstation, not at the bench |
-| Power-cut testing is slow and manual | **certain** | accepted — it is the requirement; windows 3 and 4 get the repetitions, the rest one pass each |
-| `pnpm verify` regressions from the shared `durable-write.ts` extraction | low | U1 *adds* the module and uses it only in the release path; the six existing copies are untouched |
-| The Shell version field drifts from the agent's model | low | the existing compile-time + runtime drift test already guards this path |
+| Risk                                                                                                         | Likelihood  | Handling                                                                                                                                                               |
+| ------------------------------------------------------------------------------------------------------------ | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The update-agent's empty `CapabilityBoundingSet` blocks `systemctl restart`                                  | **medium**  | try direct, fall back to a restart verb on the existing root config broker (§6 Phase 3)                                                                                |
+| The slot-shared `.wants` bug bites on a third declared path                                                  | **medium**  | generalised target + a systemd-runtime test asserting all three mounts enabled, before hardware                                                                        |
+| mTLS from the terminal to a workstation service needs SAN/trust work the Hub path already solved differently | medium      | reuse the operational certificate and the dev PKI chain; if the terminal's client-auth posture needs work, it surfaces in Phase 5 on the workstation, not at the bench |
+| Power-cut testing is slow and manual                                                                         | **certain** | accepted — it is the requirement; windows 3 and 4 get the repetitions, the rest one pass each                                                                          |
+| `pnpm verify` regressions from the shared `durable-write.ts` extraction                                      | low         | U1 _adds_ the module and uses it only in the release path; the six existing copies are untouched                                                                       |
+| The Shell version field drifts from the agent's model                                                        | low         | the existing compile-time + runtime drift test already guards this path                                                                                                |
 
 ---
 

@@ -1,12 +1,12 @@
 # U1 — release-assignment ordering, Phase 5 completion, and the end-to-end chain
 
-| Field | Value |
-| --- | --- |
-| Date | 2026-09-11 · Asia/Phnom_Penh |
-| Status | **SOURCE IMPLEMENTED + TESTED-IN-DEV + CHAIN-PROVEN FROM THE WORKSTATION.** Not `IMAGE VERIFIED`, not `HARDWARE VERIFIED`. |
-| Committed | **No.** Nothing committed or pushed. |
-| Stop point | Phase 4 image integration and the reflash have **not** begun. |
-| Rulings | OD-U1-1 = A · OD-U1-2 = C · OD-U1-3 = A, all unchanged |
+| Field      | Value                                                                                                                      |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Date       | 2026-09-11 · Asia/Phnom_Penh                                                                                               |
+| Status     | **SOURCE IMPLEMENTED + TESTED-IN-DEV + CHAIN-PROVEN FROM THE WORKSTATION.** Not `IMAGE VERIFIED`, not `HARDWARE VERIFIED`. |
+| Committed  | **No.** Nothing committed or pushed.                                                                                       |
+| Stop point | Phase 4 image integration and the reflash have **not** begun.                                                              |
+| Rulings    | OD-U1-1 = A · OD-U1-2 = C · OD-U1-3 = A, all unchanged                                                                     |
 
 ---
 
@@ -17,12 +17,12 @@
 Every column of every `kitluy_releases` table, the hub migration set, and
 `@kitluy/release-manifests`:
 
-| Table | Ordering available |
-| --- | --- |
-| `release_artifacts` | none — uuid id + timestamps |
-| `rollout_campaigns` | none — uuid id + `idempotency_key` + `started_at` |
+| Table                  | Ordering available                                |
+| ---------------------- | ------------------------------------------------- |
+| `release_artifacts`    | none — uuid id + timestamps                       |
+| `rollout_campaigns`    | none — uuid id + `idempotency_key` + `started_at` |
 | `device_installations` | none — uuid id, unique `(campaign_id, device_id)` |
-| `release_events` | none — uuid id + `occurred_at` |
+| `release_events`       | none — uuid id + `occurred_at`                    |
 
 Group `0182` is called **"assignment identity"** and is not this: it corrected
 `assign_release_v1` so an idempotency key identifies ONE request, after a
@@ -32,8 +32,8 @@ the first. It adds no ordering.
 **Confirmed: no authoritative release-assignment sequence existed.**
 
 `kitluy_devices.device_assignments.assignment_generation` was re-examined and
-**rejected for this job**, exactly as you said: it orders the device's *Store
-binding*, so two release assignments to one device in one Store carry the same
+**rejected for this job**, exactly as you said: it orders the device's _Store
+binding_, so two release assignments to one device in one Store carry the same
 generation.
 
 ### What was implemented — cloud group 0221
@@ -81,7 +81,7 @@ sequence, because the device's own journal remembers what it installed.
 
 1. Writing this migration, `pnpm migrations:validate` refused it — the validator
    matches `ALTER TABLE … <destructive verb>` across the whole file, and my
-   comment *promising* the absence of those verbs was what made it read as
+   comment _promising_ the absence of those verbs was what made it read as
    destructive. The comment now says so.
 2. `device_installations` is owned by `kitluy_release_governor`, so the migration
    borrows that role exactly as group 0180 does rather than inventing a second
@@ -105,11 +105,11 @@ testing and hardware acceptance — the mixing you ruled out.
 
 **What was rejected, and why it matters:**
 
-| Stack | Why not |
-| --- | --- |
-| `:54392` | The canonical `LOCAL_DSN` in `dev-target.mjs`, but it holds **9 821 synthetic `WS11-T001-*` fixtures** and neither real board. It is a test-fixture stack. It is also 10 migrations behind, including `0189`, which the BRINGUP-001 handoff records as **unappliable on this image**. |
-| `:54322`, `:54332` | Not KitLuy — no `kitluy_releases` schema. `:54322` is the stack recorded as defect D-04. |
-| hosted `kitluy-project-pos` | A hosted **write**, which needs `pnpm db:deploy:hosted-dev` and explicit authorisation. Not done. |
+| Stack                       | Why not                                                                                                                                                                                                                                                                               |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `:54392`                    | The canonical `LOCAL_DSN` in `dev-target.mjs`, but it holds **9 821 synthetic `WS11-T001-*` fixtures** and neither real board. It is a test-fixture stack. It is also 10 migrations behind, including `0189`, which the BRINGUP-001 handoff records as **unappliable on this image**. |
+| `:54322`, `:54332`          | Not KitLuy — no `kitluy_releases` schema. `:54322` is the stack recorded as defect D-04.                                                                                                                                                                                              |
+| hosted `kitluy-project-pos` | A hosted **write**, which needs `pnpm db:deploy:hosted-dev` and explicit authorisation. Not done.                                                                                                                                                                                     |
 
 **How the tools are pinned to it:** every release tool resolves through the
 existing `dev-target.mjs` (`KITLUY_DEV_FLEET_DSN` first), so the fleet service
@@ -161,8 +161,8 @@ release chain: 23/23 passed
 
 **The database mints the release id; the packer was inventing one and signing
 it.** `create_release_draft_v1` generates `release_artifacts.id` as a uuid, and
-`current_device_assignment_v1` hands that uuid to the device *as the manifest's
-`releaseId`*. A locally invented id would have been covered by the signature
+`current_device_assignment_v1` hands that uuid to the device _as the manifest's
+`releaseId`_. A locally invented id would have been covered by the signature
 while the device checked a different one — **every genuine release refused
 `ASSIGNMENT_RELEASE_ID_MISMATCH`**, on hardware, with the signature looking
 perfectly valid.
@@ -187,16 +187,16 @@ demands), which correctly removes them from
 
 ## 4. Phase 5, now complete
 
-| Piece | State |
-| --- | --- |
-| `release-pack.mjs` | packs a reproducible ustar (fixed mtime, sorted, uid/gid 0, no symlinks by construction), gzip, `buildId` = git SHA + dirty flag |
-| `release-publish.mjs` | pack → draft → sign → promote internal → assign, target printed first |
-| `release-service.mjs` | the two routes; assignment answers **only** from the governed function; artifact is Range-capable and refuses any release id that is not a uuid |
-| `release-target.mjs` | one resolver, wrapping `dev-target.mjs`, plus the group-0221 capability refusal |
-| `verify-terminal.mjs` | DB-side checks always; `--ssh` adds the device-side facts for acceptance |
-| `http-release-source.ts` | the device's client for both interfaces; refuses redirects, bounds every response, verifies nothing |
-| Device Shell display | `readRelease` + `releaseCaption` + the footer line |
-| `bootstrap-dev-pki.mjs --release-key-only` | mints the release key into an **existing** PKI without touching the CA |
+| Piece                                      | State                                                                                                                                           |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `release-pack.mjs`                         | packs a reproducible ustar (fixed mtime, sorted, uid/gid 0, no symlinks by construction), gzip, `buildId` = git SHA + dirty flag                |
+| `release-publish.mjs`                      | pack → draft → sign → promote internal → assign, target printed first                                                                           |
+| `release-service.mjs`                      | the two routes; assignment answers **only** from the governed function; artifact is Range-capable and refuses any release id that is not a uuid |
+| `release-target.mjs`                       | one resolver, wrapping `dev-target.mjs`, plus the group-0221 capability refusal                                                                 |
+| `verify-terminal.mjs`                      | DB-side checks always; `--ssh` adds the device-side facts for acceptance                                                                        |
+| `http-release-source.ts`                   | the device's client for both interfaces; refuses redirects, bounds every response, verifies nothing                                             |
+| Device Shell display                       | `readRelease` + `releaseCaption` + the footer line                                                                                              |
+| `bootstrap-dev-pki.mjs --release-key-only` | mints the release key into an **existing** PKI without touching the CA                                                                          |
 
 **The PKI addition mattered more than expected.** The real `dev-pki` predates U1
 and the generator correctly refuses to overwrite a CA. Regenerating to get one
@@ -220,7 +220,7 @@ caption          "Image software · 0.4.12 is installed and starts on restart"  
 ```
 
 A test caught a gap here that I would not have found by reading: a board running
-an **older release** than the installed one produced *no caption at all* — the
+an **older release** than the installed one produced _no caption at all_ — the
 worst case, indistinguishable from an image with no release runtime. Fixed:
 `"Older release running · … starts on restart"`.
 
@@ -243,14 +243,14 @@ pnpm migrations:validate                 120 migration files, passed
 
 `pnpm verify` was run before any U1 work, and again now. **Identical.**
 
-| Check | Baseline | Now | Verdict |
-| --- | --- | --- | --- |
-| Format check | FAIL — `EACCES` on `build/work/chroot-v2.7.0/…/persistent/home/pi`; *"All matched files use Prettier code style!"* | identical, same path | **no new** |
-| Lint | FAIL — 2 errors: `terminal-edge.test.ts:310`, `dev-configuration.ts:40` | the same 2, same lines | **no new** |
-| Typecheck | PASS | **PASS** | see below |
-| Unit tests | FAIL — `@kitluy/device-identity#test` only; 899 passed / 23 skipped; leaked `kitluy_credential_issuer` grant | identical, same counts, same task | **no new** |
-| Contract · Offline · Build · OpenAPI · Migrations · Hub migrations · Secret scan · Clock | PASS | PASS | |
-| Docs link check | FAIL — 4 broken links, one 2026-07-30 handoff | 4, same file | **no new** |
+| Check                                                                                    | Baseline                                                                                                           | Now                               | Verdict    |
+| ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | --------------------------------- | ---------- |
+| Format check                                                                             | FAIL — `EACCES` on `build/work/chroot-v2.7.0/…/persistent/home/pi`; _"All matched files use Prettier code style!"_ | identical, same path              | **no new** |
+| Lint                                                                                     | FAIL — 2 errors: `terminal-edge.test.ts:310`, `dev-configuration.ts:40`                                            | the same 2, same lines            | **no new** |
+| Typecheck                                                                                | PASS                                                                                                               | **PASS**                          | see below  |
+| Unit tests                                                                               | FAIL — `@kitluy/device-identity#test` only; 899 passed / 23 skipped; leaked `kitluy_credential_issuer` grant       | identical, same counts, same task | **no new** |
+| Contract · Offline · Build · OpenAPI · Migrations · Hub migrations · Secret scan · Clock | PASS                                                                                                               | PASS                              |            |
+| Docs link check                                                                          | FAIL — 4 broken links, one 2026-07-30 handoff                                                                      | 4, same file                      | **no new** |
 
 > **BASELINE FAILURES: 4, all pre-existing. NEW U1 REGRESSIONS: 0.**
 
@@ -269,15 +269,15 @@ recorded because a clean final number is not the same as a clean process:
 
 Phase 4's scope is now better known than it was:
 
-| Discovered | Effect on Phase 4 |
-| --- | --- |
-| `KITLUY_RELEASE_SOURCE` must carry a **base URL** (`http://<host>:<port>`), not a file path | `/etc/kitluy/release.env` injection is a URL; `release-service.mjs` prints the exact line to bake |
-| The trust anchor is a **`.json` record**, not a bare `.pub` | the image writes `/etc/kitluy/trust/release-signing.json`; `evaluatePreconditions` already accepts `.json` |
-| The Device Shell needs `/persistent/shared/kitluy/releases/device-shell/journal.json` **readable as `kitluy-terminal`** | the store is root-owned; directories 0755 and files 0644 are required, not incidental |
-| The launcher must write `running-source.json` into `/var/lib/kitluy/terminal/` | that directory is already chowned to `kitluy-terminal` by `kitluy-device-shell.service`'s `ExecStartPre` — no new permission work |
-| `DeviceRoots` gained `releaseStoreDir` | the Electron main process passes it; no unit change |
-| A release id is a **uuid** | the store's `rel-<uuid>` directories; the launcher's `-f current/payload/package.json` test is unaffected |
-| The device runs **Node 18.20.4** | already handled: gzip, not zstd |
+| Discovered                                                                                                              | Effect on Phase 4                                                                                                                 |
+| ----------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `KITLUY_RELEASE_SOURCE` must carry a **base URL** (`http://<host>:<port>`), not a file path                             | `/etc/kitluy/release.env` injection is a URL; `release-service.mjs` prints the exact line to bake                                 |
+| The trust anchor is a **`.json` record**, not a bare `.pub`                                                             | the image writes `/etc/kitluy/trust/release-signing.json`; `evaluatePreconditions` already accepts `.json`                        |
+| The Device Shell needs `/persistent/shared/kitluy/releases/device-shell/journal.json` **readable as `kitluy-terminal`** | the store is root-owned; directories 0755 and files 0644 are required, not incidental                                             |
+| The launcher must write `running-source.json` into `/var/lib/kitluy/terminal/`                                          | that directory is already chowned to `kitluy-terminal` by `kitluy-device-shell.service`'s `ExecStartPre` — no new permission work |
+| `DeviceRoots` gained `releaseStoreDir`                                                                                  | the Electron main process passes it; no unit change                                                                               |
+| A release id is a **uuid**                                                                                              | the store's `rel-<uuid>` directories; the launcher's `-f current/payload/package.json` test is unaffected                         |
+| The device runs **Node 18.20.4**                                                                                        | already handled: gzip, not zstd                                                                                                   |
 
 **No change to the Phase 4 plan's shape.** The reflash still covers: trust anchor
 injection, `release.env`, the slot-shared store declaration plus the generalised
@@ -288,13 +288,13 @@ injection, `release.env`, the slot-shared store declaration plus the generalised
 
 ## 7. Evidence discipline
 
-| State | U1 |
-| --- | --- |
-| `SOURCE IMPLEMENTED` | **yes** — phases 1–3 and 5 complete |
-| `TESTED-IN-DEV` | **yes** — 172 U1 + 13 shell + 9 + 23 checks, 0 failures, 0 new regressions |
-| `IMAGE VERIFIED` | **no** — Phase 4 has not begun |
-| `HARDWARE VERIFIED` | **no** — acceptance A/B/C/D not attempted, no SD card touched, no device contacted |
-| `PILOT-PROVEN` / `PRODUCTION-PROVEN` | **not claimable** — BLK-005 |
+| State                                | U1                                                                                 |
+| ------------------------------------ | ---------------------------------------------------------------------------------- |
+| `SOURCE IMPLEMENTED`                 | **yes** — phases 1–3 and 5 complete                                                |
+| `TESTED-IN-DEV`                      | **yes** — 172 U1 + 13 shell + 9 + 23 checks, 0 failures, 0 new regressions         |
+| `IMAGE VERIFIED`                     | **no** — Phase 4 has not begun                                                     |
+| `HARDWARE VERIFIED`                  | **no** — acceptance A/B/C/D not attempted, no SD card touched, no device contacted |
+| `PILOT-PROVEN` / `PRODUCTION-PROVEN` | **not claimable** — BLK-005                                                        |
 
 Nothing committed or pushed. One migration created and applied **to the local
 development stack only**. The bootstrap/runtime classification is unchanged and

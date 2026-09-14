@@ -1,14 +1,14 @@
 # KitLuy Suite — what has been built: device images and portals
 
-| Field | Value |
-| --- | --- |
-| Report date | 2026-09-11 · Asia/Phnom_Penh |
-| Repository | `het-kitluy-project` (HET KitLuy Project monorepo) |
-| Repository root | `~/Development/HET_VEASNA_WORKSPACE/repos/het-kitluy-project` |
-| Product name | **KitLuy Suite** |
-| Branch at time of writing | `claude/fix-firstboot-esm-and-ssh-hostkeys` |
-| Purpose of this file | A self-contained briefing for an outside AI/reader who has **no access to this repository**. It describes the two Raspberry Pi device images and the browser portals, what is proven, and what is not. |
-| Method | Written from the repository itself: source files, `runtime-manifest.json` in both image trees, migration directories, and the dated handoff records in `00_AI_HANDOFF/`. No commands were re-run for this report — every test number below is quoted from the handoff that recorded it, and is labelled as such. |
+| Field                     | Value                                                                                                                                                                                                                                                                                                            |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Report date               | 2026-09-11 · Asia/Phnom_Penh                                                                                                                                                                                                                                                                                     |
+| Repository                | `het-kitluy-project` (HET KitLuy Project monorepo)                                                                                                                                                                                                                                                               |
+| Repository root           | `~/Development/HET_VEASNA_WORKSPACE/repos/het-kitluy-project`                                                                                                                                                                                                                                                    |
+| Product name              | **KitLuy Suite**                                                                                                                                                                                                                                                                                                 |
+| Branch at time of writing | `claude/fix-firstboot-esm-and-ssh-hostkeys`                                                                                                                                                                                                                                                                      |
+| Purpose of this file      | A self-contained briefing for an outside AI/reader who has **no access to this repository**. It describes the two Raspberry Pi device images and the browser portals, what is proven, and what is not.                                                                                                           |
+| Method                    | Written from the repository itself: source files, `runtime-manifest.json` in both image trees, migration directories, and the dated handoff records in `00_AI_HANDOFF/`. No commands were re-run for this report — every test number below is quoted from the handoff that recorded it, and is labelled as such. |
 
 > **Vocabulary rule used throughout.** `BUILT` = implemented and exercised by tests.
 > `PROVEN ON HARDWARE` = observed working on a physical Raspberry Pi, with the
@@ -38,15 +38,15 @@ answering `200`, on real hardware, from a clean slate.
 
 ## 1. Repository shape (the numbers)
 
-| Thing | Count | Note |
-| --- | --- | --- |
-| Applications (`apps/`) | 9 | 3 PWA portals, device shell, POS desktop, POS mobile, partner app, storefront, B2B website |
-| Services (`services/`) | 20 | management API, device registry, hub agent, firstboot agent, sync, provisioning, … |
-| Shared packages (`packages/`) | 45 | money, rbac, auth, edge-contracts, device-identity, web-ui, localization, … |
-| Verticals (`verticals/`) | 9 phases | Phase 1 Laundry is the owner-locked live vertical |
-| Cloud migrations (`supabase/migrations/`) | 119 files, sequence numbered to **0220** | the sequence is sparse by design (0000, 0010, 0020, 0035, …), so 119 files reach 0220. Latest: `…0220_a_recovering_terminal_may_present_a_code.sql` |
-| Store Hub local migrations (`hub/migrations/`) | 43 files, numbered to **0042** | `0042_terminal_pairing_signing_credential.sql` |
-| Supabase edge functions | 1 real (`device-registration`) + `_shared` | the unauthenticated door a fresh board knocks on |
+| Thing                                          | Count                                      | Note                                                                                                                                                |
+| ---------------------------------------------- | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Applications (`apps/`)                         | 9                                          | 3 PWA portals, device shell, POS desktop, POS mobile, partner app, storefront, B2B website                                                          |
+| Services (`services/`)                         | 20                                         | management API, device registry, hub agent, firstboot agent, sync, provisioning, …                                                                  |
+| Shared packages (`packages/`)                  | 45                                         | money, rbac, auth, edge-contracts, device-identity, web-ui, localization, …                                                                         |
+| Verticals (`verticals/`)                       | 9 phases                                   | Phase 1 Laundry is the owner-locked live vertical                                                                                                   |
+| Cloud migrations (`supabase/migrations/`)      | 119 files, sequence numbered to **0220**   | the sequence is sparse by design (0000, 0010, 0020, 0035, …), so 119 files reach 0220. Latest: `…0220_a_recovering_terminal_may_present_a_code.sql` |
+| Store Hub local migrations (`hub/migrations/`) | 43 files, numbered to **0042**             | `0042_terminal_pairing_signing_credential.sql`                                                                                                      |
+| Supabase edge functions                        | 1 real (`device-registration`) + `_shared` | the unauthenticated door a fresh board knocks on                                                                                                    |
 
 Monorepo, pnpm workspaces, strict TypeScript, Turbo. Node version pinned in
 `.nvmrc`; dependency versions live in the `pnpm-workspace.yaml` catalog.
@@ -61,13 +61,13 @@ Owner decision 2026-08-13: **two devices, two images, two sources.** A Store Hub
 and a Pi Terminal do fundamentally different jobs and carry different authority,
 so they are not profiles of one build.
 
-| | Pi Terminal | Store Hub |
-| --- | --- | --- |
-| Source tree | `infra/kitluy-os-image` | `infra/kitluy-store-hub-image` |
-| Profile | `pi-terminal` | `store-hub` |
-| Carries a database | **No** | Yes — PostgreSQL 15 on encrypted NVMe |
-| Carries Store authority | **No — asserted absent by every test** | Yes |
-| Primary surface | Electron kiosk on a screen | headless; serves the LAN |
+|                         | Pi Terminal                            | Store Hub                             |
+| ----------------------- | -------------------------------------- | ------------------------------------- |
+| Source tree             | `infra/kitluy-os-image`                | `infra/kitluy-store-hub-image`        |
+| Profile                 | `pi-terminal`                          | `store-hub`                           |
+| Carries a database      | **No**                                 | Yes — PostgreSQL 15 on encrypted NVMe |
+| Carries Store authority | **No — asserted absent by every test** | Yes                                   |
+| Primary surface         | Electron kiosk on a screen             | headless; serves the LAN              |
 
 ### 2.2 The mechanism that keeps an image honest: `runtime-manifest.json`
 
@@ -97,18 +97,18 @@ behind dm-verity, a shared persistent partition, read-only erofs root.
 
 **Declared components** (from `runtime-manifest.json`):
 
-| Component | systemd unit | Enabled | What it does |
-| --- | --- | --- | --- |
-| `firstboot-identity` | `kitluy-firstboot.service` | yes | creates the board's Ed25519 **device identity key** at first boot |
-| `cloud-registration` | `kitluy-cloud-registration.service` | yes | Factory Enrollment: registers with KitLuy and waits for an explicit Admin approval; polls every 60 s |
-| `health-reporter` | `kitluy-health-reporter.service` | yes | device heartbeats |
-| `update-agent` | `kitluy-update-agent.service` | yes | signed release / update channel client |
-| `ssh-hostkeys` | `kitluy-ssh-hostkeys.service` | yes | generates host keys into the slot-shared mount (see §2.6) |
-| `bootstrap-screen` | `kitluy-bootstrap-screen.service` | **no** | the retired *text* status screen on tty1, superseded by the shell |
-| `device-shell` | `kitluy-device-shell.service` | yes | the Electron kiosk (§3.4) |
-| `electron-runtime` | — | yes | pinned Electron **38.8.6** arm64, fetched + checksum-verified, not committed |
-| `terminal-edge` | `kitluy-terminal-edge.service` | yes | discovers the Store Hub, does mutual TLS, pairs, reads bootstrap (§2.5) |
-| `terminal-session` / `terminal-client` | — | no | declared successors, not yet enabled |
+| Component                              | systemd unit                        | Enabled | What it does                                                                                         |
+| -------------------------------------- | ----------------------------------- | ------- | ---------------------------------------------------------------------------------------------------- |
+| `firstboot-identity`                   | `kitluy-firstboot.service`          | yes     | creates the board's Ed25519 **device identity key** at first boot                                    |
+| `cloud-registration`                   | `kitluy-cloud-registration.service` | yes     | Factory Enrollment: registers with KitLuy and waits for an explicit Admin approval; polls every 60 s |
+| `health-reporter`                      | `kitluy-health-reporter.service`    | yes     | device heartbeats                                                                                    |
+| `update-agent`                         | `kitluy-update-agent.service`       | yes     | signed release / update channel client                                                               |
+| `ssh-hostkeys`                         | `kitluy-ssh-hostkeys.service`       | yes     | generates host keys into the slot-shared mount (see §2.6)                                            |
+| `bootstrap-screen`                     | `kitluy-bootstrap-screen.service`   | **no**  | the retired _text_ status screen on tty1, superseded by the shell                                    |
+| `device-shell`                         | `kitluy-device-shell.service`       | yes     | the Electron kiosk (§3.4)                                                                            |
+| `electron-runtime`                     | —                                   | yes     | pinned Electron **38.8.6** arm64, fetched + checksum-verified, not committed                         |
+| `terminal-edge`                        | `kitluy-terminal-edge.service`      | yes     | discovers the Store Hub, does mutual TLS, pairs, reads bootstrap (§2.5)                              |
+| `terminal-session` / `terminal-client` | —                                   | no      | declared successors, not yet enabled                                                                 |
 
 Plus a **root config broker** (`kitluy-device-config.service`): the kiosk runs
 with an **empty `CapabilityBoundingSet`** and therefore cannot join a Wi-Fi
@@ -148,24 +148,24 @@ produces a real image. Everything built on a developer workstation is
 
 **Test suites:** `build-gates`, `systemd-runtime`, `environment-gating`,
 `rpi-image-gen`, `image-contents` (the only one that reads a **built** rootfs;
-it SKIPS when no image has been built, and a skip is treated as *no evidence*,
+it SKIPS when no image has been built, and a skip is treated as _no evidence_,
 never as a pass), plus `scan-image-secrets.sh` over the built tree.
 
 ### 2.4 Store Hub image — `infra/kitluy-store-hub-image`
 
 **Declared components:**
 
-| Component | systemd unit | What it does |
-| --- | --- | --- |
-| `firstboot-identity` | `kitluy-firstboot.service` | device identity key |
-| `cloud-registration` | `kitluy-cloud-registration.service` | Factory Enrollment |
-| `hub-pairing-ui` | `kitluy-hub-pairing.service` | the console where the installer types the Partner's one-time Hub pairing code |
-| `operational-tls` | `kitluy-operational-tls.service` | obtains the board's operational X.509 certificate |
-| `health-reporter` | `kitluy-health-reporter.service` | heartbeats |
-| `update-agent` | `kitluy-update-agent.service` | update channel |
-| `hub-storage-provision` | `kitluy-hub-storage.service` | **LUKS2** container on NVMe, resolved by type (never a hardcoded `/dev/nvme0n1`) |
-| `hub-database-provision` | `kitluy-hub-database.service` | PostgreSQL 15 cluster + the 43 Hub migrations |
-| `hub-agent` | `kitluy-hub-agent.service` | the LAN server: mutual TLS on **:7443**, mDNS `_kitluy-edge._tcp` |
+| Component                | systemd unit                        | What it does                                                                     |
+| ------------------------ | ----------------------------------- | -------------------------------------------------------------------------------- |
+| `firstboot-identity`     | `kitluy-firstboot.service`          | device identity key                                                              |
+| `cloud-registration`     | `kitluy-cloud-registration.service` | Factory Enrollment                                                               |
+| `hub-pairing-ui`         | `kitluy-hub-pairing.service`        | the console where the installer types the Partner's one-time Hub pairing code    |
+| `operational-tls`        | `kitluy-operational-tls.service`    | obtains the board's operational X.509 certificate                                |
+| `health-reporter`        | `kitluy-health-reporter.service`    | heartbeats                                                                       |
+| `update-agent`           | `kitluy-update-agent.service`       | update channel                                                                   |
+| `hub-storage-provision`  | `kitluy-hub-storage.service`        | **LUKS2** container on NVMe, resolved by type (never a hardcoded `/dev/nvme0n1`) |
+| `hub-database-provision` | `kitluy-hub-database.service`       | PostgreSQL 15 cluster + the 43 Hub migrations                                    |
+| `hub-agent`              | `kitluy-hub-agent.service`          | the LAN server: mutual TLS on **:7443**, mDNS `_kitluy-edge._tcp`                |
 
 Extra suite over the terminal tree: `storage-posture.test.sh`.
 
@@ -189,16 +189,16 @@ a hard rule of the architecture.
 
 ### 2.6 Hardware bring-up: the dated record
 
-| Date | Milestone | Status recorded |
-| --- | --- | --- |
-| 2026-08-31 | A physical Pi 5 registered, was approved in the Admin Portal, enrolled, and **paired from the Partner Portal** — the whole admission chain through the UI for the first time | PARTIAL — certificate issuance stranded |
-| 2026-09-01 | **Store Hub reaches `active`** on hardware: `manufactured → enrolled → awaiting_trust → active` in six seconds, unassisted, with two portal clicks and a typed code | done |
-| 2026-09-01 | **Store Hub edge runtime foundation**: a Pi 5 served a signed discovery record over mutual TLS on :7443 — LUKS2 volume, PostgreSQL, 42 migrations, agent listening, signature verifying against the board's own identity key | GATE A ACHIEVED |
-| 2026-09-03 | **Factory Enrollment becomes the terminal's first stage**; proven on a Pi 5 the same evening: registered, approved, "Approved / Store Unassigned" on screen, survives reboot | PARTIAL |
-| 2026-09-07 | The Pi Terminal image gets a screen that can take a pairing code: `cage` kiosk compositor + pinned Electron arm64 in the image. Full image built (QEMU cross-build, exit 0, 8.9 GB raw / 734 MB compressed) and inspected | PARTIAL |
-| 2026-09-08 | Terminal **Settings screen** + root config broker; Admin can tell an online Pi from an unplugged one | TESTED-IN-DEV |
-| 2026-09-10 | The Store Hub serves terminals — three image defects found and fixed; a terminal dials its Hub and is recognised | PROVEN ON HARDWARE, partial by design |
-| **2026-09-11** | **A Pi Terminal is served by its Store Hub, end to end** | **PROVEN ON HARDWARE** |
+| Date           | Milestone                                                                                                                                                                                                                    | Status recorded                         |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
+| 2026-08-31     | A physical Pi 5 registered, was approved in the Admin Portal, enrolled, and **paired from the Partner Portal** — the whole admission chain through the UI for the first time                                                 | PARTIAL — certificate issuance stranded |
+| 2026-09-01     | **Store Hub reaches `active`** on hardware: `manufactured → enrolled → awaiting_trust → active` in six seconds, unassisted, with two portal clicks and a typed code                                                          | done                                    |
+| 2026-09-01     | **Store Hub edge runtime foundation**: a Pi 5 served a signed discovery record over mutual TLS on :7443 — LUKS2 volume, PostgreSQL, 42 migrations, agent listening, signature verifying against the board's own identity key | GATE A ACHIEVED                         |
+| 2026-09-03     | **Factory Enrollment becomes the terminal's first stage**; proven on a Pi 5 the same evening: registered, approved, "Approved / Store Unassigned" on screen, survives reboot                                                 | PARTIAL                                 |
+| 2026-09-07     | The Pi Terminal image gets a screen that can take a pairing code: `cage` kiosk compositor + pinned Electron arm64 in the image. Full image built (QEMU cross-build, exit 0, 8.9 GB raw / 734 MB compressed) and inspected    | PARTIAL                                 |
+| 2026-09-08     | Terminal **Settings screen** + root config broker; Admin can tell an online Pi from an unplugged one                                                                                                                         | TESTED-IN-DEV                           |
+| 2026-09-10     | The Store Hub serves terminals — three image defects found and fixed; a terminal dials its Hub and is recognised                                                                                                             | PROVEN ON HARDWARE, partial by design   |
+| **2026-09-11** | **A Pi Terminal is served by its Store Hub, end to end**                                                                                                                                                                     | **PROVEN ON HARDWARE**                  |
 
 The 2026-09-11 result, from a completely clean slate (cloud fleet truncated,
 both boards on new SD cards with freshly built images, new device records, new
@@ -218,8 +218,8 @@ edge:configuration-current  200  CONFIGURATION_DELIVERY
 
 These are recorded because each cost real time and each generalises:
 
-- **A device holds two keys doing two jobs.** An RSA-2048 *operational* key
-  carries mutual TLS; an Ed25519 *device identity* key signs pairing proofs.
+- **A device holds two keys doing two jobs.** An RSA-2048 _operational_ key
+  carries mutual TLS; an Ed25519 _device identity_ key signs pairing proofs.
   Binding the wrong one in a transcript makes the handshake unsatisfiable from
   both sides. Hub migration `0042` binds the **signing** credential.
 - **DER serial padding.** `certificate_x509_serial` stored the DER integer
@@ -266,7 +266,7 @@ Three rules hold across every portal:
 3. **No portal reads the device or core schemas directly.** `kitluy_devices`
    and `kitluy_core` are closed to the data API; every governed door is granted
    to a service identity only. A browser attempting a direct device query gets
-   `permission denied`, which is the *correct* outcome.
+   `permission denied`, which is the _correct_ outcome.
 
 ### 3.1 Admin PWA Portal — `apps/kitluy-admin-pwa-portal`
 
@@ -278,16 +278,16 @@ Routes: `#/devices` · `#/pending` · `#/devices/{id}` · `#/stores` · `#/store
 
 Against the Management API (`/management/v1`):
 
-| Screen | Endpoint |
-| --- | --- |
-| signed-in identity | `GET /me` |
-| fleet list | `GET /devices` |
-| device detail | `GET /devices/{id}` |
-| **verify-and-approve queue** | `GET /devices-pending` |
-| approve a board | `POST /devices/{id}/approve-enrollment` |
-| Digital Stores list | `GET /digital-stores` |
-| create-store options | `GET /digital-stores/options` |
-| create a Digital Store | `POST /digital-stores` |
+| Screen                       | Endpoint                                |
+| ---------------------------- | --------------------------------------- |
+| signed-in identity           | `GET /me`                               |
+| fleet list                   | `GET /devices`                          |
+| device detail                | `GET /devices/{id}`                     |
+| **verify-and-approve queue** | `GET /devices-pending`                  |
+| approve a board              | `POST /devices/{id}/approve-enrollment` |
+| Digital Stores list          | `GET /digital-stores`                   |
+| create-store options         | `GET /digital-stores/options`           |
+| create a Digital Store       | `POST /digital-stores`                  |
 
 Built behaviour worth noting:
 
@@ -338,7 +338,7 @@ the code on the device (owner clarification, 2026-09-04).
 A rung is `done` only when something reported it, `not_reported` otherwise; no
 rung is inferred from an earlier one, and a done rung is never demoted when the
 Hub later regresses. One rung — `hubPaired` — is currently in `UNREPORTABLE_RUNGS`
-and rendered as *unbuildable* rather than *awaited*, because nothing in the
+and rendered as _unbuildable_ rather than _awaited_, because nothing in the
 build can report it yet (the device now knows the answer; nothing carries it to
 the cloud and the API has no field for it).
 
@@ -427,20 +427,20 @@ Enrollment can work before any credential exists.
 
 ## 5. Status summary
 
-| Capability | Status |
-| --- | --- |
-| Store Hub image builds and flashes | **PROVEN ON HARDWARE** |
-| Store Hub reaches `active` via the portals | **PROVEN ON HARDWARE** (2026-09-01) |
-| Store Hub serves the LAN over mutual TLS :7443 | **PROVEN ON HARDWARE** |
-| Pi Terminal image builds and flashes | **PROVEN ON HARDWARE** |
-| Pi Terminal Factory Enrollment (register → Admin approval → `enrolled`) | **PROVEN ON HARDWARE** (2026-09-03) |
-| Pi Terminal graphical kiosk shell in the image | **BUILT**, image built and inspected |
-| Terminal discovers, pairs with and is served by its Store Hub | **PROVEN ON HARDWARE, END TO END** (2026-09-11) |
-| Admin Portal: fleet, approval queue, device detail, Digital Stores | **BUILT** |
-| Partner Portal: Hub pairing, terminal seats, one-time codes, ladder | **BUILT** |
-| Chain Portal | **SCAFFOLDED** |
-| POS business application on a terminal | **not started in this program** |
-| Deployment to pilot or production | **NONE** |
+| Capability                                                              | Status                                          |
+| ----------------------------------------------------------------------- | ----------------------------------------------- |
+| Store Hub image builds and flashes                                      | **PROVEN ON HARDWARE**                          |
+| Store Hub reaches `active` via the portals                              | **PROVEN ON HARDWARE** (2026-09-01)             |
+| Store Hub serves the LAN over mutual TLS :7443                          | **PROVEN ON HARDWARE**                          |
+| Pi Terminal image builds and flashes                                    | **PROVEN ON HARDWARE**                          |
+| Pi Terminal Factory Enrollment (register → Admin approval → `enrolled`) | **PROVEN ON HARDWARE** (2026-09-03)             |
+| Pi Terminal graphical kiosk shell in the image                          | **BUILT**, image built and inspected            |
+| Terminal discovers, pairs with and is served by its Store Hub           | **PROVEN ON HARDWARE, END TO END** (2026-09-11) |
+| Admin Portal: fleet, approval queue, device detail, Digital Stores      | **BUILT**                                       |
+| Partner Portal: Hub pairing, terminal seats, one-time codes, ladder     | **BUILT**                                       |
+| Chain Portal                                                            | **SCAFFOLDED**                                  |
+| POS business application on a terminal                                  | **not started in this program**                 |
+| Deployment to pilot or production                                       | **NONE**                                        |
 
 ---
 
@@ -481,11 +481,11 @@ Enrollment can work before any credential exists.
 Test numbers quoted from the records that produced them, **not re-run for this
 report**:
 
-| Recorded | Result | Source |
-| --- | --- | --- |
-| 2026-09-11 | `services/kitluy-hub-agent` — 176 passed, 0 failed, 271 skipped (no local hub database) | handoff 38 §5 |
+| Recorded   | Result                                                                                                                                        | Source                 |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
+| 2026-09-11 | `services/kitluy-hub-agent` — 176 passed, 0 failed, 271 skipped (no local hub database)                                                       | handoff 38 §5          |
 | 2026-09-07 | terminal image 294/0/1 · Store Hub image 291/0/1 · device shell 66/66 · firstboot agent 455 passed / 9 skipped · secret scan over 2 089 files | `KL-P1-TERM-SHELL-002` |
-| 2026-09-07 | built-rootfs `image-contents` 83/0/1 · `systemd-runtime` 171/0 · device shell 70/70 | `KL-P1-TERM-SHELL-003` |
+| 2026-09-07 | built-rootfs `image-contents` 83/0/1 · `systemd-runtime` 171/0 · device shell 70/70                                                           | `KL-P1-TERM-SHELL-003` |
 
 **No command was executed to produce this document, and no status here was
 advanced on its own authority.** `pnpm verify` was not run — nothing in the
@@ -497,26 +497,26 @@ tests are skipped for want of a local Hub database, and a skipped suite is
 
 ## 8. Glossary for an outside reader
 
-| Term | Meaning |
-| --- | --- |
-| **KitLuy Suite** | the product name |
-| **HET KitLuy Project** | the project; `het-kitluy-project` is its repository |
-| **Store Hub** | one Raspberry Pi per store; holds the store's encrypted local PostgreSQL and serves that store's terminals over the LAN |
-| **Pi Terminal** | the Raspberry Pi at the counter; a kiosk screen, no local database, no Store authority |
+| Term                   | Meaning                                                                                                                   |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| **KitLuy Suite**       | the product name                                                                                                          |
+| **HET KitLuy Project** | the project; `het-kitluy-project` is its repository                                                                       |
+| **Store Hub**          | one Raspberry Pi per store; holds the store's encrypted local PostgreSQL and serves that store's terminals over the LAN   |
+| **Pi Terminal**        | the Raspberry Pi at the counter; a kiosk screen, no local database, no Store authority                                    |
 | **Factory Enrollment** | a flashed board registers itself and then **waits for an explicit Admin approval**; pending is its designed resting state |
-| **Digital Store** | the cloud record of a store, created by an Admin and assigned to a Partner |
-| **Partner** | the merchant — the customer who operates stores |
-| **Chain** | multi-store governance above the Partner |
-| **T1–T4** | the owner-locked Phase 1 Laundry terminal model; a three-terminal mapping is rejected |
-| **Four-eyes** | a second authorized person must approve; cannot be relaxed |
-| **RLS** | PostgreSQL row-level security — the real authorization boundary |
-| **`enrolled`** | approved by an Admin, **not** yet assigned to a Store |
-| **`awaiting_trust`** | assigned to a Store, awaiting activation |
-| **`active`** | fully activated; for a Hub, the only state in which it can serve terminals |
-| **erofs / dm-verity** | read-only, integrity-checked root filesystem — nothing on a booted device's root can be edited |
-| **`cage`** | a Wayland kiosk compositor that shows exactly one application with no desktop behind it |
+| **Digital Store**      | the cloud record of a store, created by an Admin and assigned to a Partner                                                |
+| **Partner**            | the merchant — the customer who operates stores                                                                           |
+| **Chain**              | multi-store governance above the Partner                                                                                  |
+| **T1–T4**              | the owner-locked Phase 1 Laundry terminal model; a three-terminal mapping is rejected                                     |
+| **Four-eyes**          | a second authorized person must approve; cannot be relaxed                                                                |
+| **RLS**                | PostgreSQL row-level security — the real authorization boundary                                                           |
+| **`enrolled`**         | approved by an Admin, **not** yet assigned to a Store                                                                     |
+| **`awaiting_trust`**   | assigned to a Store, awaiting activation                                                                                  |
+| **`active`**           | fully activated; for a Hub, the only state in which it can serve terminals                                                |
+| **erofs / dm-verity**  | read-only, integrity-checked root filesystem — nothing on a booted device's root can be edited                            |
+| **`cage`**             | a Wayland kiosk compositor that shows exactly one application with no desktop behind it                                   |
 
 ---
 
-*Written 2026-09-11 from the repository at commit `bde3490` plus the uncommitted
-working tree on `claude/fix-firstboot-esm-and-ssh-hostkeys`.*
+_Written 2026-09-11 from the repository at commit `bde3490` plus the uncommitted
+working tree on `claude/fix-firstboot-esm-and-ssh-hostkeys`._

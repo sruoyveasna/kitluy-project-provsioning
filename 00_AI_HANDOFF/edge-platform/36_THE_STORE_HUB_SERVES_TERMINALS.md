@@ -37,15 +37,15 @@ Two causes compounded, and the unit's own comment asserted the opposite of both:
 2. **The script's fallback is blocked by the unit's own hardening.**
    `install -d -m 2775` sets the **setgid** bit, and `RestrictSUIDSGID=yes`
    blocks that syscall. The directory is never created, and the error you see is
-   the *chown* step complaining about a directory the blocked `mkdir` never made.
+   the _chown_ step complaining about a directory the blocked `mkdir` never made.
 
 Bisected on the board with three replica units:
 
-| unit | mode | RestrictSUIDSGID | result |
-| --- | --- | --- | --- |
-| replica | 2775 | yes | **ENOENT** (reproduced) |
-| replica | 0755 | yes | success |
-| replica | 2775 | no | success |
+| unit    | mode | RestrictSUIDSGID | result                  |
+| ------- | ---- | ---------------- | ----------------------- |
+| replica | 2775 | yes              | **ENOENT** (reproduced) |
+| replica | 0755 | yes              | success                 |
+| replica | 2775 | no               | success                 |
 
 **Fix:** the unit declares `RuntimeDirectory=postgresql`,
 `RuntimeDirectoryMode=2775`, `RuntimeDirectoryPreserve=yes`, `Group=postgres`.
@@ -185,8 +185,8 @@ FAIL [SECRET] Private key material
   .../hub-migrations/0038_release_trust_and_cache.sql:177
 ```
 
-It is a false positive. That migration deliberately inserts the literal
-`-----BEGIN PRIVATE KEY-----probe` to prove the trust registry's CHECK constraint
+It is a false positive. That migration deliberately inserts a literal PEM
+`BEGIN PRIVATE KEY` header followed by `probe` to prove the trust registry's CHECK constraint
 **rejects** private key material. Recorded, not fixed — out of scope.
 
 ## 9. Recommended next task

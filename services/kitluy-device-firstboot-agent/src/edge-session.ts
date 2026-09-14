@@ -184,9 +184,13 @@ export async function runEdgeAttempt(options: EdgeAttemptOptions): Promise<EdgeS
   const candidates: EdgeCandidate[] = [];
   const last = readLastEndpoint(lastEndpointPath);
   if (last !== null) candidates.push(last);
-  const discovered = await (options.discover ?? (() => discoverEdgeCandidates({
-    ...(options.mdnsTimeoutMs === undefined ? {} : { timeoutMs: options.mdnsTimeoutMs }),
-  })))();
+  const discovered = await (
+    options.discover ??
+    (() =>
+      discoverEdgeCandidates({
+        ...(options.mdnsTimeoutMs === undefined ? {} : { timeoutMs: options.mdnsTimeoutMs }),
+      }))
+  )();
   for (const candidate of discovered) {
     if (!candidates.some((c) => c.host === candidate.host && c.port === candidate.port)) {
       candidates.push(candidate);
@@ -203,7 +207,13 @@ export async function runEdgeAttempt(options: EdgeAttemptOptions): Promise<EdgeS
 
   let lastRefusal: EdgeStatus | null = null;
   for (const candidate of candidates) {
-    const attempted = await attemptCandidate(candidate, credentials.credentials, options, call, now);
+    const attempted = await attemptCandidate(
+      candidate,
+      credentials.credentials,
+      options,
+      call,
+      now,
+    );
     // DEGRADED counts as reached: the endpoint is the right one and worth
     // remembering, and the thing that is wrong is on the Hub, not the address.
     if (attempted.phase === "SERVING" || attempted.phase === "DEGRADED") {
@@ -235,7 +245,12 @@ async function attemptCandidate(
   now: () => Date,
 ): Promise<EdgeStatus> {
   const checkedAt = now().toISOString();
-  const base = { host: candidate.host, port: candidate.port, credentials, environment: options.environment };
+  const base = {
+    host: candidate.host,
+    port: candidate.port,
+    credentials,
+    environment: options.environment,
+  };
 
   let discovery;
   try {
@@ -322,7 +337,11 @@ async function attemptCandidate(
           "pair into; the cloud has not delivered its profile assignment",
         checkedAt,
         hub,
-        reads: { authorityTime: reads.authorityTime, eligibility: reads.eligibility, configuration: "-" },
+        reads: {
+          authorityTime: reads.authorityTime,
+          eligibility: reads.eligibility,
+          configuration: "-",
+        },
       };
     }
     const outcome: PairingOutcome = await pairWithHub({
@@ -341,7 +360,11 @@ async function attemptCandidate(
         detail: `the Store Hub refused to pair this terminal: ${outcome.result} (${outcome.detail})`,
         checkedAt,
         hub,
-        reads: { authorityTime: reads.authorityTime, eligibility: reads.eligibility, configuration: "-" },
+        reads: {
+          authorityTime: reads.authorityTime,
+          eligibility: reads.eligibility,
+          configuration: "-",
+        },
         pairing,
       };
     }

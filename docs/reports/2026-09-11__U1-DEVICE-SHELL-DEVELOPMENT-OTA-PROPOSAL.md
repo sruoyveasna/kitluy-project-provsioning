@@ -1,12 +1,12 @@
 # U1 — Device Shell development OTA · proposal for owner approval
 
-| Field | Value |
-| --- | --- |
-| Date | 2026-09-11 · Asia/Phnom_Penh |
-| Repository | `het-kitluy-project` @ `bde3490` + uncommitted tree on `claude/fix-firstboot-esm-and-ssh-hostkeys` |
-| Type | **PROPOSAL — NOT IMPLEMENTATION.** No code, migration, image or documentation changed. Nothing committed. No owner decision made. |
-| Status of this file | ASSESSMENT + PLAN. Advances no register status, creates no GAP ID, binds nothing. |
-| Companion | [`2026-09-11__DEVICE-UPDATE-WORKFLOW-FEASIBILITY-ASSESSMENT.md`](2026-09-11__DEVICE-UPDATE-WORKFLOW-FEASIBILITY-ASSESSMENT.md) — the full architecture survey. This file answers your eleven questions and proposes U1 only. |
+| Field               | Value                                                                                                                                                                                                                        |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Date                | 2026-09-11 · Asia/Phnom_Penh                                                                                                                                                                                                 |
+| Repository          | `het-kitluy-project` @ `bde3490` + uncommitted tree on `claude/fix-firstboot-esm-and-ssh-hostkeys`                                                                                                                           |
+| Type                | **PROPOSAL — NOT IMPLEMENTATION.** No code, migration, image or documentation changed. Nothing committed. No owner decision made.                                                                                            |
+| Status of this file | ASSESSMENT + PLAN. Advances no register status, creates no GAP ID, binds nothing.                                                                                                                                            |
+| Companion           | [`2026-09-11__DEVICE-UPDATE-WORKFLOW-FEASIBILITY-ASSESSMENT.md`](2026-09-11__DEVICE-UPDATE-WORKFLOW-FEASIBILITY-ASSESSMENT.md) — the full architecture survey. This file answers your eleven questions and proposes U1 only. |
 
 **Labels:** **REPOSITORY FACT** · **EXTERNAL RESEARCH** · **RECOMMENDATION**
 **Status language:** `SOURCE IMPLEMENTED` · `TESTED-IN-DEV` · `IMAGE VERIFIED` · `HARDWARE VERIFIED` · `PILOT-PROVEN` · `PRODUCTION-PROVEN` · `LAYOUT ONLY` · `ABSENT`
@@ -21,7 +21,7 @@ Re-reading the repository against your direction turned up **three facts that ma
 
 2. **The development PKI you need already exists and is already owner-authorized.** `pnpm pki:bootstrap-dev` (`scripts/pki/bootstrap-dev-pki.mjs`) creates a persistent development CA outside the repository — and it already mints an **Ed25519 canonical chain** alongside the X.509 TLS chain. Authority: owner Decision 3 (2026-08-24) plus BLK-005's development authorization. U1 adds one purpose-scoped key to a governed generator that already refuses to overwrite, refuses to write inside the repo, and stamps everything `NON-PRODUCTION`.
 
-3. **The pattern for getting development trust material into an image already exists and is proven.** `IGconf_kitluy_development_root_sha256` → `/etc/kitluy/development-root.sha256`, with explicit *"absent is safe"* semantics: a Hub with no pin **refuses** to adopt a certificate rather than adopting an unverified one. Both images carry the injection point. U1 follows this pattern exactly rather than inventing one.
+3. **The pattern for getting development trust material into an image already exists and is proven.** `IGconf_kitluy_development_root_sha256` → `/etc/kitluy/development-root.sha256`, with explicit _"absent is safe"_ semantics: a Hub with no pin **refuses** to adopt a certificate rather than adopting an unverified one. Both images carry the injection point. U1 follows this pattern exactly rather than inventing one.
 
 Together: **U1 is roughly a launcher indirection, a release store, a payload fetch-verify-activate loop, one signing key, and a CLI.** It is not an update platform.
 
@@ -29,20 +29,20 @@ Together: **U1 is roughly a launcher indirection, a release store, a payload fet
 
 # 1. Your workflow, in my own words
 
-You want the Raspberry Pi to stop being a thing you *reprogram* and start being a thing you *deploy to*.
+You want the Raspberry Pi to stop being a thing you _reprogram_ and start being a thing you _deploy to_.
 
 Concretely: when you change the Device Shell, the only step that should involve you is the change itself. Building, packaging, signing, publishing, delivering, verifying, installing and restarting should be one operation you trigger and then stop thinking about — and the board on your desk should be running the new code a minute later, still enrolled, still paired with its Hub, still activated, with no card touched and nobody walking to the bench.
 
 But you were specific about four things that are **constraints, not conveniences**, and I read them as the real substance of the direction:
 
-- **Speed must not cost reproducibility.** Every version running on a Pi must be traceable back to source, artifact hash, release id, install result and health result. A development release is still a *release* — it is not a file copy that happens to work.
+- **Speed must not cost reproducibility.** Every version running on a Pi must be traceable back to source, artifact hash, release id, install result and health result. A development release is still a _release_ — it is not a file copy that happens to work.
 - **Development must not become a second architecture.** Whatever makes development fast has to be the same machinery that later carries Pilot and Stable, differing in authorization, signing and rollout policy — not in kind. You do not want to throw anything away in six months.
 - **The factory lane stays.** Fast OTA must not quietly erode clean-slate testing. Two lanes, used deliberately: daily OTA, and image/factory acceptance when image-level behaviour actually changes.
 - **Failure is part of the workflow, not an exception to it.** The running version must survive an unproven replacement. Interrupted downloads, bad signatures, wrong-purpose keys, checksum mismatches, full disks, power cuts, crashes and failed health checks all have to land somewhere defined, and a bad release must put the good one back by itself.
 
-And one thing I want to reflect back because it shapes the design more than it might look: **you also want to stop needing SSH to understand what happened.** That is not a UI wish — it means the update runtime has to *report*, in a form something other than a human tail-ing a journal can read. I have treated that as part of U1's definition of done, not as a later nicety, because Test A and Test B in your §14 cannot honestly be judged without it.
+And one thing I want to reflect back because it shapes the design more than it might look: **you also want to stop needing SSH to understand what happened.** That is not a UI wish — it means the update runtime has to _report_, in a form something other than a human tail-ing a journal can read. I have treated that as part of U1's definition of done, not as a later nicety, because Test A and Test B in your §14 cannot honestly be judged without it.
 
-**One place I will push back, gently.** You framed it as image versus update. That is exactly right for applications and services. It is *not* quite right for the OS: a system update **is** a new image, delivered to a slot instead of to a card. Keeping that inside the "image" concept rather than the "update" concept is what keeps one build, one signature and one reproducibility story. So I would say: **two artifact kinds, three delivery routes** — flash a card, write a slot, install a release. It changes nothing about what you asked for; it keeps the vocabulary honest when we get to U5.
+**One place I will push back, gently.** You framed it as image versus update. That is exactly right for applications and services. It is _not_ quite right for the OS: a system update **is** a new image, delivered to a slot instead of to a card. Keeping that inside the "image" concept rather than the "update" concept is what keeps one build, one signature and one reproducibility story. So I would say: **two artifact kinds, three delivery routes** — flash a card, write a slot, install a release. It changes nothing about what you asked for; it keeps the vocabulary honest when we get to U5.
 
 ---
 
@@ -52,9 +52,9 @@ And one thing I want to reflect back because it shapes the design more than it m
 
 The reason it fits is that **KitLuy already built the expensive half.** The parts that are hard to get right and dangerous to get wrong — the signed manifest contract, the fail-closed verifier, the acceptance gate, the promotion authority, the install state machine, the health gate, the one-rollback rule — exist and are TESTED-IN-DEV. What does not exist is plumbing: download bytes, put them somewhere, flip a pointer, restart a unit, say what happened.
 
-That is an unusual position and a lucky one. It means U1 is mostly *connecting* things, and it means development speed can be bought without inventing a trust model.
+That is an unusual position and a lucky one. It means U1 is mostly _connecting_ things, and it means development speed can be bought without inventing a trust model.
 
-**The obstacle** is that every KitLuy program on both images runs from `/usr/lib/kitluy/…` on a read-only EROFS root, and the POS unit already in the image claims a release package "installs `/usr/lib/kitluy/terminal-client`" — which cannot happen. My previous assessment treated that as a large decision. **Finding 1 above shrinks it dramatically for U1:** because the Shell's launcher already indirects through `APP=`, U1 needs a writable home for a 280 KB *app directory* only. It does not need to make `/usr` writable, does not need overlayfs, does not need `systemd-sysext`, and does not need to relocate a single executable.
+**The obstacle** is that every KitLuy program on both images runs from `/usr/lib/kitluy/…` on a read-only EROFS root, and the POS unit already in the image claims a release package "installs `/usr/lib/kitluy/terminal-client`" — which cannot happen. My previous assessment treated that as a large decision. **Finding 1 above shrinks it dramatically for U1:** because the Shell's launcher already indirects through `APP=`, U1 needs a writable home for a 280 KB _app directory_ only. It does not need to make `/usr` writable, does not need overlayfs, does not need `systemd-sysext`, and does not need to relocate a single executable.
 
 ---
 
@@ -62,23 +62,23 @@ That is an unusual position and a lucky one. It means U1 is mostly *connecting* 
 
 All REPOSITORY FACT.
 
-| Component | Where | State |
-| --- | --- | --- |
-| **Signed release manifest v1** — Ed25519, canonical bytes, separator-injection guard, key id **and** version matched, `revoked` refused even with a good signature | `packages/device-identity/src/release-manifest.ts` (241 lines) | **TESTED-IN-DEV** |
-| **Device-side acceptance gate** — product, architecture, hardware profile, environment, channel, schema range, configuration prerequisite, artifact size | same file, `findReleaseAcceptanceRefusal` | **TESTED-IN-DEV** |
-| **Cloud release authority** — `kitluy_releases`, immutable after signing, `draft→signed→internal→pilot→stable` no skips, four-eyes on Pilot/Stable, revocation as a new fact, campaigns, per-device projection | migration `0180` | **TESTED-IN-DEV** |
-| **`internal` promotion needs no approver and no PKI gate** | `promote_release_v1` | **TESTED-IN-DEV** |
-| **Hub install state machine + owner-locked health gate** — 5 min window / 20 s probes / 3 consecutive / **one** automatic rollback / `failed_rolled_back` blocks automatic retry; every state persisted before the visible step | `services/kitluy-hub-agent/src/hub/release-agent.ts` (449 lines), hub `0038`/`0039` | **TESTED-IN-DEV** |
-| **Verified artifact cache** — digest and size re-proven over *downloaded* bytes, resumable durable offset, storage metadata never authoritative | `services/kitluy-hub-agent/src/hub/release-cache.ts` | **TESTED-IN-DEV** |
-| **Development PKI bootstrap** — persistent CA outside the repo, X.509 chain **and Ed25519 canonical chain**, refuses overwrite, refuses in-repo paths, stamps `NON-PRODUCTION` | `scripts/pki/bootstrap-dev-pki.mjs` | **SOURCE IMPLEMENTED**, owner-authorized (Decision 3, 2026-08-24) |
-| **Trust-anchor pinning discipline** — public certificates only, refuses any file carrying a private key block, two-source digest agreement | `scripts/pki/trust-anchor-bootstrap.mjs`, `pin-dev-trust-anchors.mjs`, guard `assert-no-dev-pki.mjs` | **SOURCE IMPLEMENTED** |
-| **Image trust-material injection pattern** — `IGconf_kitluy_development_root_sha256` → `/etc/kitluy/…`, *absent is safe* | both image trees | **IMAGE VERIFIED** |
-| **Device launcher indirection** — `APP=/usr/lib/kitluy/lib/device-shell`, Electron resolved separately | `…/usr/lib/kitluy/device-shell` (26 lines) | **HARDWARE VERIFIED** (this is what runs on your board) |
-| **Acceptance context values already on every device** — `KITLUY_IMAGE_VERSION`, `KITLUY_IMAGE_SCHEMA_VERSION`, `KITLUY_RELEASE_CHANNEL`, `KITLUY_DEVICE_CLASS`, `KITLUY_HARDWARE_PROFILE_KEY`, `KITLUY_ENVIRONMENT` | `/etc/kitluy/image.env` | **IMAGE VERIFIED** |
-| **Version reporting contract** — the Hub's terminal heartbeat route already accepts `releaseVersion`, `softwareVersion`, `configurationVersion`; hub `0036` stores them; cloud `device_health_reports` / `device_health_projections` already have those columns | `hub/edge/routes.ts`, hub `0036`, cloud `0177` | **TESTED-IN-DEV** (contract + schema) |
-| **Persistent partition + slot-shared mechanism** — `/persistent`, and `slot-shared.d` declarations already used for `/etc/ssh` and `/etc/wpa_supplicant` | upstream `image-rota`; KitLuy `slot-shared.d` | **HARDWARE VERIFIED** |
-| **Build evidence discipline** — build manifest records SHA-256 per artifact, builder commit, `signed:false`, `releaseEligible:false`, `promotable:false` | `kitluy-pi-terminal-dev-manifest.json` | **IMAGE VERIFIED** |
-| **Development tooling conventions** — `scripts/development/*.mjs` behind `pnpm dev:*` scripts | `package.json` | **SOURCE IMPLEMENTED** |
+| Component                                                                                                                                                                                                                                                       | Where                                                                                                | State                                                             |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| **Signed release manifest v1** — Ed25519, canonical bytes, separator-injection guard, key id **and** version matched, `revoked` refused even with a good signature                                                                                              | `packages/device-identity/src/release-manifest.ts` (241 lines)                                       | **TESTED-IN-DEV**                                                 |
+| **Device-side acceptance gate** — product, architecture, hardware profile, environment, channel, schema range, configuration prerequisite, artifact size                                                                                                        | same file, `findReleaseAcceptanceRefusal`                                                            | **TESTED-IN-DEV**                                                 |
+| **Cloud release authority** — `kitluy_releases`, immutable after signing, `draft→signed→internal→pilot→stable` no skips, four-eyes on Pilot/Stable, revocation as a new fact, campaigns, per-device projection                                                  | migration `0180`                                                                                     | **TESTED-IN-DEV**                                                 |
+| **`internal` promotion needs no approver and no PKI gate**                                                                                                                                                                                                      | `promote_release_v1`                                                                                 | **TESTED-IN-DEV**                                                 |
+| **Hub install state machine + owner-locked health gate** — 5 min window / 20 s probes / 3 consecutive / **one** automatic rollback / `failed_rolled_back` blocks automatic retry; every state persisted before the visible step                                 | `services/kitluy-hub-agent/src/hub/release-agent.ts` (449 lines), hub `0038`/`0039`                  | **TESTED-IN-DEV**                                                 |
+| **Verified artifact cache** — digest and size re-proven over _downloaded_ bytes, resumable durable offset, storage metadata never authoritative                                                                                                                 | `services/kitluy-hub-agent/src/hub/release-cache.ts`                                                 | **TESTED-IN-DEV**                                                 |
+| **Development PKI bootstrap** — persistent CA outside the repo, X.509 chain **and Ed25519 canonical chain**, refuses overwrite, refuses in-repo paths, stamps `NON-PRODUCTION`                                                                                  | `scripts/pki/bootstrap-dev-pki.mjs`                                                                  | **SOURCE IMPLEMENTED**, owner-authorized (Decision 3, 2026-08-24) |
+| **Trust-anchor pinning discipline** — public certificates only, refuses any file carrying a private key block, two-source digest agreement                                                                                                                      | `scripts/pki/trust-anchor-bootstrap.mjs`, `pin-dev-trust-anchors.mjs`, guard `assert-no-dev-pki.mjs` | **SOURCE IMPLEMENTED**                                            |
+| **Image trust-material injection pattern** — `IGconf_kitluy_development_root_sha256` → `/etc/kitluy/…`, _absent is safe_                                                                                                                                        | both image trees                                                                                     | **IMAGE VERIFIED**                                                |
+| **Device launcher indirection** — `APP=/usr/lib/kitluy/lib/device-shell`, Electron resolved separately                                                                                                                                                          | `…/usr/lib/kitluy/device-shell` (26 lines)                                                           | **HARDWARE VERIFIED** (this is what runs on your board)           |
+| **Acceptance context values already on every device** — `KITLUY_IMAGE_VERSION`, `KITLUY_IMAGE_SCHEMA_VERSION`, `KITLUY_RELEASE_CHANNEL`, `KITLUY_DEVICE_CLASS`, `KITLUY_HARDWARE_PROFILE_KEY`, `KITLUY_ENVIRONMENT`                                             | `/etc/kitluy/image.env`                                                                              | **IMAGE VERIFIED**                                                |
+| **Version reporting contract** — the Hub's terminal heartbeat route already accepts `releaseVersion`, `softwareVersion`, `configurationVersion`; hub `0036` stores them; cloud `device_health_reports` / `device_health_projections` already have those columns | `hub/edge/routes.ts`, hub `0036`, cloud `0177`                                                       | **TESTED-IN-DEV** (contract + schema)                             |
+| **Persistent partition + slot-shared mechanism** — `/persistent`, and `slot-shared.d` declarations already used for `/etc/ssh` and `/etc/wpa_supplicant`                                                                                                        | upstream `image-rota`; KitLuy `slot-shared.d`                                                        | **HARDWARE VERIFIED**                                             |
+| **Build evidence discipline** — build manifest records SHA-256 per artifact, builder commit, `signed:false`, `releaseEligible:false`, `promotable:false`                                                                                                        | `kitluy-pi-terminal-dev-manifest.json`                                                               | **IMAGE VERIFIED**                                                |
+| **Development tooling conventions** — `scripts/development/*.mjs` behind `pnpm dev:*` scripts                                                                                                                                                                   | `package.json`                                                                                       | **SOURCE IMPLEMENTED**                                            |
 
 ---
 
@@ -86,22 +86,22 @@ All REPOSITORY FACT.
 
 All REPOSITORY FACT. Stated as **ABSENT**, not "partial", where nothing exists.
 
-| Missing piece | Evidence | Needed for |
-| --- | --- | --- |
-| **A device update runtime.** The `update-agent` is 91 lines and never checks, downloads, verifies or installs (§5) | `src/bin/update-bootstrap.ts` | **U1** |
-| **Any production caller of the release machinery.** `beginInstallation`, `applyReleaseAssignment`, `sign_release_v1`, `promote_release_v1`, `assign_release_v1` are called **only from tests**. `hub-agent.ts` never imports the release modules | grep across the tree | U1/U3/U4 |
-| **A writable, slot-shared release store** | nothing declares one; `/var` is per-slot | **U1** |
-| **Any trust material on a device.** `/etc/kitluy/trust/` is an **empty directory** on the terminal image; the Hub image has **no trust directory at all**. Nothing writes `/etc/kitluy/release.env` | both overlays | **U1** |
-| **A release-signing key.** The dev PKI mints device-identity and TLS chains — **no `release_signing` key** | `bootstrap-dev-pki.mjs` `FILES` map | **U1** |
-| **A publish path.** No CLI, no service, no API route, no portal screen creates or signs a release | Management API has six modules, none about releases | **U1** |
-| **Artifact storage/transport.** `kitluy-file-service` is SCAFFOLDED (91 lines); `ArtifactFetcher` has only test fakes | service `src/` | U1 (dev source), U4 (Hub) |
-| **Signing-purpose binding.** Six purposes are defined and required separate, but the manifest body carries no purpose and the verifier checks none — a key in the trust registry is trusted for releases whatever it was minted for | `release-manifest.ts` vs `environments.ts` | **U1** (your §12 lists this) |
-| **Source provenance.** The build manifest records the *upstream builder's* commit, not KitLuy's — no git SHA links an artifact to source | build manifest | **U1** (your §7) |
-| **Component version reporting from the device.** The terminal writes `edge-status.json` locally and sends **no** heartbeat; the Hub route that would accept one exists and is uncalled | `terminal-edge`, `edge-session.ts` | U1 (local), U3 (cloud) |
-| **Any update UI** in Admin, Partner or the Device Shell | all three trees | U3+ |
-| **A LAN release route.** `edge-contracts` defines none | `registry.ts`, `routes.ts` | U4 |
-| **A real `SlotAdapter`.** Only `class FakeDevice` in a test; nothing writes a slot, sets tryboot, or commits `autoboot.txt` | `release-agent.integration.test.ts:68` | U5 |
-| **Slot-shared device identity.** Identity key, operational cert, registration, pairing and assignment all live under per-slot `/var` — an A/B update today would present the board as new | `pre-image.sh`, `installation.js` header | **U5 blocker** |
+| Missing piece                                                                                                                                                                                                                                    | Evidence                                            | Needed for                   |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------- | ---------------------------- |
+| **A device update runtime.** The `update-agent` is 91 lines and never checks, downloads, verifies or installs (§5)                                                                                                                               | `src/bin/update-bootstrap.ts`                       | **U1**                       |
+| **Any production caller of the release machinery.** `beginInstallation`, `applyReleaseAssignment`, `sign_release_v1`, `promote_release_v1`, `assign_release_v1` are called **only from tests**. `hub-agent.ts` never imports the release modules | grep across the tree                                | U1/U3/U4                     |
+| **A writable, slot-shared release store**                                                                                                                                                                                                        | nothing declares one; `/var` is per-slot            | **U1**                       |
+| **Any trust material on a device.** `/etc/kitluy/trust/` is an **empty directory** on the terminal image; the Hub image has **no trust directory at all**. Nothing writes `/etc/kitluy/release.env`                                              | both overlays                                       | **U1**                       |
+| **A release-signing key.** The dev PKI mints device-identity and TLS chains — **no `release_signing` key**                                                                                                                                       | `bootstrap-dev-pki.mjs` `FILES` map                 | **U1**                       |
+| **A publish path.** No CLI, no service, no API route, no portal screen creates or signs a release                                                                                                                                                | Management API has six modules, none about releases | **U1**                       |
+| **Artifact storage/transport.** `kitluy-file-service` is SCAFFOLDED (91 lines); `ArtifactFetcher` has only test fakes                                                                                                                            | service `src/`                                      | U1 (dev source), U4 (Hub)    |
+| **Signing-purpose binding.** Six purposes are defined and required separate, but the manifest body carries no purpose and the verifier checks none — a key in the trust registry is trusted for releases whatever it was minted for              | `release-manifest.ts` vs `environments.ts`          | **U1** (your §12 lists this) |
+| **Source provenance.** The build manifest records the _upstream builder's_ commit, not KitLuy's — no git SHA links an artifact to source                                                                                                         | build manifest                                      | **U1** (your §7)             |
+| **Component version reporting from the device.** The terminal writes `edge-status.json` locally and sends **no** heartbeat; the Hub route that would accept one exists and is uncalled                                                           | `terminal-edge`, `edge-session.ts`                  | U1 (local), U3 (cloud)       |
+| **Any update UI** in Admin, Partner or the Device Shell                                                                                                                                                                                          | all three trees                                     | U3+                          |
+| **A LAN release route.** `edge-contracts` defines none                                                                                                                                                                                           | `registry.ts`, `routes.ts`                          | U4                           |
+| **A real `SlotAdapter`.** Only `class FakeDevice` in a test; nothing writes a slot, sets tryboot, or commits `autoboot.txt`                                                                                                                      | `release-agent.integration.test.ts:68`              | U5                           |
+| **Slot-shared device identity.** Identity key, operational cert, registration, pairing and assignment all live under per-slot `/var` — an A/B update today would present the board as new                                                        | `pre-image.sh`, `installation.js` header            | **U5 blocker**               |
 
 ---
 
@@ -109,18 +109,18 @@ All REPOSITORY FACT. Stated as **ABSENT**, not "partial", where nothing exists.
 
 **RECOMMENDATION: extend it. Keep its name, its unit, its path, and above all its posture.**
 
-**What it actually does (REPOSITORY FACT).** 91 lines. Every 300 seconds it logs one of three states: `no_trust_anchor`, `no_release_source`, or `up_to_date`. It does not query, download, verify or install — `up_to_date` is returned unconditionally once its two preconditions exist. Its own header is honest about the last part: *"it never reports an update as installed — installation is the release agent's job, not this one's."*
+**What it actually does (REPOSITORY FACT).** 91 lines. Every 300 seconds it logs one of three states: `no_trust_anchor`, `no_release_source`, or `up_to_date`. It does not query, download, verify or install — `up_to_date` is returned unconditionally once its two preconditions exist. Its own header is honest about the last part: _"it never reports an update as installed — installation is the release agent's job, not this one's."_
 
 On your two boards right now it has been logging `no_trust_anchor` every five minutes since they were flashed, because `/etc/kitluy/trust/` is empty. It has never reached its second precondition.
 
 **Why extend rather than replace:**
 
-1. **Its refusal order is already correct, and it is the order most updaters get wrong.** It refuses to *look for* a payload when it holds no trust material, rather than fetching first and failing to verify afterwards. That is the right instinct and it is the thing I would otherwise have to argue for from scratch.
+1. **Its refusal order is already correct, and it is the order most updaters get wrong.** It refuses to _look for_ a payload when it holds no trust material, rather than fetching first and failing to verify afterwards. That is the right instinct and it is the thing I would otherwise have to argue for from scratch.
 2. **Its bootstrap-ordering rationale is sound and still applies.** An updater cannot be delivered by itself, which is exactly why it is baked. Replacing it with something delivered as a release would reintroduce the problem `KLD-2026-08-11-DEVICE-BOOTSTRAP-RUNTIME-001` exists to prevent.
 3. **It already reads the right inputs** — `/etc/kitluy/image.env` for version, `/etc/kitluy/trust` for anchors, `/etc/kitluy/release.env` for the source — and those are precisely the U1 inputs.
 4. **Its unit is already correct and hardened**: `CapabilityBoundingSet=`, `ProtectSystem=strict`, `NoNewPrivileges`, and `ReadWritePaths=/var/lib/kitluy/update` — a writable work directory already reserved and scoped. U1 adds one more `ReadWritePaths` entry for the release store.
 
-**What "extend" concretely means:** keep `evaluateUpdate`'s three states as the *precondition* stage, and add the stages after it — query, verify, download, re-prove, stage, preflight, activate, restart, health-gate, commit-or-roll-back, report. Nothing is deleted.
+**What "extend" concretely means:** keep `evaluateUpdate`'s three states as the _precondition_ stage, and add the stages after it — query, verify, download, re-prove, stage, preflight, activate, restart, health-gate, commit-or-roll-back, report. Nothing is deleted.
 
 ---
 
@@ -137,7 +137,7 @@ APP=/usr/lib/kitluy/lib/device-shell
 exec /usr/bin/cage -- "$ELECTRON" --ozone-platform=wayland "$APP"
 ```
 
-The Electron *runtime* and the *app* are already separate. The app is 280 KB. The launcher already resolves the app through one variable, and already fails with a readable reason when the app is absent.
+The Electron _runtime_ and the _app_ are already separate. The app is 280 KB. The launcher already resolves the app through one variable, and already fails with a readable reason when the app is absent.
 
 **RECOMMENDATION — a versioned release store on a slot-shared persistent path, with the launcher resolving through it and falling back to the image.**
 
@@ -180,15 +180,15 @@ APP=/usr/lib/kitluy/lib/device-shell                       # the image's own cop
 
 ## 7.1 The seven pieces
 
-| # | Piece | Detail | Size |
-| --- | --- | --- | --- |
-| **1** | **Release-signing key in the existing dev PKI** | Add `dev-release-signing.key.pem` / `.pub.pem` to `bootstrap-dev-pki.mjs`'s `FILES` map. Ed25519, same refusals (no overwrite, never inside the repo, `NON-PRODUCTION` stamped). **Within existing authority** — BLK-005 authorizes development signing; owner Decision 3 (2026-08-24) authorizes this generator. | small |
-| **2** | **Trust material on the device** | `IGconf_kitluy_release_trust_pubkey` → `/etc/kitluy/trust/release-signing.pub`, plus a sibling record naming its **purpose** (`release_signing`) and key id/version. Follows the `development-root.sha256` pattern exactly, including *absent is safe* — no anchor means the agent refuses, which is what it already does today. | small |
-| **3** | **The release store** | `/persistent/shared/kitluy/releases/…` declared in `slot-shared.d`, with the generalised `.wants` workaround. Root-owned; not writable by `kitluy-terminal`. | small |
-| **4** | **Launcher indirection** | The `APP=` fallback shown in §6. ~4 lines. | trivial |
-| **5** | **The update runtime** | Grow `update-bootstrap.ts`: query source → verify manifest (Ed25519 + **purpose** + key id/version + not revoked) → acceptance gate against real `image.env` → disk check → resumable download → **re-prove SHA-256 and size over received bytes** → unpack to `.incoming` → preflight → record `previous` durably → atomic flip → `systemctl restart` → health gate → commit or roll back → write `state.json`. | the bulk |
-| **6** | **`pnpm dev:release`** | `pack` (tar.zst + digest + **git SHA and dirty flag** as `buildId`) → `sign` → `publish` (`create_release_draft_v1` → `sign_release_v1` → `promote_release_v1(…,'internal')`) → `assign` (`assign_release_v1`). Sits in `scripts/development/` beside `dev:fleet`, `dev:device:approve`, `dev:pairing:code`. | medium |
-| **7** | **Development artifact source** | A static signed-artifact server on your workstation LAN, behind a **`ReleaseSource` interface with one implementation**. U4 adds the Hub implementation; nothing else changes. | small |
+| #     | Piece                                           | Detail                                                                                                                                                                                                                                                                                                                                                                                                           | Size     |
+| ----- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| **1** | **Release-signing key in the existing dev PKI** | Add `dev-release-signing.key.pem` / `.pub.pem` to `bootstrap-dev-pki.mjs`'s `FILES` map. Ed25519, same refusals (no overwrite, never inside the repo, `NON-PRODUCTION` stamped). **Within existing authority** — BLK-005 authorizes development signing; owner Decision 3 (2026-08-24) authorizes this generator.                                                                                                | small    |
+| **2** | **Trust material on the device**                | `IGconf_kitluy_release_trust_pubkey` → `/etc/kitluy/trust/release-signing.pub`, plus a sibling record naming its **purpose** (`release_signing`) and key id/version. Follows the `development-root.sha256` pattern exactly, including _absent is safe_ — no anchor means the agent refuses, which is what it already does today.                                                                                 | small    |
+| **3** | **The release store**                           | `/persistent/shared/kitluy/releases/…` declared in `slot-shared.d`, with the generalised `.wants` workaround. Root-owned; not writable by `kitluy-terminal`.                                                                                                                                                                                                                                                     | small    |
+| **4** | **Launcher indirection**                        | The `APP=` fallback shown in §6. ~4 lines.                                                                                                                                                                                                                                                                                                                                                                       | trivial  |
+| **5** | **The update runtime**                          | Grow `update-bootstrap.ts`: query source → verify manifest (Ed25519 + **purpose** + key id/version + not revoked) → acceptance gate against real `image.env` → disk check → resumable download → **re-prove SHA-256 and size over received bytes** → unpack to `.incoming` → preflight → record `previous` durably → atomic flip → `systemctl restart` → health gate → commit or roll back → write `state.json`. | the bulk |
+| **6** | **`pnpm dev:release`**                          | `pack` (tar.zst + digest + **git SHA and dirty flag** as `buildId`) → `sign` → `publish` (`create_release_draft_v1` → `sign_release_v1` → `promote_release_v1(…,'internal')`) → `assign` (`assign_release_v1`). Sits in `scripts/development/` beside `dev:fleet`, `dev:device:approve`, `dev:pairing:code`.                                                                                                     | medium   |
+| **7** | **Development artifact source**                 | A static signed-artifact server on your workstation LAN, behind a **`ReleaseSource` interface with one implementation**. U4 adds the Hub implementation; nothing else changes.                                                                                                                                                                                                                                   | small    |
 
 ## 7.2 Health gate for an application
 
@@ -200,24 +200,24 @@ The owner-locked gate (`KLD-2026-08-06-WS11-T006-001` §6: 5-minute window, 20-s
 
 ## 7.3 Failure handling — your §12 list, mapped
 
-| Your scenario | U1 behaviour |
-| --- | --- |
-| Interrupted download | resume from a durable offset; the running version is never touched |
-| Invalid signature | refused **before any artifact byte**; recorded with its code |
-| **Wrong-purpose signing key** | refused — the on-device trust record names `release_signing` and the verifier checks it (piece 2). **This closes a gap that exists today** |
-| Checksum mismatch | refused after re-proving over received bytes; payload discarded |
-| Disk full | refused before staging; requires free ≥ 2 × artifact size, as the Hub agent already does |
-| Power failure | `.incoming` is never the pointer target; `previous` is recorded durably *before* the flip; an unfinished unpack is discarded on next boot |
-| Application crash / failed health check | flip back to `previous`, restart, mark `failed_rolled_back`, refuse automatic retry of the same release |
-| Service crash | same path |
-| Incompatible Hub/Terminal versions | `RELEASE_SCHEMA_INCOMPATIBLE` / configuration prerequisite refusal (already in the acceptance gate) |
-| **Everything else fails** | the launcher falls back to the image's own Shell — the board still boots to a usable screen |
+| Your scenario                           | U1 behaviour                                                                                                                               |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Interrupted download                    | resume from a durable offset; the running version is never touched                                                                         |
+| Invalid signature                       | refused **before any artifact byte**; recorded with its code                                                                               |
+| **Wrong-purpose signing key**           | refused — the on-device trust record names `release_signing` and the verifier checks it (piece 2). **This closes a gap that exists today** |
+| Checksum mismatch                       | refused after re-proving over received bytes; payload discarded                                                                            |
+| Disk full                               | refused before staging; requires free ≥ 2 × artifact size, as the Hub agent already does                                                   |
+| Power failure                           | `.incoming` is never the pointer target; `previous` is recorded durably _before_ the flip; an unfinished unpack is discarded on next boot  |
+| Application crash / failed health check | flip back to `previous`, restart, mark `failed_rolled_back`, refuse automatic retry of the same release                                    |
+| Service crash                           | same path                                                                                                                                  |
+| Incompatible Hub/Terminal versions      | `RELEASE_SCHEMA_INCOMPATIBLE` / configuration prerequisite refusal (already in the acceptance gate)                                        |
+| **Everything else fails**               | the launcher falls back to the image's own Shell — the board still boots to a usable screen                                                |
 
 ## 7.4 Traceability — your §7
 
 Every install records: `releaseId` · `productKey` · `version` · **`buildId` = git SHA + dirty flag** · `artifactDigestSha256` · `artifactSizeBytes` · signing key id/version/purpose · target device · installed_at · install result · health result · previous version.
 
-The cloud half already stores this (`release_artifacts`, `device_installations`, `release_events` — append-only). The device half is `state.json`. **The one genuinely new field is the git SHA**, because the current build manifest records the *upstream builder's* commit, not KitLuy's.
+The cloud half already stores this (`release_artifacts`, `device_installations`, `release_events` — append-only). The device half is `state.json`. **The one genuinely new field is the git SHA**, because the current build manifest records the _upstream builder's_ commit, not KitLuy's.
 
 ## 7.5 Local visibility — your §9, minimum viable
 
@@ -282,7 +282,7 @@ change Device Shell code
 
 **Eliminated:** the cross-build, the SD card, the physical trip, the reboot, the re-enrolment, and the "which version is actually on there?" question.
 
-**Gained, not lost:** artifact identity, a version, a git SHA, a signature, a compatibility gate, an audit trail, automatic rollback, and a readable answer to *what happened* without SSH.
+**Gained, not lost:** artifact identity, a version, a git SHA, a signature, a compatibility gate, an audit trail, automatic rollback, and a readable answer to _what happened_ without SSH.
 
 **Still true after U1:** you keep SSH for engineering diagnosis — it is simply no longer part of the normal loop. And the clean-image lane (§11 of your direction) is untouched: full build → flash blank media → Factory Enrollment → Admin approval → pairing → activation → acceptance, run deliberately when image-level behaviour changes, not for every UI tweak.
 
@@ -290,37 +290,37 @@ change Device Shell code
 
 # 9. What still requires a full image build / reflash after U1
 
-| Change | After U1 |
-| --- | --- |
-| Device Shell UI, React, Electron *app* code | **no reflash** |
-| Laundry POS and future vertical applications | **no reflash** — U2 |
-| `terminal-edge`, `health-reporter`, `cloud-registration`, Hub agent, sync service | **reflash until U3**, and subject to **OD-U1-2** |
-| The update runtime itself | reflash — it is the bootstrap, by design |
-| Electron **runtime** binary | reflash until U5 |
-| Kernel, Debian packages, system libraries, systemd units, `/usr` contents | reflash until U5 |
+| Change                                                                               | After U1                                                                               |
+| ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| Device Shell UI, React, Electron _app_ code                                          | **no reflash**                                                                         |
+| Laundry POS and future vertical applications                                         | **no reflash** — U2                                                                    |
+| `terminal-edge`, `health-reporter`, `cloud-registration`, Hub agent, sync service    | **reflash until U3**, and subject to **OD-U1-2**                                       |
+| The update runtime itself                                                            | reflash — it is the bootstrap, by design                                               |
+| Electron **runtime** binary                                                          | reflash until U5                                                                       |
+| Kernel, Debian packages, system libraries, systemd units, `/usr` contents            | reflash until U5                                                                       |
 | `/etc/kitluy/image.env` values (registration URL, hardware profile key, environment) | reflash until U5 — baked into the read-only rootfs and **not correctable on the card** |
-| Trust anchors in `/etc/kitluy/trust` | reflash until U5 (or a governed configuration delivery) |
-| `slot-shared.d` declarations | reflash, first time only |
-| Bootloader / EEPROM | **always reflash** |
-| `autoboot.txt` / bootconfig structure | **always reflash** |
-| Partition table or sizes | **always reflash** |
-| LUKS2 layout on the Hub NVMe | **always reflash** |
-| Factory Enrollment *behaviour* | code: U3. **Testing it: always a blank card** |
-| Clean-slate acceptance, manufacturing, disaster recovery | **always reflash, by definition** |
+| Trust anchors in `/etc/kitluy/trust`                                                 | reflash until U5 (or a governed configuration delivery)                                |
+| `slot-shared.d` declarations                                                         | reflash, first time only                                                               |
+| Bootloader / EEPROM                                                                  | **always reflash**                                                                     |
+| `autoboot.txt` / bootconfig structure                                                | **always reflash**                                                                     |
+| Partition table or sizes                                                             | **always reflash**                                                                     |
+| LUKS2 layout on the Hub NVMe                                                         | **always reflash**                                                                     |
+| Factory Enrollment _behaviour_                                                       | code: U3. **Testing it: always a blank card**                                          |
+| Clean-slate acceptance, manufacturing, disaster recovery                             | **always reflash, by definition**                                                      |
 
 ---
 
 # 10. What waits for U2–U6
 
-I am keeping your sequence. One refinement, noted in §7: U1 builds the mechanism generically so U2 is a *second product*, not a generalisation pass — otherwise U1 becomes the throwaway your §5 forbids.
+I am keeping your sequence. One refinement, noted in §7: U1 builds the mechanism generically so U2 is a _second product_, not a generalisation pass — otherwise U1 becomes the throwaway your §5 forbids.
 
-| Slice | Scope | Why it waits |
-| --- | --- | --- |
-| **U2 — reusable application release** | A second product (POS Desktop, or a vertical module) through the same pipeline; whatever generalisation gaps surface; multi-product `state.json` | Proves reusability with real evidence rather than by assertion. Nothing in U1 needs it. |
-| **U3 — runtime/service release** | `terminal-edge`, `health-reporter`, `hub-agent`; per-unit activation (stop → flip → start) with unit-specific preflight; **device → Hub → cloud version reporting**, which also finally makes the Partner Portal's `hubPaired` rung reportable; the "may I install now?" predicate answered by the Hub | **Gated on OD-U1-2.** Also riskier than U1: a bad `terminal-edge` costs the Hub connection, where a bad Shell only costs the screen — and the launcher fallback protects the Shell but has no equivalent for a service. |
-| **U4 — Store Hub release cache** | Two `/edge/v1` routes (manifest, Range-capable artifact); terminal prefers Hub, falls back to cloud; calls the **already-built** `release-cache.ts` for the first time; per-Store rollout serialisation | Needs more than one terminal to be worth proving. **Policy §9 already specifies this architecture** — it is implementation, not design. |
-| **U5 — A/B system OTA** | Real `SlotAdapter`; system-image artifact; `reboot "0 tryboot"`; `autoboot.txt` commit; per-slot `cmdline.txt` | **Has a hard prerequisite: device identity must stop being per-slot.** Today an A/B switch would boot a board with no identity key, no certificate, no registration and no pairing — it would present as brand new. Cheap to fix (`slot-shared.d`) but must land *before* the first slot write, with its own hardware test. **EXTERNAL RESEARCH:** the Raspberry Pi firmware keeps no boot-attempt counter, but tryboot is one-shot and self-clearing — so "the new slot does not boot" rolls back by firmware, free. |
-| **U6 — Pilot/Stable governance** | Cohort/canary expansion with automatic pause on health failure; mandatory minimum version; emergency release; Admin Releases screen; Partner "install now / defer until close" | **BLK-005 blocks Pilot and Production promotion**, and the policy's `[REQUIRED: channel approvers and permissions]` has never been filled in. Building rollout governance before there is a fleet is the six-month detour you ruled out. |
+| Slice                                 | Scope                                                                                                                                                                                                                                                                                                  | Why it waits                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **U2 — reusable application release** | A second product (POS Desktop, or a vertical module) through the same pipeline; whatever generalisation gaps surface; multi-product `state.json`                                                                                                                                                       | Proves reusability with real evidence rather than by assertion. Nothing in U1 needs it.                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| **U3 — runtime/service release**      | `terminal-edge`, `health-reporter`, `hub-agent`; per-unit activation (stop → flip → start) with unit-specific preflight; **device → Hub → cloud version reporting**, which also finally makes the Partner Portal's `hubPaired` rung reportable; the "may I install now?" predicate answered by the Hub | **Gated on OD-U1-2.** Also riskier than U1: a bad `terminal-edge` costs the Hub connection, where a bad Shell only costs the screen — and the launcher fallback protects the Shell but has no equivalent for a service.                                                                                                                                                                                                                                                                                               |
+| **U4 — Store Hub release cache**      | Two `/edge/v1` routes (manifest, Range-capable artifact); terminal prefers Hub, falls back to cloud; calls the **already-built** `release-cache.ts` for the first time; per-Store rollout serialisation                                                                                                | Needs more than one terminal to be worth proving. **Policy §9 already specifies this architecture** — it is implementation, not design.                                                                                                                                                                                                                                                                                                                                                                               |
+| **U5 — A/B system OTA**               | Real `SlotAdapter`; system-image artifact; `reboot "0 tryboot"`; `autoboot.txt` commit; per-slot `cmdline.txt`                                                                                                                                                                                         | **Has a hard prerequisite: device identity must stop being per-slot.** Today an A/B switch would boot a board with no identity key, no certificate, no registration and no pairing — it would present as brand new. Cheap to fix (`slot-shared.d`) but must land _before_ the first slot write, with its own hardware test. **EXTERNAL RESEARCH:** the Raspberry Pi firmware keeps no boot-attempt counter, but tryboot is one-shot and self-clearing — so "the new slot does not boot" rolls back by firmware, free. |
+| **U6 — Pilot/Stable governance**      | Cohort/canary expansion with automatic pause on health failure; mandatory minimum version; emergency release; Admin Releases screen; Partner "install now / defer until close"                                                                                                                         | **BLK-005 blocks Pilot and Production promotion**, and the policy's `[REQUIRED: channel approvers and permissions]` has never been filled in. Building rollout governance before there is a fleet is the six-month detour you ruled out.                                                                                                                                                                                                                                                                              |
 
 ---
 
@@ -332,13 +332,13 @@ Three. Everything else is implementation and I am not asking you about it.
 
 ### OD-U1-1 — May a Device Shell release run from persistent storage instead of `/usr`?
 
-**Plain language.** Every KitLuy program runs from `/usr/lib/kitluy/`, which is read-only. An update cannot write there. For U1 the question is narrow, because the Shell's launcher already resolves its app through one variable: may the *app payload* (280 KB of JS/HTML) live on the persistent partition, with the launcher preferring it and falling back to the image's own copy?
+**Plain language.** Every KitLuy program runs from `/usr/lib/kitluy/`, which is read-only. An update cannot write there. For U1 the question is narrow, because the Shell's launcher already resolves its app through one variable: may the _app payload_ (280 KB of JS/HTML) live on the persistent partition, with the launcher preferring it and falling back to the image's own copy?
 
-| | Option | Consequence |
-| --- | --- | --- |
+|       | Option                                                                     | Consequence                                                                                                                                                           |
+| ----- | -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **A** | **Yes** — release store on a slot-shared persistent path; `/usr` untouched | U1 proceeds. `/usr` stays read-only, no overlayfs, no sysext, no EROFS change. A bad release cannot brick the board because the image's Shell is always the fallback. |
-| **B** | No — application code may only ever live in `/usr` | U1 becomes impossible without `systemd-sysext` or making `/usr` writable; both are larger, and sysext's signature enforcement is unavailable on this kernel. |
-| **C** | Applications ship only inside a full system slot | Every UI change costs a reboot and a full image build. Close to today; does not solve the problem. |
+| **B** | No — application code may only ever live in `/usr`                         | U1 becomes impossible without `systemd-sysext` or making `/usr` writable; both are larger, and sysext's signature enforcement is unavailable on this kernel.          |
+| **C** | Applications ship only inside a full system slot                           | Every UI change costs a reboot and a full image build. Close to today; does not solve the problem.                                                                    |
 
 **My recommendation: A.** It is the only option that delivers the loop you asked for, it violates none of your §16 prohibitions, and the fallback property is a genuine safety improvement over today rather than a compromise.
 
@@ -348,15 +348,15 @@ Three. Everything else is implementation and I am not asking you about it.
 
 ### OD-U1-2 — Is the Device Shell a "bootstrap surface" or a governed application release?
 
-**Plain language.** `KLD-2026-08-11-DEVICE-BOOTSTRAP-RUNTIME-001` (LOCKED) §2 lists *"Terminal bootstrap surface — `/usr/lib/kitluy/terminal-bootstrap-ui`"* among the components baked into the image, and §4.2 says **"bootstrap-agent changes ride an image rebuild."** The graphical Device Shell replaced `terminal-bootstrap-ui` on 2026-09-04, after that decision was written. So on a strict reading, **U1 updates a bootstrap component, which the decision currently forbids.**
+**Plain language.** `KLD-2026-08-11-DEVICE-BOOTSTRAP-RUNTIME-001` (LOCKED) §2 lists _"Terminal bootstrap surface — `/usr/lib/kitluy/terminal-bootstrap-ui`"_ among the components baked into the image, and §4.2 says **"bootstrap-agent changes ride an image rebuild."** The graphical Device Shell replaced `terminal-bootstrap-ui` on 2026-09-04, after that decision was written. So on a strict reading, **U1 updates a bootstrap component, which the decision currently forbids.**
 
-The decision's *reason* is bootstrap ordering: an updater cannot deliver itself. I think that reason does not reach the Shell — but that is your call, not mine.
+The decision's _reason_ is bootstrap ordering: an updater cannot deliver itself. I think that reason does not reach the Shell — but that is your call, not mine.
 
-| | Option | Consequence |
-| --- | --- | --- |
+|       | Option                                                                                                                                                                                                                              | Consequence                                                                                                                                                                                                                              |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **A** | **Narrow the bootstrap set to what is needed to obtain and verify an update** — `firstboot-identity`, `cloud-registration`, `update-agent` and its trust material — and classify the Device Shell as a governed application release | U1 proceeds. The ordering argument stays fully intact: a board with a broken Shell can still register, still be approved and still update, because those are separate units. The launcher fallback means it still shows a usable screen. |
-| **B** | Keep the boundary as written; the Shell stays image-only | **U1 cannot proceed as scoped.** The first product would have to be the POS Desktop application — which is SCAFFOLDED and has no business behaviour, so the fast loop would deliver nothing you can see on the touchscreen. |
-| **C** | Rule on the Shell only now, defer `terminal-edge` and the agents to U3 | U1 proceeds on the narrowest possible ruling; U3 comes back to you. |
+| **B** | Keep the boundary as written; the Shell stays image-only                                                                                                                                                                            | **U1 cannot proceed as scoped.** The first product would have to be the POS Desktop application — which is SCAFFOLDED and has no business behaviour, so the fast loop would deliver nothing you can see on the touchscreen.              |
+| **C** | Rule on the Shell only now, defer `terminal-edge` and the agents to U3                                                                                                                                                              | U1 proceeds on the narrowest possible ruling; U3 comes back to you.                                                                                                                                                                      |
 
 **My recommendation: C for now, A when U3 is scoped.** C unblocks U1 with the smallest possible change to a LOCKED decision, and keeps the wider boundary question for when you can see U1 working and judge it on evidence rather than on my argument.
 
@@ -368,11 +368,11 @@ The decision's *reason* is bootstrap ordering: an updater cannot deliver itself.
 
 **Plain language.** The health gate is owner-locked at 5-minute window / 20-second probes / 3 consecutive successes (`KLD-2026-08-06-WS11-T006-001` §6). Applied to U1, a successful install commits after about **60 seconds**, and a failed one rolls back after up to **5 minutes**. That is safe, and it is slower than the loop you described.
 
-| | Option | Consequence |
-| --- | --- | --- |
-| **A** | **Keep the locked timings everywhere** | One gate, no environment-specific behaviour, nothing to get wrong. ~60 s per successful dev install. |
-| **B** | **Development-only timings** (e.g. 5-second probes, 3 consecutive, 60-second window), pilot and production unchanged and unchangeable | Dev install commits in ~15 s. Introduces one environment-conditional value — small, but it is a second behaviour in a security-adjacent path. |
-| **C** | Keep locked timings, but let the runtime commit early on an explicit positive readiness signal from the app rather than on elapsed time | Fast *and* single-behaviour, but it requires the Shell to assert its own readiness, which is a slightly stronger claim than "it is alive". |
+|       | Option                                                                                                                                  | Consequence                                                                                                                                   |
+| ----- | --------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| **A** | **Keep the locked timings everywhere**                                                                                                  | One gate, no environment-specific behaviour, nothing to get wrong. ~60 s per successful dev install.                                          |
+| **B** | **Development-only timings** (e.g. 5-second probes, 3 consecutive, 60-second window), pilot and production unchanged and unchangeable   | Dev install commits in ~15 s. Introduces one environment-conditional value — small, but it is a second behaviour in a security-adjacent path. |
+| **C** | Keep locked timings, but let the runtime commit early on an explicit positive readiness signal from the app rather than on elapsed time | Fast _and_ single-behaviour, but it requires the Shell to assert its own readiness, which is a slightly stronger claim than "it is alive".    |
 
 **My recommendation: A for U1.** Sixty seconds is not the bottleneck you are trying to remove — the cross-build and the card are — and keeping one gate everywhere is worth more than 45 seconds. If it grates in practice once U1 is running, revisit with B or C on evidence.
 
@@ -390,13 +390,13 @@ Poll interval, artifact compression, on-disk layout inside the release store, CL
 
 Per your §18, U1 will be reported against these states and no looser:
 
-| State | Meaning for U1 |
-| --- | --- |
-| `SOURCE IMPLEMENTED` | the runtime, CLI and store exist and typecheck |
-| `TESTED-IN-DEV` | §7.6 suites pass, including power-loss and rollback |
-| `IMAGE VERIFIED` | a built rootfs carries the trust anchor, the store declaration and the launcher indirection, asserted by `image-contents.test.sh` and `systemd-runtime.test.sh` |
-| `HARDWARE VERIFIED` | **Test A and Test B both pass on your physical Pi Terminal, with no SD card touched, and the terminal still paired and `SERVING` afterwards** |
-| `PILOT-PROVEN` / `PRODUCTION-PROVEN` | **not claimable** — BLK-005 blocks Pilot and Production promotion |
+| State                                | Meaning for U1                                                                                                                                                  |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SOURCE IMPLEMENTED`                 | the runtime, CLI and store exist and typecheck                                                                                                                  |
+| `TESTED-IN-DEV`                      | §7.6 suites pass, including power-loss and rollback                                                                                                             |
+| `IMAGE VERIFIED`                     | a built rootfs carries the trust anchor, the store declaration and the launcher indirection, asserted by `image-contents.test.sh` and `systemd-runtime.test.sh` |
+| `HARDWARE VERIFIED`                  | **Test A and Test B both pass on your physical Pi Terminal, with no SD card touched, and the terminal still paired and `SERVING` afterwards**                   |
+| `PILOT-PROVEN` / `PRODUCTION-PROVEN` | **not claimable** — BLK-005 blocks Pilot and Production promotion                                                                                               |
 
 **U1 is not complete until `HARDWARE VERIFIED`.** An update runtime that exists, a release schema that exists and A/B partitions that exist are not evidence that OTA works, and I will not report them as such.
 

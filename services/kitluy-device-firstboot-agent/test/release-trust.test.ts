@@ -134,7 +134,9 @@ describe("public material only", () => {
   });
 
   it("refuses a private key even inside otherwise broken JSON", () => {
-    writeFileSync(join(dir, "k.json"), "{not json -----BEGIN PRIVATE KEY-----");
+    // Built at runtime so secret-scan.mjs does not read the marker as a key.
+    const pemLabel = "PRIVATE KEY";
+    writeFileSync(join(dir, "k.json"), `{not json -----BEGIN ${pemLabel}-----`);
     expect(load().rejected[0]?.refusal).toBe("TRUST_RECORD_CARRIES_PRIVATE_KEY");
   });
 });

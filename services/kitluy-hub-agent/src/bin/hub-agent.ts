@@ -338,9 +338,7 @@ async function publishDevelopmentConfigurationCommand(path: string): Promise<voi
       digitalStoreId: delivery.digitalStoreId as string,
       locationId: delivery.storeLocationId as string,
       environment,
-      grants: [
-        { terminalDeviceId: delivery.terminalDeviceId as string, profileCodes },
-      ],
+      grants: [{ terminalDeviceId: delivery.terminalDeviceId as string, profileCodes }],
     });
     log.info("development configuration activated", {
       snapshotId: outcome.snapshotId,

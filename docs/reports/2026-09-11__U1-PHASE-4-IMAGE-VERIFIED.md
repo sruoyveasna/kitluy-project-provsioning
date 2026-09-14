@@ -1,11 +1,11 @@
 # U1 Phase 4 — Pi Terminal image integration, IMAGE VERIFIED
 
-| Field | Value |
-| --- | --- |
-| Date | 2026-09-11 · Asia/Phnom_Penh |
-| Status | **IMAGE VERIFIED.** Not `HARDWARE VERIFIED` — no card was written, no device contacted. |
-| Committed | **No.** Nothing committed or pushed. |
-| Stop point | The physical reflash has **not** happened. |
+| Field      | Value                                                                                   |
+| ---------- | --------------------------------------------------------------------------------------- |
+| Date       | 2026-09-11 · Asia/Phnom_Penh                                                            |
+| Status     | **IMAGE VERIFIED.** Not `HARDWARE VERIFIED` — no card was written, no device contacted. |
+| Committed  | **No.** Nothing committed or pushed.                                                    |
+| Stop point | The physical reflash has **not** happened.                                              |
 
 ---
 
@@ -18,14 +18,14 @@ kitluy-pos-terminal-wayland-arm64.img.sparse.zst   999,184,919 bytes  sha256 0e3
 kitluy-pos-terminal-wayland-arm64-v2.7.0.tar.zst 1,500,993,439 bytes  sha256 f1f72a743178d715…
 ```
 
-| | |
-| --- | --- |
-| profile / device class | `pi-terminal` / `terminal` |
-| architecture / board | `arm64` / `raspberry-pi-5` |
-| base OS | `debian-bookworm-arm64` (node **18.20.4**) |
-| builder | `rpi-image-gen v2.7.0` @ `a7b6d4806183195f3efadb533f58c8e46393d057` |
-| build class | `DEVELOPMENT-CROSS-BUILD` (QEMU, x86_64 host) |
-| classification | `DEVELOPMENT / UNSIGNED / NOT RELEASE-ELIGIBLE / NOT BOOT-TESTED` |
+|                        |                                                                     |
+| ---------------------- | ------------------------------------------------------------------- |
+| profile / device class | `pi-terminal` / `terminal`                                          |
+| architecture / board   | `arm64` / `raspberry-pi-5`                                          |
+| base OS                | `debian-bookworm-arm64` (node **18.20.4**)                          |
+| builder                | `rpi-image-gen v2.7.0` @ `a7b6d4806183195f3efadb533f58c8e46393d057` |
+| build class            | `DEVELOPMENT-CROSS-BUILD` (QEMU, x86_64 host)                       |
+| classification         | `DEVELOPMENT / UNSIGNED / NOT RELEASE-ELIGIBLE / NOT BOOT-TESTED`   |
 
 Built with:
 
@@ -52,14 +52,14 @@ The anchor was loaded **with the device's own built loader** (`dist/release-trus
 
 ## 2. Image test results — actual
 
-| Suite | Result |
-| --- | --- |
-| `build-gates.test.sh` | **57 passed, 0 failed** (was 45; +12 U1 gates) |
-| `systemd-runtime.test.sh` | **215 passed, 0 failed** |
-| `environment-gating.test.sh` | **20 passed, 0 failed** |
-| `rpi-image-gen.test.sh` | **29 passed, 0 failed, 0 skipped** |
+| Suite                                   | Result                                                                     |
+| --------------------------------------- | -------------------------------------------------------------------------- |
+| `build-gates.test.sh`                   | **57 passed, 0 failed** (was 45; +12 U1 gates)                             |
+| `systemd-runtime.test.sh`               | **215 passed, 0 failed**                                                   |
+| `environment-gating.test.sh`            | **20 passed, 0 failed**                                                    |
+| `rpi-image-gen.test.sh`                 | **29 passed, 0 failed, 0 skipped**                                         |
 | `image-contents.test.sh` (BUILT rootfs) | **105 passed, 0 failed, 0 skipped** (was 101 + 4 failing before the build) |
-| `scan-image-secrets.sh` (BUILT rootfs) | **17 passed, 0 failed — RESULT: PASS** |
+| `scan-image-secrets.sh` (BUILT rootfs)  | **17 passed, 0 failed — RESULT: PASS**                                     |
 
 The new built-rootfs assertions, each checked in the filesystem the builder actually produced:
 
@@ -106,7 +106,7 @@ Tested: 9 cases in `test/update-preconditions.test.ts` — override wins; absent
 
 ## 4. Newest-unsigned-assignment (requirement 2)
 
-**The defect was real and I reproduced it before fixing it.** Group 0222 put the signature test in the `WHERE` clause and *then* ordered by sequence, so an unsigned newest row was **skipped** and the previous signed one returned. A publisher that crashed between `assign_release_v1` and `record_assignment_signature_v1` left the device being told about the previous release while the operator believed the new one was assigned — no error, no log, just two sides disagreeing.
+**The defect was real and I reproduced it before fixing it.** Group 0222 put the signature test in the `WHERE` clause and _then_ ordered by sequence, so an unsigned newest row was **skipped** and the previous signed one returned. A publisher that crashed between `assign_release_v1` and `record_assignment_signature_v1` left the device being told about the previous release while the operator believed the new one was assigned — no error, no log, just two sides disagreeing.
 
 **Group 0223** picks the newest row **by sequence alone**, then tests it:
 
@@ -138,35 +138,35 @@ The third assertion goes through the device's own HTTP client, so it proves the 
 
 ## 5. Everything else in the Phase 4 list
 
-| Item | State |
-| --- | --- |
-| trust anchor integration | `IGconf_kitluy_release_trust_record` → `/etc/kitluy/trust/release-signing.json`; refuses a record containing a private key, at build time **and** at read time; absent is safe |
-| release-source configuration | §3 |
-| slot-shared release store | **not needed** — `/persistent/shared/kitluy/releases`, created at runtime |
-| slot-shared mount workaround | **not needed** — no new declared path |
-| launcher release/fallback indirection | prefers `current/payload`, tests `-f package.json` (never `-d`), falls back to the image copy |
-| running-source witness | written before `exec`, best-effort, to a directory the unit already owns |
-| update-agent permissions | `ReadWritePaths=/var/lib/kitluy/update /persistent/shared/kitluy` |
-| runtime manifest | `releaseStore` / `releaseTrust` / `releaseSource` declared; `device-shell` gains `appRoots` + `witness` |
-| bootstrap-runtime packaging | 10 new modules; **45 js files** packaged; manifest cross-check clean |
-| image gates | §2 |
-| complete image build | §1 |
-| built-rootfs inspection | §2 — 105/105 |
-| secret scan | §2 — 17/17 PASS |
-| no-regression verification | §6 |
+| Item                                  | State                                                                                                                                                                          |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| trust anchor integration              | `IGconf_kitluy_release_trust_record` → `/etc/kitluy/trust/release-signing.json`; refuses a record containing a private key, at build time **and** at read time; absent is safe |
+| release-source configuration          | §3                                                                                                                                                                             |
+| slot-shared release store             | **not needed** — `/persistent/shared/kitluy/releases`, created at runtime                                                                                                      |
+| slot-shared mount workaround          | **not needed** — no new declared path                                                                                                                                          |
+| launcher release/fallback indirection | prefers `current/payload`, tests `-f package.json` (never `-d`), falls back to the image copy                                                                                  |
+| running-source witness                | written before `exec`, best-effort, to a directory the unit already owns                                                                                                       |
+| update-agent permissions              | `ReadWritePaths=/var/lib/kitluy/update /persistent/shared/kitluy`                                                                                                              |
+| runtime manifest                      | `releaseStore` / `releaseTrust` / `releaseSource` declared; `device-shell` gains `appRoots` + `witness`                                                                        |
+| bootstrap-runtime packaging           | 10 new modules; **45 js files** packaged; manifest cross-check clean                                                                                                           |
+| image gates                           | §2                                                                                                                                                                             |
+| complete image build                  | §1                                                                                                                                                                             |
+| built-rootfs inspection               | §2 — 105/105                                                                                                                                                                   |
+| secret scan                           | §2 — 17/17 PASS                                                                                                                                                                |
+| no-regression verification            | §6                                                                                                                                                                             |
 
 ---
 
 ## 6. No-regression verification
 
-| Check | Baseline | Now | Verdict |
-| --- | --- | --- | --- |
-| Format check | FAIL — `EACCES` on the rootless build tree | identical | **no new** |
-| Lint | FAIL — 2 errors: `terminal-edge.test.ts:310`, `dev-configuration.ts:40` | the same 2 | **no new** |
-| Typecheck | PASS | **PASS** | |
-| Unit tests | FAIL — `@kitluy/device-identity#test` only, 899 passed / 23 skipped | identical | **no new** |
-| Docs link check | FAIL — 4 broken links | 4 | **no new** |
-| everything else | PASS | PASS | |
+| Check           | Baseline                                                                | Now        | Verdict    |
+| --------------- | ----------------------------------------------------------------------- | ---------- | ---------- |
+| Format check    | FAIL — `EACCES` on the rootless build tree                              | identical  | **no new** |
+| Lint            | FAIL — 2 errors: `terminal-edge.test.ts:310`, `dev-configuration.ts:40` | the same 2 | **no new** |
+| Typecheck       | PASS                                                                    | **PASS**   |            |
+| Unit tests      | FAIL — `@kitluy/device-identity#test` only, 899 passed / 23 skipped     | identical  | **no new** |
+| Docs link check | FAIL — 4 broken links                                                   | 4          | **no new** |
+| everything else | PASS                                                                    | PASS       |            |
 
 > **BASELINE FAILURES: 4, all pre-existing. NEW REGRESSIONS: 0.**
 
@@ -186,7 +186,7 @@ The device stack is clean: no assignment outstanding, both boards still `active`
 
 Three, all fixed:
 
-1. **`RELEASE_SOURCE: unbound variable`.** My new flag was parsed but never initialised, and the builder runs `set -u`, so it died *after* validating the environment but *before* emitting the overrides. Two existing environment-gating assertions went red. Fixed by initialising it beside the other env-or-flag values. Worth noting the gate caught it, not the build: the build "worked" right up to the point it did not.
+1. **`RELEASE_SOURCE: unbound variable`.** My new flag was parsed but never initialised, and the builder runs `set -u`, so it died _after_ validating the environment but _before_ emitting the overrides. Two existing environment-gating assertions went red. Fixed by initialising it beside the other env-or-flag values. Worth noting the gate caught it, not the build: the build "worked" right up to the point it did not.
 2. **`Error: Overrides must be provided as key=value pairs.`** The trust record on disk is pretty-printed JSON, and `rpi-image-gen` refuses an override containing a newline. Fixed by compacting to one line at the point of use — identical JSON, different whitespace.
 3. **The four new built-rootfs assertions failed against the old rootfs**, which is correct and is recorded because it is the evidence the gate works.
 

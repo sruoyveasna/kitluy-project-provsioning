@@ -199,33 +199,33 @@ export function composeInstallDependencies(options: CompositionOptions): Composi
     };
   }
 
-    // The device names ITSELF to the source, by the identifier the CLOUD issued
-    // it — never by one derived locally.
-    //
-    // This used to pass `assetTagFromFingerprint(fingerprint)`. The intent was
-    // right — a transport must not be able to talk the device into asking about
-    // somebody else's board, and local state cannot be chosen by a transport —
-    // but the DERIVATION was wrong: the authoritative name lives in the cloud.
-    //
-    // Registration contract §9 says the server never renames a board it already
-    // knows. After a re-flash the board presents a NEW key, the cloud keeps the
-    // ORIGINAL tag, and the two stop agreeing:
-    //
-    //   device derived  KL-6F4E86A71516   (from the new key)
-    //   cloud holds     KL-1CB3577C26A7   (kept, per §9)
-    //   GET /release/v1/assignment?device=KL-6F4E86A71516 -> 404
-    //   -> "no release is assigned to this device", on every poll, for ever
-    //
-    // Observed on hardware 2026-09-14. A re-flashed device is precisely the
-    // device an OTA system exists to serve, so this was never an edge case.
-    //
-    // `deviceId` is written by the cloud into the registration state and is what
-    // the cloud keys on. It is local state exactly as the fingerprint was, so
-    // the property that mattered is unchanged.
-    const source = createHttpReleaseSource({
-      baseUrl: options.baseUrl,
-      deviceRef: deviceId,
-    });
+  // The device names ITSELF to the source, by the identifier the CLOUD issued
+  // it — never by one derived locally.
+  //
+  // This used to pass `assetTagFromFingerprint(fingerprint)`. The intent was
+  // right — a transport must not be able to talk the device into asking about
+  // somebody else's board, and local state cannot be chosen by a transport —
+  // but the DERIVATION was wrong: the authoritative name lives in the cloud.
+  //
+  // Registration contract §9 says the server never renames a board it already
+  // knows. After a re-flash the board presents a NEW key, the cloud keeps the
+  // ORIGINAL tag, and the two stop agreeing:
+  //
+  //   device derived  KL-6F4E86A71516   (from the new key)
+  //   cloud holds     KL-1CB3577C26A7   (kept, per §9)
+  //   GET /release/v1/assignment?device=KL-6F4E86A71516 -> 404
+  //   -> "no release is assigned to this device", on every poll, for ever
+  //
+  // Observed on hardware 2026-09-14. A re-flashed device is precisely the
+  // device an OTA system exists to serve, so this was never an edge case.
+  //
+  // `deviceId` is written by the cloud into the registration state and is what
+  // the cloud keys on. It is local state exactly as the fingerprint was, so
+  // the property that mattered is unchanged.
+  const source = createHttpReleaseSource({
+    baseUrl: options.baseUrl,
+    deviceRef: deviceId,
+  });
 
   return {
     ok: true,

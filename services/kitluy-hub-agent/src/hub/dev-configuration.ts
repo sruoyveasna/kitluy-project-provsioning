@@ -37,7 +37,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
-import pg from "pg";
+import type pg from "pg";
 
 import { HUB_RUNTIME_ROLE, withHubTransaction } from "./db.js";
 import {
@@ -61,7 +61,10 @@ export const DEV_CONFIGURATION_KEY_ID = "kitluy.development-configuration-signer
 export const TERMINAL_PROFILES_SECTION = "terminal_profiles";
 
 export class DevelopmentConfigurationRefused extends Error {
-  constructor(readonly code: string, detail: string) {
+  constructor(
+    readonly code: string,
+    detail: string,
+  ) {
     super(`${code}: ${detail}`);
     this.name = "DevelopmentConfigurationRefused";
   }

@@ -30,15 +30,11 @@
     "list, and the tests assert the bootstrap/runtime set is absent from it."
   ],
   "schemaVersion": 1,
-  "profiles": [
-    "pi-terminal"
-  ],
+  "profiles": ["pi-terminal"],
   "components": [
     {
       "id": "firstboot-identity",
-      "profiles": [
-        "pi-terminal"
-      ],
+      "profiles": ["pi-terminal"],
       "executable": "/usr/lib/kitluy/firstboot-identity",
       "unit": "kitluy-firstboot.service",
       "enabled": true,
@@ -54,9 +50,7 @@
         "Factory Enrollment. The device announces itself and waits for an",
         "explicit Admin approval; no answer on this path makes it `enrolled`."
       ],
-      "profiles": [
-        "pi-terminal"
-      ],
+      "profiles": ["pi-terminal"],
       "executable": "/usr/lib/kitluy/cloud-registration",
       "unit": "kitluy-cloud-registration.service",
       "enabled": true,
@@ -65,15 +59,11 @@
         "package": "@kitluy-services/kitluy-device-firstboot-agent",
         "entry": "bin/cloud-registration"
       },
-      "environmentFiles": [
-        "/etc/kitluy/image.env"
-      ]
+      "environmentFiles": ["/etc/kitluy/image.env"]
     },
     {
       "id": "health-reporter",
-      "profiles": [
-        "pi-terminal"
-      ],
+      "profiles": ["pi-terminal"],
       "executable": "/usr/lib/kitluy/health-reporter",
       "unit": "kitluy-health-reporter.service",
       "enabled": true,
@@ -85,9 +75,7 @@
     },
     {
       "id": "update-agent",
-      "profiles": [
-        "pi-terminal"
-      ],
+      "profiles": ["pi-terminal"],
       "executable": "/usr/lib/kitluy/update-agent",
       "unit": "kitluy-update-agent.service",
       "enabled": true,
@@ -103,9 +91,7 @@
         "Clone hygiene, second half: the image ships no host keys, so a per-device",
         "set is generated at first boot from the distribution's ssh-keygen."
       ],
-      "profiles": [
-        "pi-terminal"
-      ],
+      "profiles": ["pi-terminal"],
       "executable": "/usr/bin/ssh-keygen",
       "unit": "kitluy-ssh-hostkeys.service",
       "enabled": true,
@@ -124,9 +110,7 @@
         "the image as the recovery surface: it needs no compositor, no GPU and no",
         "Electron, so it still works on a board where the shell cannot start."
       ],
-      "profiles": [
-        "pi-terminal"
-      ],
+      "profiles": ["pi-terminal"],
       "executable": "/usr/lib/kitluy/terminal-bootstrap-ui",
       "unit": "kitluy-bootstrap-screen.service",
       "enabled": false,
@@ -135,9 +119,7 @@
         "package": "@kitluy-services/kitluy-device-firstboot-agent",
         "entry": "bin/bootstrap-ui"
       },
-      "environmentFiles": [
-        "/etc/kitluy/image.env"
-      ]
+      "environmentFiles": ["/etc/kitluy/image.env"]
     },
     {
       "id": "device-shell",
@@ -150,9 +132,7 @@
         "Carries no Store authority and offers no path to a business application",
         "before activation (owner decision v2.0.0 4-5)."
       ],
-      "profiles": [
-        "pi-terminal"
-      ],
+      "profiles": ["pi-terminal"],
       "executable": "/usr/lib/kitluy/device-shell",
       "unit": "kitluy-device-shell.service",
       "enabled": true,
@@ -161,10 +141,7 @@
         "package": "@kitluy-apps/kitluy-device-shell",
         "app": "/usr/lib/kitluy/lib/device-shell"
       },
-      "environmentFiles": [
-        "/etc/kitluy/image.env",
-        "/etc/kitluy/terminal.env"
-      ],
+      "environmentFiles": ["/etc/kitluy/image.env", "/etc/kitluy/terminal.env"],
       "appRoots": {
         "image": "/usr/lib/kitluy/lib/device-shell",
         "release": "/persistent/shared/kitluy/releases/device-shell/current/payload",
@@ -185,9 +162,7 @@
         "`version` must equal the `electron` devDependency of the shell app: an image",
         "and an app that disagree about the runtime is the defect the pin prevents."
       ],
-      "profiles": [
-        "pi-terminal"
-      ],
+      "profiles": ["pi-terminal"],
       "executable": "/usr/lib/kitluy/electron/electron",
       "enabled": true,
       "source": {
@@ -205,9 +180,7 @@
         "Device Shell slice, not before: it failed on the first real terminal boot",
         "(2026-08-13) because nothing existed for the compositor to show."
       ],
-      "profiles": [
-        "pi-terminal"
-      ],
+      "profiles": ["pi-terminal"],
       "executable": "/usr/lib/kitluy/terminal-session",
       "unit": "kitluy-terminal-session.service",
       "enabled": false,
@@ -228,9 +201,7 @@
         "application release; this is bootstrap infrastructure and ships in the",
         "image."
       ],
-      "profiles": [
-        "pi-terminal"
-      ],
+      "profiles": ["pi-terminal"],
       "executable": "/usr/lib/kitluy/terminal-edge",
       "unit": "kitluy-terminal-edge.service",
       "enabled": true,
@@ -247,9 +218,7 @@
         "The unit is defined so the release need not invent one, and carries no",
         "executable here: the business application is never part of the image."
       ],
-      "profiles": [
-        "pi-terminal"
-      ],
+      "profiles": ["pi-terminal"],
       "unit": "kitluy-terminal-client.service",
       "enabled": false,
       "source": {
@@ -261,10 +230,7 @@
     {
       "unit": "kitluy-enrollment-agent.service",
       "executable": "/usr/lib/kitluy/enrollment-agent",
-      "modules": [
-        "bin/enrollment-bootstrap",
-        "adapters/http-enrollment-client"
-      ],
+      "modules": ["bin/enrollment-bootstrap", "adapters/http-enrollment-client"],
       "reason": "The flash-time ticket path enrolled a device straight to `enrolled` with no Admin decision, which the Factory Enrollment rule forbids; its identity also included the SD card. Cloud registration is the terminal's one identity path."
     }
   ],
@@ -295,9 +261,7 @@
       "the image on the next boot."
     ],
     "root": "/persistent/shared/kitluy/releases",
-    "updatableProducts": [
-      "device-shell"
-    ],
+    "updatableProducts": ["device-shell"],
     "imageMustNotShip": true
   },
   "releaseTrust": {

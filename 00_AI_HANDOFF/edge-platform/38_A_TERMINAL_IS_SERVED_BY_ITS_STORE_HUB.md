@@ -86,7 +86,7 @@ The 120-character bound was left exactly where it is. Ed25519 signatures are 86.
 
 `composeDevelopmentListener` signs with the identity key but declared the TLS
 certificate's serial, so `complete_terminal_pairing_v1` refused every completion:
-*"the receipt signer is not this session's Hub credential"*. It now declares the
+_"the receipt signer is not this session's Hub credential"_. It now declares the
 SPKI fingerprint of the key it actually signs with.
 
 ### 3.5 A constraint that could permanently brick a terminal — PRE-EXISTING
@@ -112,13 +112,13 @@ one has NOT) while letting a terminal state keep it as history.
 
 ## 4. What changed
 
-| File | Change |
-| --- | --- |
-| `hub/migrations/0042_…signing_credential.sql` | transcript binds the signing credential, both halves; prerequisite re-validation learns the distinction; `pairing_session_proof_state_ck` corrected |
-| `services/kitluy-hub-agent/src/hub/edge/development-listener.ts` | the signer declares its own key's credential |
-| `services/kitluy-hub-agent/src/hub-database.ts` | canonical migration list: 43 |
-| `…/usr/lib/kitluy/hub-provision-terminal` | projects the Hub's own credential, and both device-identity signing credentials |
-| `scripts/development/hub-terminal-projection.mjs` | serial read from the certificate; carries the identity fingerprint |
+| File                                                             | Change                                                                                                                                              |
+| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hub/migrations/0042_…signing_credential.sql`                    | transcript binds the signing credential, both halves; prerequisite re-validation learns the distinction; `pairing_session_proof_state_ck` corrected |
+| `services/kitluy-hub-agent/src/hub/edge/development-listener.ts` | the signer declares its own key's credential                                                                                                        |
+| `services/kitluy-hub-agent/src/hub-database.ts`                  | canonical migration list: 43                                                                                                                        |
+| `…/usr/lib/kitluy/hub-provision-terminal`                        | projects the Hub's own credential, and both device-identity signing credentials                                                                     |
+| `scripts/development/hub-terminal-projection.mjs`                | serial read from the certificate; carries the identity fingerprint                                                                                  |
 
 ## 5. Verification
 

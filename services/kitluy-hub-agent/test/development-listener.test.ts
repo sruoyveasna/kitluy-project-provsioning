@@ -14,7 +14,12 @@
  * ONE rather than a denylist someone could add a value past.
  */
 import { describe, expect, it } from "vitest";
-import { createHash, createPublicKey, generateKeyPairSync, verify as cryptoVerify } from "node:crypto";
+import {
+  createHash,
+  createPublicKey,
+  generateKeyPairSync,
+  verify as cryptoVerify,
+} from "node:crypto";
 
 import {
   edgeDiscoveryRecordBytes,

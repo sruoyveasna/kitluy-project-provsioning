@@ -257,7 +257,9 @@ try {
   );
   const assignment = current.rows[0].a;
   if (assignment === null) {
-    die("the governed reader returned nothing after signing — the device would never see this release");
+    die(
+      "the governed reader returned nothing after signing — the device would never see this release",
+    );
   }
   console.log(`[release-publish] assignment_sequence ${String(assignment.assignmentSequence)}`);
 

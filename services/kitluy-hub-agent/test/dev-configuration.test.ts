@@ -30,7 +30,10 @@ const SCOPE = {
   locationId: "00000000-0000-4000-8000-000000000018",
 };
 const GRANTS = [
-  { terminalDeviceId: "82519491-f584-4a19-9a44-495eef1c10fe", profileCodes: ["laundry.t1.intake_cashier"] },
+  {
+    terminalDeviceId: "82519491-f584-4a19-9a44-495eef1c10fe",
+    profileCodes: ["laundry.t1.intake_cashier"],
+  },
 ];
 
 /** A pool that must never be reached: every case here refuses before the DB. */
@@ -103,7 +106,9 @@ describe("the signing key", () => {
   it("carries at least the 32 bytes the development signer demands", () => {
     const path = join(mkdtempSync(join(tmpdir(), "kitluy-devcfg-")), "signing.key");
     loadOrCreateDevelopmentSigner(path);
-    expect(Buffer.from(readFileSync(path, "utf8").trim(), "base64").length).toBeGreaterThanOrEqual(32);
+    expect(Buffer.from(readFileSync(path, "utf8").trim(), "base64").length).toBeGreaterThanOrEqual(
+      32,
+    );
   });
 
   it("names itself, so a row never has to be guessed at later", () => {

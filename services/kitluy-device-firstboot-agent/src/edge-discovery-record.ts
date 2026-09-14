@@ -177,7 +177,8 @@ export function checkRecord(
   if (Number.isNaN(issuedAt) || Number.isNaN(expiresAt)) {
     return refuse("DISCOVERY_MALFORMED", "the validity window is not a pair of timestamps");
   }
-  if (now.getTime() < issuedAt) return refuse("DISCOVERY_NOT_YET_VALID", "issuedAt is in the future");
+  if (now.getTime() < issuedAt)
+    return refuse("DISCOVERY_NOT_YET_VALID", "issuedAt is in the future");
   if (now.getTime() >= expiresAt) return refuse("DISCOVERY_EXPIRED", "the record has expired");
 
   // THE ANCHOR. Everything above judges what the record SAYS; this judges what

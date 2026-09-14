@@ -15,12 +15,12 @@ registered, paired, and drew its screen.
 **And it could never have installed a release, nor even activated.** Four
 independent faults, any one of which alone stops acceptance:
 
-| # | Defect | What it stopped |
-| --- | --- | --- |
-| 1 | `ReadWritePaths=` named a directory nothing creates | the update agent never ran, on any boot |
-| 2 | the baked release source pointed at the management API | Test A would have read a scaffold 404 |
-| 3 | no `KITLUY_ENROLLMENT_BASE_URL` was baked | no operational certificate — never reaches SERVING |
-| 4 | `UMask=0077` silently masked a deliberate `0644` | the Device Shell could not read the edge status |
+| #   | Defect                                                 | What it stopped                                    |
+| --- | ------------------------------------------------------ | -------------------------------------------------- |
+| 1   | `ReadWritePaths=` named a directory nothing creates    | the update agent never ran, on any boot            |
+| 2   | the baked release source pointed at the management API | Test A would have read a scaffold 404              |
+| 3   | no `KITLUY_ENROLLMENT_BASE_URL` was baked              | no operational certificate — never reaches SERVING |
+| 4   | `UMask=0077` silently masked a deliberate `0644`       | the Device Shell could not read the edge status    |
 
 Defects 1 and 2 were found by acceptance. **Defects 3 and 4 were found while
 preparing the corrected image, before the card was written** — each would
@@ -33,14 +33,14 @@ change.
 
 ## 2. What was proven on the physical board
 
-| Claim | Evidence |
-| --- | --- |
-| The board runs the NEW image | `/usr/lib/kitluy/lib/firstboot-agent/release-runtime.js` exists on the read-only rootfs — the file that fixed the ignition gap, absent from build `e06e3c62…` |
-| The release source was baked | `/etc/kitluy/release.env` → `KITLUY_RELEASE_SOURCE=http://172.16.21.17:8790` |
-| The trust anchor was baked | `/etc/kitluy/trust/release-signing.json`, `purpose=release_signing`, `environment=development`, `state=current`, `keyVersion=1`, no private material |
-| The rootfs is EROFS read-only | `findmnt /` → `erofs ro`; `touch /etc/...` → `Read-only file system` |
-| Fallback visibility works (req. D, partial) | witness `{"source":"IMAGE_FALLBACK","app":"/usr/lib/kitluy/lib/device-shell"}`, and the journal line `starting Device Shell from IMAGE_FALLBACK` |
-| The device reaches the release source | from the board: `/health` → `200`, `/release/v1/assignment?device=KL-1054DD1CCC8E` → `200 {"assignment":null}`, unknown device → `404` |
+| Claim                                       | Evidence                                                                                                                                                      |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The board runs the NEW image                | `/usr/lib/kitluy/lib/firstboot-agent/release-runtime.js` exists on the read-only rootfs — the file that fixed the ignition gap, absent from build `e06e3c62…` |
+| The release source was baked                | `/etc/kitluy/release.env` → `KITLUY_RELEASE_SOURCE=http://172.16.21.17:8790`                                                                                  |
+| The trust anchor was baked                  | `/etc/kitluy/trust/release-signing.json`, `purpose=release_signing`, `environment=development`, `state=current`, `keyVersion=1`, no private material          |
+| The rootfs is EROFS read-only               | `findmnt /` → `erofs ro`; `touch /etc/...` → `Read-only file system`                                                                                          |
+| Fallback visibility works (req. D, partial) | witness `{"source":"IMAGE_FALLBACK","app":"/usr/lib/kitluy/lib/device-shell"}`, and the journal line `starting Device Shell from IMAGE_FALLBACK`              |
+| The device reaches the release source       | from the board: `/health` → `200`, `/release/v1/assignment?device=KL-1054DD1CCC8E` → `200 {"assignment":null}`, unknown device → `404`                        |
 
 ### 2.1 Two readings that looked wrong and were not
 
@@ -137,12 +137,12 @@ it; the second requires `RequiresMountsFor=/persistent`.
 
 Mutation-tested — each defect reintroduced separately, and each caught:
 
-| Mutation | Result |
-| --- | --- |
-| remove the `ExecStartPre` (the exact shipped defect) | **FAIL** (58/1) |
-| keep the mkdir, drop the `+` (sandboxed, cannot work) | **FAIL** (58/1) |
-| drop `RequiresMountsFor` | **FAIL** (58/1) |
-| restored | **59 passed, 0 failed** |
+| Mutation                                              | Result                  |
+| ----------------------------------------------------- | ----------------------- |
+| remove the `ExecStartPre` (the exact shipped defect)  | **FAIL** (58/1)         |
+| keep the mkdir, drop the `+` (sandboxed, cannot work) | **FAIL** (58/1)         |
+| drop `RequiresMountsFor`                              | **FAIL** (58/1)         |
+| restored                                              | **59 passed, 0 failed** |
 
 ---
 
@@ -301,13 +301,13 @@ restored: **18 passed**.
 
 **Yes — a build and a reflash, and there is no alternative that is not a bypass.**
 
-| Path | Why it is not available |
-| --- | --- |
-| Edit the unit on the device | `/etc` is EROFS read-only — `touch` returns `Read-only file system` |
-| systemd drop-in | would need `/etc/systemd/system/kitluy-update-agent.service.d`; same read-only filesystem. `/run` is writable but does not survive a reboot |
-| Slot-shared escape | only `/etc/ssh` and `/etc/wpa_supplicant` are declared; `/etc` as a whole is not |
-| A/B system OTA | that is **U5**, not built, and explicitly out of U1 scope |
-| SSH file replacement | forbidden by owner instruction; SSH is diagnosis only |
+| Path                        | Why it is not available                                                                                                                     |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Edit the unit on the device | `/etc` is EROFS read-only — `touch` returns `Read-only file system`                                                                         |
+| systemd drop-in             | would need `/etc/systemd/system/kitluy-update-agent.service.d`; same read-only filesystem. `/run` is writable but does not survive a reboot |
+| Slot-shared escape          | only `/etc/ssh` and `/etc/wpa_supplicant` are declared; `/etc` as a whole is not                                                            |
+| A/B system OTA              | that is **U5**, not built, and explicitly out of U1 scope                                                                                   |
+| SSH file replacement        | forbidden by owner instruction; SSH is diagnosis only                                                                                       |
 
 This is the bootstrap problem in its purest form: the component that would
 deliver an OTA is the component that is broken. U1's first working agent must
@@ -315,8 +315,8 @@ arrive on a flashed image.
 
 The release-source port alone **could** have been fixed without a reflash, via
 the persistent override at `/persistent/shared/kitluy/release-source.env` — that
-mechanism exists precisely for this. But the override lives *inside the directory
-that defect 1 prevents from existing*, and a reflash is required regardless, so
+mechanism exists precisely for this. But the override lives _inside the directory
+that defect 1 prevents from existing_, and a reflash is required regardless, so
 the correct default is baked rather than shipped knowingly wrong.
 
 ---
@@ -359,31 +359,31 @@ the correct default is baked rather than shipped knowingly wrong.
 
 ## 7. Verification
 
-| Check | Result |
-| --- | --- |
-| `build-gates.test.sh` | **59 passed, 0 failed** (was 57; +2 new gates) |
-| `systemd-runtime.test.sh` | **215 passed, 0 failed** — matches baseline |
-| `environment-gating.test.sh` | **20 passed, 0 failed** — matches baseline |
-| `rpi-image-gen.test.sh` | **29 passed, 0 failed** — matches baseline |
-| `image-contents.test.sh` | 106/106 before; **+1 enrollment-origin gate**, re-run against the new image |
-| `release:pack:check` | **14/14** |
-| `release:chain:check` | **31/31** |
-| agent suite | **749 passed, 0 failed** (748 baseline + the new umask test) |
-| package typecheck | **clean** |
-| repo lint | **2 errors — exactly the pre-existing baseline**, none in changed files |
-| `pnpm secret:scan` | **PASS** (2161 tracked files) |
-| `systemd-analyze verify` | no complaint about the corrected unit |
+| Check                        | Result                                                                      |
+| ---------------------------- | --------------------------------------------------------------------------- |
+| `build-gates.test.sh`        | **59 passed, 0 failed** (was 57; +2 new gates)                              |
+| `systemd-runtime.test.sh`    | **215 passed, 0 failed** — matches baseline                                 |
+| `environment-gating.test.sh` | **20 passed, 0 failed** — matches baseline                                  |
+| `rpi-image-gen.test.sh`      | **29 passed, 0 failed** — matches baseline                                  |
+| `image-contents.test.sh`     | 106/106 before; **+1 enrollment-origin gate**, re-run against the new image |
+| `release:pack:check`         | **14/14**                                                                   |
+| `release:chain:check`        | **31/31**                                                                   |
+| agent suite                  | **749 passed, 0 failed** (748 baseline + the new umask test)                |
+| package typecheck            | **clean**                                                                   |
+| repo lint                    | **2 errors — exactly the pre-existing baseline**, none in changed files     |
+| `pnpm secret:scan`           | **PASS** (2161 tracked files)                                               |
+| `systemd-analyze verify`     | no complaint about the corrected unit                                       |
 
 **Mutation tests** (a gate that cannot fail proves nothing):
 
-| Reintroduced defect | Caught by |
-| --- | --- |
-| remove `ExecStartPre` creating the store | build gate — FAIL 58/1 |
-| keep the mkdir, drop the `+` | build gate — FAIL 58/1 |
-| drop `RequiresMountsFor` | build gate — FAIL 58/1 |
-| omit `--enrollment-url` | builder REFUSES, exit 2 |
-| remove `chmodSync` | unit test — `expected '600' to be '644'` |
-| release service on a busy port | REFUSED, naming the consequence |
+| Reintroduced defect                      | Caught by                                |
+| ---------------------------------------- | ---------------------------------------- |
+| remove `ExecStartPre` creating the store | build gate — FAIL 58/1                   |
+| keep the mkdir, drop the `+`             | build gate — FAIL 58/1                   |
+| drop `RequiresMountsFor`                 | build gate — FAIL 58/1                   |
+| omit `--enrollment-url`                  | builder REFUSES, exit 2                  |
+| remove `chmodSync`                       | unit test — `expected '600' to be '644'` |
+| release service on a busy port           | REFUSED, naming the consequence          |
 
 **Cleanup:** the chain check's three synthetic `0.0.0-chain-*` releases were
 withdrawn via `revoke_release_v1` with distinct requester/approver. The authority
@@ -488,15 +488,15 @@ arrived.
 
 ### What it does and does not block
 
-| Bootstrap item | Effect |
-| --- | --- |
-| 1 `/persistent` mounted | unaffected |
-| 2 `/persistent/shared/kitluy` exists | unaffected |
-| 3 update agent active | unaffected |
-| 4 `:8791` correct service | unaffected |
-| 5 release trust loads | unaffected |
-| 6 paired/activated/**SERVING** | **BLOCKED** — no operational certificate, and the Hub is not serving either |
-| 7 no assignment outstanding | unaffected |
+| Bootstrap item                       | Effect                                                                      |
+| ------------------------------------ | --------------------------------------------------------------------------- |
+| 1 `/persistent` mounted              | unaffected                                                                  |
+| 2 `/persistent/shared/kitluy` exists | unaffected                                                                  |
+| 3 update agent active                | unaffected                                                                  |
+| 4 `:8791` correct service            | unaffected                                                                  |
+| 5 release trust loads                | unaffected                                                                  |
+| 6 paired/activated/**SERVING**       | **BLOCKED** — no operational certificate, and the Hub is not serving either |
+| 7 no assignment outstanding          | unaffected                                                                  |
 
 The OTA mechanism itself does not depend on the Store Hub: the health gate
 probes `systemctl is-active kitluy-device-shell.service`, and releases arrive
@@ -558,8 +558,8 @@ compositions.
 
 A re-flashed board is **neither case**:
 
-- not *first issuance* — it already has a credential head;
-- not a *renewal* — renewal proves possession of the previous key, and that key
+- not _first issuance_ — it already has a credential head;
+- not a _renewal_ — renewal proves possession of the previous key, and that key
   went with the card.
 
 The hardcoded `1` is therefore correct **for the path it is on**. The fault is
@@ -580,11 +580,11 @@ This is the same SD-card-failure path that `515202b` closed for **pairing**
 Asked whether the database could simply be reset, three routes were examined.
 All are shut, and each refusal is the system working correctly:
 
-| Route | Outcome |
-| --- | --- |
-| `pnpm db:reset` | Targets `supabase_db_kitluy-**local**`. The hardware stack is `kitluy-**fresh**` (`:54372`). It would reset an uninvolved stack and leave the blocker untouched. |
-| `abandon_generation_key_v1` (owner-authorised) | `KLUY-KEY-ABANDON-REFUSED: generation 1 already carries a certificate artifact; abandoning it would replace a live identity` |
-| Deleting the blocking rows directly | `KLUY-CRED-HEAD-IMMUTABLE: a generation head is advanced, never deleted` — raised by `enforce_head_authority` while holding the owning role `kitluy_credential_issuer` |
+| Route                                          | Outcome                                                                                                                                                                |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm db:reset`                                | Targets `supabase_db_kitluy-**local**`. The hardware stack is `kitluy-**fresh**` (`:54372`). It would reset an uninvolved stack and leave the blocker untouched.       |
+| `abandon_generation_key_v1` (owner-authorised) | `KLUY-KEY-ABANDON-REFUSED: generation 1 already carries a certificate artifact; abandoning it would replace a live identity`                                           |
+| Deleting the blocking rows directly            | `KLUY-CRED-HEAD-IMMUTABLE: a generation head is advanced, never deleted` — raised by `enforce_head_authority` while holding the owning role `kitluy_credential_issuer` |
 
 Every probe ran inside a transaction that was rolled back. Row counts before and
 after are identical (2 heads / 2 credentials / 2 generation keys / 2 devices).
@@ -650,10 +650,10 @@ trust anchor `bfccb44e…` still matches.
 **Outcome.** Both boards re-enrolled as new devices with no credential head, so
 first issuance is correct for them again and the collision is gone:
 
-| Board | Asset tag | State |
-| --- | --- | --- |
-| Store Hub | `KL-CFADA8C75001` | **active — "Store Hub is serving terminals"**, `7443`, mDNS advertising |
-| Pi Terminal | `KL-1CB3577C26A7` | enrolled (pre-reflash identity) |
+| Board       | Asset tag         | State                                                                   |
+| ----------- | ----------------- | ----------------------------------------------------------------------- |
+| Store Hub   | `KL-CFADA8C75001` | **active — "Store Hub is serving terminals"**, `7443`, mDNS advertising |
+| Pi Terminal | `KL-1CB3577C26A7` | enrolled (pre-reflash identity)                                         |
 
 The Hub's refusal walked forward at each step, which is how the remaining gaps
 were found: `KLUY-KEY-GENERATION-TAKEN` → `KLUY-KEY-NO-DEVICE` (stale on-card
@@ -695,15 +695,15 @@ once.
 
 Image `6ea367bd…`, board `pi5-unljtj` / `KL-1CB3577C26A7`.
 
-| # | Item | Result |
-| --- | --- | --- |
-| 1 | `/persistent` mounted | PASS `/dev/mmcblk0p6 ext4` |
-| 2 | `/persistent/shared/kitluy` exists | **PASS** `drwxr-xr-x root:root` — defect 1 fixed |
-| 3 | update agent active | **PASS** `active`, **0 restarts** |
-| 4 | `:8791` is the release service | PASS `HTTP 200` |
-| 5 | release trust loads | PASS `trustedKeys=1` |
-| 6 | paired / activated / SERVING | **STOPPED — `DEGRADED`** |
-| 7 | no installable assignment | PASS `NULL` |
+| #   | Item                               | Result                                           |
+| --- | ---------------------------------- | ------------------------------------------------ |
+| 1   | `/persistent` mounted              | PASS `/dev/mmcblk0p6 ext4`                       |
+| 2   | `/persistent/shared/kitluy` exists | **PASS** `drwxr-xr-x root:root` — defect 1 fixed |
+| 3   | update agent active                | **PASS** `active`, **0 restarts**                |
+| 4   | `:8791` is the release service     | PASS `HTTP 200`                                  |
+| 5   | release trust loads                | PASS `trustedKeys=1`                             |
+| 6   | paired / activated / SERVING       | **STOPPED — `DEGRADED`**                         |
+| 7   | no installable assignment          | PASS `NULL`                                      |
 
 All four image defects are confirmed fixed on hardware, including
 `edge-status.json` at mode **644** (was 600).

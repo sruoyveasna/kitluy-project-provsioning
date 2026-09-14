@@ -78,7 +78,9 @@ async function main(): Promise<void> {
           environment,
           expectation: {
             ...(seat.digitalStoreId === undefined ? {} : { digitalStoreId: seat.digitalStoreId }),
-            ...(seat.storeLocationId === undefined ? {} : { storeLocationId: seat.storeLocationId }),
+            ...(seat.storeLocationId === undefined
+              ? {}
+              : { storeLocationId: seat.storeLocationId }),
           },
           profileCodes: seat.profileCodes,
         }),

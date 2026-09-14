@@ -187,7 +187,6 @@ describe("the composition an installing agent needs", () => {
     expect(asked[0]).not.toContain(derived);
   });
 
-
   it("targets the Device Shell unit and nothing else", () => {
     expect(DEVICE_SHELL_UNIT).toBe("kitluy-device-shell.service");
   });

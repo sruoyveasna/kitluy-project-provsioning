@@ -20,7 +20,12 @@ import { readTransportCredentials } from "../src/edge-transport.js";
 const FINGERPRINT = "a".repeat(64);
 const HUB_ID = "75cfc61f-219e-4f1e-8f42-fa46c056a292";
 
-function workspace(): { dir: string; operationalDir: string; statusPath: string; lastPath: string } {
+function workspace(): {
+  dir: string;
+  operationalDir: string;
+  statusPath: string;
+  lastPath: string;
+} {
   const dir = mkdtempSync(join(tmpdir(), "kitluy-edge-"));
   const operationalDir = join(dir, "operational");
   mkdirSync(operationalDir, { recursive: true });
@@ -33,12 +38,18 @@ function workspace(): { dir: string; operationalDir: string; statusPath: string;
 }
 
 function writeCredentials(dir: string): void {
-  for (const name of ["operational-tls.crt.pem", "operational-tls.key.pem", "operational-tls.chain.pem"]) {
+  for (const name of [
+    "operational-tls.crt.pem",
+    "operational-tls.key.pem",
+    "operational-tls.chain.pem",
+  ]) {
     writeFileSync(join(dir, name), "-----BEGIN CERTIFICATE-----\nx\n-----END CERTIFICATE-----\n");
   }
 }
 
-function payload(overrides: Partial<SignedDiscoveryPayload["record"]> = {}): SignedDiscoveryPayload {
+function payload(
+  overrides: Partial<SignedDiscoveryPayload["record"]> = {},
+): SignedDiscoveryPayload {
   const now = Date.now();
   return {
     record: {
@@ -188,10 +199,20 @@ describe("one attempt, and the status an operator is left with", () => {
       requestFn: (input) =>
         Promise.resolve(
           input.path.startsWith("/.well-known")
-            ? { status: 200, body: payload(), peerCertificateFingerprint: FINGERPRINT, peerDeviceId: HUB_ID }
+            ? {
+                status: 200,
+                body: payload(),
+                peerCertificateFingerprint: FINGERPRINT,
+                peerDeviceId: HUB_ID,
+              }
             : {
                 status: 403,
-                body: { error: { code: "DEVICE_NOT_ASSIGNED", details: { result: "TERMINAL_NOT_RECOGNIZED" } } },
+                body: {
+                  error: {
+                    code: "DEVICE_NOT_ASSIGNED",
+                    details: { result: "TERMINAL_NOT_RECOGNIZED" },
+                  },
+                },
                 peerCertificateFingerprint: FINGERPRINT,
                 peerDeviceId: HUB_ID,
               },
@@ -258,17 +279,32 @@ describe("one attempt, and the status an operator is left with", () => {
       discover: () => Promise.resolve([{ host: "10.0.0.5", port: 7443, instance: "hub" }]),
       requestFn: (input) => {
         if (input.path.startsWith("/.well-known")) {
-          return Promise.resolve({ status: 200, body: payload(), peerCertificateFingerprint: FINGERPRINT, peerDeviceId: HUB_ID });
-        }
-        if (input.path.endsWith("/configuration/current")) {
           return Promise.resolve({
-            status: 503,
-            body: { error: { code: "DEPENDENCY_UNAVAILABLE", details: { result: "DELIVERY_SIGNER_UNAVAILABLE" } } },
+            status: 200,
+            body: payload(),
             peerCertificateFingerprint: FINGERPRINT,
             peerDeviceId: HUB_ID,
           });
         }
-        return Promise.resolve({ status: 200, body: { ok: true }, peerCertificateFingerprint: FINGERPRINT, peerDeviceId: HUB_ID });
+        if (input.path.endsWith("/configuration/current")) {
+          return Promise.resolve({
+            status: 503,
+            body: {
+              error: {
+                code: "DEPENDENCY_UNAVAILABLE",
+                details: { result: "DELIVERY_SIGNER_UNAVAILABLE" },
+              },
+            },
+            peerCertificateFingerprint: FINGERPRINT,
+            peerDeviceId: HUB_ID,
+          });
+        }
+        return Promise.resolve({
+          status: 200,
+          body: { ok: true },
+          peerCertificateFingerprint: FINGERPRINT,
+          peerDeviceId: HUB_ID,
+        });
       },
     });
     expect(status.phase).toBe("DEGRADED");
@@ -289,15 +325,27 @@ describe("one attempt, and the status an operator is left with", () => {
       requestFn: (input) =>
         Promise.resolve(
           input.path.startsWith("/.well-known")
-            ? { status: 200, body: payload(), peerCertificateFingerprint: FINGERPRINT, peerDeviceId: HUB_ID }
+            ? {
+                status: 200,
+                body: payload(),
+                peerCertificateFingerprint: FINGERPRINT,
+                peerDeviceId: HUB_ID,
+              }
             : input.path.endsWith("/eligibility")
               ? {
                   status: 403,
-                  body: { error: { code: "DEVICE_NOT_ASSIGNED", details: { result: "PAIRING_REQUIRED" } } },
+                  body: {
+                    error: { code: "DEVICE_NOT_ASSIGNED", details: { result: "PAIRING_REQUIRED" } },
+                  },
                   peerCertificateFingerprint: FINGERPRINT,
                   peerDeviceId: HUB_ID,
                 }
-              : { status: 200, body: { ok: true }, peerCertificateFingerprint: FINGERPRINT, peerDeviceId: HUB_ID },
+              : {
+                  status: 200,
+                  body: { ok: true },
+                  peerCertificateFingerprint: FINGERPRINT,
+                  peerDeviceId: HUB_ID,
+                },
         ),
     });
     expect(status.phase).toBe("PAIRING_REFUSED");
@@ -307,7 +355,7 @@ describe("one attempt, and the status an operator is left with", () => {
   it("pairs when the Hub says PAIRING_REQUIRED and a profile is held", async () => {
     const w = workspace();
     writeCredentials(w.operationalDir);
-    let paired = false;
+    const paired = false;
     const paths: string[] = [];
     const status = await runEdgeAttempt({
       environment: "development",
@@ -320,12 +368,19 @@ describe("one attempt, and the status an operator is left with", () => {
       requestFn: (input) => {
         paths.push(input.path);
         if (input.path.startsWith("/.well-known")) {
-          return Promise.resolve({ status: 200, body: payload(), peerCertificateFingerprint: FINGERPRINT, peerDeviceId: HUB_ID });
+          return Promise.resolve({
+            status: 200,
+            body: payload(),
+            peerCertificateFingerprint: FINGERPRINT,
+            peerDeviceId: HUB_ID,
+          });
         }
         if (input.path.endsWith("/eligibility") && !paired) {
           return Promise.resolve({
             status: 403,
-            body: { error: { code: "DEVICE_NOT_ASSIGNED", details: { result: "PAIRING_REQUIRED" } } },
+            body: {
+              error: { code: "DEVICE_NOT_ASSIGNED", details: { result: "PAIRING_REQUIRED" } },
+            },
             peerCertificateFingerprint: FINGERPRINT,
             peerDeviceId: HUB_ID,
           });
@@ -344,7 +399,12 @@ describe("one attempt, and the status an operator is left with", () => {
             peerDeviceId: HUB_ID,
           });
         }
-        return Promise.resolve({ status: 200, body: { ok: true }, peerCertificateFingerprint: FINGERPRINT, peerDeviceId: HUB_ID });
+        return Promise.resolve({
+          status: 200,
+          body: { ok: true },
+          peerCertificateFingerprint: FINGERPRINT,
+          peerDeviceId: HUB_ID,
+        });
       },
     });
     // The key is absent, so pairing must refuse with a named cause rather than

@@ -1,13 +1,13 @@
 # U1 phases 1–3 and 5 — evidence report, stop point before image integration
 
-| Field | Value |
-| --- | --- |
-| Date | 2026-09-11 · Asia/Phnom_Penh |
-| Repository | `het-kitluy-project`, branch `claude/fix-firstboot-esm-and-ssh-hostkeys` |
-| Status | **SOURCE IMPLEMENTED + TESTED-IN-DEV.** Not `IMAGE VERIFIED`, not `HARDWARE VERIFIED`. |
-| Committed | **No.** Nothing committed or pushed. |
-| Owner rulings applied | OD-U1-1 = A · OD-U1-2 = C · OD-U1-3 = A |
-| Stop point | Phase 4 (image integration) and the physical reflash have **not** begun, as instructed. |
+| Field                 | Value                                                                                   |
+| --------------------- | --------------------------------------------------------------------------------------- |
+| Date                  | 2026-09-11 · Asia/Phnom_Penh                                                            |
+| Repository            | `het-kitluy-project`, branch `claude/fix-firstboot-esm-and-ssh-hostkeys`                |
+| Status                | **SOURCE IMPLEMENTED + TESTED-IN-DEV.** Not `IMAGE VERIFIED`, not `HARDWARE VERIFIED`.  |
+| Committed             | **No.** Nothing committed or pushed.                                                    |
+| Owner rulings applied | OD-U1-1 = A · OD-U1-2 = C · OD-U1-3 = A                                                 |
+| Stop point            | Phase 4 (image integration) and the physical reflash have **not** begun, as instructed. |
 
 ---
 
@@ -17,26 +17,26 @@
 
 ### Baseline — recorded before U1 touched anything
 
-| Step | Result | Cause |
-| --- | --- | --- |
-| Format check | **FAIL** | `EACCES: permission denied, scandir …/build/work/chroot-v2.7.0/filesystem/persistent/home/pi` — an unreadable rootless build artifact. Prettier's own verdict on everything it *could* read: *"All matched files use Prettier code style!"* |
-| Lint | **FAIL** | 2 errors: `test/terminal-edge.test.ts:310` `prefer-const`; `src/hub/dev-configuration.ts:40` `consistent-type-imports`. Both in the pre-existing uncommitted edge work. |
-| Typecheck | PASS | |
-| Unit tests | **FAIL** | `@kitluy/device-identity` — 2 suites fail **in setup**: `kitluy_credential_issuer is ALREADY granted to this login, so another session has borrowed it`. A leaked role grant from an earlier session. **899 passed, 23 skipped, 0 test assertions failed.** The suite's own message says *"do not revoke the membership by hand"*, so it was left alone. |
-| Contract tests · Offline harness · Build · OpenAPI · Migration validation · Hub migration validation · Secret scan · Clock usage | PASS | |
-| Docs link check | **FAIL** | 4 broken links in `00_AI_HANDOFF/shared/2026-07-30__SHARED__WS-11-T003-STEP4__PHASE-E-PROMOTION-GATE__AI-HANDOFF.md` |
+| Step                                                                                                                             | Result   | Cause                                                                                                                                                                                                                                                                                                                                                    |
+| -------------------------------------------------------------------------------------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Format check                                                                                                                     | **FAIL** | `EACCES: permission denied, scandir …/build/work/chroot-v2.7.0/filesystem/persistent/home/pi` — an unreadable rootless build artifact. Prettier's own verdict on everything it _could_ read: _"All matched files use Prettier code style!"_                                                                                                              |
+| Lint                                                                                                                             | **FAIL** | 2 errors: `test/terminal-edge.test.ts:310` `prefer-const`; `src/hub/dev-configuration.ts:40` `consistent-type-imports`. Both in the pre-existing uncommitted edge work.                                                                                                                                                                                  |
+| Typecheck                                                                                                                        | PASS     |                                                                                                                                                                                                                                                                                                                                                          |
+| Unit tests                                                                                                                       | **FAIL** | `@kitluy/device-identity` — 2 suites fail **in setup**: `kitluy_credential_issuer is ALREADY granted to this login, so another session has borrowed it`. A leaked role grant from an earlier session. **899 passed, 23 skipped, 0 test assertions failed.** The suite's own message says _"do not revoke the membership by hand"_, so it was left alone. |
+| Contract tests · Offline harness · Build · OpenAPI · Migration validation · Hub migration validation · Secret scan · Clock usage | PASS     |                                                                                                                                                                                                                                                                                                                                                          |
+| Docs link check                                                                                                                  | **FAIL** | 4 broken links in `00_AI_HANDOFF/shared/2026-07-30__SHARED__WS-11-T003-STEP4__PHASE-E-PROMOTION-GATE__AI-HANDOFF.md`                                                                                                                                                                                                                                     |
 
 ### After U1 phases 1–3 and 5
 
 **Identical.** Compared field by field:
 
-| Check | Baseline | After | Verdict |
-| --- | --- | --- | --- |
-| Lint errors | 2, at `terminal-edge.test.ts:310` and `dev-configuration.ts:40` | the same 2, same files, same lines | **no new** |
-| Format | EACCES on the same path; "All matched files use Prettier code style!" | identical | **no new** |
-| Broken doc links | 4 | 4 | **no new** |
-| Failing turbo task | `@kitluy/device-identity#test` only | `@kitluy/device-identity#test` only | **no new** |
-| device-identity totals | 899 passed / 23 skipped | 899 passed / 23 skipped | unchanged |
+| Check                  | Baseline                                                              | After                               | Verdict    |
+| ---------------------- | --------------------------------------------------------------------- | ----------------------------------- | ---------- |
+| Lint errors            | 2, at `terminal-edge.test.ts:310` and `dev-configuration.ts:40`       | the same 2, same files, same lines  | **no new** |
+| Format                 | EACCES on the same path; "All matched files use Prettier code style!" | identical                           | **no new** |
+| Broken doc links       | 4                                                                     | 4                                   | **no new** |
+| Failing turbo task     | `@kitluy/device-identity#test` only                                   | `@kitluy/device-identity#test` only | **no new** |
+| device-identity totals | 899 passed / 23 skipped                                               | 899 passed / 23 skipped             | unchanged  |
 
 > **BASELINE FAILURES: 4, all pre-existing, none touched.**
 > **NEW U1 REGRESSIONS: 0.**
@@ -88,23 +88,23 @@ Monotonic, unique per device, integer, **not a timestamp**, and already used for
 
 ### Its honest limit, stated rather than papered over
 
-`assignment_generation` orders a device's **Store binding**. It does **not** order two *release* assignments issued inside one binding — `kitluy_releases.device_installations` has no generation or sequence column, and its identity is `(campaign_id, device_id)` with a uuid primary key.
+`assignment_generation` orders a device's **Store binding**. It does **not** order two _release_ assignments issued inside one binding — `kitluy_releases.device_installations` has no generation or sequence column, and its identity is `(campaign_id, device_id)` with a uuid primary key.
 
-So the generation alone leaves a gap: a replay of an earlier release assignment made under the *same* device-assignment generation would not be refused by generation.
+So the generation alone leaves a gap: a replay of an earlier release assignment made under the _same_ device-assignment generation would not be refused by generation.
 
 ### How the gap is closed without a schema change
 
 A second, independent check in the device's durable journal. A replay can only ever name a release the device has **already seen**, so:
 
-| Condition | Refusal |
-| --- | --- |
-| generation lower than the highest accepted | `ASSIGNMENT_STALE` |
-| release id already installed and moved past | `ASSIGNMENT_SUPERSEDED` |
-| release id already rolled back from | `INSTALL_RETRY_BLOCKED_AFTER_ROLLBACK` |
+| Condition                                   | Refusal                                |
+| ------------------------------------------- | -------------------------------------- |
+| generation lower than the highest accepted  | `ASSIGNMENT_STALE`                     |
+| release id already installed and moved past | `ASSIGNMENT_SUPERSEDED`                |
+| release id already rolled back from         | `INSTALL_RETRY_BLOCKED_AFTER_ROLLBACK` |
 
 The device persists `lastAssignmentGeneration` as a high-water mark that never lowers, plus `supersededReleaseIds` and `failedRolledBackReleaseIds`. All three are in `journal.json` on the slot-shared store, written durably.
 
-**A governed downgrade still works**, which was the point of the ruling: the owner assigning an older *version* arrives with a **higher generation** and a release id the device has not superseded, so it installs normally. Version strings are never compared anywhere. Test: `ALLOWS a governed downgrade — an older VERSION under a newer generation`.
+**A governed downgrade still works**, which was the point of the ruling: the owner assigning an older _version_ arrives with a **higher generation** and a release id the device has not superseded, so it installs normally. Version strings are never compared anywhere. Test: `ALLOWS a governed downgrade — an older VERSION under a newer generation`.
 
 ### The smallest explicit mechanism, if you want the gap closed in the cloud
 
@@ -126,18 +126,18 @@ A tar reader was written rather than shelling out to `/usr/bin/tar` (which the d
 
 Every refusal the ruling listed, with a test that **builds the malicious archive**:
 
-| Required refusal | Code | Test |
-| --- | --- | --- |
-| absolute paths | `ENTRY_NAME_ABSOLUTE` | ✓ |
-| `..` traversal | `ENTRY_NAME_TRAVERSAL` | ✓ (plain, buried, **and via the ustar `prefix` field**) |
-| symlink escape | `ENTRY_TYPE_SYMLINK` | ✓ (refused even when the target looks harmless) |
-| hard-link escape | `ENTRY_TYPE_HARDLINK` | ✓ |
-| device nodes | `ENTRY_TYPE_DEVICE` | ✓ (char and block) |
-| unexpected ownership | `ENTRY_OWNERSHIP_NOT_ROOT` | ✓ |
-| setuid/setgid | `ENTRY_MODE_SETUID_SETGID` | ✓ (setuid, setgid, sticky) |
-| extraction outside the release root | `ENTRY_ESCAPES_ROOT` | ✓ (independent resolved-prefix check) |
-| unreasonable decompressed size | `ARCHIVE_TOO_LARGE` / `ARCHIVE_DECOMPRESSION_FAILED` | ✓ (a real decompression bomb) |
-| unreasonable file count | `ARCHIVE_TOO_MANY_ENTRIES` | ✓ |
+| Required refusal                    | Code                                                 | Test                                                    |
+| ----------------------------------- | ---------------------------------------------------- | ------------------------------------------------------- |
+| absolute paths                      | `ENTRY_NAME_ABSOLUTE`                                | ✓                                                       |
+| `..` traversal                      | `ENTRY_NAME_TRAVERSAL`                               | ✓ (plain, buried, **and via the ustar `prefix` field**) |
+| symlink escape                      | `ENTRY_TYPE_SYMLINK`                                 | ✓ (refused even when the target looks harmless)         |
+| hard-link escape                    | `ENTRY_TYPE_HARDLINK`                                | ✓                                                       |
+| device nodes                        | `ENTRY_TYPE_DEVICE`                                  | ✓ (char and block)                                      |
+| unexpected ownership                | `ENTRY_OWNERSHIP_NOT_ROOT`                           | ✓                                                       |
+| setuid/setgid                       | `ENTRY_MODE_SETUID_SETGID`                           | ✓ (setuid, setgid, sticky)                              |
+| extraction outside the release root | `ENTRY_ESCAPES_ROOT`                                 | ✓ (independent resolved-prefix check)                   |
+| unreasonable decompressed size      | `ARCHIVE_TOO_LARGE` / `ARCHIVE_DECOMPRESSION_FAILED` | ✓ (a real decompression bomb)                           |
+| unreasonable file count             | `ARCHIVE_TOO_MANY_ENTRIES`                           | ✓                                                       |
 
 Also refused: fifos, pax/GNU extended headers (`x`,`g`,`L`,`K` — the classic
 indirection escape), unknown typeflags, corrupt header checksums, control
@@ -167,23 +167,23 @@ The plan's "atomic switch by `rename(2)`" was **not sufficient**, and this was c
 
 `src/durable-write.ts` extracts the discipline already used by hand in
 `pairing-state.ts`, `bootstrap-state.ts`, `installation.ts` and
-`operational-credential-state.ts`: *write temp → fsync file → rename → fsync dir*.
+`operational-credential-state.ts`: _write temp → fsync file → rename → fsync dir_.
 It adds `swapSymlinkDurable` (symlink to a temp name → fsync dir → rename → fsync dir)
 and `fsyncTree` (files first, then directories bottom-up, so a directory entry
 can never become durable ahead of the contents it names).
 
 The nine-step sequence and the boot-time reconciliation table are implemented as planned. **Every step boundary has a test** that builds the exact on-disk state a cut at that instant would leave, then reconciles:
 
-| Boundary | Resolution | Test |
-| --- | --- | --- |
-| interrupted unpack | `.incoming` discarded, nothing else changed | ✓ |
-| promoted, not activated | release exists, `current` unchanged | ✓ |
-| journal `ACTIVATING`, switch never happened | discard; keep previous | ✓ |
-| switch landed, journal never advanced | adopt; enter the gate | ✓ |
-| gate never finished | re-run from zero | ✓ |
-| `current` payload gone | restore previous | ✓ |
-| nothing usable remains | remove `current`; image copy runs | ✓ |
-| reconcile run twice | idempotent | ✓ |
+| Boundary                                    | Resolution                                  | Test |
+| ------------------------------------------- | ------------------------------------------- | ---- |
+| interrupted unpack                          | `.incoming` discarded, nothing else changed | ✓    |
+| promoted, not activated                     | release exists, `current` unchanged         | ✓    |
+| journal `ACTIVATING`, switch never happened | discard; keep previous                      | ✓    |
+| switch landed, journal never advanced       | adopt; enter the gate                       | ✓    |
+| gate never finished                         | re-run from zero                            | ✓    |
+| `current` payload gone                      | restore previous                            | ✓    |
+| nothing usable remains                      | remove `current`; image copy runs           | ✓    |
+| reconcile run twice                         | idempotent                                  | ✓    |
 
 Plus the **invariant itself**, asserted over 24 combinations of journal phase × filesystem state:
 
@@ -202,7 +202,7 @@ That is the property acceptance test C will check on hardware, where the power a
 
 Reported: `runningSource` (`RELEASE` / `IMAGE_FALLBACK` / `UNKNOWN`), running release id and version, installed release id and version, **`stale`** (a restart would change what is running), last update result, and a `fallbackReason` that is never null when the image copy is running.
 
-The case that matters — *a release is installed but the shell started before it* — reports `IMAGE_FALLBACK`, `runningVersion: null`, `stale: true`, and "a release is installed but the shell started before it; a restart picks it up". **The image copy is never presented as the assigned release.**
+The case that matters — _a release is installed but the shell started before it_ — reports `IMAGE_FALLBACK`, `runningVersion: null`, `stale: true`, and "a release is installed but the shell started before it; a restart picks it up". **The image copy is never presented as the assigned release.**
 
 `formatReleaseStatusLine` emits one greppable journal line, so
 `journalctl -u kitluy-update-agent` answers "what is running and why" **without SSH**.
@@ -212,12 +212,15 @@ The case that matters — *a release is installed but the shell started before i
 ## 6. What was built
 
 ### Phase 1 — signing and trust
+
 - `scripts/pki/bootstrap-dev-pki.mjs` — adds a purpose-scoped Ed25519 **release-signing** key: `dev-release-signing.key.pem` (0600), `.pub.pem` (0644), and a public `dev-release-signing.json` trust record carrying `purpose: "release_signing"`. Deliberately **not** chained to the canonical root: release manifests are verified against a key **registry** matched by (keyId, keyVersion), not a chain, and implying a validation path the verifier does not have would be worse than none. Executed against a scratch directory; modes verified.
 
 ### Phase 2 — durable store
+
 - `src/durable-write.ts`, `src/release-store.ts` — layout, journal, staging, promotion, activation, rollback, reconciliation, pruning. The **U1 scope fence is code**: `assertProductPermitted` refuses every product but `device-shell`, and a test names `terminal-edge`, `firstboot-identity`, `cloud-registration`, `update-agent`, `health-reporter`, `operational-tls`, `hub-agent` and `terminal-client` as refused.
 
 ### Phase 3 — the update runtime
+
 - `src/release-verify.ts` — a **mirror** of the canonical verifier. The agent's `src/` imports no workspace package at runtime (the device closure is Node built-ins only), so the contract is duplicated and guarded by `release-verify-drift.test.ts`, which imports the real `@kitluy/device-identity` and compares **canonical bytes**, digests and verdicts across 31 cases. This follows the pattern already used for registration bytes, the operational CSR and the Hub claim.
 - `src/release-trust.ts` — loads `/etc/kitluy/trust`, refuses wrong purpose, wrong environment, private-key material (checked on the raw text before parsing), and malformed records. Absent is safe.
 - `src/release-assignment.ts` — the authority/transport split and the replay logic (§2).
@@ -227,7 +230,8 @@ The case that matters — *a release is installed but the shell started before i
 - `src/bin/update-bootstrap.ts` — **grown, not replaced**. `evaluateUpdate` → `evaluatePreconditions` with identical behaviour; the misleading `up_to_date` state is now `ready` (it never meant "up to date"); a new `no_usable_trust_anchor` distinguishes "anchors present but all refused" from "no anchors", which is a different fault and a different fix.
 
 ### Phase 5 — packing and signing (partial, see §7)
-- `scripts/development/release-pack.mjs` — collects the payload, writes a **reproducible** ustar (fixed mtime, sorted entries, uid/gid 0, no symlinks by construction), gzips, signs with the dev release key, and records **`buildId` = git short SHA + dirty flag** — the source-provenance link that did not exist before (the image build manifest records only the *upstream builder's* commit).
+
+- `scripts/development/release-pack.mjs` — collects the payload, writes a **reproducible** ustar (fixed mtime, sorted entries, uid/gid 0, no symlinks by construction), gzips, signs with the dev release key, and records **`buildId` = git short SHA + dirty flag** — the source-provenance link that did not exist before (the image build manifest records only the _upstream builder's_ commit).
 - `scripts/development/release-pack.test.mjs` (`pnpm release:pack:check`) — the cross-boundary proof: the packer's canonical bytes equal the **built device closure's**, the device verifies the packer's signature, a tampered manifest is refused, the device extracts what the packer wrote, the dev PKI record shape loads, purpose separation is enforced, and packing twice is byte-identical. **9/9.**
 - `package.json` — two script entries added in place (two-line diff).
 
@@ -237,12 +241,12 @@ The case that matters — *a release is installed but the shell started before i
 
 Phase 5 is **partial**. These were planned and are **not built**:
 
-| Not built | Why it stopped here |
-| --- | --- |
+| Not built                                                                                                                        | Why it stopped here                                                                                              |
+| -------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | `release-publish.mjs` — `create_release_draft_v1` → `sign_release_v1` → `promote_release_v1(…,'internal')` → `assign_release_v1` | needs a live development database. Writing it now would mean shipping unexercised code and reporting it as such. |
-| `release-service.mjs` — the `AssignmentSource` + `ArtifactSource` over mTLS, reading the governed rows | same; also the first place the mTLS client-auth posture will be exercised |
-| `verify-terminal.mjs` — automated post-update acceptance | needs a device |
-| Device Shell rendering its version and last-update state | touches `apps/kitluy-device-shell`; small, but not started |
+| `release-service.mjs` — the `AssignmentSource` + `ArtifactSource` over mTLS, reading the governed rows                           | same; also the first place the mTLS client-auth posture will be exercised                                        |
+| `verify-terminal.mjs` — automated post-update acceptance                                                                         | needs a device                                                                                                   |
+| Device Shell rendering its version and last-update state                                                                         | touches `apps/kitluy-device-shell`; small, but not started                                                       |
 
 The device side is complete and tested; **the workstation side can pack and sign but cannot yet publish or serve.** No hardware run has happened and none was attempted.
 
@@ -250,13 +254,13 @@ The device side is complete and tested; **the workstation side can pack and sign
 
 ## 8. Evidence discipline
 
-| State | U1 |
-| --- | --- |
-| `SOURCE IMPLEMENTED` | **yes** — phases 1–3 complete, phase 5 partial |
-| `TESTED-IN-DEV` | **yes** — 172 U1 tests + 9 cross-boundary checks + 711 agent tests, 0 failures; zero new regressions against a recorded baseline |
-| `IMAGE VERIFIED` | **no** — Phase 4 has not begun |
-| `HARDWARE VERIFIED` | **no** — acceptance A/B/C/D not attempted, no SD card touched, no device contacted |
-| `PILOT-PROVEN` / `PRODUCTION-PROVEN` | **not claimable** — BLK-005 |
+| State                                | U1                                                                                                                               |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `SOURCE IMPLEMENTED`                 | **yes** — phases 1–3 complete, phase 5 partial                                                                                   |
+| `TESTED-IN-DEV`                      | **yes** — 172 U1 tests + 9 cross-boundary checks + 711 agent tests, 0 failures; zero new regressions against a recorded baseline |
+| `IMAGE VERIFIED`                     | **no** — Phase 4 has not begun                                                                                                   |
+| `HARDWARE VERIFIED`                  | **no** — acceptance A/B/C/D not attempted, no SD card touched, no device contacted                                               |
+| `PILOT-PROVEN` / `PRODUCTION-PROVEN` | **not claimable** — BLK-005                                                                                                      |
 
 Nothing was committed or pushed. No migration was created. No owner decision was made or assumed. The bootstrap/runtime classification was not changed: OD-U1-2 = C is enforced in code and asserted by test.
 
