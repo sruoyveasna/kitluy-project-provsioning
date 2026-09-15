@@ -42,4 +42,5 @@ export * from "./operational-csr-bytes.js";
 export * from "./operational-credential-state.js";
 export * from "./operational-certificate-verification.js";
 export * from "./operational-tls-client.js";
+export * from "./operational-recovery-identity-bytes.js";
 export * from "./adapters/http-operational-certificate-client.js";

@@ -607,6 +607,48 @@ export async function issueFirstOperationalCertificate(
     return refuse("OPCERT_GOVERNED_ISSUANCE_REFUSED", "issuance returned no credential");
   }
 
+  return mintAndRecordOperationalArtifact(pool, {
+    credentialId: credential.credentialId,
+    deviceRecordId: request.deviceRecordId,
+    operationalPublicKeyPem: request.operationalPublicKeyPem,
+    actorRef: request.actorRef,
+    paths,
+    chain,
+    governedReplayed: governed.outcome === "REPLAYED",
+  });
+}
+
+export interface OperationalArtifactInput {
+  /** A credential the governed pipeline has already FINALIZED. */
+  readonly credentialId: string;
+  readonly deviceRecordId: string;
+  /** The key the caller proved possession of. The leaf is minted over it. */
+  readonly operationalPublicKeyPem: string;
+  readonly actorRef: string;
+  readonly paths: NonNullable<ReturnType<typeof resolveDevPkiPaths>>;
+  readonly chain: { readonly rootCertificatePem: string; readonly intermediateCertificatePem: string };
+  /** Whether the governed pipeline replayed a credential it had already issued. */
+  readonly governedReplayed: boolean;
+}
+
+/**
+ * Steps 4b to 6 of every operational issuance: read the finalized credential,
+ * replay its artifact or mint and verify the leaf, and persist it before
+ * reporting success.
+ *
+ * Shared by first issuance and by re-flash recovery (group 0224) so the one
+ * path that turns a governed credential into an X.509 artifact exists once.
+ */
+export async function mintAndRecordOperationalArtifact(
+  pool: pg.Pool,
+  input: OperationalArtifactInput,
+): Promise<FirstOperationalIssuanceOutcome> {
+  const refuse = (
+    refusalCode: FirstIssuanceRefusalCode,
+    detail: string,
+  ): FirstOperationalIssuanceOutcome => ({ outcome: "REFUSED", refusalCode, detail });
+  const { paths, chain } = input;
+
   // -- 4b. THE AUTHORITATIVE WINDOW, READ FROM THE CREDENTIAL ----------------
   // NOT from `finalize`'s optional fields. On a REPLAY the governed door returns
   // only `credential_id`, `serial_number` and `certificate_generation` — it does
@@ -632,7 +674,7 @@ export async function issueFirstOperationalCertificate(
          from kitluy_devices.device_credentials cr
          left join kitluy_devices.device_certificates c2 on c2.credential_id = cr.credential_id
         where cr.credential_id = $1::uuid`,
-      [credential.credentialId],
+      [input.credentialId],
     );
     return rows[0];
   });
@@ -646,7 +688,7 @@ export async function issueFirstOperationalCertificate(
   if (authoritative.existing_pem !== null && authoritative.existing_sha !== null) {
     return {
       outcome: "REPLAYED",
-      credentialId: credential.credentialId,
+      credentialId: input.credentialId,
       certificateGeneration: authoritative.certificate_generation,
       serialNumber: authoritative.serial_number,
       certificateSha256: authoritative.existing_sha,
@@ -665,8 +707,8 @@ export async function issueFirstOperationalCertificate(
   try {
     leafPem = withIssuingCaKey(paths, (issuerPrivateKeyPem) =>
       signOperationalLeaf({
-        subjectPublicKeyPem: request.operationalPublicKeyPem,
-        deviceRecordId: request.deviceRecordId,
+        subjectPublicKeyPem: input.operationalPublicKeyPem,
+        deviceRecordId: input.deviceRecordId,
         serialNumber: authoritative.serial_number,
         notBefore: authoritative.not_before,
         notAfter: authoritative.not_after,
@@ -728,7 +770,7 @@ export async function issueFirstOperationalCertificate(
       const { rows } = await c.query<{ result: Record<string, unknown> }>(
         `select kitluy_devices.record_operational_certificate_v1(
                   $1::uuid, $2::text, $3::text, $4::text, $5::text) as result`,
-        [credential.credentialId, leafPem, chainPem, OPERATIONAL_KEY_ALGORITHM, request.actorRef],
+        [input.credentialId, leafPem, chainPem, OPERATIONAL_KEY_ALGORITHM, input.actorRef],
       );
       return (rows[0]?.result ?? {}) as typeof recorded;
     });
@@ -746,8 +788,8 @@ export async function issueFirstOperationalCertificate(
   }
 
   return {
-    outcome: governed.outcome === "REPLAYED" ? "REPLAYED" : "ISSUED",
-    credentialId: credential.credentialId,
+    outcome: input.governedReplayed ? "REPLAYED" : "ISSUED",
+    credentialId: input.credentialId,
     certificateGeneration: authoritative.certificate_generation,
     serialNumber: authoritative.serial_number,
     // FROM THE DATABASE, computed there over the DER. Not recomputed here, so

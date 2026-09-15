@@ -58,6 +58,11 @@ import {
   verifyOperationalCertificate,
   type VerificationFailure,
 } from "./operational-certificate-verification.js";
+import {
+  RecoveryIdentityError,
+  type RecoveryIdentityProof,
+  type RecoveryIdentitySigner,
+} from "./operational-recovery-identity-bytes.js";
 
 /** What the registry answered. Public material only. */
 export interface IssuanceResponse {
@@ -90,6 +95,8 @@ export interface OperationalCertificateClient {
     readonly csr: OperationalCsrFields;
     readonly operationalPublicKeyPem: string;
     readonly proofOfPossessionBase64: string;
+    /** The device identity proof. The registry requires it for recovery only. */
+    readonly identity?: RecoveryIdentityProof;
   }): Promise<IssuanceCallResult>;
 }
 
@@ -106,6 +113,13 @@ export interface EnsureCertificateDeps {
   readonly paths?: typeof OPERATIONAL_PATHS;
   /** Injected only so tests can make identifiers deterministic. */
   readonly newId?: () => string;
+  /**
+   * Signs the recovery identity proof with the device identity key. A board
+   * that was re-flashed already holds a credential in the cloud, and the
+   * registry issues it a new one only against this proof (group 0224). Absent,
+   * first issuance still works and a recovery is refused with a typed code.
+   */
+  readonly identitySigner?: RecoveryIdentitySigner;
 }
 
 export type EnsureCertificateOutcome =
@@ -219,9 +233,9 @@ export async function ensureOperationalCertificate(
     correlationId: requestState.correlationId,
   };
 
+  const preimage = Buffer.from(operationalCsrBytes(csr));
   let proofOfPossessionBase64: string;
   try {
-    const preimage = Buffer.from(operationalCsrBytes(csr));
     proofOfPossessionBase64 = withOperationalPrivateKey(
       (privateKey) => cryptoSign("sha256", preimage, privateKey).toString("base64"),
       paths.privateKey,
@@ -235,11 +249,31 @@ export async function ensureOperationalCertificate(
     };
   }
 
+  // --- 3b. THE DEVICE IDENTITY PROOF, OVER THE SAME BYTES ------------------
+  // Deterministic for the persisted request: Ed25519 signatures are, so a
+  // replay after a lost response carries the identical proof.
+  let identity: RecoveryIdentityProof | undefined;
+  if (deps.identitySigner !== undefined) {
+    try {
+      identity = deps.identitySigner(preimage);
+    } catch (error) {
+      return {
+        kind: "blocked",
+        detail:
+          error instanceof RecoveryIdentityError
+            ? error.message
+            : "the recovery identity proof could not be signed",
+        phase: currentPhase(paths),
+      };
+    }
+  }
+
   // --- 4. ASK ----------------------------------------------------------------
   const call = await deps.client.request({
     csr,
     operationalPublicKeyPem: key.publicKeyPem,
     proofOfPossessionBase64,
+    ...(identity === undefined ? {} : { identity }),
   });
   if (call.kind === "unreachable") {
     // The request state survives, so the next boot replays this exact request.

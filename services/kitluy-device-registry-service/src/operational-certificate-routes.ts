@@ -9,7 +9,7 @@
  * THIS ROUTE DECIDES NOTHING
  * ===========================================================================
  * It is transport. It parses a `kitluy.csr.v1` request, hands it to
- * `issueFirstOperationalCertificate`, and renders the answer. Every security
+ * `obtainOperationalCertificate`, and renders the answer. Every security
  * decision — proof of possession, generation allocation, serial, validity
  * window, issuer, environment, trusted time — is made behind the governed doors
  * and is deliberately NOT expressible in this body.
@@ -28,10 +28,16 @@
  * renders the refusal code verbatim. A device cannot become another device by
  * claiming its id, because the governed doors check the assignment, the
  * lifecycle state and the generation head before anything is spent.
+ *
+ * A device that ALREADY holds a credential and presents a new key — a re-flashed
+ * board — is recovery (group 0224), and must also carry `identityPublicKeyPem`
+ * and `identityProof`: a signature by its device identity key over
+ * `recoveryIdentityProofBytes`. Which composition answers is decided behind
+ * `obtainOperationalCertificate`, not here.
  */
 import { randomUUID } from "node:crypto";
 
-import { issueFirstOperationalCertificate } from "./first-operational-issuance.js";
+import { obtainOperationalCertificate } from "./reflash-credential-recovery.js";
 import type { HardwareTrustLevel } from "@kitluy/device-identity";
 import type pg from "pg";
 import { errorEnvelope, httpStatusFor } from "@kitluy/api-errors";
@@ -69,6 +75,9 @@ const BODY_FIELDS: readonly string[] = [
   "nonce",
   "correlationId",
   "proofOfPossession",
+  // Recovery only (group 0224). Both or neither.
+  "identityPublicKeyPem",
+  "identityProof",
 ];
 
 export interface OperationalCertificateRouterDeps {
@@ -212,14 +221,28 @@ export function createOperationalCertificateRouter(
         return invalid(correlationId, "proofOfPossession must not be empty");
       }
 
+      const identityPublicKeyPem = text("identityPublicKeyPem");
+      const identityProofText = text("identityProof");
+      if ((identityPublicKeyPem === null) !== (identityProofText === null)) {
+        return invalid(correlationId, "identityPublicKeyPem and identityProof are sent together or not at all");
+      }
+      if (identityPublicKeyPem !== null && !identityPublicKeyPem.includes("PUBLIC KEY")) {
+        return invalid(correlationId, "identityPublicKeyPem must be a PEM public key");
+      }
+      const identityProof =
+        identityProofText === null ? undefined : Buffer.from(identityProofText, "base64");
+      if (identityProof !== undefined && identityProof.length === 0) {
+        return invalid(correlationId, "identityProof must be base64 and not empty");
+      }
+
       // The device's `requestedAt` is carried through because it is part of the
       // SIGNED preimage and the proof would not verify without it. It does NOT
       // become the certificate's validity anchor — group 0204 (finding C-2)
       // moved that to the server's own governed clock, and this route has no way
       // to influence it.
-      let outcome: Awaited<ReturnType<typeof issueFirstOperationalCertificate>>;
+      let outcome: Awaited<ReturnType<typeof obtainOperationalCertificate>>;
       try {
-        outcome = await issueFirstOperationalCertificate(
+        outcome = await obtainOperationalCertificate(
           deps.pool,
           {
             deviceRecordId,
@@ -235,6 +258,9 @@ export function createOperationalCertificateRouter(
             requestedAt: new Date(requestedAt),
             trustedTimeStatus: "trusted",
             actorRef: `device/${deviceRecordId}`,
+            ...(identityPublicKeyPem === null || identityProof === undefined
+              ? {}
+              : { identityPublicKeyPem, identityProof: new Uint8Array(identityProof) }),
           },
           deps.env,
         );
@@ -258,7 +284,9 @@ export function createOperationalCertificateRouter(
         // and `OPCERT_POSSESSION_PROOF_FAILED` need completely different
         // operator actions, and a surface that flattened them to "refused" would
         // make the difference invisible.
-        const retryable = outcome.refusalCode === "OPCERT_CA_UNAVAILABLE";
+        const retryable =
+          outcome.refusalCode === "OPCERT_CA_UNAVAILABLE" ||
+          outcome.refusalCode === "OPCERT_ROUTE_UNAVAILABLE";
         deps.logger?.info({
           event: "operational-certificate-refused",
           correlationId,
@@ -340,6 +368,7 @@ export function createOperationalCertificateRouter(
           certificatePem: outcome.certificatePem,
           chainPem: outcome.chainPem,
           publicKeyAlgorithm: outcome.publicKeyAlgorithm,
+          ...(outcome.recovered === true ? { recovered: true } : {}),
           ...(outcome.notBefore === undefined ? {} : { notBefore: outcome.notBefore }),
           ...(outcome.notAfter === undefined ? {} : { notAfter: outcome.notAfter }),
         },

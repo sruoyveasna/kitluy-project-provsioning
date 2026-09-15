@@ -30,6 +30,7 @@ import type {
   OperationalCertificateClient,
 } from "../operational-tls-client.js";
 import type { OperationalCsrFields } from "../operational-csr-bytes.js";
+import type { RecoveryIdentityProof } from "../operational-recovery-identity-bytes.js";
 
 export const OPERATIONAL_CERTIFICATE_PATH = "/v1/operational-certificate";
 
@@ -100,6 +101,7 @@ export function createHttpOperationalCertificateClient(
       csr: OperationalCsrFields;
       operationalPublicKeyPem: string;
       proofOfPossessionBase64: string;
+      identity?: RecoveryIdentityProof;
     }): Promise<IssuanceCallResult> {
       const controller = new AbortController();
       const deadline = setTimeout(() => {
@@ -127,6 +129,13 @@ export function createHttpOperationalCertificateClient(
             requestedAt: input.csr.requestedAt,
             nonce: input.csr.nonce,
             proofOfPossession: input.proofOfPossessionBase64,
+            // Recovery only (registry group 0224): both fields or neither.
+            ...(input.identity === undefined
+              ? {}
+              : {
+                  identityPublicKeyPem: input.identity.identityPublicKeyPem,
+                  identityProof: input.identity.identityProofBase64,
+                }),
           }),
           signal: controller.signal,
         });
