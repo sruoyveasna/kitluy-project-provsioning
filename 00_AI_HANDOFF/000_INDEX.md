@@ -4,6 +4,13 @@ Read the newest relevant handoff before starting work. Naming:
 `YYYY-MM-DD__<AREA>__<TASK-ID>__<SLUG>__AI-HANDOFF.md` under the matching
 subfolder (repository/ shared/ apps/ services/ data/ infrastructure/ reviews/).
 
+## The hardware stack and both images carry credential recovery (2026-09-15)
+
+Record: [`edge-platform/40_THE_HARDWARE_STACK_AND_BOTH_IMAGES_CARRY_RECOVERY.md`](edge-platform/40_THE_HARDWARE_STACK_AND_BOTH_IMAGES_CARRY_RECOVERY.md)
+· **IMPLEMENTED · TESTED · IMAGE VERIFIED** · NOT hardware verified · committed and pushed to `provisioning/dev` · no hosted write · no board flashed
+
+Closes handoff 39 §8 steps 1–3. **Database:** 0224 applied unchanged to `kitluy-fresh` (backup first), ledger 122 → 123, both doors and the evidence table verified, 16 data fingerprints identical before and after. **Fleet service** `:8787` restarted only after that: health 200, routes load, and a live probe reached `classify_operational_certificate_request_v1` on PG 15 (`KLUY-KEY-NO-DEVICE` for an unknown device), with no device mutated. **Packaging** refused twice, both for real: neither image listed the new recovery module, and the Store Hub overlay had never picked up U1's release closure. Both lists were fixed (`c158dfc`); on a Hub the release agent stays inert (`no_trust_anchor`). **Images** built from `c158dfc`: Store Hub `kitluy-storehub-os-arm64.img.zst` `1aee48ff…e882c2b3`, Pi Terminal `kitluy-pos-terminal-wayland-arm64.img.zst` `d198e129…4766d028`. Every committed `usr/lib/kitluy` overlay file was read back out of each image's erofs `system_a` with the builder's own erofs-utils and matches: Hub 100/100, Terminal 55/55. That includes the recovery identity proof and `selectOperationalHubIdentity`. Tests: recovery 14/14, firstboot opcert 93/93, Hub 447/0, and opcert issuance 53/54 (the 1 failure is pre-existing). **Correction:** `pnpm dev:device:unassign` is hosted-only and refuses `kitluy-fresh`. The re-flash unassign on the hardware stack is `revoke_device_assignment_v1` as `kitluy_fleet_governor`, and it needs owner confirmation. The edge-runtime mount still breaks on every reboot.
+
 ## A re-flashed device recovers its operational credential, and the Hub agrees on who it is (2026-09-14)
 
 Record: [`edge-platform/39_A_REFLASHED_DEVICE_RECOVERS_ITS_CREDENTIAL.md`](edge-platform/39_A_REFLASHED_DEVICE_RECOVERS_ITS_CREDENTIAL.md)
