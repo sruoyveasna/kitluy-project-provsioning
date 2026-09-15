@@ -4,6 +4,13 @@ Read the newest relevant handoff before starting work. Naming:
 `YYYY-MM-DD__<AREA>__<TASK-ID>__<SLUG>__AI-HANDOFF.md` under the matching
 subfolder (repository/ shared/ apps/ services/ data/ infrastructure/ reviews/).
 
+## A re-flashed device recovers its operational credential, and the Hub agrees on who it is (2026-09-14)
+
+Record: [`edge-platform/39_A_REFLASHED_DEVICE_RECOVERS_ITS_CREDENTIAL.md`](edge-platform/39_A_REFLASHED_DEVICE_RECOVERS_ITS_CREDENTIAL.md)
+· **IMPLEMENTED-IN-DEV, AUTOMATED TESTS PASS** · NOT hardware verified · not committed · no hosted write · `kitluy-fresh` NOT migrated · no image rebuilt
+
+Closes both blockers from the U1 stop report (§9b, §11) in code. **Recovery:** migration 0224 adds one governed door, `reserve_device_credential_recovery_v1`, feeding the existing rotation pipeline — a re-flashed, re-paired board signs its certificate request with the identity key of its current enrollment, the door requires that the old certificate's enrollment is a strict ancestor of the current one, and the board gets generation N+1 with the same device record, the same asset tag, the lost key superseded and no reset. Proactive rotation stays disabled. It also fixes a latent defect: no generation-2 X.509 artifact could ever be recorded (one-active-artifact index). **Hub:** runtime eligibility now picks the same trusted, deployed identity pairing does, so a stale revoked identity no longer yields 503 `HUB_NOT_OPERATIONAL`. Evidence: recovery security suite 14/14 (real DB, dev CA, route and firstboot client), Hub agent 447/447 with the Hub database, five mutation tests each caught. `kitluy-repo17` was caught up to parity first (backup taken; 0189 segfaults the local Postgres and was not applied). **Before any flash:** apply 0224 to `kitluy-fresh` BEFORE restarting the `:8787` fleet service, then re-package and rebuild both images.
+
 ## A Pi Terminal is served by its Store Hub (2026-09-11)
 
 Record: [`edge-platform/38_A_TERMINAL_IS_SERVED_BY_ITS_STORE_HUB.md`](edge-platform/38_A_TERMINAL_IS_SERVED_BY_ITS_STORE_HUB.md)

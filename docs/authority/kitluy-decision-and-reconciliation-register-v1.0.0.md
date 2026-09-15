@@ -4618,3 +4618,106 @@ guard counts granted capabilities only); 0163/0171 select "the Hub" without a
 `device_class` filter; an optional 0171 response extension with the §7
 context; a retire/replace door for physical terminals; the canonical
 migration manifest lags 0188+.
+
+## KLD-2026-09-14-REFLASH-CREDENTIAL-RECOVERY-001 — a re-flashed, already-known device recovers its operational credential through the rotation pipeline (OWNER 2026-09-14)
+
+Owner instruction, verbatim: "Implement and verify governed
+operational-credential recovery for an already-known physical device after
+re-flash, using the existing credential-renewal/key-rotation mechanism, without
+deleting or replacing the permanent device identity and without destructive
+database resets. Do not resume U1 hardware flashing until this path passes
+automated tests. Then fix the Store Hub trusted/deployed identity-selection
+defect and verify it with stale + current Hub identity rows."
+
+**The failure it answers.** U1 hardware report 2026-09-12 §9b: a re-flashed
+board that already holds an operational certificate is refused for ever
+(`KLUY-KEY-GENERATION-TAKEN`), because first issuance binds its key at the
+literal generation 1 and nothing routes the board to renewal. The only exit used
+was an owner-ordered table-wide reset of the `kitluy_devices` and
+`kitluy_releases` tables on the local `kitluy-fresh` stack (recorded here
+retroactively from that report; it gave the Store Hub a new cloud identity and is
+not a sanctioned procedure).
+
+**Implemented (development only), migration group 0224:**
+
+1. `renewal_policy.allow_reflash_credential_recovery` +
+   `reflash_recovery_approved_by_decision_ref`, with a CHECK that refuses the
+   first without the second. Development is enabled under THIS decision id.
+   **Proactive rotation (`allow_key_rotation`) stays disabled** — enabling
+   recovery does not enable it, and the migration's assertions refuse otherwise.
+2. `reserve_device_credential_recovery_v1` — the only new door. It creates a
+   `rotate_key` reservation in `device_renewal_reservations` when ALL hold:
+   policy permits; the request is signed by the Ed25519 identity key of the
+   device's current sealed enrollment (verified by the service, bound by the
+   door); the incumbent certificate artifact's enrollment is a strict ancestor
+   of that enrollment through `supersedes_enrollment_id` (clock-free re-flash
+   evidence); the device is `awaiting_trust` with a live assignment at its
+   current generation and no open trust incident; the incumbent is not revoked.
+   Why it was admitted is written to the append-only
+   `device_credential_recovery_evidence`.
+3. Everything after the reservation is the existing pipeline, unforked:
+   `register_generation_key_v2` → the shared prepare/sign/finalize bound to the
+   reservation → the same X.509 artifact door → `confirm_provider_key_activation_v1`,
+   which activates the recovered key and supersedes the lost one. The device is
+   its own key provider: it proved possession of the new private half in the
+   same request.
+4. A narrow trigger marks the previous generation's X.509 artifact `superseded`
+   when the current head generation's artifact is recorded. Group 0201's
+   one-active-artifact index made every generation-2 artifact fail before this.
+5. `classify_operational_certificate_request_v1` routes the certificate route:
+   first issuance for a device with no credential or for the generation-1 key
+   retrying; recovery otherwise. First issuance is unchanged.
+6. The device (`kitluy-operational-tls`) signs every certificate request with
+   its identity key under the domain separator
+   `kitluy.opcert-recovery-identity.v1`, bound to SHA-256 of the exact
+   `kitluy.csr.v1` bytes.
+
+**Preserved:** the permanent `device_record_id`, the asset tag (the server does
+not rename a known board), every enrollment, assignment and append-only row. No
+row is removed and no reset is performed. The credential head advances.
+
+**Re-pairing a re-flashed Store Hub** is the existing operator procedure:
+`revoke_device_assignment_v1` (as `pnpm dev:device:unassign` does) returns the
+Hub to `enrolled`, and a new pairing code re-pairs it at a new assignment
+generation. Recovery requires that state; it does not bypass it.
+
+**Explicitly NOT decided here (open):**
+
+- Pilot and production recovery — the tables and the door are development-only
+  (KLD-2026-08-26-FIRST-ISSUANCE-RECOVERY-001 "Not decided here" still stands).
+- Whether recovery should REVOKE the incumbent credential rather than leave it
+  bounded by the existing three-day overlap cap. The lost key is superseded; the
+  old card, if kept, can still present the old certificate inside that window.
+- Re-pairing an ACTIVE Pi Terminal after a re-flash through the terminal pairing
+  session door (0213/0220) was not exercised; the suite proves the Store Hub
+  path. The recovery door itself is device-class agnostic.
+
+**Evidence:** `services/kitluy-device-registry-service/test/reflash-credential-recovery.adversarial.test.ts`
+(14 tests, formal security suite, real database and development CA, including
+the real firstboot client adopting generation 1, being re-flashed, and adopting
+generation 2 through the real route). Mutation-tested: removing the identity
+binding, the re-flash evidence, the service's signature verification, or the
+artifact supersession trigger each fails the suite. NOT hardware verified.
+
+## KLREC-2026-09-14-HUB-IDENTITY-SELECTION-001 — eligibility and pairing disagreed about which identity is the Store Hub (FIXED 2026-09-14)
+
+U1 hardware report 2026-09-12 §11: after a cloud re-identification the Hub's
+local `edge_identity.hub_device` held the previous identity (`revoked`; it
+cannot be removed because `pairing_receipt` references it and is append-only)
+beside the current one. `begin_terminal_pairing_v1` (hub migration 0042)
+selects the oldest TRUSTED, DEPLOYED row and pairing succeeded;
+`runtime-bootstrap.ts` selected the oldest row UNCONDITIONALLY, found it revoked,
+and refused runtime eligibility, current configuration and staff sessions with
+503 `HUB_NOT_OPERATIONAL`.
+
+**Resolution:** `selectOperationalHubIdentity` applies exactly 0042's selection.
+Only when no operational identity exists does the newest row decide between
+`HUB_RETIRED` and `HUB_NOT_OPERATIONAL`. No higher-authority decision was
+overridden: the fix makes the Hub-agent read agree with the governed pairing
+door. **Evidence:** two cases in
+`services/kitluy-hub-agent/test/t1-bootstrap-routes.integration.test.ts` over
+the real mTLS routes and Hub database with a stale revoked identity older than
+the current one (eligibility and configuration 200 with the current
+`hubDeviceId`; stale-only 503 `HUB_NOT_OPERATIONAL`; retired current identity
+403 `HUB_RETIRED`); restoring the old query reproduces the hardware 503. Needs a
+Store Hub image rebuild to reach hardware; NOT hardware verified.
