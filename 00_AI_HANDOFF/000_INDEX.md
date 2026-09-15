@@ -4,6 +4,37 @@ Read the newest relevant handoff before starting work. Naming:
 `YYYY-MM-DD__<AREA>__<TASK-ID>__<SLUG>__AI-HANDOFF.md` under the matching
 subfolder (repository/ shared/ apps/ services/ data/ infrastructure/ reviews/).
 
+## REFLASH-HARDENING-001 — a re-paired Store Hub requests at its real generation, and a stale request blocks nothing (2026-09-15)
+
+Record: [`edge-platform/43_REFLASH_HARDENING_A_REPAIRED_HUB_NEEDS_NO_WORKAROUND.md`](edge-platform/43_REFLASH_HARDENING_A_REPAIRED_HUB_NEEDS_NO_WORKAROUND.md)
+· **IMPLEMENTED · TESTED · IMAGE VERIFIED · HARDWARE VERIFICATION PENDING** · migration **0226** · commit `0dd3e1c` · no board flashed
+
+Removes the two workarounds the hardware run needed.
+
+**Defect C (cloud).** The recovery door reserved and the key was registered before issuance saw a stale assignment generation, so the leftover reservation and spent key blocked the corrected request.
+
+- `reserve_device_credential_recovery_v2` refuses `KLUY-RECOVERY-STALE-ASSIGNMENT` before any write, then calls v1 unchanged.
+
+**Defect B (cloud and board).** The Hub was never told its generation.
+
+- `hub_pairing_assignment_generation_v1` lets `/v1/hub-pairing` return `assignmentGeneration`; `pairing-state.json` persists it; `paired-identity.ts` reads it (a legacy file assumes 1 and logs it).
+- A saved request for another generation is rebuilt with the same key and a new request id.
+
+**Tests.**
+
+- Recovery suite 18/18, including a new automated **Pi Terminal** recovery and the real firstboot client rebuilding a stale request.
+- Six mutations, each caught.
+- Pre-existing failures identical to baseline.
+
+**Environments.** 0226 applied to `kitluy-repo17` and `kitluy-fresh` after backups; fleet service rebuilt and restarted; a rolled-back probe on the real Hub refused a stale generation with nothing written.
+
+**Images, both rebuilt** (the Terminal packages the changed modules) and read back from the final erofs:
+
+- Store Hub `kitluy-storehub-os-arm64.img.zst` `898964e1…811894d` (100/100 overlay files match);
+- Pi Terminal `kitluy-pos-terminal-wayland-arm64.img.zst` `e1e8ec30…f9a8adafc0ae` (55/55).
+
+**Next:** the Store Hub re-flash in §8 must pass with no generation override, abandon or key reset.
+
 ## Both re-flashed boards recover their credentials, and the Terminal is served again (2026-09-15)
 
 Record: [`edge-platform/42_BOTH_REFLASHED_BOARDS_RECOVER_AND_THE_TERMINAL_IS_SERVED.md`](edge-platform/42_BOTH_REFLASHED_BOARDS_RECOVER_AND_THE_TERMINAL_IS_SERVED.md)

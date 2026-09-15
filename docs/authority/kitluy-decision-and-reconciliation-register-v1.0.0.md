@@ -4921,3 +4921,43 @@ cloud authority; these are the development stand-ins for the BLK-006 producer.
 - carry the real assignment generation;
 - retire superseded rows in the same transaction;
 - make re-publishing close prior grants.
+
+## KLREC-2026-09-15-REFLASH-HARDENING-001 — defects B and C fixed in code (IMPLEMENTED · TESTED · IMAGE VERIFIED, HARDWARE VERIFICATION PENDING, 2026-09-15)
+
+Resolves in code `KLREC-2026-09-15-RECOVERY-RESERVES-BEFORE-GENERATION-CHECK-001`
+(C) and `KLREC-2026-09-15-HUB-REQUEST-ASSIGNMENT-GENERATION-001` (B), both
+recorded above as OPEN. Owner task REFLASH-HARDENING-001, handoff 43, commit
+`0dd3e1c`, migration group 0226.
+
+**C.**
+- `reserve_device_credential_recovery_v2` takes the request's assignment
+  generation and refuses a mismatch as `KLUY-RECOVERY-STALE-ASSIGNMENT` before
+  v1's replay, eligibility or any write, then delegates to v1 unchanged.
+- The registry service calls v2. v1's owner, ACL and search path are unchanged.
+- **Proven:** a stale request leaves no reservation, key, head advance, artifact
+  or evidence, and the same key then recovers. This holds for a Store Hub, for
+  the real firstboot client, and for a Pi Terminal.
+
+**B.**
+- `hub_pairing_assignment_generation_v1` (one pending Store Hub assignment,
+  `kitluy_hub_pairing_service` only) lets `/v1/hub-pairing` return
+  `assignmentGeneration`.
+- The Hub console persists it; `paired-identity.ts` reads it. A legacy file
+  assumes 1 and says so.
+- A saved request for a different generation is rebuilt with the same key and a
+  new request id.
+
+**Mutation-proven.** Removing v2's check, the composition's or route's field,
+the paired-identity read, the rebuild, or the transport parse each fails at
+least one test.
+
+**Applied** to `kitluy-repo17` and `kitluy-fresh` after backups; fleet service
+rebuilt and restarted.
+
+**Workarounds retired pending hardware:** the `KITLUY_ASSIGNMENT_GENERATION`
+drop-in and `abandon_generation_key_v1` plus a new key must not be needed on the
+next Store Hub re-flash (handoff 43 §8). B and C stay OPEN in the hardware sense
+until that run passes.
+
+**Out of scope, still open:** D, E, E2, F (Hub projection tooling), D1
+(topology).
