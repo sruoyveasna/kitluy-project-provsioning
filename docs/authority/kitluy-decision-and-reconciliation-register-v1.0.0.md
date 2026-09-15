@@ -4721,3 +4721,102 @@ the current one (eligibility and configuration 200 with the current
 `hubDeviceId`; stale-only 503 `HUB_NOT_OPERATIONAL`; retired current identity
 403 `HUB_RETIRED`); restoring the old query reproduces the hardware 503. Needs a
 Store Hub image rebuild to reach hardware; NOT hardware verified.
+
+## KLD-2026-09-15-TERMINAL-TOPOLOGY-001 — terminal topology is owned by the business vertical, not by KitLuy globally (OWNER CLARIFICATION 2026-09-15)
+
+Owner architecture clarification, 2026-09-15, stated as the rule for all future
+terminal work:
+
+```text
+ONE generic KitLuy terminal platform
+  -> business vertical
+  -> vertical-specific logical terminal profiles
+  -> terminal seats / instances
+  -> physical Raspberry Pi devices
+  -> desired runtime configuration
+```
+
+1. KitLuy has no universal fixed terminal architecture. The business vertical
+   determines which terminal profiles exist, which are required or optional, how
+   many instances may exist, and which profiles one physical terminal may run.
+2. A logical terminal profile is a business/runtime role, not a Raspberry Pi.
+   Logical profile count ≠ physical device count; a terminal number is not a
+   global hardware slot.
+3. Profile identifiers are namespaced by vertical (`laundry.t3.ready_scan_in`). A
+   bare `T3` is never a globally unique semantic identifier.
+4. One generic Pi Terminal image. The control plane decides what a device
+   becomes after provisioning. No per-vertical or per-profile images.
+5. Business vertical, logical profile, terminal seat, physical device, device
+   identity and runtime desired state stay separate identifiers.
+6. Portals render; the Management API and canonical backend validate. UI hiding
+   is never the security boundary. The Store Hub validates what a terminal may
+   run; discovery never implies authorization.
+
+**Relation to existing decisions:** consistent with, and supersedes nothing in,
+KLV4-DEC-005 (Laundry T1–T4, OWNER-LOCKED) and KLD-2026-07-26-002 Group 2
+(namespaced Laundry identifiers). T1–T4 is confirmed as the **Laundry** vertical
+contract. The reconciliation audit (`00_AI_HANDOFF/edge-platform/41_TERMINAL_TOPOLOGY_IS_VERTICAL_DRIVEN.md`)
+found no current authoritative document stating a global terminal model; the
+Café T1–T5 model exists only in superseded documents.
+
+**Explicitly NOT decided here:** Café profile identifiers or activation, any
+other vertical's topology, per-store instance caps, and the pairing semantics of
+a seat with several profiles (`KLREC-2026-09-15-MULTI-PROFILE-SEAT-PAIRING-001`).
+
+## KLREC-2026-09-15-MULTI-PROFILE-SEAT-PAIRING-001 — a seat with several profiles pairs into its first role, and the Hub serves only T1 (OPEN — OWNER DECISION REQUIRED)
+
+The cloud keeps a seat's roles in the order the Partner ticked them (0213
+ordinal) and delivers them in that order. The terminal pairs into the first key
+(`edge-session.ts` `profileCodes?.[0]`). The Hub pairing receipt binds that one
+profile. `readRuntimeEligibility` then requires the chosen grant to be
+`laundry.t1.intake_cashier` and equal to the receipt, choosing among grants with
+`order by assignment_version desc limit 1` and no tie-breaker, while the
+development publisher gives every grant of a snapshot the same version.
+
+**Reproduced 2026-09-15** on the real Hub LAN routes and the local Hub database
+(temporary test, removed): a T2-first seat is refused `403 PROFILE_NOT_T1`; a
+T1-first seat passed 5 of 5, which the query does not guarantee. Development
+data on `kitluy-fresh`: seat `Pi HEllo` (`KL-1CB3577C26A7`, the U1 acceptance
+terminal) is T2, T1, T3, T4. Not observed on hardware.
+
+**Conflict:** the cloud models a seat as a role set of 1–8 profiles (0213,
+KLD-2026-09-04-TERMINAL-PAIRING-DOORS-001) and the owner decisions describe one
+Pi running "T1 + T2". The Hub pairing receipt, the terminal local store and
+runtime eligibility each carry exactly one profile.
+
+**Owner decision required:** does a terminal with several profiles pair into its
+whole role set, or into one profile, and if one, chosen how? Until then, the
+no-code workaround for a development seat is to make T1 its first role while its
+assignment is revoked. `set_physical_terminal_roles_v1` keeps the ordinal of a
+key that stays, so T2 must be removed and re-added. Not performed. Slice
+TOPOLOGY-001 in handoff 41.
+
+## KLREC-2026-09-15-TERMINAL-TOPOLOGY-CONFLICTS-001 — where the implementation or documents diverge from vertical-driven topology (OPEN)
+
+Recorded by the TERMINAL-TOPOLOGY-001 audit (handoff 41 §4). Nothing was
+changed.
+
+1. **Combinations unenforced.** The Terminal Profile Contract §2 allows T1+T2,
+   T3+T4 or one dedicated profile per device; cloud, API and portal accept any
+   1–8 keys, and both `kitluy-fresh` development seats carry all four. Owner
+   decision on enforcement required.
+2. **Device-profile code names drift.** `laundry_t1_dedicated` (Terminal Profile
+   Contract) vs `laundry_t1` (configuration snapshot contract lines 160/176);
+   Store Hub spec §7.6 lists four codes. Owner decision on the canonical set.
+3. **Neutral Core typed to Laundry.** `packages/edge-contracts`
+   `TerminalProfileId` / `allowedTerminalProfiles` is the Laundry union, also on
+   vertical-neutral `/edge/v1/*` routes.
+4. **Vocabulary authority only in the browser.** API and DB validate shape and
+   vertical prefix; `laundry.t9.anything` is accepted for a Laundry store. The
+   Partner Portal alone enforces the Laundry list.
+5. **Store Hub Laundry-only by construction.** Compiled-in vocabulary; hub 0031
+   CHECK `^laundry\.t[1-4]\.[a-z_]+$`; a foreign-vertical key surfaces as
+   `INTERNAL_ERROR`. "Single-vertical appliance" (hub 0005) to be confirmed.
+6. **Café prefix conflict.** Superseded documents used `cafe.*`; the registry
+   code `CAFE_RESTAURANT` yields the prefix `cafe_restaurant.` under 0213. No
+   Café identifiers exist; none may be invented before an owner decision.
+7. **Releases not profile-aware.** Product, architecture and hardware profile
+   only. To be designed with desired state.
+8. **Stale statements.** 0121 comment claims T1–T4 enforcement its regex does not
+   perform; `PROJECT_HOME.md` (line 227) still lists terminal-profile identifiers as
+   pending (resolved 2026-07-27, KLREC-2026-07-26-009).

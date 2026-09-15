@@ -4,6 +4,31 @@ Read the newest relevant handoff before starting work. Naming:
 `YYYY-MM-DD__<AREA>__<TASK-ID>__<SLUG>__AI-HANDOFF.md` under the matching
 subfolder (repository/ shared/ apps/ services/ data/ infrastructure/ reviews/).
 
+## Terminal topology is vertical-driven — reconciliation audit TERMINAL-TOPOLOGY-001 (2026-09-15)
+
+Record: [`edge-platform/41_TERMINAL_TOPOLOGY_IS_VERTICAL_DRIVEN.md`](edge-platform/41_TERMINAL_TOPOLOGY_IS_VERTICAL_DRIVEN.md)
+· **AUDIT ONLY — recommendations PROPOSED** · no code or schema changed · one Laundry defect REPRODUCED on the Hub code path (not hardware) · affects Phase 0
+
+**Owner rule** (`KLD-2026-09-15-TERMINAL-TOPOLOGY-001`): the business vertical owns its terminal topology. T1–T4 is the **Laundry** contract, not a KitLuy-wide one. A logical profile is not a seat, and a seat is not a Pi. There is one generic image. No current authoritative document says otherwise; Café's T1–T5 exists only in superseded documents, and no Café identifiers are approved.
+
+**What exists:**
+
+- **Cloud:** already mostly neutral. Seat, role set (1–8 keys), device and assignment are separate. Keys are checked by shape and vertical prefix only.
+- **Store Hub:** Laundry-only by construction (0031 CHECK `laundry.t[1-4]`). It pairs a terminal into one profile, and runtime eligibility serves T1 only.
+- **Terminal and POS app:** the terminal pairs into its FIRST role; the POS app is T1-only. The Pi image is generic.
+- **Releases:** not profile-aware.
+
+**Defect D1:** a seat's roles are kept in checkbox click order. A seat whose first role isn't T1 is refused `403 PROFILE_NOT_T1` (reproduced). The U1 acceptance terminal `KL-1CB3577C26A7` (seat `Pi HEllo`) is T2-first on `kitluy-fresh`, so after its re-flash it will not reach `SERVING` until T1 is its first role. That order can only change while its assignment is revoked: remove T2 and re-add it. Owner decision needed on seat pairing semantics (`KLREC-2026-09-15-MULTI-PROFILE-SEAT-PAIRING-001`).
+
+**Other conflicts** (`KLREC-2026-09-15-TERMINAL-TOPOLOGY-CONFLICTS-001`):
+
+- the Terminal Profile Contract's T1+T2 / T3+T4 combinations are enforced nowhere, and both dev seats carry all four roles;
+- neutral `edge-contracts` is typed to Laundry;
+- the Laundry vocabulary is enforced only in the browser;
+- the Café prefix (`cafe_restaurant.` vs `cafe.`) is undecided.
+
+Ten bounded slices proposed (TOPOLOGY-001…010).
+
 ## The hardware stack and both images carry credential recovery (2026-09-15)
 
 Record: [`edge-platform/40_THE_HARDWARE_STACK_AND_BOTH_IMAGES_CARRY_RECOVERY.md`](edge-platform/40_THE_HARDWARE_STACK_AND_BOTH_IMAGES_CARRY_RECOVERY.md)
