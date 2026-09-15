@@ -698,6 +698,112 @@ describe.skipIf(!live)("T1 bootstrap routes and staff sessions (WS-12-T001-P02)"
   });
 
   // -------------------------------------------------------------------------
+  // A re-identified Hub (U1 hardware report 2026-09-12 §11)
+  // -------------------------------------------------------------------------
+  //
+  // On hardware a cloud reset gave the Hub a NEW identity while its local
+  // database kept the previous one: `pairing_receipt` references it and is
+  // append-only, so it was marked `revoked` and the current identity projected
+  // alongside it. Pairing (hub migration 0042) chose the trusted, deployed row
+  // and succeeded; eligibility chose the OLDEST row, found it revoked, and
+  // refused every read with 503 HUB_NOT_OPERATIONAL.
+  //
+  // The synthetic rows below reference nothing, so they are removed in
+  // `finally`; the seeded Hub is restored the same way.
+
+  async function currentHubIdentity(): Promise<{ id: string; created_at: Date }> {
+    const { rows } = await pool.query<{ id: string; created_at: Date }>(
+      `select id, created_at from edge_identity.hub_device
+        where device_kind = 'store_hub' and trust_status = 'trusted' and lifecycle_status = 'deployed'
+        order by created_at limit 1`,
+    );
+    expect(rows[0], "the seeded Hub must be trusted and deployed").toBeDefined();
+    return rows[0]!;
+  }
+
+  async function insertStaleHubIdentity(id: string, olderThan: Date): Promise<void> {
+    const h = (label: string) => createHash("sha256").update(`${label}:${id}`).digest("hex");
+    await pool.query(
+      `insert into edge_identity.hub_device
+         (id, asset_number, device_kind, lifecycle_status, trust_status,
+          board_serial_hash, factory_duid_hash, root_key_fingerprint,
+          manufacturing_cert_serial, created_at, updated_at)
+       values ($1::uuid, $2, 'store_hub', 'deployed', 'revoked', $3, $4, $5,
+               'STALE-PRE-REIDENTIFICATION', $6::timestamptz - interval '30 days', now())`,
+      [id, `STALE-HUB-${RUN}-${id.slice(0, 8)}`, h("board"), h("duid"), h("root"), olderThan],
+    );
+  }
+
+  it("serves a RE-IDENTIFIED Hub: a stale revoked identity beside the current one refuses nothing", async () => {
+    const t = await newLanTerminal("elig-reidentified");
+    await pairTerminal(t);
+    const current = await currentHubIdentity();
+    const staleId = randomUUID();
+    try {
+      await insertStaleHubIdentity(staleId, current.created_at);
+
+      // The exact hardware shape: the stale identity is now the OLDEST Hub row.
+      const { rows: oldest } = await pool.query<{ id: string }>(
+        `select id from edge_identity.hub_device where device_kind = 'store_hub' order by created_at limit 1`,
+      );
+      expect(oldest[0]!.id).toBe(staleId);
+
+      const eligibility = await call(t, "GET", EDGE_RUNTIME_ELIGIBILITY_PATH);
+      expect(eligibility.status, JSON.stringify(eligibility.body)).toBe(200);
+      expect((eligibility.body["eligibility"] as Record<string, unknown>)["hubDeviceId"]).toBe(
+        current.id,
+      );
+
+      // The configuration route is gated by the same derivation and was the
+      // second 503 on hardware.
+      const configuration = await call(t, "GET", EDGE_CONFIGURATION_CURRENT_PATH);
+      expect(configuration.status, JSON.stringify(configuration.body)).toBe(200);
+      expect((configuration.body["delivery"] as Record<string, unknown>)["hubDeviceId"]).toBe(
+        current.id,
+      );
+    } finally {
+      await pool.query(`delete from edge_identity.hub_device where id = $1::uuid`, [staleId]);
+    }
+  });
+
+  it("still fails closed: a stale identity alone is HUB_NOT_OPERATIONAL, a retired current one HUB_RETIRED", async () => {
+    const t = await newLanTerminal("elig-no-operational-hub");
+    await pairTerminal(t);
+    const current = await currentHubIdentity();
+    const staleId = randomUUID();
+    try {
+      await insertStaleHubIdentity(staleId, current.created_at);
+
+      // No trusted, deployed identity remains: the stale row must not stand in.
+      await pool.query(
+        `update edge_identity.hub_device set trust_status = 'quarantined' where id = $1::uuid`,
+        [current.id],
+      );
+      const notOperational = await call(t, "GET", EDGE_RUNTIME_ELIGIBILITY_PATH);
+      expect(notOperational.status).toBe(503);
+      expect(detailsOf(notOperational)["result"]).toBe("HUB_NOT_OPERATIONAL");
+
+      // The NEWEST identity is retired: the Hub is retired, whatever older rows say.
+      await pool.query(
+        `update edge_identity.hub_device set lifecycle_status = 'retired' where id = $1::uuid`,
+        [current.id],
+      );
+      const retired = await call(t, "GET", EDGE_RUNTIME_ELIGIBILITY_PATH);
+      expect(retired.status).toBe(403);
+      expect(detailsOf(retired)["result"]).toBe("HUB_RETIRED");
+    } finally {
+      await pool.query(
+        `update edge_identity.hub_device set trust_status = 'trusted', lifecycle_status = 'deployed'
+          where id = $1::uuid`,
+        [current.id],
+      );
+      await pool.query(`delete from edge_identity.hub_device where id = $1::uuid`, [staleId]);
+    }
+    const restored = await call(t, "GET", EDGE_RUNTIME_ELIGIBILITY_PATH);
+    expect(restored.status, JSON.stringify(restored.body)).toBe(200);
+  });
+
+  // -------------------------------------------------------------------------
   // Current configuration (§3)
   // -------------------------------------------------------------------------
 

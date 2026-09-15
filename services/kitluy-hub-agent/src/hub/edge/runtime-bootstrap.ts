@@ -168,7 +168,80 @@ export async function readRuntimeEligibility(
   );
 }
 
-async function deriveEligibility(
+export type HubIdentitySelection =
+  | { readonly kind: "operational"; readonly id: string }
+  | {
+      readonly kind: "refused";
+      readonly refusal: "HUB_NOT_OPERATIONAL" | "HUB_RETIRED";
+      readonly detail: string;
+    };
+
+/**
+ * Which `hub_device` row IS this Store Hub.
+ *
+ * ===========================================================================
+ * THE DEFECT THIS REPLACES (U1 hardware report 2026-09-12 §11)
+ * ===========================================================================
+ * This read took the OLDEST store_hub row unconditionally and then refused it
+ * if it was not trusted and deployed. A Hub re-identified by the cloud keeps
+ * its previous identity row — `pairing_receipt` references it and is
+ * append-only, so it is marked `revoked`, never removed — and the current
+ * identity is projected alongside it. The oldest row was then always the
+ * revoked one, so every eligibility, configuration and staff-session read was
+ * refused HUB_NOT_OPERATIONAL while pairing, on the same Hub, succeeded.
+ *
+ * The two paths disagreed about which identity is "the Hub". Pairing
+ * (`begin_terminal_pairing_v1`, hub migration 0042) chooses among TRUSTED,
+ * DEPLOYED rows, oldest first. This chooses exactly the same row, so the Hub a
+ * terminal paired with is the Hub that serves it.
+ *
+ * Only when no operational identity exists does the NEWEST row decide the
+ * refusal: a Hub whose current identity is retired is retired, and a stale row
+ * from before a re-identification never speaks for the Hub.
+ */
+export async function selectOperationalHubIdentity(
+  client: HubClient,
+): Promise<HubIdentitySelection> {
+  const operational = await client.query<{ id: string }>(
+    `select id
+       from edge_identity.hub_device
+      where device_kind = 'store_hub'
+        and trust_status = 'trusted'
+        and lifecycle_status = 'deployed'
+      order by created_at
+      limit 1`,
+  );
+  const row = operational.rows[0];
+  if (row !== undefined) {
+    return { kind: "operational", id: row.id };
+  }
+
+  const newest = await client.query<{ lifecycle_status: string }>(
+    `select lifecycle_status
+       from edge_identity.hub_device
+      where device_kind = 'store_hub'
+      order by created_at desc
+      limit 1`,
+  );
+  const current = newest.rows[0];
+  if (current === undefined) {
+    return {
+      kind: "refused",
+      refusal: "HUB_NOT_OPERATIONAL",
+      detail: "no Store Hub device record exists",
+    };
+  }
+  if (current.lifecycle_status === "retired") {
+    return { kind: "refused", refusal: "HUB_RETIRED", detail: "this Store Hub is retired" };
+  }
+  return {
+    kind: "refused",
+    refusal: "HUB_NOT_OPERATIONAL",
+    detail: "this Store Hub has no trusted, deployed identity",
+  };
+}
+
+export async function deriveEligibility(
   client: HubClient,
   terminalDeviceId: string,
   certificateSerial: string,
@@ -181,27 +254,11 @@ async function deriveEligibility(
   });
 
   // Hub self-state: trusted, deployed, replacement mode normal.
-  const hub = await client.query<{
-    id: string;
-    lifecycle_status: string;
-    trust_status: string;
-  }>(
-    `select id, lifecycle_status, trust_status
-       from edge_identity.hub_device
-      where device_kind = 'store_hub'
-      order by created_at
-      limit 1`,
-  );
-  const hubRow = hub.rows[0];
-  if (hubRow === undefined) {
-    return refuse("HUB_NOT_OPERATIONAL", "no Store Hub device record exists");
+  const identity = await selectOperationalHubIdentity(client);
+  if (identity.kind === "refused") {
+    return refuse(identity.refusal, identity.detail);
   }
-  if (hubRow.lifecycle_status === "retired") {
-    return refuse("HUB_RETIRED", "this Store Hub is retired");
-  }
-  if (hubRow.trust_status !== "trusted" || hubRow.lifecycle_status !== "deployed") {
-    return refuse("HUB_NOT_OPERATIONAL", "this Store Hub is not trusted and deployed");
-  }
+  const hubRow = { id: identity.id };
   const replacement = await client.query<{ mode: string }>(
     `select mode from edge_identity.hub_replacement_state where singleton = true`,
   );
