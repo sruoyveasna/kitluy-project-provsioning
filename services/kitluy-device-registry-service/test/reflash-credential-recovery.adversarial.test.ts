@@ -396,6 +396,20 @@ async function rePair(board: Board): Promise<void> {
   expect(await lifecycle(board.deviceId)).toBe("enrolled");
   const result = await pair(board.deviceId, "device/reflash-suite-repair");
   expect(result).toBe("PAIRED");
+  // What the Hub pairing ROUTE does next (`main.ts` `advanceTrust`). Pairing
+  // through the composition alone skipped it, and on hardware (2026-09-15) this
+  // exact step ACTIVATED the re-flashed Hub on the previous SD card's
+  // certificate, after which recovery refused it for being active. Group 0225
+  // keeps the board waiting; the refusal must be the certificate, nothing else.
+  const advance = await advanceDeviceTrust(pool, {
+    deviceRecordId: board.deviceId,
+    environment: ENVIRONMENT,
+    actorRef: "device/hub-pairing",
+  });
+  expect(advance.kind, JSON.stringify(advance)).toBe("blocked");
+  if (advance.kind === "blocked") {
+    expect(advance.refusalCode).toBe("KLUY-DEVICE-NO-CERTIFICATE");
+  }
   await establishTrustedTime(board.deviceId);
   board.assignmentGeneration = await currentAssignmentGeneration(board.deviceId);
   expect(await lifecycle(board.deviceId)).toBe("awaiting_trust");
@@ -609,6 +623,33 @@ describe("THE RE-FLASH: a known board recovers its operational credential", () =
 
       // The route re-checked trust after issuance, exactly as for first issuance.
       expect(await lifecycle(hub.deviceId)).toBe("active");
+    },
+    FLOW_TIMEOUT_MS,
+  );
+
+  it(
+    "is not activated on the previous SD card's certificate when it re-pairs (hardware 2026-09-15)",
+    async () => {
+      const hub = await hubInService();
+      await reflash(hub);
+      // Runs the pairing route's trust advance and asserts it is refused.
+      await rePair(hub);
+
+      const state = await snapshot(hub.deviceId);
+      expect(await lifecycle(hub.deviceId)).toBe("awaiting_trust");
+      // The only certificate is generation 1, recorded under the enrollment the
+      // re-flash superseded. It is still active — its key is merely on another
+      // card — which is exactly why it must not satisfy activation.
+      expect(state.enrollments.map((e) => e.state)).toEqual(["superseded", "sealed"]);
+      expect(state.artifacts.map((a) => [a.certificate_generation, a.status])).toEqual([
+        [1, "active"],
+      ]);
+      expect(state.artifacts[0]!.enrollment_id).toBe(state.enrollments[0]!.id);
+      expect(state.device.current_enrollment_id).toBe(state.enrollments[1]!.id);
+
+      // And the board can now recover, which is the whole point.
+      const recovered = await ask(hub, rsaKey());
+      expect(recovered.outcome, refusalOf(recovered)).toBe("ISSUED");
     },
     FLOW_TIMEOUT_MS,
   );

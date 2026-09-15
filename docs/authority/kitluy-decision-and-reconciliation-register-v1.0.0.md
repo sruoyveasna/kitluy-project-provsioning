@@ -4820,3 +4820,73 @@ changed.
 8. **Stale statements.** 0121 comment claims T1–T4 enforcement its regex does not
    perform; `PROJECT_HOME.md` (line 227) still lists terminal-profile identifiers as
    pending (resolved 2026-07-27, KLREC-2026-07-26-009).
+
+## KLREC-2026-09-15-ACTIVATION-ON-SUPERSEDED-ENROLLMENT-001 — a re-flashed Store Hub was activated on its previous SD card's certificate, which blocked recovery (FIXED 2026-09-15, group 0225)
+
+**On hardware, 2026-09-15.** Store Hub `KL-CFADA8C75001` was re-flashed and
+registered a new identity key (enrollment 2 superseded enrollment 1). The
+operator revoked its assignment and it re-paired. The Hub pairing route's trust
+advance (`advanceDeviceTrust` → `attempt_activate_device_v1`) then activated it,
+because `activate_device_v1` accepted the in-window generation-1 certificate
+recorded under enrollment 1 — whose key is on the old card. Every certificate
+request was then refused with `KLUY-RECOVERY-DEVICE-STATE: device is active`.
+The cloud reported `active`; the board held no certificate.
+
+**Why the suite missed it:** `reflash-credential-recovery.adversarial.test.ts`
+re-paired through `HubPairingComposition`, not the route, so the trust advance
+never ran. The earlier "pre-existing" firstboot e2e failure (the route activates
+the Hub itself) was the same interaction.
+
+**Resolution (owner choice: fix activation, not loosen recovery):** group 0225
+adds one conjunct to `activate_device_v1`: `c.enrollment_id =
+current_enrollment_id`. The artifact door already records the current
+enrollment, so first issuance is unchanged, a re-paired re-flashed board rests at
+`awaiting_trust`, and recovery's generation 2 activates. The suite's re-pair
+helper now runs the route's trust advance and asserts `blocked /
+KLUY-DEVICE-NO-CERTIFICATE`; without 0225, 10 of 15 tests fail with
+`advanced/active`; with it, 15/15. Activation-related suites: identical failing
+set to the pre-change baseline (pre-existing), one more pass. Applied to
+`kitluy-repo17` and `kitluy-fresh` (backups taken).
+
+**Hardware result:** after 0225 and the workarounds below, the Hub recovered
+generation 2 (`DEV-95D5467A59BB9732`), same device record and asset tag, became
+`active`, and serves terminals on `:7443`.
+
+## KLREC-2026-09-15-HUB-REQUEST-ASSIGNMENT-GENERATION-001 — a Store Hub always requests its certificate at assignment generation 1 (OPEN)
+
+`services/kitluy-device-firstboot-agent/src/paired-identity.ts` returns
+`assignmentGeneration: 1` for the Hub pairing state, which records no generation.
+First pairing is generation 1, so it never showed. A re-paired Hub (generation 3
+on hardware) is refused `KLUY-CRED-STALE-ASSIGNMENT: request carries generation 1,
+device is at 3`, and the request is persisted before sending and reused, so it
+never corrects itself.
+
+**Workaround used (development board, not persisted):** runtime drop-in
+`/run/systemd/system/kitluy-operational-tls.service.d/assignment-generation.conf`
+(`KITLUY_ASSIGNMENT_GENERATION=3`), the unused operational key and request moved
+aside to `/var/lib/kitluy/operational.superseded-20260915-stale-gen1-request`.
+
+**Fix required:** record the assignment generation from the pairing response in
+the Hub pairing state and read it in `paired-identity.ts`. Board code — needs
+re-packaging and an image rebuild.
+
+## KLREC-2026-09-15-RECOVERY-RESERVES-BEFORE-GENERATION-CHECK-001 — a recovery request with a stale assignment generation leaves an open reservation that blocks every later request (OPEN)
+
+`reserve_device_credential_recovery_v1` (0224) opens a `rotate_key` reservation
+and the key is registered before issuance checks the REQUEST's assignment
+generation (`KLUY-CRED-STALE-ASSIGNMENT`, group 0204). The refused request leaves
+the reservation `pop_pending`; a corrected request has a different idempotency key
+and is refused `KLUY-RECOVERY-ALREADY-RESERVED`. Key fingerprints are unique per
+environment for ever, so the board also needs a new operational key.
+
+**Workaround used:** the governed `abandon_generation_key_v1(device, 'development',
+'device_identity', 2, 'STALE_ASSIGNMENT_GENERATION_REQUEST_HUB_REFLASH_20260915')`
+as `kitluy_issuance_service` (key and reservation abandoned; no certificate
+involved), then a fresh key on the board.
+
+**Fix required:** refuse a recovery whose request generation differs from the
+device's before reserving (dispatcher or door). Cloud-side only.
+
+**Related, OPEN:** the Hub pairing console never prompts again once
+`pairing-state.json` says PAIRED, and nothing clears it when the cloud revokes
+the assignment; a second re-pair of the same card needed the file moved aside.
