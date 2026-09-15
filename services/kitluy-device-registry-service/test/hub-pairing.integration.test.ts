@@ -261,11 +261,14 @@ describe.skipIf(!live)("a Store Hub pairs, and lands exactly where the model say
     expect(outcome.data?.tenantId).toBe(scope.tenantId);
 
     // The assignment is real, and it is NOT active.
-    const { rows } = await pool.query<{ state: string }>(
-      `select state::text as state from kitluy_devices.device_assignments where id = $1::uuid`,
+    const { rows } = await pool.query<{ state: string; assignment_generation: number }>(
+      `select state::text as state, assignment_generation
+         from kitluy_devices.device_assignments where id = $1::uuid`,
       [outcome.data!.assignmentId],
     );
     expect(rows[0]?.state).toBe("pending_trust");
+    // The generation the board is told is the one the cloud holds (group 0226).
+    expect(outcome.data?.assignmentGeneration).toBe(rows[0]?.assignment_generation);
 
     // BLK-005 holds: pairing did not activate the device.
     const { rows: dev } = await pool.query<{ lifecycle_state: string }>(

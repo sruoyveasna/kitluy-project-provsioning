@@ -72,6 +72,14 @@ export interface PairingState {
   readonly detail?: string;
   /** Server-issued. Absent until the cloud has actually created an assignment. */
   readonly assignmentId?: string;
+  /**
+   * The generation of that assignment, as the cloud stated it (group 0226). The
+   * operational certificate is requested against it. Files written before it
+   * existed lack it; `paired-identity.ts` then falls back to 1 and says so. A
+   * re-paired Hub is at generation > 1, and requesting at 1 is refused
+   * KLUY-CRED-STALE-ASSIGNMENT (hardware, 2026-09-15).
+   */
+  readonly assignmentGeneration?: number;
   readonly tenantId?: string;
   readonly digitalStoreId?: string;
   readonly storeLocationId?: string;

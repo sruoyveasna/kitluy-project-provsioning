@@ -21,11 +21,19 @@
  * and gated on BLK-005, so a console that said "ready" would be telling a shop a
  * Hub can serve terminals when it cannot.
  */
+import { mkdtempSync, rmSync } from "node:fs";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import type { BootstrapState } from "../src/bootstrap-state.js";
-import type { PairingState } from "../src/pairing-state.js";
+import { readPairedIdentity } from "../src/paired-identity.js";
+import { readPairingState, writePairingState, type PairingState } from "../src/pairing-state.js";
 import {
+  createPairingTransport,
   interpret,
   looksLikeCode,
   render,
@@ -275,5 +283,108 @@ describe("the local shape check", () => {
     // still enforced, immediately above and below this test.
     expect(looksLikeCode("ABCD-8291")).toBe(true);
     expect(looksLikeCode("ABCD 8291")).toBe(true);
+  });
+});
+
+/**
+ * The assignment generation travels from the pairing response to the
+ * certificate request (registry group 0226; REFLASH-HARDENING-001). Before it,
+ * a Hub re-paired at generation 3 requested at 1 and was refused
+ * KLUY-CRED-STALE-ASSIGNMENT on hardware (2026-09-15).
+ */
+describe("the assignment generation the cloud states at pairing", () => {
+  async function pairingServer(body: Record<string, unknown>): Promise<Server> {
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(body));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    return server;
+  }
+  const baseUrl = (server: Server): string =>
+    `http://127.0.0.1:${String((server.address() as AddressInfo).port)}`;
+  const PAIRED_BODY = {
+    deviceRecordId: DEVICE,
+    assignmentId: "asg-3",
+    assignmentGeneration: 3,
+    tenantId: "t-1",
+    digitalStoreId: "s-1",
+    storeLocationId: "l-1",
+    storeAssignment: "pending_trust",
+    activated: false,
+  };
+
+  it("is parsed from the route's response", async () => {
+    const server = await pairingServer(PAIRED_BODY);
+    try {
+      const attempt = await createPairingTransport({ baseUrl: baseUrl(server) }).submit({
+        deviceRecordId: DEVICE,
+        code: "ABCD8291",
+      });
+      expect(attempt.status).toBe(200);
+      expect(attempt.assignmentGeneration).toBe(3);
+    } finally {
+      server.close();
+    }
+  });
+
+  it.each([
+    ["absent", undefined],
+    ["zero", 0],
+    ["a string", "3"],
+    ["a fraction", 1.5],
+  ])("is dropped, never guessed, when %s", async (_label, generation) => {
+    const server = await pairingServer({ ...PAIRED_BODY, assignmentGeneration: generation });
+    try {
+      const attempt = await createPairingTransport({ baseUrl: baseUrl(server) }).submit({
+        deviceRecordId: DEVICE,
+        code: "ABCD8291",
+      });
+      expect(attempt.assignmentGeneration).toBeUndefined();
+    } finally {
+      server.close();
+    }
+  });
+
+  it("is recorded when PAIRED, and a response without it records none", () => {
+    const withGeneration = interpret(
+      { status: 200, assignmentId: "asg-3", assignmentGeneration: 3, tenantId: "t-1" },
+      DEVICE,
+    );
+    expect(withGeneration.state?.assignmentGeneration).toBe(3);
+
+    const legacy = interpret({ status: 200, assignmentId: "asg-1", tenantId: "t-1" }, DEVICE);
+    expect(legacy.state).not.toBeNull();
+    expect(legacy.state && "assignmentGeneration" in legacy.state).toBe(false);
+  });
+
+  it("survives a restart and is what the certificate agent reads", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kitluy-pairing-generation-"));
+    const server = await pairingServer(PAIRED_BODY);
+    try {
+      const statePath = join(dir, "pairing-state.json");
+      // The console: response -> interpret -> persisted state.
+      const attempt = await createPairingTransport({ baseUrl: baseUrl(server) }).submit({
+        deviceRecordId: DEVICE,
+        code: "ABCD8291",
+      });
+      const outcome = interpret(attempt, DEVICE);
+      expect(outcome.state).not.toBeNull();
+      writePairingState(outcome.state!, statePath);
+
+      // A restart: nothing in memory, only the file.
+      expect(readPairingState(statePath)?.assignmentGeneration).toBe(3);
+
+      // `operational-tls` reads the paired identity from that file.
+      const identity = readPairedIdentity({
+        pairingStatePath: statePath,
+        terminalAssignmentPath: join(dir, "no-seat.json"),
+      });
+      expect(identity?.assignmentGeneration).toBe(3);
+      expect(identity?.assignmentGenerationSource).toBe("stated");
+    } finally {
+      server.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

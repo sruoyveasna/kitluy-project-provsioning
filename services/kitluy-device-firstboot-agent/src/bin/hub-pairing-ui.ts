@@ -83,6 +83,8 @@ export interface PairingAttempt {
   readonly status: number;
   readonly result?: string;
   readonly assignmentId?: string;
+  /** The assignment's authoritative generation (group 0226). */
+  readonly assignmentGeneration?: number;
   readonly tenantId?: string;
   readonly digitalStoreId?: string;
   readonly storeLocationId?: string;
@@ -257,6 +259,9 @@ export function interpret(
         phase: "PAIRED",
         detail: "assigned to the Store and awaiting trust",
         assignmentId: attempt.assignmentId,
+        ...(attempt.assignmentGeneration === undefined
+          ? {}
+          : { assignmentGeneration: attempt.assignmentGeneration }),
         tenantId: attempt.tenantId,
         digitalStoreId: attempt.digitalStoreId,
         storeLocationId: attempt.storeLocationId,
@@ -276,6 +281,9 @@ export function interpret(
           phase: "PAIRED",
           detail: "assigned to the Store and awaiting trust",
           assignmentId: attempt.assignmentId,
+          ...(attempt.assignmentGeneration === undefined
+            ? {}
+            : { assignmentGeneration: attempt.assignmentGeneration }),
           tenantId: attempt.tenantId,
           digitalStoreId: attempt.digitalStoreId,
           storeLocationId: attempt.storeLocationId,
@@ -398,6 +406,10 @@ export function interpret(
  * `AbortController` deadline, because a Hub console that hangs on a silent socket
  * looks broken to the operator standing in front of it.
  */
+function positiveInteger(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
+}
+
 export function createPairingTransport(options: {
   readonly baseUrl: string;
   readonly timeoutMs?: number;
@@ -426,6 +438,9 @@ export function createPairingTransport(options: {
           status: response.status,
           result: typeof details?.result === "string" ? details.result : undefined,
           assignmentId: typeof body.assignmentId === "string" ? body.assignmentId : undefined,
+          // Persisted by `interpret` and read by `paired-identity.ts`; a missing
+          // or malformed value is dropped, never guessed.
+          assignmentGeneration: positiveInteger(body.assignmentGeneration),
           tenantId: typeof body.tenantId === "string" ? body.tenantId : undefined,
           digitalStoreId: typeof body.digitalStoreId === "string" ? body.digitalStoreId : undefined,
           storeLocationId:

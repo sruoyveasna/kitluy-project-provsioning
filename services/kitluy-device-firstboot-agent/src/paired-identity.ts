@@ -36,8 +36,19 @@ export interface PairedIdentity {
   readonly deviceRecordId: string;
   /** The generation the certificate is requested against; 1 when unstated. */
   readonly assignmentGeneration: number;
+  /**
+   * Whether the file STATED the generation or this reader assumed 1. Logged by
+   * `operational-tls`, because an assumed 1 on a re-paired device is exactly the
+   * request the cloud refuses as KLUY-CRED-STALE-ASSIGNMENT (hardware,
+   * 2026-09-15). Only files written before group 0226 should ever assume.
+   */
+  readonly assignmentGenerationSource: "stated" | "assumed-legacy-default";
   /** Which file answered. Logged, so an operator can see what the device read. */
   readonly source: "hub-pairing-state" | "terminal-assignment";
+}
+
+function statedGeneration(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
 }
 
 function readTerminalAssignment(path: string): PairedIdentity | null {
@@ -51,13 +62,13 @@ function readTerminalAssignment(path: string): PairedIdentity | null {
   if (typeof raw !== "object" || raw === null) return null;
   const deviceRecordId = (raw as { deviceRecordId?: unknown }).deviceRecordId;
   if (typeof deviceRecordId !== "string" || deviceRecordId === "") return null;
-  const generation = (raw as { assignmentGeneration?: unknown }).assignmentGeneration;
+  const generation = statedGeneration(
+    (raw as { assignmentGeneration?: unknown }).assignmentGeneration,
+  );
   return {
     deviceRecordId,
-    assignmentGeneration:
-      typeof generation === "number" && Number.isInteger(generation) && generation > 0
-        ? generation
-        : 1,
+    assignmentGeneration: generation ?? 1,
+    assignmentGenerationSource: generation === undefined ? "assumed-legacy-default" : "stated",
     source: "terminal-assignment",
   };
 }
@@ -71,15 +82,26 @@ function readTerminalAssignment(path: string): PairedIdentity | null {
  * the certificate exists.
  */
 export function readPairedIdentity(
-  options: { readonly terminalAssignmentPath?: string } = {},
+  options: {
+    readonly terminalAssignmentPath?: string;
+    /** Injected by tests; the canonical path otherwise. */
+    readonly pairingStatePath?: string;
+  } = {},
 ): PairedIdentity | null {
-  const hub = readPairingState();
+  const hub =
+    options.pairingStatePath === undefined
+      ? readPairingState()
+      : readPairingState(options.pairingStatePath);
   if (hub !== null && hub.phase === "PAIRED" && hub.deviceRecordId !== undefined) {
+    // The generation the cloud stated at pairing (group 0226). A file written
+    // before that has none, and 1 — what this agent always used for a Hub — is
+    // kept for it, but marked as assumed so it is visible in the log. The
+    // hard-coded 1 is what refused a re-paired Hub at generation 3 on hardware.
+    const generation = statedGeneration(hub.assignmentGeneration);
     return {
       deviceRecordId: hub.deviceRecordId,
-      // The Hub's own state carries no generation; 1 is what this agent has
-      // always used for a Hub, and that behaviour is unchanged.
-      assignmentGeneration: 1,
+      assignmentGeneration: generation ?? 1,
+      assignmentGenerationSource: generation === undefined ? "assumed-legacy-default" : "stated",
       source: "hub-pairing-state",
     };
   }

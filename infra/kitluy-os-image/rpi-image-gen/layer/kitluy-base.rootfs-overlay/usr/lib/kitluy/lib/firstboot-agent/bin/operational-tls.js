@@ -43,7 +43,7 @@ import { readFileSync } from "node:fs";
 import { createHttpOperationalCertificateClient } from "../adapters/http-operational-certificate-client.js";
 import { readImageEnv } from "../image-env.js";
 import { readPairedIdentity } from "../paired-identity.js";
-import { currentPhase, readManifest, OPERATIONAL_PATHS, } from "../operational-credential-state.js";
+import { currentPhase, readManifest, OPERATIONAL_PATHS } from "../operational-credential-state.js";
 import { ensureOperationalCertificate } from "../operational-tls-client.js";
 import { DEVICE_IDENTITY_PRIVATE_KEY_PATH, fileRecoveryIdentitySigner, } from "../operational-recovery-identity-bytes.js";
 /** How long to wait between attempts while a prerequisite is missing. */
@@ -134,6 +134,15 @@ async function once() {
     // by `activate_device_v1` as KLUY-DEVICE-GENERATION-STALE. The env var still
     // wins where it is set, so an operator can still override for a Hub.
     const assignmentGeneration = Number(process.env.KITLUY_ASSIGNMENT_GENERATION ?? String(pairing.assignmentGeneration));
+    // Stated, assumed or overridden — said out loud. An ASSUMED 1 on a re-paired
+    // Hub is the request the cloud refused as KLUY-CRED-STALE-ASSIGNMENT on
+    // hardware (2026-09-15); group 0226 made the pairing state carry the real one.
+    log(process.env.KITLUY_ASSIGNMENT_GENERATION !== undefined
+        ? `assignment generation ${String(assignmentGeneration)} (KITLUY_ASSIGNMENT_GENERATION override)`
+        : pairing.assignmentGenerationSource === "stated"
+            ? `assignment generation ${String(assignmentGeneration)} (stated by ${pairing.source})`
+            : `assignment generation ${String(assignmentGeneration)} ASSUMED: ${pairing.source} ` +
+                "states none (written before the cloud reported it); re-pair if this device has paired more than once");
     const trustedTime = new Date();
     const outcome = await ensureOperationalCertificate({
         client: createHttpOperationalCertificateClient({ baseUrl }),
@@ -169,6 +178,10 @@ async function once() {
         // it. The key is the one `kitluy-firstboot.service` created, which this
         // root unit can read under `ReadWritePaths=/var/lib/kitluy`.
         identitySigner: fileRecoveryIdentitySigner(DEVICE_IDENTITY_PRIVATE_KEY_PATH),
+        onStaleRequestReplaced: ({ fromGeneration, toGeneration }) => {
+            log(`saved request was made at assignment generation ${String(fromGeneration)}; ` +
+                `rebuilt at generation ${String(toGeneration)} with the same key and a new request id`);
+        },
     });
     switch (outcome.kind) {
         case "already_adopted":

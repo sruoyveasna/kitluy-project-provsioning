@@ -113,6 +113,13 @@ export interface HubPairingCompositionResult<T = undefined> {
 export interface PairedHubMaterial {
   readonly deviceRecordId: string;
   readonly assignmentId: string;
+  /**
+   * The generation of THAT assignment, read from the cloud (group 0226). The
+   * board requests its operational certificate against it. Without it a
+   * re-paired Hub asked at generation 1 and was refused
+   * KLUY-CRED-STALE-ASSIGNMENT (hardware, 2026-09-15).
+   */
+  readonly assignmentGeneration: number;
   readonly tenantId: string;
   readonly digitalStoreId: string;
   readonly storeLocationId: string;
@@ -401,6 +408,24 @@ export class HubPairingComposition {
           };
         }
 
+        // The generation of the assignment just created, in the same transaction
+        // (group 0226). The pairing role cannot read `device_assignments`; this
+        // definer returns one integer for one pending Store Hub assignment.
+        const { rows: generationRows } = await client.query<{ g: number | null }>(
+          "select kitluy_devices.hub_pairing_assignment_generation_v1($1::uuid) as g",
+          [assignmentId],
+        );
+        const assignmentGeneration = generationRows[0]?.g;
+        if (
+          typeof assignmentGeneration !== "number" ||
+          !Number.isInteger(assignmentGeneration) ||
+          assignmentGeneration < 1
+        ) {
+          // Rolled back rather than answered without it: a board told nothing
+          // falls back to generation 1, which is exactly the hardware defect.
+          throw new Error("KLUY-HUBSESSION-ASSIGNMENT-GENERATION-UNAVAILABLE");
+        }
+
         // Spend the session, LAST — after the assignment exists.
         //
         // `consume_hub_pairing_session_v1` updates conditional on `state='open'`
@@ -429,6 +454,7 @@ export class HubPairingComposition {
           data: {
             deviceRecordId: input.deviceRecordId,
             assignmentId,
+            assignmentGeneration,
             tenantId,
             digitalStoreId,
             storeLocationId,

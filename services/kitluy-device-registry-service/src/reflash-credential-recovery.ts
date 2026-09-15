@@ -20,7 +20,8 @@
  * ===========================================================================
  * NOTHING HERE IS A NEW PIPELINE
  * ===========================================================================
- *   reserve_device_credential_recovery_v1   group 0224 — the ONE new door
+ *   reserve_device_credential_recovery_v2   group 0226 — generation check, then
+ *                                           group 0224's v1, the ONE new door
  *   register_generation_key_v2              group 0130 — key bound to the attempt
  *   runGovernedIssuance + binding           the shared prepare/sign/finalize,
  *                                           bound to the reservation exactly as
@@ -287,6 +288,12 @@ export async function recoverOperationalCertificate(
   // -- 4. THE RECOVERY RESERVATION -------------------------------------------
   // Idempotent on the SIGNED request: a device that lost the response replays
   // its persisted request byte-identically and receives the same attempt.
+  //
+  // v2 (group 0226) is given the REQUEST's assignment generation and refuses a
+  // mismatch as KLUY-RECOVERY-STALE-ASSIGNMENT before anything is written. v1
+  // never saw it: on hardware (2026-09-15) a re-paired Hub asked at generation
+  // 1, the reservation and the key were written, issuance then refused, and the
+  // open reservation and spent key blocked every corrected request.
   const preimageHash = createHash("sha256").update(Buffer.from(preimage)).digest("hex");
   const reservationKey = createHash("sha256")
     .update(`kitluy.opcert-recovery.v1\n${preimageHash}`, "utf8")
@@ -295,9 +302,9 @@ export async function recoverOperationalCertificate(
   try {
     reserved = await withServiceRole(pool, REGISTRY_ROLES.issuance, async (c) => {
       const { rows } = await c.query<{ r: RecoveryReservationRow }>(
-        `select kitluy_devices.reserve_device_credential_recovery_v1(
+        `select kitluy_devices.reserve_device_credential_recovery_v2(
                   $1::uuid, $2::text, 'device_identity', $3::text, $4::text, $5::boolean,
-                  $6::timestamptz, $7::text, $8::text) as r`,
+                  $6::timestamptz, $7::text, $8::text, $9::integer) as r`,
         [
           request.deviceRecordId,
           request.environment,
@@ -307,6 +314,7 @@ export async function recoverOperationalCertificate(
           request.requestedAt,
           request.trustedTimeStatus,
           request.actorRef,
+          request.assignmentGeneration,
         ],
       );
       const row = rows[0]?.r;

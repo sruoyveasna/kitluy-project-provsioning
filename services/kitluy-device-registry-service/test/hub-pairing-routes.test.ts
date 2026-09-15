@@ -58,6 +58,7 @@ const PAIRED: HubPairingCompositionResult<PairedHubMaterial> = {
   data: {
     deviceRecordId: DEVICE,
     assignmentId: "22222222-2222-4222-8222-222222222222",
+    assignmentGeneration: 3,
     tenantId: "33333333-3333-4333-8333-333333333333",
     digitalStoreId: "44444444-4444-4444-8444-444444444444",
     storeLocationId: "55555555-5555-4555-8555-555555555555",
@@ -88,6 +89,16 @@ describe("a paired Hub is told the truth about its state", () => {
     // certificates exist (BLK-005).
     expect(response.body.activated).toBe(false);
     expect(response.body.assignmentId).toBe(PAIRED.data?.assignmentId);
+  });
+
+  it("returns the assignment's authoritative generation, which the board requests against", async () => {
+    // A re-paired Hub is at generation > 1. Without this field the board fell
+    // back to 1 and was refused KLUY-CRED-STALE-ASSIGNMENT (hardware,
+    // 2026-09-15; group 0226).
+    const response = await router().handle(request({ deviceRecordId: DEVICE, code: GOOD_CODE }));
+
+    expect(response.status).toBe(200);
+    expect(response.body.assignmentGeneration).toBe(3);
   });
 
   it("never returns an audit detail", async () => {

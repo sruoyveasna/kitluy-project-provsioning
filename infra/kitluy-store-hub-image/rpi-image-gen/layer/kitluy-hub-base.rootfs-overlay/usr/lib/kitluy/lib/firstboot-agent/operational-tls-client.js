@@ -88,6 +88,26 @@ export async function ensureOperationalCertificate(deps) {
             phase: currentPhase(paths),
         };
     }
+    // A SAVED REQUEST FOR A GENERATION THIS DEVICE NO LONGER HOLDS.
+    //
+    // The request is persisted before the first call and replayed for ever, which
+    // is right for a lost response and wrong after a re-pair: every replay carries
+    // the old generation and the cloud refuses it as KLUY-CRED-STALE-ASSIGNMENT,
+    // for ever. That is what a re-paired Store Hub did on hardware (2026-09-15).
+    //
+    // Nothing was adopted (checked in step 0), so the request is rebuilt: the SAME
+    // key — the cloud refuses a stale generation before it registers a key (group
+    // 0226), so the key is not spent — with a NEW request id, nonce and time, and
+    // persisted before the call exactly as a first request is. The stale request
+    // is overwritten and can never be sent again.
+    if (requestState !== null && requestState.assignmentGeneration !== deps.assignmentGeneration) {
+        deps.onStaleRequestReplaced?.({
+            fromGeneration: requestState.assignmentGeneration,
+            toGeneration: deps.assignmentGeneration,
+            staleRequestId: requestState.requestId,
+        });
+        requestState = null;
+    }
     if (requestState === null) {
         const now = new Date();
         requestState = {
@@ -192,7 +212,11 @@ export async function ensureOperationalCertificate(deps) {
         // NOTHING is written. The request state stays, so a later boot can retry
         // against a server that has been fixed, and the Hub has consumed nothing it
         // cannot recover from.
-        return { kind: "verification_failed", failures: verification.failures, phase: currentPhase(paths) };
+        return {
+            kind: "verification_failed",
+            failures: verification.failures,
+            phase: currentPhase(paths),
+        };
     }
     // The digest the server reported must be the digest of what it actually sent.
     if (verification.certificateSha256 !== response.certificateSha256.toLowerCase()) {

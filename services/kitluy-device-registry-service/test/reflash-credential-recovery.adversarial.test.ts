@@ -39,7 +39,7 @@ import {
   randomUUID,
   sign as cryptoSign,
 } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -64,6 +64,7 @@ import { advanceDeviceTrust } from "../src/device-trust-advance.js";
 import { readDevPkiChain, resolveDevPkiPaths } from "../src/dev-operational-pki.js";
 import { operationalKeyFingerprint } from "../src/first-operational-issuance.js";
 import { HubPairingComposition } from "../src/hub-pairing-composition.js";
+import { TerminalPairingComposition } from "../src/terminal-pairing-composition.js";
 import { createOperationalCertificateRouter } from "../src/operational-certificate-routes.js";
 import {
   obtainOperationalCertificate,
@@ -118,6 +119,8 @@ interface Board {
   readonly mac: string;
   identity: Key;
   assignmentGeneration: number;
+  /** The hardware profile the board registers with; a Store Hub's by default. */
+  readonly profileKey?: string;
 }
 
 async function currentAssignmentGeneration(deviceId: string): Promise<number> {
@@ -129,7 +132,10 @@ async function currentAssignmentGeneration(deviceId: string): Promise<number> {
 }
 
 /** An operator opens a session in the fixture Store and the board redeems the code. */
-async function pair(deviceId: string, actor: string): Promise<string> {
+async function pair(
+  deviceId: string,
+  actor: string,
+): Promise<{ readonly result: string; readonly assignmentGeneration?: number }> {
   const { rows: scope } = await pool.query<{
     tenant_id: string;
     digital_store_id: string;
@@ -148,7 +154,9 @@ async function pair(deviceId: string, actor: string): Promise<string> {
     presentedCode: code,
     actorRef: actor,
   });
-  return paired.result === "PAIRED" ? "PAIRED" : `${paired.result}: ${paired.auditDetail ?? ""}`;
+  return paired.result === "PAIRED"
+    ? { result: "PAIRED", assignmentGeneration: paired.data?.assignmentGeneration }
+    : { result: `${paired.result}: ${paired.auditDetail ?? ""}` };
 }
 
 async function establishTrustedTime(deviceId: string): Promise<void> {
@@ -185,7 +193,7 @@ async function pairedHub(): Promise<Board> {
     ],
   );
   const deviceId = rows[0]!.device_id;
-  expect(await pair(deviceId, "device/reflash-suite")).toBe("PAIRED");
+  expect((await pair(deviceId, "device/reflash-suite")).result).toBe("PAIRED");
   await establishTrustedTime(deviceId);
   return {
     deviceId,
@@ -204,6 +212,8 @@ interface RequestOptions {
   readonly tamperIdentityProof?: boolean;
   /** Reuse a request id, so the same signed request can be replayed. */
   readonly requestId?: string;
+  /** The assignment generation the request states; the board's own by default. */
+  readonly assignmentGeneration?: number;
   readonly nonce?: string;
   readonly correlationId?: string;
   readonly requestedAt?: Date;
@@ -214,6 +224,7 @@ function buildRequest(board: Board, operationalKey: Key, options: RequestOptions
   const nonce = options.nonce ?? randomUUID();
   const correlationId = options.correlationId ?? randomUUID();
   const requestedAt = options.requestedAt ?? new Date();
+  const assignmentGeneration = options.assignmentGeneration ?? board.assignmentGeneration;
   const csr: DeviceCertificateRequest = {
     requestId,
     deviceRecordId: board.deviceId,
@@ -221,7 +232,7 @@ function buildRequest(board: Board, operationalKey: Key, options: RequestOptions
     devicePublicKeyPem: operationalKey.publicKeyPem,
     publicKeyFingerprint: operationalKeyFingerprint(operationalKey.publicKeyPem),
     hardwareTrustLevel: "development_software",
-    assignmentGeneration: board.assignmentGeneration,
+    assignmentGeneration,
     requestedPurpose: "device_identity",
     requestedAt,
     nonce,
@@ -254,7 +265,7 @@ function buildRequest(board: Board, operationalKey: Key, options: RequestOptions
   return {
     deviceRecordId: board.deviceId,
     environment: ENVIRONMENT,
-    assignmentGeneration: board.assignmentGeneration,
+    assignmentGeneration,
     hardwareTrustLevel: "development_software" as const,
     operationalPublicKeyPem: operationalKey.publicKeyPem,
     operationalKeyHandle: `reflash-suite:${board.deviceId}:${requestId}`,
@@ -308,7 +319,7 @@ async function reflash(board: Board): Promise<{ previousIdentity: Key }> {
       // The label a re-flashed board derives from its NEW key. The server must
       // not rename a board it already knows, which is asserted below.
       `KL-${publicKeyFingerprint(identity.publicKeyPem).slice(0, 12).toUpperCase()}`,
-      HUB_PROFILE_KEY,
+      board.profileKey ?? HUB_PROFILE_KEY,
       publicKeyFingerprint(identity.publicKeyPem),
       JSON.stringify([
         { signal_type: "mac_address", signal_value: board.mac },
@@ -395,7 +406,7 @@ async function rePair(board: Board): Promise<void> {
   });
   expect(await lifecycle(board.deviceId)).toBe("enrolled");
   const result = await pair(board.deviceId, "device/reflash-suite-repair");
-  expect(result).toBe("PAIRED");
+  expect(result.result).toBe("PAIRED");
   // What the Hub pairing ROUTE does next (`main.ts` `advanceTrust`). Pairing
   // through the composition alone skipped it, and on hardware (2026-09-15) this
   // exact step ACTIVATED the re-flashed Hub on the previous SD card's
@@ -412,6 +423,10 @@ async function rePair(board: Board): Promise<void> {
   }
   await establishTrustedTime(board.deviceId);
   board.assignmentGeneration = await currentAssignmentGeneration(board.deviceId);
+  // The pairing answer states the generation the cloud now holds, and after a
+  // re-pair it is greater than 1 (group 0226). The board used to assume 1.
+  expect(board.assignmentGeneration).toBeGreaterThan(1);
+  expect(result.assignmentGeneration).toBe(board.assignmentGeneration);
   expect(await lifecycle(board.deviceId)).toBe("awaiting_trust");
 }
 
@@ -655,6 +670,52 @@ describe("THE RE-FLASH: a known board recovers its operational credential", () =
   );
 
   it(
+    "refuses a STALE assignment generation before anything durable, then recovers with the same key",
+    async () => {
+      const hub = await hubInService();
+      await reflash(hub);
+      await rePair(hub);
+      const before = await snapshot(hub.deviceId);
+      const key = rsaKey();
+      const fingerprint = operationalKeyFingerprint(key.publicKeyPem);
+
+      // The hardware run (2026-09-15): re-paired at generation N, asked at 1.
+      const stale = await ask(hub, key, { assignmentGeneration: 1 });
+      expect(refusalOf(stale)).toContain("KLUY-RECOVERY-STALE-ASSIGNMENT");
+
+      // NOTHING durable: no reservation, no key, no head advance, no artifact,
+      // no evidence — and the key's fingerprint is not spent anywhere.
+      const after = await snapshot(hub.deviceId);
+      expect(after.reservations).toEqual([]);
+      expect(after.keys).toEqual(before.keys);
+      expect(after.head).toEqual(before.head);
+      expect(after.artifacts).toEqual(before.artifacts);
+      expect(after.evidence).toEqual([]);
+      const { rows: spent } = await pool.query<{ n: number }>(
+        `select count(*)::int as n from kitluy_devices.device_generation_keys
+          where public_key_fingerprint = $1`,
+        [fingerprint],
+      );
+      expect(spent[0]?.n).toBe(0);
+
+      // The corrected request, SAME key and a new request id: recovers normally.
+      const corrected = await ask(hub, key);
+      expect(corrected.outcome, refusalOf(corrected)).toBe("ISSUED");
+      if (corrected.outcome === "REFUSED") return;
+      expect(corrected.recovered).toBe(true);
+      expect(corrected.certificateGeneration).toBe(2);
+      const recovered = await snapshot(hub.deviceId);
+      expect(recovered.head?.current_generation).toBe(2);
+      expect(recovered.reservations).toHaveLength(1);
+      expect(recovered.evidence).toHaveLength(1);
+      // Issued, not yet activated: activation is the ROUTE's post-issuance trust
+      // re-check, which the route and real-device cases in this suite assert.
+      expect(await lifecycle(hub.deviceId)).toBe("awaiting_trust");
+    },
+    FLOW_TIMEOUT_MS,
+  );
+
+  it(
     "is idempotent: a lost response replays the same recovered certificate",
     async () => {
       const hub = await hubInService();
@@ -820,6 +881,76 @@ describe("THE REAL DEVICE CODE, through the real route, across a re-flash", () =
           first.manifest.publicKeyFingerprint,
         );
         // The route re-checked trust, and the board is back in service.
+        expect(await lifecycle(board.deviceId)).toBe("active");
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+    FLOW_TIMEOUT_MS,
+  );
+
+  it(
+    "a card that saved its request at the old generation rebuilds it and recovers with the same key",
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "kitluy-reflash-stale-e2e-"));
+      try {
+        const chain = readDevPkiChain(resolveDevPkiPaths()!);
+        const expectedRootSha256 = createHash("sha256")
+          .update(new X509Certificate(chain.rootCertificatePem).raw)
+          .digest("hex");
+        const board = await pairedHub();
+        const client = routeClient();
+        const cardA = sdCard(root, "card-a", board.identity);
+        const first = await ensureOperationalCertificate({
+          client,
+          deviceRecordId: board.deviceId,
+          environment: ENVIRONMENT,
+          hardwareTrustLevel: "development_software",
+          assignmentGeneration: board.assignmentGeneration,
+          trustedTime: new Date(),
+          expectedRootSha256,
+          paths: cardA.paths,
+          identitySigner: cardA.identitySigner,
+        });
+        expect(first.kind, JSON.stringify(first)).toBe("adopted");
+
+        await reflash(board);
+        await rePair(board);
+        const cardB = sdCard(root, "card-b", board.identity);
+        const onCard = (assignmentGeneration: number, replaced: string[]) =>
+          ensureOperationalCertificate({
+            client,
+            deviceRecordId: board.deviceId,
+            environment: ENVIRONMENT,
+            hardwareTrustLevel: "development_software",
+            assignmentGeneration,
+            trustedTime: new Date(),
+            expectedRootSha256,
+            paths: cardB.paths,
+            identitySigner: cardB.identitySigner,
+            onStaleRequestReplaced: (c) =>
+              replaced.push(`${String(c.fromGeneration)}->${String(c.toGeneration)}`),
+          });
+
+        // The hardware run: the board saved and sent its request at generation 1.
+        const stale = await onCard(1, []);
+        expect(stale.kind, JSON.stringify(stale)).toBe("refused");
+        const saved = JSON.parse(readFileSync(cardB.paths.requestState, "utf8")) as {
+          requestId: string;
+          publicKeyFingerprint: string;
+        };
+        const blocking = await snapshot(board.deviceId);
+        expect(blocking.reservations).toEqual([]);
+
+        // The pairing state now states the real generation: the SAME card rebuilds
+        // its request, keeps its key, and recovers — no abandon, no new key.
+        const replaced: string[] = [];
+        const recovered = await onCard(board.assignmentGeneration, replaced);
+        expect(recovered.kind, JSON.stringify(recovered)).toBe("adopted");
+        if (recovered.kind !== "adopted") return;
+        expect(replaced).toEqual([`1->${String(board.assignmentGeneration)}`]);
+        expect(recovered.manifest.certificateGeneration).toBe(2);
+        expect(recovered.manifest.publicKeyFingerprint).toBe(saved.publicKeyFingerprint);
         expect(await lifecycle(board.deviceId)).toBe("active");
       } finally {
         rmSync(root, { recursive: true, force: true });
@@ -1049,6 +1180,238 @@ describe("NOTHING ELSE CHANGED", () => {
         ),
       ).rejects.toThrow(/KLUY-RECOVERY-UNAUTHORIZED/);
       expect((await snapshot(hub.deviceId)).evidence).toHaveLength(1);
+    },
+    FLOW_TIMEOUT_MS,
+  );
+});
+
+/**
+ * A PI TERMINAL recovers through the same door (REFLASH-HARDENING-001).
+ *
+ * The recovery door is device-class agnostic and a re-flashed Pi Terminal
+ * recovered on hardware on 2026-09-15; this is its automated regression,
+ * including group 0226's stale-generation refusal and group 0225's refusal to
+ * activate on the previous card's certificate. The Terminal pairs on a seat
+ * through the real `TerminalPairingComposition` and, like the route, advances
+ * trust afterwards.
+ *
+ * Scope and fixture shape follow `terminal-pairing.integration.test.ts`: the
+ * seeded Laundry scope, and an ACTIVE Store Hub there, expressed as the
+ * `device_assignment_projections` row activation writes.
+ */
+describe("A PI TERMINAL: re-flashed, re-seated, recovers", () => {
+  const TENANT = "00000000-0000-4000-8000-000000000011";
+  const STORE = "00000000-0000-4000-8000-000000000015";
+  const LOCATION = "00000000-0000-4000-8000-000000000018";
+  const TERMINAL_PROFILE_KEY = "WS11-PT-TERMINAL-PROBE";
+  const ROLES = ["laundry.t1.intake_cashier", "laundry.t2.customer_display"];
+
+  async function profileId(key: string, deviceClass: "store_hub" | "terminal"): Promise<string> {
+    await pool.query(
+      `insert into kitluy_devices.hardware_profiles
+         (profile_key, display_name, device_class, manufacturer, model_identifier,
+          required_signal_types, certification_status)
+       values ($1, $2, $3, 'ASSERTION-FIXTURE', 'PROBE-PT',
+               array['mac_address', 'board_serial', 'storage_serial']::kitluy_devices.hardware_signal_type[],
+               'CERTIFIED')
+       on conflict (profile_key) do nothing`,
+      [key, `${key} fixture`, deviceClass],
+    );
+    const { rows } = await pool.query<{ id: string }>(
+      `select id from kitluy_devices.hardware_profiles where profile_key = $1`,
+      [key],
+    );
+    return rows[0]!.id;
+  }
+
+  /** The same active-Hub fixture the terminal pairing suite uses, reused across runs. */
+  async function activeHubAtScope(): Promise<void> {
+    const assetTag = "TPAIR-HUB-01";
+    let { rows } = await pool.query<{ id: string }>(
+      `select id from kitluy_devices.devices where asset_tag = $1`,
+      [assetTag],
+    );
+    if (rows[0] === undefined) {
+      const h = sha256(assetTag);
+      ({ rows } = await pool.query<{ id: string }>(
+        `select kitluy_devices.enroll_device_v1(
+           $1::text, $2::uuid, now() - interval '30 days', $3::text, 'ed25519', 'software',
+           'STATION-TPAIR', 'OP-TPAIR', $4::jsonb, null) as id`,
+        [
+          assetTag,
+          await profileId(HUB_PROFILE_KEY, "store_hub"),
+          h,
+          JSON.stringify([
+            {
+              signal_type: "mac_address",
+              signal_value: (h.slice(0, 12).match(/../g) ?? []).join(":"),
+            },
+            { signal_type: "board_serial", signal_value: `BS-${h.slice(12, 28)}` },
+            { signal_type: "storage_serial", signal_value: `SS-${h.slice(28, 44)}` },
+          ]),
+        ],
+      ));
+    }
+    const hubId = rows[0]!.id;
+    const { rows: projected } = await pool.query<{ n: number }>(
+      `select count(*)::int as n from kitluy_devices.device_assignment_projections
+        where device_id = $1::uuid and digital_store_id = $2::uuid and store_location_id = $3::uuid`,
+      [hubId, STORE, LOCATION],
+    );
+    if ((projected[0]?.n ?? 0) > 0) return;
+    const token = sha256(`reflash-terminal-hub-token-${randomUUID()}`);
+    const payload = sha256(`reflash-terminal-hub-payload-${randomUUID()}`);
+    await pool.query(
+      `select kitluy_devices.create_device_claim_v1($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, 900, 'OP-TPAIR')`,
+      [hubId, TENANT, STORE, LOCATION, token, payload],
+    );
+    const { rows: redeemed } = await pool.query<{ assignment_id: string }>(
+      `select kitluy_devices.redeem_device_claim_v1($1, $2, $3::uuid, 'HUB-TPAIR') as assignment_id`,
+      [token, payload, hubId],
+    );
+    await pool.query(
+      `insert into kitluy_devices.device_assignment_projections
+         (device_id, assignment_id, assignment_generation, tenant_id, digital_store_id, store_location_id,
+          terminal_profile_keys, environment)
+       select $1::uuid, $2::uuid, d.assignment_generation, $3::uuid, $4::uuid, $5::uuid, '{}', 'development'
+         from kitluy_devices.devices d where d.id = $1::uuid
+       on conflict (device_id) do nothing`,
+      [hubId, redeemed[0]!.assignment_id, TENANT, STORE, LOCATION],
+    );
+  }
+
+  /** HET approval evidence for the terminal's CURRENT enrollment, as the fixture suite writes it. */
+  async function approve(deviceId: string): Promise<void> {
+    await pool.query(
+      `insert into kitluy_devices.device_lifecycle_events
+         (device_id, from_state, to_state, reason_code, actor_ref, detail)
+       values ($1::uuid, 'enrolled', 'enrolled', 'HET_HARDWARE_VERIFIED_AND_APPROVED', 'OP-REFLASH-SUITE',
+               jsonb_build_object('environment', 'development', 'reason', 'reflash-suite fixture'))`,
+      [deviceId],
+    );
+  }
+
+  async function seatAndPair(board: Board, seatId: string | null): Promise<string> {
+    let id = seatId;
+    if (id === null) {
+      const { rows } = await pool.query<{ r: Record<string, unknown> }>(
+        `select kitluy_devices.define_physical_terminal_v1($1::uuid, $2::uuid, $3, $4::text[], 'partner/reflash-suite') as r`,
+        [STORE, LOCATION, `Reflash Seat ${randomUUID().slice(0, 8)}`, ROLES],
+      );
+      expect(rows[0]!.r.outcome, JSON.stringify(rows[0]!.r)).toBe("DEFINED");
+      id = String(rows[0]!.r.physical_terminal_id);
+    }
+    const code = pairingCode();
+    const { rows: opened } = await pool.query<{ r: Record<string, unknown> }>(
+      `select kitluy_devices.open_terminal_pairing_session_v1($1::uuid, $2, 900, 'partner/reflash-suite') as r`,
+      [id, sha256(code)],
+    );
+    expect(opened[0]!.r.outcome, JSON.stringify(opened[0]!.r)).toBe("OPENED");
+    const paired = await new TerminalPairingComposition({ source: pool }).pair({
+      deviceRecordId: board.deviceId,
+      presentedCode: code,
+      actorRef: "device/reflash-suite-terminal",
+    });
+    expect(paired.result, JSON.stringify(paired)).toBe("PAIRED");
+    board.assignmentGeneration = await currentAssignmentGeneration(board.deviceId);
+    expect(paired.data?.assignmentGeneration).toBe(board.assignmentGeneration);
+    return id;
+  }
+
+  it(
+    "recovers generation 2 on its seat; a stale generation first leaves nothing behind",
+    async () => {
+      await activeHubAtScope();
+      const assetTag = `${FIXTURE_PREFIX}T-${randomUUID()}`;
+      const h = sha256(assetTag);
+      const identity = identityKey();
+      const mac = (h.slice(0, 12).match(/../g) ?? []).join(":");
+      const boardSerial = `BS-${h.slice(12, 28)}`;
+      const { rows } = await pool.query<{ device_id: string }>(
+        `select kitluy_devices.enroll_device_v1(
+           $1::text, $2::uuid, now() - interval '30 days', $3::text, 'ed25519', 'software',
+           'STATION-REFLASH', 'HET-MFG/reflash-suite', $4::jsonb, null) as device_id`,
+        [
+          assetTag,
+          await profileId(TERMINAL_PROFILE_KEY, "terminal"),
+          publicKeyFingerprint(identity.publicKeyPem),
+          JSON.stringify([
+            { signal_type: "mac_address", signal_value: mac },
+            { signal_type: "board_serial", signal_value: boardSerial },
+            { signal_type: "storage_serial", signal_value: `SS-${h.slice(28, 44)}` },
+          ]),
+        ],
+      );
+      const terminal: Board = {
+        deviceId: rows[0]!.device_id,
+        assetTag,
+        boardSerial,
+        mac,
+        identity,
+        assignmentGeneration: 0,
+        profileKey: TERMINAL_PROFILE_KEY,
+      };
+      await approve(terminal.deviceId);
+
+      // In service: seated, first certificate, active.
+      const seatId = await seatAndPair(terminal, null);
+      await establishTrustedTime(terminal.deviceId);
+      const first = await ask(terminal, rsaKey(), { identity: null });
+      expect(first.outcome, refusalOf(first)).toBe("ISSUED");
+      const activated = await advanceDeviceTrust(pool, {
+        deviceRecordId: terminal.deviceId,
+        environment: ENVIRONMENT,
+        actorRef: "device/terminal-pairing",
+      });
+      expect(activated.kind, JSON.stringify(activated)).toBe("advanced");
+
+      // Re-flashed: a new card and identity key; released and re-seated.
+      await reflash(terminal);
+      await approve(terminal.deviceId);
+      await withBorrowedRole("kitluy_fleet_governor", async (client) => {
+        await client.query(
+          "select kitluy_devices.revoke_device_assignment_v1($1::uuid, 'SD_CARD_REFLASH', 'OP-REFLASH-SUITE')",
+          [terminal.deviceId],
+        );
+      });
+      await seatAndPair(terminal, seatId);
+      expect(terminal.assignmentGeneration).toBeGreaterThan(1);
+      // The terminal route's trust advance: group 0225 keeps it waiting.
+      const blocked = await advanceDeviceTrust(pool, {
+        deviceRecordId: terminal.deviceId,
+        environment: ENVIRONMENT,
+        actorRef: "device/terminal-pairing",
+      });
+      expect(blocked.kind, JSON.stringify(blocked)).toBe("blocked");
+      await establishTrustedTime(terminal.deviceId);
+      const before = await snapshot(terminal.deviceId);
+
+      // A stale generation: refused, and nothing durable is written (group 0226).
+      const key = rsaKey();
+      const stale = await ask(terminal, key, { assignmentGeneration: 1 });
+      expect(refusalOf(stale)).toContain("KLUY-RECOVERY-STALE-ASSIGNMENT");
+      const unchanged = await snapshot(terminal.deviceId);
+      expect(unchanged.reservations).toEqual([]);
+      expect(unchanged.keys).toEqual(before.keys);
+      expect(unchanged.head).toEqual(before.head);
+
+      // The corrected request, same key: generation 2, then active.
+      const recovered = await ask(terminal, key);
+      expect(recovered.outcome, refusalOf(recovered)).toBe("ISSUED");
+      if (recovered.outcome === "REFUSED") return;
+      expect(recovered.recovered).toBe(true);
+      expect(recovered.certificateGeneration).toBe(2);
+      const back = await advanceDeviceTrust(pool, {
+        deviceRecordId: terminal.deviceId,
+        environment: ENVIRONMENT,
+        actorRef: "device/terminal-pairing",
+      });
+      expect(back.kind, JSON.stringify(back)).toBe("advanced");
+      expect(await lifecycle(terminal.deviceId)).toBe("active");
+      const after = await snapshot(terminal.deviceId);
+      expect(after.device.id).toBe(terminal.deviceId);
+      expect(after.device.asset_tag).toBe(assetTag);
+      expect(after.head).toEqual({ current_generation: 2, previous_generation: 1 });
     },
     FLOW_TIMEOUT_MS,
   );

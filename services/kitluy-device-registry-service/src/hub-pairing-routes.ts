@@ -201,6 +201,9 @@ function paired(
       correlationId,
       deviceRecordId: material.deviceRecordId,
       assignmentId: material.assignmentId,
+      // The authoritative generation of that assignment. The board persists it
+      // and requests its certificate against it (group 0226).
+      assignmentGeneration: material.assignmentGeneration,
       tenantId: material.tenantId,
       digitalStoreId: material.digitalStoreId,
       storeLocationId: material.storeLocationId,

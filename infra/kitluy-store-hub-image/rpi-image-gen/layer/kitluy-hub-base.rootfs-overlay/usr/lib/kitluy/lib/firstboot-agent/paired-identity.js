@@ -30,6 +30,9 @@ import { readPairingState } from "./pairing-state.js";
 import { readFileSync } from "node:fs";
 /** Where the Device Shell writes a terminal's seat. Mirrors TERMINAL_ASSIGNMENT_PATH. */
 export const TERMINAL_ASSIGNMENT_PATH = "/var/lib/kitluy/terminal/assignment.json";
+function statedGeneration(value) {
+    return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
+}
 function readTerminalAssignment(path) {
     let raw;
     try {
@@ -44,12 +47,11 @@ function readTerminalAssignment(path) {
     const deviceRecordId = raw.deviceRecordId;
     if (typeof deviceRecordId !== "string" || deviceRecordId === "")
         return null;
-    const generation = raw.assignmentGeneration;
+    const generation = statedGeneration(raw.assignmentGeneration);
     return {
         deviceRecordId,
-        assignmentGeneration: typeof generation === "number" && Number.isInteger(generation) && generation > 0
-            ? generation
-            : 1,
+        assignmentGeneration: generation ?? 1,
+        assignmentGenerationSource: generation === undefined ? "assumed-legacy-default" : "stated",
         source: "terminal-assignment",
     };
 }
@@ -62,13 +64,19 @@ function readTerminalAssignment(path) {
  * the certificate exists.
  */
 export function readPairedIdentity(options = {}) {
-    const hub = readPairingState();
+    const hub = options.pairingStatePath === undefined
+        ? readPairingState()
+        : readPairingState(options.pairingStatePath);
     if (hub !== null && hub.phase === "PAIRED" && hub.deviceRecordId !== undefined) {
+        // The generation the cloud stated at pairing (group 0226). A file written
+        // before that has none, and 1 — what this agent always used for a Hub — is
+        // kept for it, but marked as assumed so it is visible in the log. The
+        // hard-coded 1 is what refused a re-paired Hub at generation 3 on hardware.
+        const generation = statedGeneration(hub.assignmentGeneration);
         return {
             deviceRecordId: hub.deviceRecordId,
-            // The Hub's own state carries no generation; 1 is what this agent has
-            // always used for a Hub, and that behaviour is unchanged.
-            assignmentGeneration: 1,
+            assignmentGeneration: generation ?? 1,
+            assignmentGenerationSource: generation === undefined ? "assumed-legacy-default" : "stated",
             source: "hub-pairing-state",
         };
     }
