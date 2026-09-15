@@ -36,6 +36,7 @@ import { ensureOperationalKey, withOperationalPrivateKey, OperationalKeyError, }
 import { operationalCsrBytes, OPERATIONAL_CSR_PURPOSE, } from "./operational-csr-bytes.js";
 import { commitAdoption, currentPhase, readManifest, readRequestState, writeRequestState, OPERATIONAL_PATHS, } from "./operational-credential-state.js";
 import { verifyOperationalCertificate, } from "./operational-certificate-verification.js";
+import { RecoveryIdentityError, } from "./operational-recovery-identity-bytes.js";
 /**
  * Bring the Hub to ADOPTED, or say precisely why it could not.
  *
@@ -122,9 +123,9 @@ export async function ensureOperationalCertificate(deps) {
         nonce: requestState.nonce,
         correlationId: requestState.correlationId,
     };
+    const preimage = Buffer.from(operationalCsrBytes(csr));
     let proofOfPossessionBase64;
     try {
-        const preimage = Buffer.from(operationalCsrBytes(csr));
         proofOfPossessionBase64 = withOperationalPrivateKey((privateKey) => cryptoSign("sha256", preimage, privateKey).toString("base64"), paths.privateKey);
     }
     catch (error) {
@@ -134,11 +135,30 @@ export async function ensureOperationalCertificate(deps) {
             phase: currentPhase(paths),
         };
     }
+    // --- 3b. THE DEVICE IDENTITY PROOF, OVER THE SAME BYTES ------------------
+    // Deterministic for the persisted request: Ed25519 signatures are, so a
+    // replay after a lost response carries the identical proof.
+    let identity;
+    if (deps.identitySigner !== undefined) {
+        try {
+            identity = deps.identitySigner(preimage);
+        }
+        catch (error) {
+            return {
+                kind: "blocked",
+                detail: error instanceof RecoveryIdentityError
+                    ? error.message
+                    : "the recovery identity proof could not be signed",
+                phase: currentPhase(paths),
+            };
+        }
+    }
     // --- 4. ASK ----------------------------------------------------------------
     const call = await deps.client.request({
         csr,
         operationalPublicKeyPem: key.publicKeyPem,
         proofOfPossessionBase64,
+        ...(identity === undefined ? {} : { identity }),
     });
     if (call.kind === "unreachable") {
         // The request state survives, so the next boot replays this exact request.

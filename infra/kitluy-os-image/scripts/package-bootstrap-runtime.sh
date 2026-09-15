@@ -143,6 +143,13 @@ DEVICE_MODULES=(
   operational-certificate-verification operational-tls-client
   adapters/http-operational-certificate-client
   paired-identity
+  # The recovery identity proof (KLD-2026-09-14-REFLASH-CREDENTIAL-RECOVERY-001).
+  # Every certificate request is signed with the device identity key so a
+  # re-flashed board can recover its credential; `operational-tls-client` and
+  # `bin/operational-tls` import it. Its absence refused this build with
+  # "unpackaged imports" on 2026-09-15. The device copy of the canonical bytes,
+  # kept honest by test/operational-recovery-identity-drift.test.ts.
+  operational-recovery-identity-bytes
   bin/operational-tls
   # The link to the Store Hub. A terminal that has a certificate and cannot use
   # it is not a till; this is the client that discovers the Hub over mDNS,

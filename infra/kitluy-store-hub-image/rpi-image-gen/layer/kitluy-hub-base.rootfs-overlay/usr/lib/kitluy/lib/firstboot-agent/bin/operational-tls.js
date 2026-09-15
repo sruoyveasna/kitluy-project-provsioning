@@ -45,6 +45,7 @@ import { readImageEnv } from "../image-env.js";
 import { readPairedIdentity } from "../paired-identity.js";
 import { currentPhase, readManifest, OPERATIONAL_PATHS, } from "../operational-credential-state.js";
 import { ensureOperationalCertificate } from "../operational-tls-client.js";
+import { DEVICE_IDENTITY_PRIVATE_KEY_PATH, fileRecoveryIdentitySigner, } from "../operational-recovery-identity-bytes.js";
 /** How long to wait between attempts while a prerequisite is missing. */
 const IDLE_SECONDS = 30;
 /** Where the pinned DEVELOPMENT root's digest is published in the image. */
@@ -162,6 +163,12 @@ async function once() {
         trustedTime,
         expectedRootSha256: rootPin,
         paths: OPERATIONAL_PATHS,
+        // Every request carries the identity proof. A re-flashed board already
+        // holds a credential in the cloud and is issued a new one only as a governed
+        // recovery against this proof (registry group 0224); first issuance ignores
+        // it. The key is the one `kitluy-firstboot.service` created, which this
+        // root unit can read under `ReadWritePaths=/var/lib/kitluy`.
+        identitySigner: fileRecoveryIdentitySigner(DEVICE_IDENTITY_PRIVATE_KEY_PATH),
     });
     switch (outcome.kind) {
         case "already_adopted":

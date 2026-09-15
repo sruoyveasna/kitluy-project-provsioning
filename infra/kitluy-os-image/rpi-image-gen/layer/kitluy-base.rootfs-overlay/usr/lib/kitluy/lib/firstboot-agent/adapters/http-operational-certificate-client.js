@@ -73,6 +73,13 @@ export function createHttpOperationalCertificateClient(options) {
                         requestedAt: input.csr.requestedAt,
                         nonce: input.csr.nonce,
                         proofOfPossession: input.proofOfPossessionBase64,
+                        // Recovery only (registry group 0224): both fields or neither.
+                        ...(input.identity === undefined
+                            ? {}
+                            : {
+                                identityPublicKeyPem: input.identity.identityPublicKeyPem,
+                                identityProof: input.identity.identityProofBase64,
+                            }),
                     }),
                     signal: controller.signal,
                 });

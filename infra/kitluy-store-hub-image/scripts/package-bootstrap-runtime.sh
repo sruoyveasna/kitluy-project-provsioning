@@ -59,6 +59,17 @@ DEVICE_MODULES=(
   adapters/http-registration-client
   bin/firstboot-identity bin/enrollment-bootstrap bin/health-reporter
   bin/update-bootstrap bin/cloud-registration
+  # THE UPDATE AGENT'S CLOSURE. `bin/update-bootstrap` (the declared
+  # `update-agent` component) grew into the U1 release runtime, and this list was
+  # never updated, so the Hub overlay kept shipping the pre-U1 precondition
+  # reporter and re-packaging refused with "unpackaged imports" (2026-09-15).
+  # Same modules the Pi Terminal image packages. On a Store Hub the agent stays
+  # INERT: the Hub builder bakes no release trust anchor and no release source,
+  # so every pass stops at `no_trust_anchor` before an install is composed —
+  # the behaviour the old reporter had. Hub release distribution is U4.
+  durable-write release-store release-verify release-trust
+  release-archive release-artifact release-assignment release-install release-status
+  adapters/http-release-source release-runtime
   # bin/bootstrap-ui is the PI TERMINAL's status screen — it titles itself
   # "KitLuy Terminal" and hardcodes `Store assignment .. Unassigned`, which is
   # wrong on a Hub and a lie once the Hub pairs. It was shipped here with no
@@ -89,6 +100,12 @@ DEVICE_MODULES=(
   # certificate. Its absence here refused the build with an unpackaged import
   # rather than shipping a closure that would die at the first boot.
   paired-identity
+  # The recovery identity proof (KLD-2026-09-14-REFLASH-CREDENTIAL-RECOVERY-001).
+  # A re-flashed Hub already holds a credential in the cloud and is issued a new
+  # one only against a signature by its device identity key;
+  # `operational-tls-client` and `bin/operational-tls` import this module, so the
+  # closure check refuses the build without it.
+  operational-recovery-identity-bytes
   bin/operational-tls
 )
 rm -rf "$LIB_DIR"

@@ -99,9 +99,10 @@ export async function runEdgeAttempt(options) {
     const last = readLastEndpoint(lastEndpointPath);
     if (last !== null)
         candidates.push(last);
-    const discovered = await (options.discover ?? (() => discoverEdgeCandidates({
-        ...(options.mdnsTimeoutMs === undefined ? {} : { timeoutMs: options.mdnsTimeoutMs }),
-    })))();
+    const discovered = await (options.discover ??
+        (() => discoverEdgeCandidates({
+            ...(options.mdnsTimeoutMs === undefined ? {} : { timeoutMs: options.mdnsTimeoutMs }),
+        })))();
     for (const candidate of discovered) {
         if (!candidates.some((c) => c.host === candidate.host && c.port === candidate.port)) {
             candidates.push(candidate);
@@ -141,7 +142,12 @@ export async function runEdgeAttempt(options) {
 }
 async function attemptCandidate(candidate, credentials, options, call, now) {
     const checkedAt = now().toISOString();
-    const base = { host: candidate.host, port: candidate.port, credentials, environment: options.environment };
+    const base = {
+        host: candidate.host,
+        port: candidate.port,
+        credentials,
+        environment: options.environment,
+    };
     let discovery;
     try {
         discovery = await call({ ...base, method: "GET", path: WELL_KNOWN_DISCOVERY_PATH });
@@ -218,7 +224,11 @@ async function attemptCandidate(candidate, credentials, options, call, now) {
                     "pair into; the cloud has not delivered its profile assignment",
                 checkedAt,
                 hub,
-                reads: { authorityTime: reads.authorityTime, eligibility: reads.eligibility, configuration: "-" },
+                reads: {
+                    authorityTime: reads.authorityTime,
+                    eligibility: reads.eligibility,
+                    configuration: "-",
+                },
             };
         }
         const outcome = await pairWithHub({
@@ -237,7 +247,11 @@ async function attemptCandidate(candidate, credentials, options, call, now) {
                 detail: `the Store Hub refused to pair this terminal: ${outcome.result} (${outcome.detail})`,
                 checkedAt,
                 hub,
-                reads: { authorityTime: reads.authorityTime, eligibility: reads.eligibility, configuration: "-" },
+                reads: {
+                    authorityTime: reads.authorityTime,
+                    eligibility: reads.eligibility,
+                    configuration: "-",
+                },
                 pairing,
             };
         }

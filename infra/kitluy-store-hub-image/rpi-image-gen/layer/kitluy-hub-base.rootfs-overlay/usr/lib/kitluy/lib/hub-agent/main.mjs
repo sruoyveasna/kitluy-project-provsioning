@@ -5762,7 +5762,6 @@ var DEV_CONFIGURATION_KEY_PATH, DEV_CONFIGURATION_KEY_ID, TERMINAL_PROFILES_SECT
 var init_dev_configuration = __esm({
   "src/hub/dev-configuration.ts"() {
     "use strict";
-    init_esm();
     init_db();
     init_configuration();
     init_signing();
@@ -6636,6 +6635,9 @@ init_dev_crypto();
 
 // ../../packages/device-identity/dist/certificate-issuance.js
 init_errors();
+init_dev_crypto();
+
+// ../../packages/device-identity/dist/operational-recovery-identity.js
 init_dev_crypto();
 
 // ../../packages/device-identity/dist/issuance-adapter.js
@@ -8257,29 +8259,55 @@ async function readRuntimeEligibility(pool, terminalDeviceId, certificateSerial,
     HUB_RUNTIME_ROLE
   );
 }
+async function selectOperationalHubIdentity(client) {
+  const operational = await client.query(
+    `select id
+       from edge_identity.hub_device
+      where device_kind = 'store_hub'
+        and trust_status = 'trusted'
+        and lifecycle_status = 'deployed'
+      order by created_at
+      limit 1`
+  );
+  const row = operational.rows[0];
+  if (row !== void 0) {
+    return { kind: "operational", id: row.id };
+  }
+  const newest = await client.query(
+    `select lifecycle_status
+       from edge_identity.hub_device
+      where device_kind = 'store_hub'
+      order by created_at desc
+      limit 1`
+  );
+  const current = newest.rows[0];
+  if (current === void 0) {
+    return {
+      kind: "refused",
+      refusal: "HUB_NOT_OPERATIONAL",
+      detail: "no Store Hub device record exists"
+    };
+  }
+  if (current.lifecycle_status === "retired") {
+    return { kind: "refused", refusal: "HUB_RETIRED", detail: "this Store Hub is retired" };
+  }
+  return {
+    kind: "refused",
+    refusal: "HUB_NOT_OPERATIONAL",
+    detail: "this Store Hub has no trusted, deployed identity"
+  };
+}
 async function deriveEligibility(client, terminalDeviceId, certificateSerial, environment) {
   const refuse = (refusal2, detail) => ({
     outcome: "refused",
     refusal: refusal2,
     detail
   });
-  const hub = await client.query(
-    `select id, lifecycle_status, trust_status
-       from edge_identity.hub_device
-      where device_kind = 'store_hub'
-      order by created_at
-      limit 1`
-  );
-  const hubRow = hub.rows[0];
-  if (hubRow === void 0) {
-    return refuse("HUB_NOT_OPERATIONAL", "no Store Hub device record exists");
+  const identity = await selectOperationalHubIdentity(client);
+  if (identity.kind === "refused") {
+    return refuse(identity.refusal, identity.detail);
   }
-  if (hubRow.lifecycle_status === "retired") {
-    return refuse("HUB_RETIRED", "this Store Hub is retired");
-  }
-  if (hubRow.trust_status !== "trusted" || hubRow.lifecycle_status !== "deployed") {
-    return refuse("HUB_NOT_OPERATIONAL", "this Store Hub is not trusted and deployed");
-  }
+  const hubRow = { id: identity.id };
   const replacement = await client.query(
     `select mode from edge_identity.hub_replacement_state where singleton = true`
   );
@@ -11340,9 +11368,7 @@ async function publishDevelopmentConfigurationCommand(path) {
       digitalStoreId: delivery.digitalStoreId,
       locationId: delivery.storeLocationId,
       environment,
-      grants: [
-        { terminalDeviceId: delivery.terminalDeviceId, profileCodes }
-      ]
+      grants: [{ terminalDeviceId: delivery.terminalDeviceId, profileCodes }]
     });
     log.info("development configuration activated", {
       snapshotId: outcome.snapshotId,
