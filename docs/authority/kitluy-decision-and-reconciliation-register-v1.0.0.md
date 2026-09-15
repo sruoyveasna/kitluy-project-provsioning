@@ -4890,3 +4890,34 @@ device's before reserving (dispatcher or door). Cloud-side only.
 **Related, OPEN:** the Hub pairing console never prompts again once
 `pairing-state.json` says PAIRED, and nothing clears it when the cloud revokes
 the assignment; a second re-pair of the same card needed the file moved aside.
+
+## KLREC-2026-09-15-HUB-PROJECTION-TOOLING-AFTER-REPAIR-001 — the Store Hub's development projection tools cannot follow a re-paired Hub or Terminal (OPEN)
+
+Found on hardware on 2026-09-15 while restoring Terminal `SERVING` after both
+boards recovered their credentials (handoff 42 §3 steps 15–18). Nothing here is
+cloud authority; these are the development stand-ins for the BLK-006 producer.
+
+1. **`hub-provision-terminal --hub-self` hard-codes `assignment_generation = 1`.**
+   After any re-pair it violates `hub_assignment_generation_uq`. It also never
+   ends the previous Hub assignment or revokes the previous credentials, and
+   `hub_assignment_active_uq` allows only one open assignment. With equal
+   `rotation_generation`, the Hub's signing-key selection in hub migration 0042
+   would tie between the old and new identity keys.
+2. **`publishDevelopmentConfiguration` does not close a terminal's previous
+   grants.** It activates the new snapshot, and the grant insert then violates
+   `terminal_profile_assignment_active_uq`. The earlier grants stay open.
+3. **Backticks inside a double-quoted SQL comment in `hub-provision-terminal`**
+   run as shell command substitution (`certificate_serial: not found`).
+   Cosmetic.
+
+**Workarounds used (Hub development database, recorded in handoff 42):**
+- ended the old Hub assignment;
+- revoked four superseded credentials, two of the Hub's and two of the
+  Terminal's;
+- ran a `/tmp` copy of the script with generation 3;
+- closed the previous grants and re-published (snapshot v3).
+
+**Fix required** in the Hub image tooling before the next re-flash:
+- carry the real assignment generation;
+- retire superseded rows in the same transaction;
+- make re-publishing close prior grants.

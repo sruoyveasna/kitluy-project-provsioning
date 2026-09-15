@@ -4,6 +4,22 @@ Read the newest relevant handoff before starting work. Naming:
 `YYYY-MM-DD__<AREA>__<TASK-ID>__<SLUG>__AI-HANDOFF.md` under the matching
 subfolder (repository/ shared/ apps/ services/ data/ infrastructure/ reviews/).
 
+## Both re-flashed boards recover their credentials, and the Terminal is served again (2026-09-15)
+
+Record: [`edge-platform/42_BOTH_REFLASHED_BOARDS_RECOVER_AND_THE_TERMINAL_IS_SERVED.md`](edge-platform/42_BOTH_REFLASHED_BOARDS_RECOVER_AND_THE_TERMINAL_IS_SERVED.md)
+· **HARDWARE VERIFIED — Phase 0 baseline reached, with workarounds** · migration 0225 committed (`ef0727d`) · no hosted write
+
+**Result:** Store Hub `KL-CFADA8C75001` and Pi Terminal `KL-1CB3577C26A7`, flashed with the handoff 40 images, both recovered certificate generation 2 through the governed path. Each kept its device record and asset tag. The Terminal then reached **`SERVING`**: paired as `laundry.t1.intake_cashier`; authority time, eligibility and configuration all ok.
+
+**How it got there:**
+
+- **Defect A (fixed, 0225).** The Hub pairing route activated the re-flashed Hub on its _old card's_ certificate, and recovery then refused it for being active. Activation now requires a certificate from the device's current enrollment. The recovery suite now runs the route's trust advance: without 0225, 10 of 15 tests fail; with it, 15/15.
+- **Hub needed workarounds.** It always requests at generation 1 (defect B, board), and a stale request left a reservation that blocks later ones (defect C, cloud). Unblocked with a runtime generation override, the governed `abandon_generation_key_v1`, and a fresh key.
+- **Terminal recovered first time.**
+- **Hub development projection needed hand repair.** `--hub-self` hard-codes generation 1 (D), the console never re-prompts (E), and re-publishing grants fails (F). Old rows were retired, and grants re-published T1-first, because handoff 41 D1 appeared live: the Hub picked T2.
+
+B, C, D, E, E2 and F are open, plus the D1 owner decision.
+
 ## Terminal topology is vertical-driven — reconciliation audit TERMINAL-TOPOLOGY-001 (2026-09-15)
 
 Record: [`edge-platform/41_TERMINAL_TOPOLOGY_IS_VERTICAL_DRIVEN.md`](edge-platform/41_TERMINAL_TOPOLOGY_IS_VERTICAL_DRIVEN.md)
