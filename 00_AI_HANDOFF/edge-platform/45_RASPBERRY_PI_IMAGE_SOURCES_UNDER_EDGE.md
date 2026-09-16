@@ -8,7 +8,7 @@ Structural refactor only. No intended change to runtime, network, recovery, data
 | --------------------- | --------------------------------------------------------------------------------------------------------- |
 | Starting commit       | `b2d33c6467edf30378cfd34464d7fc78192163ed` (`provisioning/dev`, fetched and verified before editing)      |
 | Task brief's HEAD     | `22bfd5c`, two commits behind: `65678a4` and `b2d33c6` (BOOT-RECOVERY-CLASSIFICATION-001) landed after it |
-| Implementation commit | `PENDING` (this record's follow-up commit only fills in this SHA)                                         |
+| Implementation commit | `2e94af5` (`2e94af50b8e0080af381b59947432b8f5aefb6eb`; the follow-up commit only fills in this SHA)       |
 | Previous edge handoff | 44 (BOOT-RECOVERY-CLASSIFICATION-001)                                                                     |
 | Decision register     | `KLREC-2026-09-16-EDGE-IMAGE-SOURCE-PATHS-001`                                                            |
 
@@ -221,7 +221,7 @@ Only then do both this refactor and `65678a4` become **IMAGE VERIFIED**.
 
 | Commit      | What                                                                                                                    |
 | ----------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `PENDING`   | 293 renames; path and depth fixes; ignore rules; secret-scan pin; navigation README; registers; this handoff; the index |
+| `2e94af5`   | 293 renames; path and depth fixes; ignore rules; secret-scan pin; navigation README; registers; this handoff; the index |
 | this commit | records the implementation SHA in this handoff and the index                                                            |
 
 Pushed to `provisioning` `dev`. `main` unchanged. Not included:

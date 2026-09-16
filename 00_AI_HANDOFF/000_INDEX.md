@@ -7,7 +7,7 @@ subfolder (repository/ shared/ apps/ services/ data/ infrastructure/ reviews/).
 ## INFRA-EDGE-STRUCTURE-001 — the two Raspberry Pi image sources move under `infra/edge/raspberry-pi/` (2026-09-16)
 
 Record: [`edge-platform/45_RASPBERRY_PI_IMAGE_SOURCES_UNDER_EDGE.md`](edge-platform/45_RASPBERRY_PI_IMAGE_SOURCES_UNDER_EDGE.md)
-· **STRUCTURE IMPLEMENTED · TESTED · IMAGE NOT REBUILT · HARDWARE NOT PERFORMED** · commit `PENDING` (from `b2d33c6`)
+· **STRUCTURE IMPLEMENTED · TESTED · IMAGE NOT REBUILT · HARDWARE NOT PERFORMED** · commit `2e94af5` (from `b2d33c6`)
 
 **Path migration.** Records written before this entry use the old paths:
 
