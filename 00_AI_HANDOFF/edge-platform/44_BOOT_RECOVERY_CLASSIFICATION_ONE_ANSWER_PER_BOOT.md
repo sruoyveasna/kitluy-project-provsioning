@@ -4,13 +4,13 @@
 **Status:** **IMPLEMENTED · TESTED · INTEGRATED (local hardware stack `kitluy-fresh`, live route probed with the real boards' records) · PORTAL: source and tests only, NOT browser-verified · IMAGE: sources integrated and packaged, NOT rebuilt · HARDWARE VERIFICATION PENDING · END-TO-END NOT VERIFIED.**
 The REFLASH-HARDENING-001 hardware gate (handoff 43 §8) is **also still pending**: both boards were powered off throughout this session.
 
-| Fact             | Value                                                                                                      |
-| ---------------- | ---------------------------------------------------------------------------------------------------------- |
-| Starting commit  | `22bfd5ce97cd6a039c4607ed641b9c085e47350e` (verified as HEAD before editing)                               |
-| Ending commit    | see §14                                                                                                    |
-| Migration        | **0227** `supabase/migrations/20260916100000_0227_device_boot_evidence.sql`                                |
-| New package      | `packages/device-boot-classification` (`@kitluy/device-boot-classification`, plus `/evidence-row` subpath) |
-| Previous records | handoff 43 (REFLASH-HARDENING-001, hardware pending), 42 (hardware run), 41 (topology, D1)                 |
+| Fact                  | Value                                                                                                      |
+| --------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Starting commit       | `22bfd5ce97cd6a039c4607ed641b9c085e47350e` (verified as HEAD before editing)                               |
+| Implementation commit | `65678a4` (this record's follow-up commit only fills in this SHA)                                          |
+| Migration             | **0227** `supabase/migrations/20260916100000_0227_device_boot_evidence.sql`                                |
+| New package           | `packages/device-boot-classification` (`@kitluy/device-boot-classification`, plus `/evidence-row` subpath) |
+| Previous records      | handoff 43 (REFLASH-HARDENING-001, hardware pending), 42 (hardware run), 41 (topology, D1)                 |
 
 Authority: owner task BOOT-RECOVERY-CLASSIFICATION-001 (2026-09-16). It re-decides
 nothing already locked: `KLD-2026-09-14-REFLASH-CREDENTIAL-RECOVERY-001`,
@@ -294,7 +294,8 @@ No hosted database was touched.
 
 | Commit      | What                                                                                                                                                                                                                                        |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| this commit | contract package + matrix; migration 0227; registry route; firstboot runtime, console and drift test; both overlays re-packaged; Management API recovery view + OpenAPI; Admin Portal recovery card; this handoff, the index, register rows |
+| `65678a4`   | contract package + matrix; migration 0227; registry route; firstboot runtime, console and drift test; both overlays re-packaged; Management API recovery view + OpenAPI; Admin Portal recovery card; this handoff, the index, register rows |
+| this commit | records `65678a4` in this handoff and the index                                                                                                                                                                                             |
 
 Pushed to `provisioning` `dev`. `main` unchanged. Not included:
 `scripts/development/issue-dev-pairing-code.mjs` (an uncommitted PG 15 fix present

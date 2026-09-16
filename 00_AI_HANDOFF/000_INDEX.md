@@ -7,7 +7,7 @@ subfolder (repository/ shared/ apps/ services/ data/ infrastructure/ reviews/).
 ## BOOT-RECOVERY-CLASSIFICATION-001 — one answer per boot: what happened, and the one next step (2026-09-16)
 
 Record: [`edge-platform/44_BOOT_RECOVERY_CLASSIFICATION_ONE_ANSWER_PER_BOOT.md`](edge-platform/44_BOOT_RECOVERY_CLASSIFICATION_ONE_ANSWER_PER_BOOT.md)
-· **IMPLEMENTED · TESTED · INTEGRATED (local hardware stack) · IMAGE NOT REBUILT · HARDWARE VERIFICATION PENDING** · migration **0227** · starting commit `22bfd5c`
+· **IMPLEMENTED · TESTED · INTEGRATED (local hardware stack) · IMAGE NOT REBUILT · HARDWARE VERIFICATION PENDING** · migration **0227** · commit `65678a4` (from `22bfd5c`)
 
 **What exists now.**
 
