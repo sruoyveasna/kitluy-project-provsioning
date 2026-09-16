@@ -1,0 +1,34 @@
+[Unit]
+Description=KitLuy Store Hub encrypted data volume (NVMe, LUKS2 unlock)
+Documentation=infra/edge/raspberry-pi/store-hub-image/README.md
+# Deliberately NOT before the enrollment agent: a Hub with a storage fault must
+# still come online in the fleet and stay diagnosable remotely. Storage failing
+# should cost the shop its database, not its visibility.
+After=local-fs.target
+ConditionPathExists=/usr/lib/kitluy/hub-storage-provision
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/kitluy/hub-storage-provision
+User=root
+# This unit opens a LUKS container and creates a device-mapper node, so it needs
+# device access and CAP_SYS_ADMIN. The directives below are the ones that can be
+# applied WITHOUT breaking that, rather than a full sandbox that would fail in
+# ways indistinguishable from a hardware fault.
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+RestrictSUIDSGID=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+# The mount is a separate .mount unit, so this needs no mount propagation.
+PrivateNetwork=yes
+# A storage fault is almost always physical — no drive, unprogrammed OTP — and a
+# restart loop buries the one log line that says which.
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

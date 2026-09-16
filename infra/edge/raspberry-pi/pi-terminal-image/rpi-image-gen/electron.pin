@@ -1,0 +1,49 @@
+# KitLuy Pi Terminal — pinned Electron runtime.
+#
+# The Device Shell is an Electron application, and Debian ships no Electron. It
+# is therefore an EXTERNAL, PINNED dependency, acquired the same way the image
+# builder itself is: by an immutable version plus the checksum of the exact
+# artifact, so the resolution can be re-checked rather than trusted.
+#
+# Authority: ADR-0004 (the pnpm binary download is skipped repository-wide, so
+# the image must supply the runtime itself); Slice 1B image integration.
+#
+# WHY A CHECKSUM AND NOT JUST A VERSION
+# -------------------------------------
+# A version names a release; a checksum names the bytes. Everything else the
+# image consumes is either built here or pinned by digest, and an unverified
+# 100 MB binary that runs as the terminal's entire user interface would be the
+# one exception. The download is over TLS, but TLS proves who served the file,
+# not which file was served — the release could be re-cut, the mirror could be
+# wrong, and neither would be visible without this line.
+#
+# The value below is the official `SHASUMS256.txt` entry for the artifact,
+# retrieved from the release on 2026-09-07.
+#
+# RE-PIN PROCEDURE
+# ----------------
+#   1. bump KITLUY_ELECTRON_VERSION
+#   2. curl -sSL https://github.com/electron/electron/releases/download/\
+#        v<version>/SHASUMS256.txt | grep 'linux-arm64.zip'
+#   3. copy the hash into KITLUY_ELECTRON_SHA256
+#   4. update the `electron` devDependency in apps/kitluy-device-shell/package.json
+#      to the SAME version — test/electron-pin.test.ts fails if they disagree,
+#      because an image and an app that disagree about the runtime is precisely
+#      the defect this pin exists to prevent
+#   5. rebuild and re-run infra/edge/raspberry-pi/pi-terminal-image/test/image-contents.test.sh
+
+KITLUY_ELECTRON_VERSION="38.8.6"
+
+# arm64: the Pi 5 is aarch64. armv7l would be a 32-bit Pi and is NOT supported —
+# the device layer pins rpi5.
+KITLUY_ELECTRON_ARCH="linux-arm64"
+
+KITLUY_ELECTRON_URL_TEMPLATE="https://github.com/electron/electron/releases/download/v%s/electron-v%s-%s.zip"
+
+# sha256 of electron-v38.8.6-linux-arm64.zip, from the release's own
+# SHASUMS256.txt. Verified before unpacking; a mismatch REFUSES the build.
+KITLUY_ELECTRON_SHA256="add5aaa35ed57e60f84b780f6461064b912de55effd27ec11e338462243867a5"
+
+# Where the verified, unpacked runtime lands inside the image. The session unit
+# and the manifest both name this path.
+KITLUY_ELECTRON_INSTALL_PATH="/usr/lib/kitluy/electron"

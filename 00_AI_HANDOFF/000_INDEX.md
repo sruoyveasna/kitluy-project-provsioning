@@ -4,6 +4,34 @@ Read the newest relevant handoff before starting work. Naming:
 `YYYY-MM-DD__<AREA>__<TASK-ID>__<SLUG>__AI-HANDOFF.md` under the matching
 subfolder (repository/ shared/ apps/ services/ data/ infrastructure/ reviews/).
 
+## INFRA-EDGE-STRUCTURE-001 — the two Raspberry Pi image sources move under `infra/edge/raspberry-pi/` (2026-09-16)
+
+Record: [`edge-platform/45_RASPBERRY_PI_IMAGE_SOURCES_UNDER_EDGE.md`](edge-platform/45_RASPBERRY_PI_IMAGE_SOURCES_UNDER_EDGE.md)
+· **STRUCTURE IMPLEMENTED · TESTED · IMAGE NOT REBUILT · HARDWARE NOT PERFORMED** · commit `PENDING` (from `b2d33c6`)
+
+**Path migration.** Records written before this entry use the old paths:
+
+| Previous path                  | Current path                                |
+| ------------------------------ | ------------------------------------------- |
+| `infra/kitluy-os-image`        | `infra/edge/raspberry-pi/pi-terminal-image` |
+| `infra/kitluy-store-hub-image` | `infra/edge/raspberry-pi/store-hub-image`   |
+
+Start at `infra/edge/raspberry-pi/README.md`.
+
+**What changed.**
+
+- 293 tracked files were renamed, with identical blobs.
+- Each image tree was one directory deeper than before, so every `${ROOT}/../..` climb to the repo root was fixed. That covers packaging and three test suites; one of them passed silently when broken.
+- Also updated: `.gitignore` re-includes for the Device Shell dist, `.prettierignore` and `eslint.config.mjs` `out/` globs, the secret-scan exact-path pin, and the Electron-pin test.
+- Pin (`v2.7.0` / `a7b6d48…`), image names, layers, units and manifest components are unchanged.
+- Packaging from the new paths reproduces every committed overlay byte for byte.
+
+**Left in place, not committed:** 68 GB of generated `build/` and `out/` at the old paths. The first build from each new path fetches the builder and Electron again.
+
+**Tests:** every image suite's PASS/FAIL lines are identical to the pre-move baseline. `pnpm verify` gives the same three pre-existing failures as handoff 44.
+
+**Next:** unchanged from handoff 44. Rebuilding both images from the new paths gives this move, and `65678a4`, their image evidence.
+
 ## BOOT-RECOVERY-CLASSIFICATION-001 — one answer per boot: what happened, and the one next step (2026-09-16)
 
 Record: [`edge-platform/44_BOOT_RECOVERY_CLASSIFICATION_ONE_ANSWER_PER_BOOT.md`](edge-platform/44_BOOT_RECOVERY_CLASSIFICATION_ONE_ANSWER_PER_BOOT.md)

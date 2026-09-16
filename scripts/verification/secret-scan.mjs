@@ -54,7 +54,7 @@ const pinnedRejectionFixtures = [
   // packager exists to prevent — this stops matching and the finding returns.
   // A real secret introduced into either copy does the same.
   {
-    file: "infra/kitluy-store-hub-image/rpi-image-gen/layer/kitluy-hub-base.rootfs-overlay/usr/lib/kitluy/hub-migrations/0038_release_trust_and_cache.sql",
+    file: "infra/edge/raspberry-pi/store-hub-image/rpi-image-gen/layer/kitluy-hub-base.rootfs-overlay/usr/lib/kitluy/hub-migrations/0038_release_trust_and_cache.sql",
     pattern: "Private key block",
     sha256: "3d571e17e226ded82ab8aaf1e55ad54efac3a959c9de1d45b4d23554b8a2ab78",
   },

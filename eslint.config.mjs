@@ -40,6 +40,7 @@ export default tseslint.config(
       "**/dist-bundle/**",
       "**/*rootfs-overlay/**/lib/hub-agent/**",
       "infra/*/out/**",
+      "infra/edge/raspberry-pi/*/out/**",
     ],
   },
   js.configs.recommended,

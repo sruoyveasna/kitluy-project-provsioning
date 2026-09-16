@@ -5016,3 +5016,31 @@ Implementation rules adopted within the task's authority, each from a finding:
 
 Open gaps: GAP-BOOT-002 … GAP-BOOT-010 and KLREC-2026-09-16-DEVICE-RELEASE-ROUTE-001
 (handoff 44 §12).
+
+## KLREC-2026-09-16-EDGE-IMAGE-SOURCE-PATHS-001 — the two Raspberry Pi image sources move under `infra/edge/raspberry-pi/` (IMPLEMENTED · TESTED — STRUCTURE ONLY)
+
+Owner task INFRA-EDGE-STRUCTURE-001 (2026-09-16); handoff 45.
+
+| Previous path                  | Current path                                |
+| ------------------------------ | ------------------------------------------- |
+| `infra/kitluy-os-image`        | `infra/edge/raspberry-pi/pi-terminal-image` |
+| `infra/kitluy-store-hub-image` | `infra/edge/raspberry-pi/store-hub-image`   |
+
+**Re-decides nothing.** The owner decision of 2026-08-13 (two device classes, two
+images, two sources) stands: the trees stay separate, keep their own manifests,
+packaging and tests, and the Terminal build still refuses the `store-hub` profile.
+The `rpi-image-gen` pin (`v2.7.0` / `a7b6d4806183195f3efadb533f58c8e46393d057`),
+image names, layers, units and runtime manifests are unchanged. No image was rebuilt.
+
+**Conflict recorded, not resolved by rewriting.** RB v4.0.0 §14.2 (*Canonical
+monorepo shape*, `docs/source/canonical/kitluy-suite-rebuild-bible-v4.0.0.md`), the
+monorepo blueprint v1.0.0, the imported infrastructure and Store Hub Phase 1 specs,
+and `docs/source/engineering/CODEOWNERS` still list a single `infra/kitluy-os-image/`.
+The repository already diverged from that single tree on 2026-08-13. These source
+documents are owner originals and were not edited. The owner's instruction of
+2026-09-16 is the authority for the current location. **Owner to confirm** that the
+next bible or blueprint revision replaces `infra/kitluy-os-image/` with
+`infra/edge/raspberry-pi/{pi-terminal-image,store-hub-image}/`.
+
+Historical handoffs, reports, evidence rows and earlier register entries keep the
+old paths because those paths were true when they were written.

@@ -10,8 +10,8 @@ import { describe, expect, it } from "vitest";
  * board, and every API difference between the two would become a defect that
  * reproduces only on hardware.
  *
- * The image half of that pin now exists (`infra/kitluy-os-image/rpi-image-gen/
- * electron.pin`, declared in `runtime-manifest.json`), so this suite no longer
+ * The image half of that pin now exists (`infra/edge/raspberry-pi/pi-terminal-image/
+ * rpi-image-gen/electron.pin`, declared in `runtime-manifest.json`), so this suite no longer
  * asserts a shape and hopes — it compares the two.
  */
 const here = dirname(fileURLToPath(import.meta.url));
@@ -20,7 +20,16 @@ const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as {
   devDependencies?: Record<string, string>;
 };
 
-const imageRoot = join(here, "..", "..", "..", "infra", "kitluy-os-image");
+const imageRoot = join(
+  here,
+  "..",
+  "..",
+  "..",
+  "infra",
+  "edge",
+  "raspberry-pi",
+  "pi-terminal-image",
+);
 const pinPath = join(imageRoot, "rpi-image-gen", "electron.pin");
 const manifestPath = join(imageRoot, "runtime-manifest.json");
 

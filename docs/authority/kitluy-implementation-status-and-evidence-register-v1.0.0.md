@@ -173,6 +173,13 @@ dev migrations, no reproducible dev deployment). No status was advanced beyond
 its evidence. Evidence classes: E-REPO (repository path at commit),
 E-TEST (executed test run 2026-07-26, `pnpm verify` all 11 gates passing).
 
+**Image source path migration (INFRA-EDGE-STRUCTURE-001, 2026-09-16; structure
+only, no status changed):** E-REPO evidence recorded under `infra/kitluy-os-image/`
+now lives at `infra/edge/raspberry-pi/pi-terminal-image/`, and evidence under
+`infra/kitluy-store-hub-image/` at `infra/edge/raspberry-pi/store-hub-image/`. Rows
+keep the path that was true when their evidence was recorded. Handoff
+`00_AI_HANDOFF/edge-platform/45_RASPBERRY_PI_IMAGE_SOURCES_UNDER_EDGE.md`.
+
 ### Machine-checkable evidence table
 
 Rows above SPECIFIED carry linked evidence (validated by `pnpm docs:registry-check`).

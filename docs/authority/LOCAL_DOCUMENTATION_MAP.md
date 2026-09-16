@@ -140,7 +140,7 @@ rebuild bible v3.0.0 and business bible v1.0.0 — both superseded.
 | What owns files? | DigitalOcean Spaces — `PROJECT_HOME.md` §3.7; `services/kitluy-file-service/` |
 | What owns cloud database/auth? | Supabase — `PROJECT_HOME.md` §3.7; `supabase/` |
 | What owns app/service compute? | DigitalOcean — `PROJECT_HOME.md` §3.7; `infra/digitalocean/` |
-| Device provisioning sequence? | `services/kitluy-provisioning-service/`; `infra/kitluy-os-image/`; `docs/decisions/kitluy-blk-005-pki-and-device-trust-owner-decision-v1.0.0.md` |
+| Device provisioning sequence? | `services/kitluy-provisioning-service/`; `infra/edge/raspberry-pi/` (Pi Terminal and Store Hub images — start at its `README.md`); `docs/decisions/kitluy-blk-005-pki-and-device-trust-owner-decision-v1.0.0.md` |
 | Authorization model? | `docs/security/kitluy-suite-rbac-permission-registry-amendment-*.md`; `packages/rbac/`, `packages/auth/`, `packages/approvals/`; `tests/rls/` |
 | Phase 1 Laundry definition? | `verticals/phase1-laundry/`; rebuild bible v4.0.0; `docs/decisions/kitluy-ws12-*` |
 | Implemented vs planned? | `docs/authority/kitluy-implementation-status-and-evidence-register-v1.0.0.md` — **the only valid answer** |

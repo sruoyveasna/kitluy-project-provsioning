@@ -28,40 +28,25 @@
  * If you change the field order, the separator, or the kind string here, that
  * test fails — which is the point.
  */
-
 /** Domain separator. MUST equal `MANUFACTURING_ENROLLMENT_POP_KIND`. */
-export const ENROLLMENT_POP_KIND = "kitluy.manufacturing-enrollment-pop.v1" as const;
-
+export const ENROLLMENT_POP_KIND = "kitluy.manufacturing-enrollment-pop.v1";
 /** MUST equal `MANUFACTURING_ENROLLMENT_POP_PURPOSE`. */
-export const ENROLLMENT_POP_PURPOSE = "manufacturing_enrollment_redemption" as const;
-
-export interface EnrollmentPopChallengeFields {
-  readonly challengeId: string;
-  readonly purpose: string;
-  readonly environment: string;
-  readonly presentedKeyFingerprint: string;
-  readonly nonce: string;
-  readonly issuedAt: Date;
-  readonly expiresAt: Date;
-}
-
+export const ENROLLMENT_POP_PURPOSE = "manufacturing_enrollment_redemption";
 /**
  * Field order is FIXED and must match the authoritative implementation exactly.
  * The kind leads, so a signature over these bytes cannot be replayed as a
  * signature over another record type.
  */
-export function enrollmentPopChallengeBytes(challenge: EnrollmentPopChallengeFields): Uint8Array {
-  return Buffer.from(
-    [
-      ENROLLMENT_POP_KIND,
-      challenge.challengeId,
-      challenge.purpose,
-      challenge.environment,
-      challenge.presentedKeyFingerprint,
-      challenge.nonce,
-      challenge.issuedAt.toISOString(),
-      challenge.expiresAt.toISOString(),
-    ].join("\n"),
-    "utf8",
-  );
+export function enrollmentPopChallengeBytes(challenge) {
+    return Buffer.from([
+        ENROLLMENT_POP_KIND,
+        challenge.challengeId,
+        challenge.purpose,
+        challenge.environment,
+        challenge.presentedKeyFingerprint,
+        challenge.nonce,
+        challenge.issuedAt.toISOString(),
+        challenge.expiresAt.toISOString(),
+    ].join("\n"), "utf8");
 }
+//# sourceMappingURL=enrollment-pop-bytes.js.map

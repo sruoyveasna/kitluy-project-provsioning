@@ -1,0 +1,47 @@
+# KitLuy OS image — pinned upstream builder.
+#
+# rpi-image-gen is consumed as an EXTERNAL, PINNED dependency. It is never
+# forked and never vendored into this repository. Everything KitLuy owns lives
+# in this directory and is passed to the builder with `-S`.
+#
+# Authority: mission §21 (external-source model), §24 (builder pinning).
+#
+# WHY A TAG AND NOT master
+# ------------------------
+# An image built from a moving branch is not reproducible, and a release
+# identity over an irreproducible artifact is meaningless — two devices could
+# report the same version while running different systems. The pin below is an
+# immutable tag plus the commit it resolved to, so the resolution can be
+# re-checked rather than trusted.
+
+KITLUY_RIG_REPOSITORY="https://github.com/raspberrypi/rpi-image-gen"
+KITLUY_RIG_TAG="v2.7.0"
+KITLUY_RIG_COMMIT="a7b6d4806183195f3efadb533f58c8e46393d057"
+
+# Verified against the pinned tree on 2026-08-07:
+#   - CLI accepts `-S <src dir>` and `-c <config>`        (lib/cli.sh)
+#   - device layer  `rpi5`                                (device/pi5/device.yaml)
+#   - image layer   `image-rota`   A/B + userdata GPT     (image/gpt/ab_userdata/image.yaml)
+#   - suite layer   `bookworm-minbase`                    (layer/suite/debian/)
+#   - config keys   device.layer, layer.{base,custom},
+#                   image.{layer,name,compression,
+#                          boot_part_size,system_part_size,data_part_size}
+#
+# Re-pin procedure: bump the tag, re-resolve the commit, then re-run
+#   bash infra/edge/raspberry-pi/pi-terminal-image/test/rpi-image-gen.test.sh
+# which re-validates every name above against the newly pinned tree.
+
+# --- Base operating system --------------------------------------------------
+# Debian Bookworm arm64 via the upstream suite layer. This is the concrete
+# resolution of the previously unresolved KITLUY_BASE_OS_RELEASE blocker for
+# DEVELOPMENT builds; a release-grade pin additionally needs a snapshot/date
+# pin so the apt state is reproducible, which stays an owner decision.
+KITLUY_RIG_SUITE_LAYER="bookworm-minbase"
+KITLUY_RIG_DEVICE_LAYER="rpi5"
+KITLUY_RIG_IMAGE_LAYER="image-rota"
+
+# --- Build classification (mission §25) -------------------------------------
+# The supported native path is an arm64 Debian/Raspberry Pi OS build host.
+# On an amd64 workstation the build is a DEVELOPMENT CROSS-BUILD relying on
+# QEMU/foreign-package support, and is NOT hardware-certified.
+KITLUY_RIG_NATIVE_BUILD_ARCH="arm64"

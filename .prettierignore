@@ -50,6 +50,7 @@ supabase/migrations
 **/dist-bundle/**
 **/*rootfs-overlay/**/lib/hub-agent/**
 infra/*/out/**
+infra/edge/raspberry-pi/*/out/**
 *.md.gdoc
 playwright-report
 test-results

@@ -32,34 +32,10 @@
  * `popServiceVerified`. Every one of those is decided by the governed doors, and
  * a request that carried them would be asking the device to choose them.
  */
-
 /** Domain separator. MUST equal the literal in `requestBytes()`. */
-export const OPERATIONAL_CSR_KIND = "kitluy.csr.v1" as const;
-
+export const OPERATIONAL_CSR_KIND = "kitluy.csr.v1";
 /** The only purpose this path issues for. */
-export const OPERATIONAL_CSR_PURPOSE = "device_identity" as const;
-
-/**
- * The fields that enter the signature, in the order they enter it.
- *
- * `requestedAt` is an ISO-8601 string here rather than a `Date` because this is
- * what gets PERSISTED across a reboot, and a `Date` does not survive JSON
- * intact. The drift test converts, so the bytes are identical either way.
- */
-export interface OperationalCsrFields {
-  readonly requestId: string;
-  readonly deviceRecordId: string;
-  readonly environment: string;
-  readonly publicKeyFingerprint: string;
-  readonly hardwareTrustLevel: string;
-  readonly assignmentGeneration: number;
-  readonly requestedPurpose: string;
-  /** ISO-8601, exactly as `Date.prototype.toISOString()` renders it. */
-  readonly requestedAt: string;
-  readonly nonce: string;
-  readonly correlationId: string;
-}
-
+export const OPERATIONAL_CSR_PURPOSE = "device_identity";
 /**
  * The bytes the device signs.
  *
@@ -67,21 +43,19 @@ export interface OperationalCsrFields {
  * prefixes and no escaping — which is inherited, not chosen, and is why the
  * drift test exists rather than a re-derivation.
  */
-export function operationalCsrBytes(fields: OperationalCsrFields): Uint8Array {
-  return Buffer.from(
-    [
-      OPERATIONAL_CSR_KIND,
-      fields.requestId,
-      fields.deviceRecordId,
-      fields.environment,
-      fields.publicKeyFingerprint,
-      fields.hardwareTrustLevel,
-      String(fields.assignmentGeneration),
-      fields.requestedPurpose,
-      fields.requestedAt,
-      fields.nonce,
-      fields.correlationId,
-    ].join("\n"),
-    "utf8",
-  );
+export function operationalCsrBytes(fields) {
+    return Buffer.from([
+        OPERATIONAL_CSR_KIND,
+        fields.requestId,
+        fields.deviceRecordId,
+        fields.environment,
+        fields.publicKeyFingerprint,
+        fields.hardwareTrustLevel,
+        String(fields.assignmentGeneration),
+        fields.requestedPurpose,
+        fields.requestedAt,
+        fields.nonce,
+        fields.correlationId,
+    ].join("\n"), "utf8");
 }
+//# sourceMappingURL=operational-csr-bytes.js.map

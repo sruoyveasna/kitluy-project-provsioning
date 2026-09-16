@@ -8,7 +8,7 @@
  *
  * STATUS: IMPLEMENTED-IN-DEV (logic and state machine, executed under vitest).
  * NOT hardware-proven: no Raspberry Pi has run this. The systemd units that
- * would invoke it are staged by infra/kitluy-os-image but the executables they
+ * would invoke it are staged by infra/edge/raspberry-pi/pi-terminal-image but the executables they
  * reference are not yet built, and that gap is recorded rather than described
  * as done.
  *

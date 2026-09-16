@@ -7,7 +7,7 @@ dist/
 # The Hub agent's single-file bundle. A build intermediate like dist/:
 # `pnpm --filter @kitluy-services/kitluy-hub-agent build:bundle` regenerates it,
 # and the copy the image actually ships is the tracked one under
-# infra/kitluy-store-hub-image/.../usr/lib/kitluy/lib/hub-agent/main.mjs.
+# infra/edge/raspberry-pi/store-hub-image/.../usr/lib/kitluy/lib/hub-agent/main.mjs.
 dist-bundle/
 build/
 .next/
@@ -60,10 +60,10 @@ dist-electron/
 #
 # The directory is re-included before its contents: git cannot re-include a file
 # whose parent directory is still excluded.
-!infra/kitluy-os-image/rpi-image-gen/layer/*.rootfs-overlay/usr/lib/kitluy/lib/device-shell/dist/
-!infra/kitluy-os-image/rpi-image-gen/layer/*.rootfs-overlay/usr/lib/kitluy/lib/device-shell/dist/**
-!infra/kitluy-os-image/rpi-image-gen/layer/*.rootfs-overlay/usr/lib/kitluy/lib/device-shell/dist-electron/
-!infra/kitluy-os-image/rpi-image-gen/layer/*.rootfs-overlay/usr/lib/kitluy/lib/device-shell/dist-electron/**
+!infra/edge/raspberry-pi/pi-terminal-image/rpi-image-gen/layer/*.rootfs-overlay/usr/lib/kitluy/lib/device-shell/dist/
+!infra/edge/raspberry-pi/pi-terminal-image/rpi-image-gen/layer/*.rootfs-overlay/usr/lib/kitluy/lib/device-shell/dist/**
+!infra/edge/raspberry-pi/pi-terminal-image/rpi-image-gen/layer/*.rootfs-overlay/usr/lib/kitluy/lib/device-shell/dist-electron/
+!infra/edge/raspberry-pi/pi-terminal-image/rpi-image-gen/layer/*.rootfs-overlay/usr/lib/kitluy/lib/device-shell/dist-electron/**
 
 # Store Hub local development backups (WS-09) — binary pg_dump artifacts.
 # Backup/restore is exercised by `pnpm hub:db:backup` / `hub:db:restore`;

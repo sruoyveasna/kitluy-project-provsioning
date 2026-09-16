@@ -3,7 +3,7 @@
  *
  * Authority: 00_AI_HANDOFF/000_ACTIVE_PHASE.md §10 (identity model);
  *   DEC-1 bootstrap-hybrid owner decision (2026-08-10);
- *   infra/kitluy-os-image `kitluy-base` layer, which creates
+ *   infra/edge/raspberry-pi/pi-terminal-image `kitluy-base` layer, which creates
  *   /var/lib/kitluy/identity empty at 0700 and places NO key material there.
  *
  * ===========================================================================

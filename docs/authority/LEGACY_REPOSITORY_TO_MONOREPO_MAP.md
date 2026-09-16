@@ -107,7 +107,8 @@ workflows. The monorepo separates these by design:
 laundry terminology. A naive copy would violate this boundary.
 
 **Also carries:** Raspberry Pi 5 / ARM64 Electron builder configs relevant to
-`infra/kitluy-os-image/`, and `Release/` + `deployment-logs/` which are
+`infra/edge/raspberry-pi/pi-terminal-image/` (named `infra/kitluy-os-image/`
+when this map was written; moved 2026-09-16, INFRA-EDGE-STRUCTURE-001), and `Release/` + `deployment-logs/` which are
 **evidence artifacts**, not source.
 
 **Governing owner decision:** Drive `KLDRV-0001`
