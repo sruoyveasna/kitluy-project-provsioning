@@ -806,6 +806,66 @@ else
       "without it cage cannot start Xwayland and the Device Shell crash-loops"
 fi
 
+# --- A MOUNT THAT WAITS FOR A SERVICE IS NOT A LOCAL FILE SYSTEM ---------------
+# Hardware 2026-09-16 (handoff 46 §5). With default dependencies a mount unit is
+# ordered Before=local-fs.target. var-lib-kitluy-hub.mount also waited for
+# kitluy-hub-storage.service, an ordinary service that runs after sysinit.target,
+# which itself waits for local-fs.target. systemd broke the cycle at every boot
+# by deleting the start jobs of systemd-timesyncd, systemd-tmpfiles-setup and
+# local-fs.target: the Hub never synchronised its clock and sat a day behind,
+# which is how certificates come to look not-yet-valid.
+#
+# The rule, for every overlay mount: ordered after (or requiring) a service means
+# DefaultDependencies=no, and then unmounting at shutdown must be restored by
+# hand. image-contents.test.sh asks systemd-analyze the same question of a built
+# rootfs.
+OVERLAY_UNITS="${LAYER_DIR}/kitluy-hub-base.rootfs-overlay/etc/systemd/system"
+SERVICE_ORDERED_MOUNTS=0
+for mount_unit in "${OVERLAY_UNITS}"/*.mount; do
+  [[ -f "$mount_unit" ]] || continue
+  mount_name="$(basename "$mount_unit")"
+  waits_for="$(grep -hE '^(After|Requires|BindsTo)=' "$mount_unit" | cut -d= -f2- | tr ' ' '\n' \
+               | grep -E '\.service$' | sort -u | tr '\n' ' ')"
+  [[ -n "$waits_for" ]] || continue
+  SERVICE_ORDERED_MOUNTS=$((SERVICE_ORDERED_MOUNTS + 1))
+  if grep -qE '^DefaultDependencies=no[[:space:]]*$' "$mount_unit"; then
+    ok "${mount_name} waits for ${waits_for% } and so is not ordered before local-fs.target"
+  else
+    bad "${mount_name} waits for ${waits_for% } and so is not ordered before local-fs.target" \
+        "without DefaultDependencies=no it is implicitly Before=local-fs.target: an ordering cycle through sysinit.target"
+  fi
+  if grep -qE '^Conflicts=.*\bumount\.target\b' "$mount_unit" \
+     && grep -qE '^Before=.*\bumount\.target\b' "$mount_unit"; then
+    ok "${mount_name} still unmounts at shutdown (Conflicts= and Before=umount.target)"
+  else
+    bad "${mount_name} still unmounts at shutdown (Conflicts= and Before=umount.target)" \
+        "DefaultDependencies=no drops these; the volume would stay mounted while the LUKS device closes"
+  fi
+done
+if [[ $SERVICE_ORDERED_MOUNTS -eq 0 ]]; then
+  bad "the Hub data mount is checked for the local-fs ordering cycle" \
+      "no overlay mount is ordered after a service, so this rule matched nothing"
+fi
+
+# The cycle must not be "fixed" by dropping the ordering that makes the volume
+# safe: unlock, then mount, then the database.
+HUB_MOUNT="${OVERLAY_UNITS}/var-lib-kitluy-hub.mount"
+HUB_DATABASE="${OVERLAY_UNITS}/kitluy-hub-database.service"
+if grep -qE '^Requires=.*\bkitluy-hub-storage\.service\b' "$HUB_MOUNT" \
+   && grep -qE '^After=.*\bkitluy-hub-storage\.service\b' "$HUB_MOUNT"; then
+  ok "the Hub data mount still requires and follows the storage unlock"
+else
+  bad "the Hub data mount still requires and follows the storage unlock" \
+      "it could mount before /dev/mapper/kitluy-hub-data exists"
+fi
+if grep -qE '^Requires=.*\bvar-lib-kitluy-hub\.mount\b' "$HUB_DATABASE" \
+   && grep -qE '^After=.*\bvar-lib-kitluy-hub\.mount\b' "$HUB_DATABASE"; then
+  ok "the Hub database still requires and follows the data mount"
+else
+  bad "the Hub database still requires and follows the data mount" \
+      "PostgreSQL could start on the empty directory beneath the mount point"
+fi
+
 # ---------------------------------------------------------------------------
 # THE DEVELOPMENT TERMINAL PROJECTION DOOR.
 #

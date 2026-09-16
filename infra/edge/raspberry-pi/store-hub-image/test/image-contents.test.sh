@@ -263,6 +263,35 @@ else
   ok "no SSH host keys are baked in"
 fi
 
+# ---------------------------------------------------------------------------
+# 6. The built image boots without an ordering cycle
+# ---------------------------------------------------------------------------
+# Hardware 2026-09-16 (handoff 46 §5): var-lib-kitluy-hub.mount was implicitly
+# Before=local-fs.target yet After=kitluy-hub-storage.service, an ordinary
+# service after sysinit.target. systemd broke the cycle at every boot by
+# deleting systemd-timesyncd, systemd-tmpfiles-setup and local-fs.target, and
+# the Hub sat a day behind real time. The overlay rule in systemd-runtime.test.sh
+# names the cause; this asks systemd itself about the units the image really
+# carries, including the distribution's. Reproduced this way on the handoff 43
+# rootfs (6 cycle lines) before the fix, 0 after.
+#
+# `--generators=no`: fstab-derived mounts are not modelled. The cycle above does
+# not need them, and a generator run needs privileges this suite does not have.
+if command -v systemd-analyze >/dev/null 2>&1; then
+  ANALYZE_ROOT="$(cd "$ROOTFS" && pwd)"
+  CYCLES="$(systemd-analyze verify --root="$ANALYZE_ROOT" --man=no --generators=no \
+              sysinit.target local-fs.target multi-user.target 2>&1 \
+            | grep -E 'ordering cycle|deleted to break ordering cycle' || true)"
+  if [[ -z "$CYCLES" ]]; then
+    ok "the boot transaction has no ordering cycle (systemd-analyze verify)"
+  else
+    bad "the boot transaction has no ordering cycle (systemd-analyze verify)" \
+        "$(printf '%s' "$CYCLES" | head -4 | tr '\n' ';')"
+  fi
+else
+  skip "the boot transaction has no ordering cycle" "systemd-analyze is not installed on this host"
+fi
+
 
 # ---------------------------------------------------------------------------
 # Development recovery sudo

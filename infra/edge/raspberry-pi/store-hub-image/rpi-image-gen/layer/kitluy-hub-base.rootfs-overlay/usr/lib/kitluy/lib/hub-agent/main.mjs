@@ -8297,6 +8297,20 @@ async function selectOperationalHubIdentity(client) {
     detail: "this Store Hub has no trusted, deployed identity"
   };
 }
+async function readContainmentDirective(client, terminalDeviceId) {
+  const containment = await client.query(
+    `select directive from edge_identity.effective_containment where device_uuid = $1::uuid`,
+    [terminalDeviceId]
+  );
+  return containment.rows[0]?.directive ?? "none";
+}
+function isBlockingContainment(directive) {
+  return directive === "operations_restricted" || directive === "suspended" || directive === "quarantined";
+}
+async function readBlockingContainment(client, terminalDeviceId) {
+  const directive = await readContainmentDirective(client, terminalDeviceId);
+  return isBlockingContainment(directive) ? directive : null;
+}
 async function deriveEligibility(client, terminalDeviceId, certificateSerial, environment) {
   const refuse = (refusal2, detail) => ({
     outcome: "refused",
@@ -8357,7 +8371,7 @@ async function deriveEligibility(client, terminalDeviceId, certificateSerial, en
     `select terminal_assignment_generation, terminal_profile_code, paired_at
        from edge_identity.pairing_receipt
       where terminal_device_id = $1::uuid
-      order by paired_at desc
+      order by terminal_assignment_generation desc, paired_at desc
       limit 1`,
     [terminalDeviceId]
   );
@@ -8365,10 +8379,20 @@ async function deriveEligibility(client, terminalDeviceId, certificateSerial, en
   if (receiptRow === void 0) {
     return refuse("PAIRING_REQUIRED", "no pairing receipt exists for this terminal");
   }
-  if (receiptRow.terminal_assignment_generation !== terminalRow.assignment_generation) {
+  if (receiptRow.terminal_assignment_generation > terminalRow.assignment_generation) {
     return refuse(
       "ASSIGNMENT_GENERATION_STALE",
-      "the pairing receipt binds a superseded assignment generation"
+      "the terminal's assignment generation is behind one it has already paired at on this Hub"
+    );
+  }
+  if (receiptRow.terminal_assignment_generation < terminalRow.assignment_generation) {
+    const blocking = await readBlockingContainment(client, terminalDeviceId);
+    if (blocking !== null) {
+      return refuse("CONTAINMENT_PROHIBITS", `containment directive ${blocking} is in effect`);
+    }
+    return refuse(
+      "PAIRING_REQUIRED",
+      "the pairing receipt binds an earlier assignment generation; pair again at the current one"
     );
   }
   const grant = await client.query(
@@ -8394,12 +8418,8 @@ async function deriveEligibility(client, terminalDeviceId, certificateSerial, en
   if (receiptRow.terminal_profile_code !== grantRow.profile_code) {
     return refuse("ASSIGNMENT_GENERATION_STALE", "the pairing receipt binds another profile");
   }
-  const containment = await client.query(
-    `select directive from edge_identity.effective_containment where device_uuid = $1::uuid`,
-    [terminalDeviceId]
-  );
-  const directive = containment.rows[0]?.directive ?? "none";
-  if (directive === "operations_restricted" || directive === "suspended" || directive === "quarantined") {
+  const directive = await readContainmentDirective(client, terminalDeviceId);
+  if (isBlockingContainment(directive)) {
     return refuse("CONTAINMENT_PROHIBITS", `containment directive ${directive} is in effect`);
   }
   const containmentState = directive === "cleared" ? "none" : directive;

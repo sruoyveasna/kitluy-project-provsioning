@@ -5044,3 +5044,75 @@ next bible or blueprint revision replaces `infra/kitluy-os-image/` with
 
 Historical handoffs, reports, evidence rows and earlier register entries keep the
 old paths because those paths were true when they were written.
+
+## KLREC-2026-09-16-HUB-RECEIPT-GENERATION-DIRECTION-001 — Defect G: a Store Hub refused a re-assigned Terminal instead of asking it to pair (IMPLEMENTED · TESTED — HARDWARE VERIFICATION PENDING)
+
+Owner task DEVICE-RECOVERY-E2E-CONTINUATION-001; handoffs 46 §4 and 47.
+
+**Found on hardware (2026-09-16).** The Pi Terminal recovered its credential at
+assignment generation 3. The Store Hub still held its receipt from generation 2.
+`deriveEligibility` answered `ASSIGNMENT_GENERATION_STALE` for any mismatch, but the
+Terminal pairs only on `PAIRING_REQUIRED`, so it stayed `HUB_REFUSED`.
+
+**Decided within the owner task's stated semantics:**
+
+- receipt generation < terminal generation → `PAIRING_REQUIRED`;
+- equal → unchanged evaluation (profile grant, T1, receipt profile, containment);
+- receipt > terminal → `ASSIGNMENT_GENERATION_STALE`, never downgraded.
+
+**Two refinements, each from evidence:**
+
+1. **The receipt consulted is the one for the highest generation, not the newest by
+   `paired_at`.** A regression test showed the previous ordering let a handshake at
+   a *lower* generation (the pairing door does not read receipts) restore eligibility
+   at that generation. That was a pre-existing authority-downgrade gap. The Hub
+   clock, found a day slow on the same board, would also have placed a current
+   receipt behind a superseded one and looped re-pairing.
+2. **A blocking containment directive is reported before `PAIRING_REQUIRED` is
+   issued.** The pairing door does not read containment, so the invitation itself is
+   withheld.
+
+**Unchanged:**
+
+- Receipts stay append-only; the governance trigger was not touched.
+- The no-receipt path answers `PAIRING_REQUIRED` before containment, as before.
+  Whether that path should also check containment first is recorded, not changed.
+- The pairing door still completes a lower-generation handshake and appends its
+  receipt. Eligibility refuses it; whether the door itself should refuse is open.
+
+## KLREC-2026-09-16-HUB-DATA-MOUNT-ORDERING-CYCLE-001 — the Store Hub's data mount put a cycle through sysinit.target, and systemd dropped time sync at every boot (IMPLEMENTED · TESTED — IMAGE AND HARDWARE VERIFICATION PENDING)
+
+Owner task DEVICE-RECOVERY-E2E-CONTINUATION-001; handoffs 46 §5 and 47.
+
+**Evidence.** The live Hub journal traced the cycle unit by unit:
+
+```text
+sysinit.target → systemd-timesyncd → systemd-tmpfiles-setup → local-fs.target
+→ var-lib-kitluy-hub.mount → kitluy-hub-storage.service → basic.target → sysinit.target
+```
+
+systemd broke it at every boot by deleting three start jobs: `systemd-timesyncd`,
+`systemd-tmpfiles-setup` and `local-fs.target`. The Hub never synchronised its clock
+(NTPSynchronized=no, about 23.5 h behind). The Pi Terminal shows no cycle and runs
+both services.
+
+**Cause.** A mount unit with default dependencies is ordered `Before=local-fs.target`.
+`var-lib-kitluy-hub.mount` is also `After=kitluy-hub-storage.service`, an ordinary
+service ordered after `sysinit.target`.
+
+**Fix.** The mount sets `DefaultDependencies=no` and restores `Conflicts=` and
+`Before=umount.target`. Its storage and database ordering is unchanged.
+
+**Proof.** `systemd-analyze verify` on the handoff 43 Hub rootfs: 6 cycle lines
+before the fix, 0 with only this change.
+
+**Reconciliation.** The 2026-09-10 index entry for the Hub serving repair attributed
+`systemd-tmpfiles-setup` not running to a condition skip on the read-only root. The
+2026-09-16 journal shows the job deleted by this cycle, and the Terminal runs it on the
+same kind of root. That entry is historical and not rewritten. Its
+`RuntimeDirectory=postgresql` fix remains correct.
+
+**Behaviour this restores on the Hub, to confirm on hardware:**
+
+- `systemd-timesyncd` starts at boot;
+- tmpfiles rules are applied at boot.

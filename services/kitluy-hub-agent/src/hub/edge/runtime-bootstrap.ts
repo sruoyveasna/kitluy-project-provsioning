@@ -241,6 +241,33 @@ export async function selectOperationalHubIdentity(
   };
 }
 
+async function readContainmentDirective(
+  client: HubClient,
+  terminalDeviceId: string,
+): Promise<string> {
+  const containment = await client.query<{ directive: string }>(
+    `select directive from edge_identity.effective_containment where device_uuid = $1::uuid`,
+    [terminalDeviceId],
+  );
+  return containment.rows[0]?.directive ?? "none";
+}
+
+function isBlockingContainment(directive: string): boolean {
+  return (
+    directive === "operations_restricted" ||
+    directive === "suspended" ||
+    directive === "quarantined"
+  );
+}
+
+async function readBlockingContainment(
+  client: HubClient,
+  terminalDeviceId: string,
+): Promise<string | null> {
+  const directive = await readContainmentDirective(client, terminalDeviceId);
+  return isBlockingContainment(directive) ? directive : null;
+}
+
 export async function deriveEligibility(
   client: HubClient,
   terminalDeviceId: string,
@@ -327,8 +354,30 @@ export async function deriveEligibility(
     return refuse("CREDENTIAL_NOT_CURRENT", "the presented credential is not current");
   }
 
-  // Current pairing receipt: the newest receipt for this terminal must bind
-  // the CURRENT assignment generation.
+  // Current pairing receipt: the receipt for the HIGHEST assignment generation
+  // this terminal ever paired at must bind the CURRENT one.
+  //
+  // DEFECT G (hardware 2026-09-16, handoff 46 §4). Receipts are append-only
+  // history (hub migration 0031), so a terminal re-assigned in the cloud still
+  // has its previous receipt here. Any mismatch used to answer
+  // ASSIGNMENT_GENERATION_STALE, but the terminal re-pairs only on
+  // PAIRING_REQUIRED — a recovered terminal at generation 3 facing its
+  // generation-2 receipt waited for ever and never served. The two directions
+  // mean different things:
+  //
+  //   receipt < terminal  the cloud moved the terminal on; pairing again at the
+  //                       new generation appends the receipt that serves it.
+  //   receipt > terminal  the terminal claims LESS than it once proved here —
+  //                       a stale or replayed projection. Refused, and nothing
+  //                       on this path ever lowers what a receipt proved.
+  //
+  // ORDERED BY GENERATION, NOT BY paired_at. `paired_at` is the Hub's clock,
+  // which the same hardware run found a day slow at boot. The pairing door does
+  // not read receipts, so a lower-generation handshake can complete and append;
+  // "newest by clock" then let that receipt restore eligibility at the lower
+  // generation, and a slow clock would put a current receipt behind a
+  // superseded one and send the terminal round a re-pair loop. Generations are
+  // monotonic cloud authority; the clock is not.
   const receipt = await client.query<{
     terminal_assignment_generation: number;
     terminal_profile_code: string;
@@ -337,7 +386,7 @@ export async function deriveEligibility(
     `select terminal_assignment_generation, terminal_profile_code, paired_at
        from edge_identity.pairing_receipt
       where terminal_device_id = $1::uuid
-      order by paired_at desc
+      order by terminal_assignment_generation desc, paired_at desc
       limit 1`,
     [terminalDeviceId],
   );
@@ -345,10 +394,23 @@ export async function deriveEligibility(
   if (receiptRow === undefined) {
     return refuse("PAIRING_REQUIRED", "no pairing receipt exists for this terminal");
   }
-  if (receiptRow.terminal_assignment_generation !== terminalRow.assignment_generation) {
+  if (receiptRow.terminal_assignment_generation > terminalRow.assignment_generation) {
     return refuse(
       "ASSIGNMENT_GENERATION_STALE",
-      "the pairing receipt binds a superseded assignment generation",
+      "the terminal's assignment generation is behind one it has already paired at on this Hub",
+    );
+  }
+  if (receiptRow.terminal_assignment_generation < terminalRow.assignment_generation) {
+    // PAIRING_REQUIRED is an instruction the terminal acts on, and the pairing
+    // door does not read containment. A terminal under a blocking directive is
+    // told so instead of being invited to write a new receipt.
+    const blocking = await readBlockingContainment(client, terminalDeviceId);
+    if (blocking !== null) {
+      return refuse("CONTAINMENT_PROHIBITS", `containment directive ${blocking} is in effect`);
+    }
+    return refuse(
+      "PAIRING_REQUIRED",
+      "the pairing receipt binds an earlier assignment generation; pair again at the current one",
     );
   }
 
@@ -378,16 +440,8 @@ export async function deriveEligibility(
   }
 
   // Containment: blocking directives refuse; investigation is reported.
-  const containment = await client.query<{ directive: string }>(
-    `select directive from edge_identity.effective_containment where device_uuid = $1::uuid`,
-    [terminalDeviceId],
-  );
-  const directive = containment.rows[0]?.directive ?? "none";
-  if (
-    directive === "operations_restricted" ||
-    directive === "suspended" ||
-    directive === "quarantined"
-  ) {
+  const directive = await readContainmentDirective(client, terminalDeviceId);
+  if (isBlockingContainment(directive)) {
     return refuse("CONTAINMENT_PROHIBITS", `containment directive ${directive} is in effect`);
   }
   const containmentState = directive === "cleared" ? "none" : directive;

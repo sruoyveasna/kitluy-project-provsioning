@@ -345,6 +345,68 @@ describe.skipIf(!live)("T1 bootstrap routes and staff sessions (WS-12-T001-P02)"
     expect(complete.status, JSON.stringify(complete.body)).toBe(200);
   }
 
+  /**
+   * The cloud re-assigning a terminal reaches the Hub as a new projection of
+   * `terminal_device.assignment_generation` (hub-provision-terminal --delivery
+   * in development; BLK-006 later). This is that projection, not a receipt edit.
+   */
+  async function setTerminalGeneration(t: LanTerminal, generation: number): Promise<void> {
+    await pool.query(
+      `update edge_identity.terminal_device set assignment_generation = $2 where id = $1`,
+      [t.deviceId, generation],
+    );
+  }
+
+  interface ReceiptView {
+    readonly id: string;
+    readonly generation: number;
+    readonly pairedAt: string;
+    readonly digest: string;
+  }
+
+  async function receiptsOf(t: LanTerminal): Promise<ReceiptView[]> {
+    const { rows } = await pool.query<{
+      id: string;
+      generation: number;
+      paired_at: Date;
+      digest: string;
+    }>(
+      `select r.id, r.terminal_assignment_generation as generation, r.paired_at,
+              md5(to_jsonb(r)::text) as digest
+         from edge_identity.pairing_receipt r
+        where r.terminal_device_id = $1
+        order by r.paired_at, r.id`,
+      [t.deviceId],
+    );
+    return rows.map((row) => ({
+      id: row.id,
+      generation: row.generation,
+      pairedAt: row.paired_at.toISOString(),
+      digest: row.digest,
+    }));
+  }
+
+  /** Every durable row an eligibility read could conceivably touch. */
+  async function durableState(t: LanTerminal): Promise<string> {
+    const { rows } = await pool.query<{ state: string }>(
+      `select md5(concat_ws('#',
+         (select coalesce(string_agg(to_jsonb(r)::text, '|' order by r.id), '')
+            from edge_identity.pairing_receipt r where r.terminal_device_id = $1),
+         (select coalesce(string_agg(to_jsonb(s)::text, '|' order by s.id), '')
+            from edge_identity.pairing_session s where s.terminal_device_id = $1),
+         (select to_jsonb(d)::text from edge_identity.terminal_device d where d.id = $1),
+         (select coalesce(string_agg(to_jsonb(c)::text, '|' order by c.id), '')
+            from edge_identity.device_credential c where c.device_id = $1),
+         (select coalesce(string_agg(to_jsonb(g)::text, '|' order by g.id), '')
+            from edge_config.terminal_profile_assignment g where g.terminal_device_id = $1),
+         (select coalesce(string_agg(to_jsonb(x)::text, '|' order by x.id), '')
+            from edge_identity.terminal_session x where x.terminal_device_id = $1)
+       )) as state`,
+      [t.deviceId],
+    );
+    return rows[0]?.state ?? "";
+  }
+
   async function insertStaff(
     profiles: readonly string[],
     opts: {
@@ -601,7 +663,7 @@ describe.skipIf(!live)("T1 bootstrap routes and staff sessions (WS-12-T001-P02)"
     expect(typeof eligibility["authorityTime"]).toBe("string");
   });
 
-  it("fails closed: missing pairing, non-T1 profile, stale generation, superseded credential", async () => {
+  it("fails closed: missing pairing, non-T1 profile, a receipt ahead of the terminal, superseded credential", async () => {
     const unpaired = await newLanTerminal("elig-unpaired");
     const noPairing = await call(unpaired, "GET", EDGE_RUNTIME_ELIGIBILITY_PATH);
     expect(noPairing.status).toBe(403);
@@ -613,12 +675,15 @@ describe.skipIf(!live)("T1 bootstrap routes and staff sessions (WS-12-T001-P02)"
     expect(wrongProfile.status).toBe(403);
     expect(detailsOf(wrongProfile)["result"]).toBe("PROFILE_NOT_T1");
 
+    // A receipt AHEAD of the terminal's projected generation. This used to
+    // move the terminal FORWARD (receipt 1, terminal 2) and expect STALE, which
+    // is Defect G itself: a terminal re-paired in the cloud must be told to
+    // pair again, not refused. The refusal survives for the direction that is
+    // actually suspicious — see the Defect G section below.
     const stale = await newLanTerminal("elig-stale");
+    await setTerminalGeneration(stale, 2);
     await pairTerminal(stale);
-    await pool.query(
-      `update edge_identity.terminal_device set assignment_generation = 2 where id = $1`,
-      [stale.deviceId],
-    );
+    await setTerminalGeneration(stale, 1);
     const staleResponse = await call(stale, "GET", EDGE_RUNTIME_ELIGIBILITY_PATH);
     expect(staleResponse.status).toBe(409);
     expect(detailsOf(staleResponse)["result"]).toBe("ASSIGNMENT_GENERATION_STALE");
@@ -674,6 +739,192 @@ describe.skipIf(!live)("T1 bootstrap routes and staff sessions (WS-12-T001-P02)"
     const refused = await call(crossStore, "GET", EDGE_RUNTIME_ELIGIBILITY_PATH);
     expect(refused.status).toBe(403);
     expect(detailsOf(refused)["result"]).toBe("ASSIGNMENT_SCOPE_MISMATCH");
+  });
+
+  // -------------------------------------------------------------------------
+  // Defect G (hardware 2026-09-16, handoff 46 §4)
+  // -------------------------------------------------------------------------
+  //
+  // A re-flashed Pi Terminal recovered its credential in the cloud at
+  // assignment generation 3. The Store Hub still held that terminal's receipt
+  // from generation 2 — receipts are append-only history — and answered
+  // ASSIGNMENT_GENERATION_STALE. The terminal pairs only on PAIRING_REQUIRED,
+  // so it waited for ever and never reached SERVING.
+  //
+  //   receipt < terminal  → PAIRING_REQUIRED (the terminal re-pairs itself)
+  //   receipt = terminal  → normal evaluation, unchanged
+  //   receipt > terminal  → refused, never downgraded
+  //
+  // Every receipt here comes from the REAL four-step handshake.
+
+  it("Defect G: a receipt one generation behind asks for pairing, and re-pairing appends a receipt that serves", async () => {
+    const t = await newLanTerminal("g-behind-1");
+    await pairTerminal(t);
+    const [original] = await receiptsOf(t);
+    expect(original?.generation).toBe(1);
+
+    await setTerminalGeneration(t, 2);
+    const before = await durableState(t);
+    const eligibility = await call(t, "GET", EDGE_RUNTIME_ELIGIBILITY_PATH);
+    expect(eligibility.status, JSON.stringify(eligibility.body)).toBe(403);
+    expect(detailsOf(eligibility)["result"]).toBe("PAIRING_REQUIRED");
+    const configuration = await call(t, "GET", EDGE_CONFIGURATION_CURRENT_PATH);
+    expect(configuration.status).toBe(403);
+    expect(detailsOf(configuration)["result"]).toBe("PAIRING_REQUIRED");
+    // Reading is not repairing: nothing durable moved.
+    expect(await durableState(t)).toBe(before);
+
+    await pairTerminal(t);
+    const receipts = await receiptsOf(t);
+    expect(receipts.map((r) => r.generation)).toEqual([1, 2]);
+    // The historical receipt is byte-for-byte what it was.
+    expect(receipts[0]).toEqual(original);
+
+    const served = await call(t, "GET", EDGE_RUNTIME_ELIGIBILITY_PATH);
+    expect(served.status, JSON.stringify(served.body)).toBe(200);
+    const payload = served.body["eligibility"] as Record<string, unknown>;
+    expect(payload["assignmentGeneration"]).toBe(2);
+    expect(payload["pairingEligibility"]).toBe("paired");
+    expect(payload["pairedAt"]).toBe(receipts[1]?.pairedAt);
+    const delivered = await call(t, "GET", EDGE_CONFIGURATION_CURRENT_PATH);
+    expect(delivered.status, JSON.stringify(delivered.body)).toBe(200);
+  });
+
+  it("Defect G: a receipt two generations behind also asks for pairing", async () => {
+    const t = await newLanTerminal("g-behind-2");
+    await pairTerminal(t);
+    await setTerminalGeneration(t, 3);
+    const refused = await call(t, "GET", EDGE_RUNTIME_ELIGIBILITY_PATH);
+    expect(refused.status, JSON.stringify(refused.body)).toBe(403);
+    expect(detailsOf(refused)["result"]).toBe("PAIRING_REQUIRED");
+
+    await pairTerminal(t);
+    expect((await receiptsOf(t)).map((r) => r.generation)).toEqual([1, 3]);
+    const served = await call(t, "GET", EDGE_RUNTIME_ELIGIBILITY_PATH);
+    expect(served.status, JSON.stringify(served.body)).toBe(200);
+    expect((served.body["eligibility"] as Record<string, unknown>)["assignmentGeneration"]).toBe(3);
+  });
+
+  it("Defect G: a receipt AHEAD of the terminal is refused and never downgraded, not even by pairing again lower", async () => {
+    const t = await newLanTerminal("g-ahead");
+    await setTerminalGeneration(t, 2);
+    await pairTerminal(t);
+    await setTerminalGeneration(t, 1);
+
+    const before = await durableState(t);
+    const refused = await call(t, "GET", EDGE_RUNTIME_ELIGIBILITY_PATH);
+    expect(refused.status, JSON.stringify(refused.body)).toBe(409);
+    expect(detailsOf(refused)["result"]).toBe("ASSIGNMENT_GENERATION_STALE");
+    const configuration = await call(t, "GET", EDGE_CONFIGURATION_CURRENT_PATH);
+    expect(configuration.status).toBe(409);
+    expect(detailsOf(configuration)["result"]).toBe("ASSIGNMENT_GENERATION_STALE");
+    expect(await durableState(t)).toBe(before);
+
+    // The pairing door does not look at receipts, so a lower-generation
+    // handshake completes and appends. It must not buy eligibility: the
+    // receipt that speaks is the one for the HIGHEST generation, whatever the
+    // clock said when each was written.
+    await pairTerminal(t);
+    const receipts = await receiptsOf(t);
+    expect(receipts.map((r) => r.generation)).toEqual([2, 1]);
+    const stillRefused = await call(t, "GET", EDGE_RUNTIME_ELIGIBILITY_PATH);
+    expect(stillRefused.status, JSON.stringify(stillRefused.body)).toBe(409);
+    expect(detailsOf(stillRefused)["result"]).toBe("ASSIGNMENT_GENERATION_STALE");
+
+    // Back at generation 2, the generation-2 receipt serves even though a
+    // superseded-generation receipt was written later. This is the shape a
+    // Store Hub with a wrong clock produces, and ordering by paired_at would
+    // have sent this terminal round a re-pair loop instead.
+    await setTerminalGeneration(t, 2);
+    const served = await call(t, "GET", EDGE_RUNTIME_ELIGIBILITY_PATH);
+    expect(served.status, JSON.stringify(served.body)).toBe(200);
+    const payload = served.body["eligibility"] as Record<string, unknown>;
+    expect(payload["assignmentGeneration"]).toBe(2);
+    expect(payload["pairedAt"]).toBe(receipts[0]?.pairedAt);
+  });
+
+  it("Defect G: scope, credential, containment and Hub replacement refusals still win over re-pairing", async () => {
+    // Containment: a suspended terminal is not invited to pair again. The
+    // pairing door does not read containment, so the invitation itself is
+    // what must be withheld.
+    const contained = await newLanTerminal("g-contained");
+    await pairTerminal(contained);
+    await setTerminalGeneration(contained, 2);
+    await pool.query(
+      `insert into edge_identity.containment_directive
+         (id, device_uuid, tenant_id, digital_store_id, location_id, directive,
+          directive_sequence, reason, source_ref, received_via, received_at)
+       values ($1, $2, $3, $4, $5, 'suspended', 1, 'defect G containment probe',
+               $6, 'operator_repair', now())`,
+      [randomUUID(), contained.deviceId, TENANT, STORE, LOCATION, `g-probe-${RUN}`],
+    );
+    const suspended = await call(contained, "GET", EDGE_RUNTIME_ELIGIBILITY_PATH);
+    expect(suspended.status, JSON.stringify(suspended.body)).toBe(403);
+    expect(detailsOf(suspended)["result"]).toBe("CONTAINMENT_PROHIBITS");
+
+    // Credential currency.
+    const superseded = await newLanTerminal("g-superseded");
+    await pairTerminal(superseded);
+    await setTerminalGeneration(superseded, 2);
+    await pool.query(
+      `update edge_identity.device_credential set status = 'superseded' where certificate_serial = $1`,
+      [superseded.tls.serial],
+    );
+    const notCurrent = await call(superseded, "GET", EDGE_RUNTIME_ELIGIBILITY_PATH);
+    expect(notCurrent.status).toBe(403);
+    expect(detailsOf(notCurrent)["result"]).toBe("CREDENTIAL_NOT_CURRENT");
+
+    // Store scope: the new generation arrived under another Digital Store.
+    const moved = await newLanTerminal("g-moved");
+    await pairTerminal(moved);
+    await pool.query(
+      `update edge_identity.terminal_device
+          set assignment_generation = 2, digital_store_id = $2
+        where id = $1`,
+      [moved.deviceId, ATTACKER_STORE],
+    );
+    const foreign = await call(moved, "GET", EDGE_RUNTIME_ELIGIBILITY_PATH);
+    expect(foreign.status).toBe(403);
+    expect(detailsOf(foreign)["result"]).toBe("ASSIGNMENT_SCOPE_MISMATCH");
+
+    // Hub replacement state.
+    const replacing = await newLanTerminal("g-replacement");
+    await pairTerminal(replacing);
+    await setTerminalGeneration(replacing, 2);
+    try {
+      await pool.query(
+        `select edge_identity.set_hub_replacement_mode_v1('restored_quarantine', $1::uuid, 'defect G probe', 'test-operator', $2::uuid)`,
+        [randomUUID(), randomUUID()],
+      );
+      const blocked = await call(replacing, "GET", EDGE_RUNTIME_ELIGIBILITY_PATH);
+      expect(blocked.status).toBe(503);
+      expect(detailsOf(blocked)["result"]).toBe("HUB_REPLACEMENT_BLOCKED");
+    } finally {
+      await pool.query(
+        `select edge_identity.set_hub_replacement_mode_v1('normal', $1::uuid, 'defect G restore', 'test-operator', $2::uuid)`,
+        [randomUUID(), randomUUID()],
+      );
+    }
+    const invited = await call(replacing, "GET", EDGE_RUNTIME_ELIGIBILITY_PATH);
+    expect(detailsOf(invited)["result"]).toBe("PAIRING_REQUIRED");
+  });
+
+  it("Defect G: equal generations keep the profile check — a receipt for another profile is still refused", async () => {
+    const t = await newLanTerminal("g-profile", { profile: T3 });
+    await pairTerminal(t);
+    // The cloud now grants T1 at a newer assignment version; the receipt still
+    // binds T3 at the SAME generation. Unchanged behaviour: refused, not re-paired.
+    await pool.query(
+      `insert into edge_config.terminal_profile_assignment
+         (id, tenant_id, digital_store_id, location_id, terminal_device_id,
+          profile_code, assignment_version, enabled, effective_from,
+          effective_until, source_snapshot_id)
+       values ($1, $2, $3, $4, $5, $6, 2, true, now() - interval '1 hour', null, $7)`,
+      [randomUUID(), TENANT, STORE, LOCATION, t.deviceId, T1, ACTIVE_SNAPSHOT],
+    );
+    const refused = await call(t, "GET", EDGE_RUNTIME_ELIGIBILITY_PATH);
+    expect(refused.status, JSON.stringify(refused.body)).toBe(409);
+    expect(detailsOf(refused)["result"]).toBe("ASSIGNMENT_GENERATION_STALE");
   });
 
   it("fails closed while the Hub is in a replacement state, and recovers on normal", async () => {
