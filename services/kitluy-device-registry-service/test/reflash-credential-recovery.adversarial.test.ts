@@ -716,6 +716,77 @@ describe("THE RE-FLASH: a known board recovers its operational credential", () =
   );
 
   it(
+    "recovers AGAIN after a second re-flash, while the first recovery's overlap is still open",
+    async () => {
+      // The Store Hub's real state before the DEVICE-RECOVERY-001 hardware run
+      // (2026-09-15): recovered once to generation 2, the three-day overlap
+      // with generation 1 still open, and re-flashed again. Every earlier case
+      // recovers generation 1 -> 2 only.
+      const hub = await hubInService();
+      await reflash(hub);
+      await rePair(hub);
+      const first = await ask(hub, rsaKey());
+      expect(first.outcome, refusalOf(first)).toBe("ISSUED");
+      const activated = await advanceDeviceTrust(pool, {
+        deviceRecordId: hub.deviceId,
+        environment: ENVIRONMENT,
+        actorRef: "reflash-suite/activation",
+      });
+      expect(activated.kind, JSON.stringify(activated)).toBe("advanced");
+      const once = await snapshot(hub.deviceId);
+      expect(once.head).toEqual({ current_generation: 2, previous_generation: 1 });
+
+      await reflash(hub);
+      await rePair(hub);
+      const second = await ask(hub, rsaKey());
+      expect(second.outcome, refusalOf(second)).toBe("ISSUED");
+      if (second.outcome === "REFUSED") return;
+      expect(second.recovered).toBe(true);
+      expect(second.certificateGeneration).toBe(3);
+      const reactivated = await advanceDeviceTrust(pool, {
+        deviceRecordId: hub.deviceId,
+        environment: ENVIRONMENT,
+        actorRef: "reflash-suite/activation",
+      });
+      expect(reactivated.kind, JSON.stringify(reactivated)).toBe("advanced");
+      expect(await lifecycle(hub.deviceId)).toBe("active");
+
+      const twice = await snapshot(hub.deviceId);
+      expect(twice.device.id).toBe(hub.deviceId);
+      expect(twice.device.asset_tag).toBe(hub.assetTag);
+      expect(twice.boardDevices).toBe(1);
+      expect(twice.head).toEqual({ current_generation: 3, previous_generation: 2 });
+      expect(twice.keys.map((k) => [k.generation, k.state])).toEqual([
+        [1, "superseded"],
+        [2, "superseded"],
+        [3, "active"],
+      ]);
+      expect(twice.artifacts.map((a) => [a.certificate_generation, a.status])).toEqual([
+        [1, "superseded"],
+        [2, "superseded"],
+        [3, "active"],
+      ]);
+      expect(twice.reservations.map((r) => [r.status, r.next_credential_generation])).toEqual([
+        ["completed", 2],
+        ["completed", 3],
+      ]);
+      expect(twice.enrollments.map((e) => [e.enrollment_sequence, e.state])).toEqual([
+        [1, "superseded"],
+        [2, "superseded"],
+        [3, "sealed"],
+      ]);
+      // The second recovery's evidence names generation 2's enrollment as the
+      // one the second re-flash superseded.
+      const latest = twice.evidence.find((e) => e.incumbent_credential_generation === 2);
+      expect(latest).toMatchObject({
+        incumbent_enrollment_id: twice.enrollments[1]!.id,
+        current_enrollment_id: twice.enrollments[2]!.id,
+      });
+    },
+    FLOW_TIMEOUT_MS,
+  );
+
+  it(
     "is idempotent: a lost response replays the same recovered certificate",
     async () => {
       const hub = await hubInService();
