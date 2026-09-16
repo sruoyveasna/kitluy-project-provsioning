@@ -20,6 +20,7 @@ import {
 } from "./provisioning-routes.js";
 import { DEVICE_ENROLLMENT_PREFIX, type EnrollmentRouter } from "./enrollment-routes.js";
 import { HUB_PAIRING_PREFIX, type HubPairingRouter } from "./hub-pairing-routes.js";
+import { DEVICE_BOOT_PREFIX, type DeviceBootRouter } from "./device-boot-routes.js";
 import { TERMINAL_PAIRING_PREFIX, type TerminalPairingRouter } from "./terminal-pairing-routes.js";
 import {
   OPERATIONAL_CERTIFICATE_PREFIX,
@@ -41,6 +42,7 @@ export interface KernelDeps {
   readonly hubPairingRouter?: HubPairingRouter;
   readonly terminalPairingRouter?: TerminalPairingRouter;
   readonly operationalCertificateRouter?: OperationalCertificateRouter;
+  readonly deviceBootRouter?: DeviceBootRouter;
 }
 
 /**
@@ -193,6 +195,29 @@ export async function handleRequest(
     const response = await deps.hubPairingRouter.handle({
       method: request.method,
       path: request.path,
+      headers: request.headers,
+      sourceIp: request.sourceIp ?? "",
+      rawBody: request.rawBody ?? "",
+    });
+    return { status: response.status, body: response.body, headers: response.headers };
+  }
+
+  // Boot classification (BOOT-RECOVERY-CLASSIFICATION-001, group 0227). Same
+  // placement and the same fail-closed 503: a board that cannot learn what
+  // happened to it must keep waiting, never read a 404 as "no such device".
+  if (path.startsWith(DEVICE_BOOT_PREFIX)) {
+    if (deps.deviceBootRouter === undefined) {
+      return {
+        status: 503,
+        body: errorEnvelope(
+          "DEPENDENCY_UNAVAILABLE",
+          "device-boot routes are not configured on this instance",
+        ),
+      };
+    }
+    const response = await deps.deviceBootRouter.handle({
+      method: request.method,
+      path,
       headers: request.headers,
       sourceIp: request.sourceIp ?? "",
       rawBody: request.rawBody ?? "",

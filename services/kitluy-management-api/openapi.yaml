@@ -148,6 +148,10 @@ paths:
                 properties:
                   device: { $ref: "#/components/schemas/FleetDevice" }
                   provisioning: { $ref: "#/components/schemas/ProvisioningReadiness" }
+                  recovery:
+                    oneOf:
+                      - { $ref: "#/components/schemas/DeviceRecovery" }
+                      - { type: "null" }
                   freshnessPolicyRuled: { type: boolean }
                   dataAsOf: { type: string, format: date-time }
         "401": { $ref: "#/components/responses/Unauthenticated" }
@@ -779,6 +783,53 @@ components:
         blockingReasons:
           type: array
           items: { type: string }
+    DeviceRecovery:
+      type: object
+      description: >-
+        What this device needs in order to come back if its SD card were
+        replaced now, decided by the same boot classification contract the
+        device runs (BOOT-RECOVERY-CLASSIFICATION-001) over the same governed
+        facts. Not the device's live boot state: the cloud does not store what a
+        card claimed. `adminDetail` is for Admin surfaces only and must never be
+        rendered to a Store. `nextActionGap` is present when this API cannot yet
+        perform the named next action.
+      required:
+        [classification, reasonCode, nextAction, userMessageKey, message, adminDetail, basis]
+      properties:
+        classification:
+          type: string
+          enum:
+            [
+              READY,
+              RECOVERING_DEVICE,
+              NEW_DEVICE,
+              WRONG_MEDIA,
+              REPLACE_HARDWARE,
+              SECURITY_LOCK,
+              WAITING,
+            ]
+        reasonCode: { type: string, pattern: "^KLUY-BOOT-" }
+        nextAction:
+          type: string
+          enum:
+            [
+              NONE,
+              WAIT,
+              ENTER_PAIRING_CODE,
+              RELEASE_DEVICE_THEN_PAIR,
+              APPROVE_ENROLLMENT,
+              REPLACE_DEVICE,
+              INSERT_CORRECT_MEDIA,
+              CONTACT_ADMIN,
+              CONTACT_HET_SUPPORT,
+            ]
+        userMessageKey: { type: string, pattern: "^boot\\." }
+        message: { type: string }
+        adminDetail: { type: string }
+        basis: { type: string, enum: [freshly_flashed_card] }
+        nextActionGap:
+          type: string
+          enum: [RELEASE_ROUTE_NOT_AVAILABLE, REPLACE_ROUTE_NOT_AVAILABLE]
     ProvisioningReadiness:
       type: object
       description: >-
@@ -796,7 +847,8 @@ components:
       properties:
         digitalStoreId: { type: string, format: uuid }
         digitalStoreReference: { type: string, description: "store_code — name" }
-        vertical: { type: [string, "null"], description: The Store's primary vertical code, verbatim }
+        vertical:
+          { type: [string, "null"], description: The Store's primary vertical code, verbatim }
         locations:
           type: array
           items:
@@ -811,7 +863,11 @@ components:
           required: [deviceReference, state]
           properties:
             deviceReference: { type: [string, "null"] }
-            state: { type: string, description: "active · pending_trust · none, or the stored state verbatim" }
+            state:
+              {
+                type: string,
+                description: "active · pending_trust · none, or the stored state verbatim",
+              }
     PairingCodeIssued:
       type: object
       required: [code, sessionId, expiresAt, ttlSeconds, showOnce]
@@ -838,7 +894,17 @@ components:
         dataAsOf: { type: string, format: date-time }
     PhysicalTerminal:
       type: object
-      required: [physicalTerminalId, digitalStoreId, storeLocationId, label, terminalProfileKeys, boundDevice, lastSession, createdAt]
+      required:
+        [
+          physicalTerminalId,
+          digitalStoreId,
+          storeLocationId,
+          label,
+          terminalProfileKeys,
+          boundDevice,
+          lastSession,
+          createdAt,
+        ]
       properties:
         physicalTerminalId: { type: string, format: uuid }
         digitalStoreId: { type: string, format: uuid }
@@ -865,9 +931,20 @@ components:
         createdAt: { type: string, format: date-time }
     TerminalPairingCodeIssued:
       type: object
-      required: [code, sessionId, expiresAt, ttlSeconds, showOnce, physicalTerminalId, label, terminalProfileKeys]
+      required:
+        [
+          code,
+          sessionId,
+          expiresAt,
+          ttlSeconds,
+          showOnce,
+          physicalTerminalId,
+          label,
+          terminalProfileKeys,
+        ]
       properties:
-        code: { type: string, description: Shown once; only its digest is stored. No QR is offered. }
+        code:
+          { type: string, description: Shown once; only its digest is stored. No QR is offered. }
         sessionId: { type: string, format: uuid }
         expiresAt: { type: string, format: date-time }
         ttlSeconds: { type: integer }
@@ -880,13 +957,27 @@ components:
         detail: { type: string }
     TerminalPairingSessionStatus:
       type: object
-      required: [sessionId, physicalTerminalId, state, paired, expired, locked, expiresAt, terminalProfileKeys]
+      required:
+        [
+          sessionId,
+          physicalTerminalId,
+          state,
+          paired,
+          expired,
+          locked,
+          expiresAt,
+          terminalProfileKeys,
+        ]
       properties:
         sessionId: { type: string, format: uuid }
         physicalTerminalId: { type: string, format: uuid }
         state: { type: string, description: "open · consumed · revoked · expired · locked" }
         paired: { type: boolean }
-        expired: { type: boolean, description: Derived from the server clock for an open session past its deadline }
+        expired:
+          {
+            type: boolean,
+            description: Derived from the server clock for an open session past its deadline,
+          }
         pairedAt: { type: [string, "null"], format: date-time }
         pairedDeviceId: { type: [string, "null"], format: uuid }
         pairedDeviceReference: { type: [string, "null"] }
@@ -909,7 +1000,18 @@ components:
         physicalTerminalLabel: { type: [string, "null"] }
     DigitalStore:
       type: object
-      required: [digitalStoreId, storeCode, name, primaryVerticalCode, status, tenantId, tenantReference, locations, createdAt]
+      required:
+        [
+          digitalStoreId,
+          storeCode,
+          name,
+          primaryVerticalCode,
+          status,
+          tenantId,
+          tenantReference,
+          locations,
+          createdAt,
+        ]
       properties:
         digitalStoreId: { type: string, format: uuid }
         storeCode: { type: string }
@@ -930,7 +1032,16 @@ components:
         createdAt: { type: string, format: date-time }
     DigitalStoreCreated:
       type: object
-      required: [digitalStoreId, storeCode, name, primaryVerticalCode, status, auditEventId, partnerStaffGranted]
+      required:
+        [
+          digitalStoreId,
+          storeCode,
+          name,
+          primaryVerticalCode,
+          status,
+          auditEventId,
+          partnerStaffGranted,
+        ]
       properties:
         digitalStoreId: { type: string, format: uuid }
         storeCode: { type: string }

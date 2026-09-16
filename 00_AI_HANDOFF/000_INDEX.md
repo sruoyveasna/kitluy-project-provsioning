@@ -4,6 +4,26 @@ Read the newest relevant handoff before starting work. Naming:
 `YYYY-MM-DD__<AREA>__<TASK-ID>__<SLUG>__AI-HANDOFF.md` under the matching
 subfolder (repository/ shared/ apps/ services/ data/ infrastructure/ reviews/).
 
+## BOOT-RECOVERY-CLASSIFICATION-001 — one answer per boot: what happened, and the one next step (2026-09-16)
+
+Record: [`edge-platform/44_BOOT_RECOVERY_CLASSIFICATION_ONE_ANSWER_PER_BOOT.md`](edge-platform/44_BOOT_RECOVERY_CLASSIFICATION_ONE_ANSWER_PER_BOOT.md)
+· **IMPLEMENTED · TESTED · INTEGRATED (local hardware stack) · IMAGE NOT REBUILT · HARDWARE VERIFICATION PENDING** · migration **0227** · starting commit `22bfd5c`
+
+**What exists now.**
+
+- One pure classifier, `@kitluy/device-boot-classification`: `READY`, `RECOVERING_DEVICE`, `NEW_DEVICE`, `WRONG_MEDIA`, `REPLACE_HARDWARE`, `SECURITY_LOCK` or `WAITING`, each with one next action and a shop-safe message.
+- Scenario matrix S01–S43: **69 passed, 2 skipped** (S42, S43, named gaps).
+- The cloud decides when reachable (`POST /v1/device-boot/classification`, read-only, as `kitluy_device_boot_service`). Offline, the board decides with a **byte-identical copy** (drift-tested) and never says "new hardware"; it keeps trading only if the cloud last said READY for this card on this board serial.
+- Store Hub console shows the sentence first. Both image overlays carry the service. Admin device view shows "what this device needs" with the gap stated when KitLuy cannot perform it.
+
+**Found while building:** an offline board reporting `unknown` would have been told to replace its hardware; credential overlap windows were live on the hardware stack; a real card does not record its enrollment, so freshness uses the identity key.
+
+**Live:** 0227 on `kitluy-repo17` and `kitluy-fresh`; fleet service restarted; the real Store Hub's record answers "enter a pairing code", matching its mid-recovery state.
+
+**Decision required:** BOOT-RECOVERY-DEC-001 — who may release a device from its Store (no governed route exists).
+
+**Next:** REFLASH-HARDENING-001 hardware gate (handoff 43 §8 steps 4–7), then rebuild both images and run acceptance.
+
 ## REFLASH-HARDENING-001 — a re-paired Store Hub requests at its real generation, and a stale request blocks nothing (2026-09-15)
 
 Record: [`edge-platform/43_REFLASH_HARDENING_A_REPAIRED_HUB_NEEDS_NO_WORKAROUND.md`](edge-platform/43_REFLASH_HARDENING_A_REPAIRED_HUB_NEEDS_NO_WORKAROUND.md)

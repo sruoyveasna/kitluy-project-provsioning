@@ -1,0 +1,30 @@
+{
+  "name": "@kitluy/device-boot-classification",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Boot & Recovery Classification Contract: one deterministic decision per device boot, with one next action",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./evidence-row": {
+      "types": "./dist/evidence-row.d.ts",
+      "default": "./dist/evidence-row.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "@types/node": "catalog:",
+    "vitest": "catalog:"
+  }
+}

@@ -19,6 +19,7 @@ import {
   type FreshnessPolicy,
 } from "./fleet.js";
 import { buildHealthReport, SERVICE_NAME, SERVICE_VERSION } from "./index.js";
+import { readDeviceRecovery, type DeviceRecoveryDeps } from "./device-recovery.js";
 import {
   listPartnerStores,
   openHubPairingSession,
@@ -129,6 +130,13 @@ export interface ManagementRouterDependencies {
    * readiness rather than inventing one.
    */
   readonly terminals?: TerminalProvisioningDeps;
+  /**
+   * Required only by the device RECOVERY view (group 0227), which reads as
+   * `kitluy_device_boot_service` inside a transaction. Absent means the device
+   * detail still answers, with `recovery: null` — a missing view of what to do
+   * next must never hide the device itself.
+   */
+  readonly recovery?: DeviceRecoveryDeps;
   /**
    * Required only by Digital Store creation (group 0215), which MUTATES and
    * enters `service_role` inside a transaction. Absent means 503, never 404.
@@ -1335,6 +1343,13 @@ export async function handleManagementRequest(
         // Where the device is, in words: Store, Location, roles, seat. Null
         // when unassigned, which is a fact rather than a missing field.
         assignmentContext: await readDeviceAssignmentContext(deps.db, deviceId),
+        // What this device needs in order to come back, decided by the same
+        // contract a board runs (BOOT-RECOVERY-CLASSIFICATION-001). The human
+        // was authorized above; the read then runs as the narrow boot identity.
+        recovery:
+          deps.recovery === undefined
+            ? null
+            : await readDeviceRecovery(deps.recovery, deviceId, deps.environment),
         freshnessPolicyRuled: policy.staleAfterSeconds !== null,
         dataAsOf: now.toISOString(),
       },

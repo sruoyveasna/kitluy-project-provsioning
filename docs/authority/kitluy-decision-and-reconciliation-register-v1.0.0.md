@@ -4961,3 +4961,58 @@ until that run passes.
 
 **Out of scope, still open:** D, E, E2, F (Hub projection tooling), D1
 (topology).
+
+## KLREC-2026-09-16-DEVICE-RELEASE-ROUTE-001 — no governed route releases a device from its Store, so normal recovery still needs SQL (OPEN — DECISION REQUIRED)
+
+The boot classification contract (BOOT-RECOVERY-CLASSIFICATION-001) answers
+`RECOVERING_DEVICE` / `RELEASE_DEVICE_THEN_PAIR` for the most common recovery: a
+re-flashed card on a device that is still assigned (scenario S03; live on the
+hardware stack for both Pi Terminal records on 2026-09-16). The release itself has
+no route: `kitluy_devices.revoke_device_assignment_v1(device, reason, operator_ref)`
+is a non-definer door executable by `service_role` and the governors, records an
+operator STRING rather than a verified human, and no permission key covers it.
+`pnpm dev:device:unassign` is hosted-only. So a Store cannot recover without a HET
+engineer running governor SQL, which the owner task's product principle forbids.
+
+**Not built, deliberately.** Releasing a device from a Store is an authority
+decision. **Owner to decide:**
+
+1. Who may release: HET Admin only, or also the Store's Partner owner (within their
+   own Store scope)?
+2. Whether pilot and production require four-eyes, as device approval does.
+3. The reason codes (`SD_CARD_REFLASH` exists) and whether a released device's seat
+   stays reserved.
+
+**Proposal (agent):** permission `fleet.device_assignment.release`; a SECURITY DEFINER
+wrapper that resolves `auth.uid()`, checks scope, writes an audit event and calls the
+door; Admin-only in development first; four-eyes in pilot/production; then the
+Management API route and the portal action. Until decided, the Admin device view
+states `nextActionGap: RELEASE_ROUTE_NOT_AVAILABLE`. Handoff 44 §12.
+
+## KLREC-2026-09-16-BOOT-RECOVERY-CLASSIFICATION-001 — one boot classification contract, cloud-authoritative, with a board-local fallback (IMPLEMENTED · TESTED · INTEGRATED, HARDWARE VERIFICATION PENDING)
+
+Owner task BOOT-RECOVERY-CLASSIFICATION-001; handoff 44; migration group 0227.
+Re-decides nothing locked (`KLD-2026-09-14-REFLASH-CREDENTIAL-RECOVERY-001`,
+`KLD-2026-08-06-WS11-T006-001`, `KLV4-DEC-007`).
+
+Implementation rules adopted within the task's authority, each from a finding:
+
+- **Offline is `unresolved`, never `unknown`.** A board that cannot reach the cloud
+  cannot resolve itself; `unknown` would have classified a good card as
+  `REPLACE_HARDWARE`. Unresolved always waits.
+- **Offline trading** requires the cloud's last answer to have been READY for the same
+  card-claims digest on the same board serial, and (Hub) an opened volume. A cloned
+  card does not inherit it; a later lock supersedes it.
+- **Credential overlap:** a card at the head's previous generation is not outdated while
+  `overlap_ends_at` is in the future (live on `kitluy-fresh`).
+- **Identity-key freshness:** cards record the identity key fingerprint, not the
+  enrollment id; a mismatch with the current enrollment's fingerprint is outdated.
+- **Retired or replaced board recognised** by its board serial even though the resolver
+  skips it, and locked.
+- **Storage `not_opened`:** a board claims neither "foreign" nor "unidentified" when it
+  cannot know which (GAP-BOOT-006).
+- **The route grants nothing** and returns no identifiers; the classifier ships to boards
+  as a byte-identical, drift-tested copy.
+
+Open gaps: GAP-BOOT-002 … GAP-BOOT-010 and KLREC-2026-09-16-DEVICE-RELEASE-ROUTE-001
+(handoff 44 §12).

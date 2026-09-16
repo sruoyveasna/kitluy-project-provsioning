@@ -205,6 +205,65 @@ describe("device detail view", () => {
     const html = renderToString(<DeviceDetailView locale="en-US" detail={detail} />);
     expect(html).toContain(MESSAGES["en-US"].neverSeen);
   });
+
+  it("shows the recovery step, and says when KitLuy cannot perform it yet", () => {
+    const html = renderToString(
+      <DeviceDetailView
+        locale="en-US"
+        detail={{
+          ...detail,
+          recovery: {
+            classification: "RECOVERING_DEVICE",
+            reasonCode: "KLUY-BOOT-RECOVERY-NEEDS-RELEASE",
+            nextAction: "RELEASE_DEVICE_THEN_PAIR",
+            userMessageKey: "boot.recovering.needsRelease",
+            message: "This device is still assigned to its shop.",
+            adminDetail: "device is active at assignment generation 3",
+            basis: "freshly_flashed_card",
+            nextActionGap: "RELEASE_ROUTE_NOT_AVAILABLE",
+          },
+        }}
+      />,
+    );
+    expect(html).toContain('data-recovery="RELEASE_DEVICE_THEN_PAIR"');
+    expect(html).toContain(MESSAGES["en-US"].recoveryActionReleaseThenPair);
+    expect(html).toContain('data-recovery-gap="RELEASE_ROUTE_NOT_AVAILABLE"');
+    expect(html).toContain(MESSAGES["en-US"].recoveryGapRelease);
+    // Still no control that pretends to release anything.
+    expect(html).not.toContain("<button");
+  });
+
+  it("a step KitLuy can take carries no gap note", () => {
+    const html = renderToString(
+      <DeviceDetailView
+        locale="km-KH"
+        detail={{
+          ...detail,
+          recovery: {
+            classification: "RECOVERING_DEVICE",
+            reasonCode: "KLUY-BOOT-RECOVERY-NEEDS-PAIRING",
+            nextAction: "ENTER_PAIRING_CODE",
+            userMessageKey: "boot.recovering.needsPairing",
+            message: "Enter the pairing code from KitLuy to finish setting up.",
+            adminDetail: "device is enrolled with no live assignment",
+            basis: "freshly_flashed_card",
+          },
+        }}
+      />,
+    );
+    expect(html).toContain(MESSAGES["km-KH"].recoveryActionEnterPairingCode);
+    expect(html).not.toContain("data-recovery-gap");
+  });
+
+  it("says plainly when recovery status is not available", () => {
+    for (const recovery of [null, undefined]) {
+      const html = renderToString(
+        <DeviceDetailView locale="en-US" detail={{ ...detail, recovery }} />,
+      );
+      expect(html).toContain('data-recovery="unavailable"');
+      expect(html).toContain(MESSAGES["en-US"].recoveryUnavailable);
+    }
+  });
 });
 
 describe("notice panel", () => {

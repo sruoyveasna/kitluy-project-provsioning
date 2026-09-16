@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@kitluy/api-errors": "workspace:*",
+    "@kitluy/device-boot-classification": "workspace:*",
     "@kitluy/device-identity": "workspace:*",
     "@kitluy/job-contracts": "workspace:*",
     "@kitluy/observability": "workspace:*",

@@ -1,0 +1,48 @@
+[Unit]
+Description=KitLuy boot classification: what happened to this device, and the one next step
+Documentation=https://github.com/Soenghak3301/HET-KITLUY-PROJECT
+# Authority: owner task BOOT-RECOVERY-CLASSIFICATION-001; registry group 0227.
+#
+# It READS and DESCRIBES. It pairs nothing, requests no certificate, unlocks no
+# storage and changes no cloud state: those remain the jobs of the units it is
+# ordered after, and every governed door keeps its own refusals.
+#
+# Ordered after registration (it reports what registration last heard) and
+# after storage on a Store Hub (it reports whether the volume opened), but it
+# REQUIRES neither: a board whose earlier steps failed is exactly the board
+# whose screen most needs a sentence.
+After=kitluy-firstboot.service kitluy-cloud-registration.service network-online.target
+Wants=network-online.target
+ConditionPathExists=/usr/lib/kitluy/boot-classification
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/kitluy/boot-classification
+# Root, with NO capabilities: it must see whether the owner-only credential
+# files under /var/lib/kitluy/operational exist, and nothing more.
+User=root
+# The agent polls every 60 seconds and never exits on a transient fault; it
+# exits non-zero only when the image does not state its class, which waiting
+# cannot fix.
+Restart=on-failure
+RestartSec=30
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictRealtime=yes
+CapabilityBoundingSet=
+# The one file it writes: /var/lib/kitluy/boot-classification.json.
+ReadWritePaths=/var/lib/kitluy
+StateDirectory=kitluy
+# 0751 — every unit sharing this StateDirectory must agree (see
+# kitluy-operational-tls.service); systemd re-applies the mode on each start.
+StateDirectoryMode=0751
+
+[Install]
+WantedBy=multi-user.target

@@ -544,6 +544,18 @@ importers:
 
   packages/dev-database: {}
 
+  packages/device-boot-classification:
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.20.1
+      typescript:
+        specifier: 'catalog:'
+        version: 5.7.3
+      vitest:
+        specifier: 'catalog:'
+        version: 2.1.9(@types/node@22.20.1)(terser@5.49.0)
+
   packages/device-identity:
     dependencies:
       '@kitluy/job-contracts':
@@ -1173,6 +1185,9 @@ importers:
       '@kitluy/api-errors':
         specifier: workspace:*
         version: link:../../packages/api-errors
+      '@kitluy/device-boot-classification':
+        specifier: workspace:*
+        version: link:../../packages/device-boot-classification
       '@kitluy/device-identity':
         specifier: workspace:*
         version: link:../../packages/device-identity
@@ -1383,6 +1398,9 @@ importers:
       '@kitluy/api-errors':
         specifier: workspace:*
         version: link:../../packages/api-errors
+      '@kitluy/device-boot-classification':
+        specifier: workspace:*
+        version: link:../../packages/device-boot-classification
       '@kitluy/device-identity':
         specifier: workspace:*
         version: link:../../packages/device-identity

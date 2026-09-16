@@ -207,9 +207,36 @@ export interface CreateStoreResult {
   readonly detail: string;
 }
 
+/**
+ * What the device needs in order to come back if its SD card were replaced now
+ * (BOOT-RECOVERY-CLASSIFICATION-001). Decided server-side by the same contract a
+ * device runs; the portal renders it and decides nothing.
+ */
+export interface DeviceRecovery {
+  readonly classification: string;
+  readonly reasonCode: string;
+  readonly nextAction:
+    | "NONE"
+    | "WAIT"
+    | "ENTER_PAIRING_CODE"
+    | "RELEASE_DEVICE_THEN_PAIR"
+    | "APPROVE_ENROLLMENT"
+    | "REPLACE_DEVICE"
+    | "INSERT_CORRECT_MEDIA"
+    | "CONTACT_ADMIN"
+    | "CONTACT_HET_SUPPORT";
+  readonly userMessageKey: string;
+  readonly message: string;
+  readonly adminDetail: string;
+  readonly basis: "freshly_flashed_card";
+  readonly nextActionGap?: "RELEASE_ROUTE_NOT_AVAILABLE" | "REPLACE_ROUTE_NOT_AVAILABLE";
+}
+
 export interface DeviceDetail {
   readonly device: FleetDeviceView;
   readonly provisioning: { readonly eligible: boolean; readonly reasons: readonly string[] };
+  /** Absent from an older API, null when the view is not configured there. */
+  readonly recovery?: DeviceRecovery | null;
   readonly freshnessPolicyRuled: boolean;
   readonly dataAsOf?: string;
 }

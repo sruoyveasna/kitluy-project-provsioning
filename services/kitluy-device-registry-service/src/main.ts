@@ -25,6 +25,8 @@ import { EnrollmentComposition, type DevelopmentOpenEnrollment } from "./enrollm
 import { createEnrollmentRouter, DEVICE_ENROLLMENT_PREFIX } from "./enrollment-routes.js";
 import { HubPairingComposition } from "./hub-pairing-composition.js";
 import { createHubPairingRouter, HUB_PAIRING_PREFIX } from "./hub-pairing-routes.js";
+import { createDeviceBootRouter, DEVICE_BOOT_PREFIX } from "./device-boot-routes.js";
+import { classifyDeviceBoot } from "./device-boot-classification.js";
 import { createTerminalPairingRouter, TERMINAL_PAIRING_PREFIX } from "./terminal-pairing-routes.js";
 import { TerminalPairingComposition } from "./terminal-pairing-composition.js";
 import { createOperationalCertificateRouter } from "./operational-certificate-routes.js";
@@ -228,6 +230,14 @@ const hubPairingRouter = createHubPairingRouter({
   logger: { info: (fields) => log.info("hub-pairing-route", fields) },
 });
 
+// Boot classification (group 0227). Pre-credential and read-only: it reaches the
+// database as `kitluy_device_boot_service`, which holds exactly one read. The
+// decision itself is `@kitluy/device-boot-classification`, never this file.
+const deviceBootRouter = createDeviceBootRouter({
+  classify: (request) => classifyDeviceBoot(revocation.pool, trustEnvironment, request),
+  logger: { info: (fields) => log.info("device-boot-route", fields) },
+});
+
 // Pi Terminal pairing (group 0213): the same two-door shape as Hub pairing,
 // with the assignment performed inside the consume door, then the same
 // separate trust advance so a paired terminal can reach `active`.
@@ -310,7 +320,10 @@ const server = createServer((req, res) => {
       // code and unlimited guessing volume. A malformed body rejected here would
       // never reach that limiter, so garbage JSON would be free.
       url.startsWith(HUB_PAIRING_PREFIX) ||
-      url.startsWith(TERMINAL_PAIRING_PREFIX);
+      url.startsWith(TERMINAL_PAIRING_PREFIX) ||
+      // Boot classification is pre-credential too, and its limiter must see
+      // every attempt, malformed ones included.
+      url.startsWith(DEVICE_BOOT_PREFIX);
     let parsed: unknown;
     if (!isBootstrap && raw.text.length > 0) {
       try {
@@ -349,6 +362,7 @@ const server = createServer((req, res) => {
         hubPairingRouter,
         terminalPairingRouter,
         operationalCertificateRouter,
+        deviceBootRouter,
       },
     );
     res.writeHead(status, { "content-type": "application/json", ...(headers ?? {}) });
@@ -377,7 +391,7 @@ server.listen(port, () => {
     // `/v1/hub-pairing` is wired above but was missing from this line, so the
     // startup log reported a smaller surface than the service actually answers —
     // and this log is the one place an operator checks what a deployment serves.
-    governedRoutes: `/v1/device-credentials/*, /v1/terminal-provisioning/*, /v1/device-enrollment/*, ${HUB_PAIRING_PREFIX}`,
+    governedRoutes: `/v1/device-credentials/*, /v1/terminal-provisioning/*, /v1/device-enrollment/*, ${HUB_PAIRING_PREFIX}, ${DEVICE_BOOT_PREFIX}/classification`,
     trustEnvironment,
     // Whether this deployment can complete an enrollment, not merely start one.
     // A key REFERENCE is a name, never key material — nothing secret is logged.

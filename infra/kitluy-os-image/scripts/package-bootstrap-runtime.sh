@@ -164,6 +164,11 @@ DEVICE_MODULES=(
   # `hub-claim-bytes` and `device-registration-bytes`.
   edge-discovery-record edge-mdns edge-transport edge-pairing edge-session
   bin/terminal-edge
+  # BOOT CLASSIFICATION (BOOT-RECOVERY-CLASSIFICATION-001). The contract is the
+  # package `@kitluy/device-boot-classification`, shipped as a byte-identical
+  # copy because the image carries no node_modules; the firstboot agent's drift
+  # test fails if the copy differs by one byte.
+  boot-classification-contract boot-classification bin/boot-classification
 )
 rm -rf "$LIB_DIR"
 mkdir -p "$LIB_DIR"

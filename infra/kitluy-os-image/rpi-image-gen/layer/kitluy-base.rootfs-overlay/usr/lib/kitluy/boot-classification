@@ -1,0 +1,11 @@
+#!/bin/sh
+# KitLuy boot classification.
+#
+# Answers one question for the screen: what happened to this device, and what
+# is the ONE next step. The cloud decides when it can be reached; offline, the
+# board decides with the same contract and never calls an outage "new hardware".
+#
+# Writes /var/lib/kitluy/boot-classification.json (world-readable: a
+# classification, a message key and two digests — no id, no secret).
+set -eu
+exec /usr/bin/node /usr/lib/kitluy/lib/firstboot-agent/bin/boot-classification.js "$@"

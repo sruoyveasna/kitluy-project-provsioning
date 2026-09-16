@@ -62,6 +62,24 @@
       "environmentFiles": ["/etc/kitluy/image.env"]
     },
     {
+      "id": "boot-classification",
+      "$comment": [
+        "BOOT-RECOVERY-CLASSIFICATION-001. Writes the one sentence the screen shows:",
+        "what happened to this device, and the one next step. It describes; it",
+        "pairs nothing, requests no certificate and changes no cloud state."
+      ],
+      "profiles": ["pi-terminal"],
+      "executable": "/usr/lib/kitluy/boot-classification",
+      "unit": "kitluy-boot-classification.service",
+      "enabled": true,
+      "source": {
+        "kind": "closure",
+        "package": "@kitluy-services/kitluy-device-firstboot-agent",
+        "entry": "bin/boot-classification"
+      },
+      "environmentFiles": ["/etc/kitluy/image.env"]
+    },
+    {
       "id": "health-reporter",
       "profiles": ["pi-terminal"],
       "executable": "/usr/lib/kitluy/health-reporter",

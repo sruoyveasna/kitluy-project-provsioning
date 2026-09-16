@@ -92,6 +92,10 @@ export const REGISTRY_ROLES = {
    *  identity from `activation`: the authority that mints an operational
    *  credential must never be the authority that consumes it. */
   certificateIssuer: "kitluy_device_certificate_issuer",
+  /** Boot classification (group 0227): EXACTLY the boot evidence read, which
+   *  writes nothing. `/v1/device-boot` is pre-credential, so it must never run
+   *  as `service_role`. */
+  deviceBoot: "kitluy_device_boot_service",
   /** A human acting under their own `auth.uid()` (group 0150/0152). */
   human: "authenticated",
 } as const;
@@ -167,6 +171,7 @@ export async function withServiceRole<T>(
     | "kitluy_terminal_pairing_service"
     | "kitluy_activation_service"
     | "kitluy_device_certificate_issuer"
+    | "kitluy_device_boot_service"
   >,
   fn: (client: pg.PoolClient) => Promise<T>,
 ): Promise<T> {

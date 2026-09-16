@@ -244,6 +244,9 @@ export function createManagementRuntime(env: Env = process.env, max = 8): Manage
       // Terminal pairing (group 0213): Partner routes enter
       // `kitluy_terminal_issuance_service` inside a transaction.
       terminals: { pool },
+      // The device recovery view (group 0227) reads as
+      // `kitluy_device_boot_service` inside a transaction.
+      recovery: { pool },
       // Digital Store creation (group 0215) enters `service_role` inside a
       // transaction, as device approval does.
       stores: { pool },

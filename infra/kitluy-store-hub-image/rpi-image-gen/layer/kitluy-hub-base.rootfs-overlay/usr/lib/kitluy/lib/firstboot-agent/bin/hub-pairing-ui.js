@@ -53,6 +53,8 @@
 import { createInterface } from "node:readline/promises";
 import { awaitNetwork } from "./network-ui.js";
 import { readBootstrapState } from "../bootstrap-state.js";
+import { readBootClassificationState, } from "../boot-classification.js";
+import { DEFAULT_USER_MESSAGES } from "../boot-classification-contract.js";
 import { readImageEnv } from "../image-env.js";
 import { pairingBelongsTo, readPairingState, writePairingState, } from "../pairing-state.js";
 import { readRegistrationState, registrationHeadline, registrationPhaseLabel, } from "../registration-state.js";
@@ -72,8 +74,18 @@ export function render(bootstrap, pairing, message,
  * existing caller and test keeps working — an image built before registration
  * existed renders exactly as it did.
  */
-registration) {
+registration, 
+/**
+ * The boot classification (BOOT-RECOVERY-CLASSIFICATION-001), when the image
+ * runs it. Optional and last, for the same reason as `registration`. Only the
+ * SHOP sentence is rendered: the reason code is for support and the journal,
+ * never for the screen (owner task §8).
+ */
+boot) {
     const device = bootstrap?.deviceLabel ?? "Unknown";
+    const bootLine = boot === undefined || boot === null
+        ? undefined
+        : DEFAULT_USER_MESSAGES[boot.current.userMessageKey];
     /**
      * The ticket-based enrolment row, shown ONLY to a device that took that path.
      *
@@ -128,6 +140,8 @@ registration) {
         "",
         "  KitLuy Store Hub",
         "",
+        // First, so the one thing a shop needs to know is the first thing it reads.
+        ...(bootLine === undefined ? [] : [`  ${bootLine}`, ""]),
         `  Device ............ ${device}`,
         ...(registrationLine === undefined ? [] : [`  KitLuy ............ ${registrationLine}`]),
         ...(fleet === null ? [] : [`  Fleet ............. ${fleet}`]),
@@ -586,7 +600,7 @@ export async function main() {
             // a consumed claim is the mistake enrolment already learned once.
             if (pairingBelongsTo(pairing, deviceRecordId) && pairing?.phase === "PAIRED") {
                 process.stdout.write(CLEAR_SCREEN);
-                process.stdout.write(render(bootstrap, pairing, undefined, registration));
+                process.stdout.write(render(bootstrap, pairing, undefined, registration, readBootClassificationState()));
                 // DO NOT RETURN. The unit is `Restart=always`, so exiting on success made
                 // systemd restart the console every few seconds — the restart counter
                 // reached 50 within minutes of the first real pairing, and the screen
@@ -596,7 +610,7 @@ export async function main() {
                 continue;
             }
             process.stdout.write(CLEAR_SCREEN);
-            process.stdout.write(render(bootstrap, pairing, undefined, registration));
+            process.stdout.write(render(bootstrap, pairing, undefined, registration, readBootClassificationState()));
             if (deviceRecordId === undefined) {
                 // Not admitted yet. Pairing cannot start, and inviting a code would be
                 // asking for something that cannot possibly work.
@@ -631,7 +645,7 @@ export async function main() {
             if (outcome.state !== null)
                 writePairingState(outcome.state);
             process.stdout.write(CLEAR_SCREEN);
-            process.stdout.write(render(readBootstrapState(), readPairingState(), outcome.message, readRegistrationState()));
+            process.stdout.write(render(readBootstrapState(), readPairingState(), outcome.message, readRegistrationState(), readBootClassificationState()));
             if (outcome.done)
                 return;
             await new Promise((r) => setTimeout(r, (outcome.holdSeconds ?? 3) * 1000));

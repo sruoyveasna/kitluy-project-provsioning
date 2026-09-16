@@ -44,6 +44,15 @@
       "environmentFiles": ["/etc/kitluy/image.env"]
     },
     {
+      "id": "boot-classification",
+      "profiles": ["store-hub"],
+      "executable": "/usr/lib/kitluy/boot-classification",
+      "unit": "kitluy-boot-classification.service",
+      "enabled": true,
+      "source": { "kind": "closure", "package": "@kitluy-services/kitluy-device-firstboot-agent" },
+      "environmentFiles": ["/etc/kitluy/image.env"]
+    },
+    {
       "id": "hub-pairing-ui",
       "profiles": ["store-hub"],
       "executable": "/usr/lib/kitluy/hub-pairing-ui",

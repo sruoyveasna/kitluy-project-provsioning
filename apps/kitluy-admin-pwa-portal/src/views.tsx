@@ -35,6 +35,7 @@ import {
 import type {
   CreateStoreResult,
   DeviceDetail,
+  DeviceRecovery,
   FleetDeviceView,
   FleetPage,
   PendingPage,
@@ -646,6 +647,80 @@ function Field(props: { label: string; children: ReactNode }): JSX.Element {
   );
 }
 
+/** The one instruction per next action, in the operator's language. */
+const RECOVERY_ACTION: Readonly<Record<DeviceRecovery["nextAction"], MessageKey>> = {
+  NONE: "recoveryActionNone",
+  WAIT: "recoveryActionWait",
+  ENTER_PAIRING_CODE: "recoveryActionEnterPairingCode",
+  RELEASE_DEVICE_THEN_PAIR: "recoveryActionReleaseThenPair",
+  APPROVE_ENROLLMENT: "recoveryActionApproveEnrollment",
+  REPLACE_DEVICE: "recoveryActionReplaceDevice",
+  INSERT_CORRECT_MEDIA: "recoveryActionInsertCorrectMedia",
+  CONTACT_ADMIN: "recoveryActionContactAdmin",
+  CONTACT_HET_SUPPORT: "recoveryActionContactHetSupport",
+};
+
+/**
+ * What the device needs in order to come back (BOOT-RECOVERY-CLASSIFICATION-001).
+ *
+ * The API decides; this renders. The raw classification and next action are
+ * shown beside the words for the same reason the lifecycle is: an operator
+ * quotes them back. A next action the API cannot perform yet says so, rather
+ * than appearing as a button that does nothing.
+ */
+function RecoveryCard(props: {
+  locale: KitluyLocale;
+  recovery: DeviceRecovery | null | undefined;
+}): JSX.Element {
+  const { locale, recovery } = props;
+  return (
+    <div
+      className="kl-card"
+      style={{ marginTop: 16 }}
+      data-recovery={recovery?.nextAction ?? "unavailable"}
+    >
+      <div className="kl-card-body">
+        <h2 style={{ margin: "0 0 10px", fontSize: 16 }}>{t(locale, "recoveryTitle")}</h2>
+        {recovery === null || recovery === undefined ? (
+          <p className="kl-muted" style={{ margin: 0 }}>
+            <em>{t(locale, "recoveryUnavailable")}</em>
+          </p>
+        ) : (
+          <>
+            <p className="kl-muted" style={{ margin: "0 0 10px" }}>
+              {t(locale, "recoveryBasis")}
+            </p>
+            <Field label={t(locale, "recoveryNextStep")}>
+              {t(locale, RECOVERY_ACTION[recovery.nextAction])} <code>{recovery.nextAction}</code>
+            </Field>
+            <p style={{ margin: "0 0 10px" }}>
+              <code>{recovery.classification}</code> · <code>{recovery.reasonCode}</code>
+            </p>
+            {recovery.nextActionGap !== undefined ? (
+              <p
+                role="note"
+                data-recovery-gap={recovery.nextActionGap}
+                style={{ margin: "0 0 10px", fontWeight: 600 }}
+              >
+                {t(
+                  locale,
+                  recovery.nextActionGap === "RELEASE_ROUTE_NOT_AVAILABLE"
+                    ? "recoveryGapRelease"
+                    : "recoveryGapReplace",
+                )}
+              </p>
+            ) : null}
+            {/* Admin-only technical detail: this portal is internal to HET. */}
+            <p className="kl-muted kl-mono" style={{ margin: 0, fontSize: 12 }}>
+              {recovery.adminDetail}
+            </p>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function DeviceDetailView(props: {
   locale: KitluyLocale;
   detail: DeviceDetail;
@@ -716,6 +791,8 @@ export function DeviceDetailView(props: {
           </p>
         </div>
       </div>
+
+      <RecoveryCard locale={locale} recovery={props.detail.recovery} />
     </section>
   );
 }
