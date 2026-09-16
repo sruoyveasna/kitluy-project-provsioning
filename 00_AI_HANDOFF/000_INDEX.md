@@ -4,6 +4,31 @@ Read the newest relevant handoff before starting work. Naming:
 `YYYY-MM-DD__<AREA>__<TASK-ID>__<SLUG>__AI-HANDOFF.md` under the matching
 subfolder (repository/ shared/ apps/ services/ data/ infrastructure/ reviews/).
 
+## DEVICE-RECOVERY-E2E-CONTINUATION-001 — current control plan for Device Recovery (2026-09-16)
+
+Record: [`edge-platform/46_DEVICE_RECOVERY_E2E_CONTINUATION_PLAN.md`](edge-platform/46_DEVICE_RECOVERY_E2E_CONTINUATION_PLAN.md)
+· **CONTINUATION CONTROL PLAN ONLY — NO IMPLEMENTATION CLAIMED** · from `86a44b0`
+
+**Read this first for Device Recovery work.** It fixes the execution order: Phase A (blockers) → Phase B (image rebuilds) → Phase C (fresh-SD acceptance).
+
+**Latest hardware session (2026-09-16, re-checked live read-only):**
+
+- **Store Hub:** re-flash recovery passed with no B/C workaround. Assignment generation 4, certificate 3, serving at 172.16.13.205:7443.
+- **Pi Terminal:** credential recovery passed (generation 3, certificate 3), and the Hub recognises it. It is **not** `SERVING`: the Hub answers `ASSIGNMENT_GENERATION_STALE`.
+- Hub-database projection steps (BLK-006 stand-ins, defects D and E2) were still done by hand, so no end-to-end claim.
+
+**Immediate task: Defect G.** The Hub holds the Terminal's generation-2 pairing receipt, and the Terminal pairs only on `PAIRING_REQUIRED`. The required semantics:
+
+- an older receipt → `PAIRING_REQUIRED`;
+- an equal one → normal evaluation;
+- a newer one → refuse.
+
+Receipts stay append-only.
+
+**Also open:** the Hub clock loop. A systemd ordering cycle on the Hub drops `systemd-timesyncd`, `systemd-tmpfiles-setup` and `local-fs.target` jobs at every boot; the cause must be reproduced before any fix.
+
+**Images:** the next builds must come from `infra/edge/raspberry-pi/{store-hub-image,pi-terminal-image}`.
+
 ## INFRA-EDGE-STRUCTURE-001 — the two Raspberry Pi image sources move under `infra/edge/raspberry-pi/` (2026-09-16)
 
 Record: [`edge-platform/45_RASPBERRY_PI_IMAGE_SOURCES_UNDER_EDGE.md`](edge-platform/45_RASPBERRY_PI_IMAGE_SOURCES_UNDER_EDGE.md)
