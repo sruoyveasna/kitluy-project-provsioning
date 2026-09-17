@@ -399,9 +399,11 @@ const RUNG_LABEL: Readonly<Record<RungKey, MessageKey>> = {
   hubActive: "rungHubActive",
   issued: "rungIssued",
   redeemed: "rungRedeemed",
-  hubPaired: "rungHubPaired",
   activated: "rungActivated",
+  hubConnected: "rungHubConnected",
   appInstalled: "rungAppInstalled",
+  appRunning: "rungAppRunning",
+  configurationLoaded: "rungConfigurationLoaded",
   pinSet: "rungPinSet",
   active: "rungActive",
 };
@@ -428,6 +430,9 @@ export function ProvisioningLadder(props: {
     // nothing ever will in this build, and showing them alike made a working
     // terminal look stalled behind a step that could never complete.
     unbuilt: "rungUnbuilt",
+    // Reported once, too long ago to still be true. Not a failure and not
+    // "nothing reported yet" — a third thing, said as itself.
+    stale: "rungStale",
   };
   const rungClass = (state: LadderRung["state"]) =>
     state === "done"
@@ -464,6 +469,14 @@ export function ProvisioningLadder(props: {
                 <span className="kl-mono">{rung.detail}</span>
               </>
             )}
+            {rung.source === "device_reported" ? (
+              <>
+                {" "}
+                <small className="kl-muted" data-rung-source="device_reported">
+                  · {t.deviceReported}
+                </small>
+              </>
+            ) : null}
             {rung.reason === undefined ? null : (
               <>
                 <br />

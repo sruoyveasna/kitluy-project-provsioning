@@ -813,3 +813,4 @@ export * from "./hub-claim-payload.js";
 export * from "./terminal-configuration-delivery.js";
 export * from "./credential-package.js";
 export * from "./device-registration-request.js";
+export * from "./device-runtime-report.js";

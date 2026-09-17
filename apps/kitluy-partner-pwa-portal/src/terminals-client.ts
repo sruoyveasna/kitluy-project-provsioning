@@ -28,6 +28,39 @@ export interface BoundDevice {
   readonly assignmentState: string | null;
 }
 
+/**
+ * What the bound Terminal last reported about its own runtime (Management API,
+ * cloud group 0229). DEVICE-REPORTED, aged by the cloud's receipt clock. Absent
+ * from an older API, null when never reported — both mean "not reported".
+ */
+export interface TerminalRuntime {
+  readonly source: "device_reported";
+  readonly receivedAt: string;
+  readonly ageSeconds: number;
+  readonly hubLink: null | {
+    readonly phase: string;
+    readonly hubDeviceId: string | null;
+    readonly checkedAt: string;
+  };
+  readonly application: null | {
+    readonly product: string;
+    readonly installedReleaseId: string | null;
+    readonly installedVersion: string | null;
+    readonly journalPhase: string;
+    readonly lastOutcome: string | null;
+    readonly runningReleaseId: string | null;
+    readonly unitActive: boolean;
+  };
+  readonly pos: null | {
+    readonly state: string;
+    readonly refusalCode: string | null;
+    readonly applicationVersion: string;
+    readonly configurationVersion: number | null;
+    readonly configurationFreshness: string | null;
+    readonly staffSignedIn: boolean;
+  };
+}
+
 export interface PhysicalTerminal {
   readonly physicalTerminalId: string;
   readonly digitalStoreId: string;
@@ -37,6 +70,7 @@ export interface PhysicalTerminal {
   readonly terminalProfileKeys: readonly string[];
   readonly boundDevice: BoundDevice | null;
   readonly lastSession: TerminalSessionSummary | null;
+  readonly runtime?: TerminalRuntime | null;
   readonly createdAt: string;
 }
 

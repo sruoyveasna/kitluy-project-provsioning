@@ -59,3 +59,12 @@ export {
   type BridgeTerminalFacts,
   type PinnedHubEndpoint,
 } from "./edge-bridge.js";
+
+// The runtime report (T1-STORE-OPERATIONS-001). Exported so the registry's
+// integration suite signs reports with the REAL device code.
+export {
+  collectRuntimeReport,
+  nextReportSequence,
+  signRuntimeReport,
+  type SignedRuntimeReport,
+} from "./runtime-report.js";

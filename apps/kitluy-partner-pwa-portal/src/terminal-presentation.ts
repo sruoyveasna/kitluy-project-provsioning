@@ -56,40 +56,67 @@ export const LADDER_RUNGS = [
   "hubActive",
   "issued",
   "redeemed",
-  "hubPaired",
   "activated",
+  "hubConnected",
   "appInstalled",
+  "appRunning",
+  "configurationLoaded",
   "pinSet",
   "active",
 ] as const;
 export type RungKey = (typeof LADDER_RUNGS)[number];
-export type RungState = "done" | "current" | "not_reported" | "blocked" | "unbuilt";
+export type RungState = "done" | "current" | "not_reported" | "blocked" | "unbuilt" | "stale";
 
 /**
  * Rungs nothing in this build can ever report.
  *
- * `not_reported` promises "nothing has been reported about it YET", and the
- * ladder says so in its own footnote. For these that is untrue: there is no
- * reporter on the device, no field in the API, and nothing to compute from, so
- * they can never advance no matter what the fleet does.
+ * `not_reported` promises "nothing has been reported about it YET". For these
+ * that is untrue: there is no reporter, no field and nothing to compute from.
  *
- * It stayed invisible until a Terminal first reached `activated` on 2026-09-09,
- * at which point the ladder showed rung 5 complete above a rung 4 that was
- * permanently pending — an ordering that cannot happen and made a working
- * device look broken.
+ * `hubPaired` left this set on 2026-09-17 (T1-STORE-OPERATIONS-001): the
+ * Terminal now reports its own Store Hub link, and the rung became
+ * `hubConnected`, done from that report and nothing else.
  *
- * `hubPaired` needs `terminal-client`, the governed application release, which
- * is not in the Terminal image. When it ships, delete the entry: the rung then
- * has a real reporter and goes back to meaning what it says.
+ * `pinSet` is here because the Terminal PIN is SPECIFIED and NOT BUILT
+ * (KLD-2026-09-03-TERMINAL-PROVISIONING-001 §10-§14): no verifier, no setup
+ * screen, no reporter. When it is built, delete the entry.
  */
-export const UNREPORTABLE_RUNGS: ReadonlySet<string> = new Set(["hubPaired"]);
+export const UNREPORTABLE_RUNGS: ReadonlySet<string> = new Set(["pinSet"]);
+
+/**
+ * Rungs that come from the Terminal's own runtime report. Each is done ONLY
+ * from a fresh report — never from an earlier rung, and never from a report
+ * the cloud received too long ago to still be true.
+ */
+export const RUNTIME_RUNGS: ReadonlySet<RungKey> = new Set([
+  "hubConnected",
+  "appInstalled",
+  "appRunning",
+  "configurationLoaded",
+]);
+
+/**
+ * How old a runtime report may be and still count. The Terminal reports every
+ * 60 seconds (the health reporter's beat); three missed beats is not a blip.
+ * Aged by the CLOUD's receipt clock (`ageSeconds`), never the device's claim.
+ */
+export const RUNTIME_FRESH_SECONDS = 180;
+
+/** POS states in which a configuration has been obtained and verified. */
+const CONFIGURATION_LOADED_STATES: ReadonlySet<string> = new Set([
+  "staff_authentication_required",
+  "ready",
+  "offline_ready",
+]);
 
 export interface LadderRung {
   readonly key: RungKey;
   readonly state: RungState;
   readonly reason?: PairBlock;
-  /** A device reference, when the rung was reported by one. */
+  /** A device reference or a reported version, when the rung was reported by one. */
   readonly detail?: string;
+  /** Set when the rung's evidence is the Terminal's own report, not a cloud door. */
+  readonly source?: "device_reported";
 }
 
 export interface SessionFacts {
@@ -111,6 +138,17 @@ export function sessionFacts(
  * The ladder, from facts only. A rung is `done` when something reported it;
  * `not_reported` otherwise. Nothing here infers a later rung from an earlier
  * one, and a done rung is never demoted when the Hub later regresses.
+ *
+ * The runtime rungs read the Terminal's report field by field:
+ *
+ *   hubConnected         terminal-edge phase SERVING
+ *   appInstalled         the kitluy-terminal release journal COMMITTED
+ *   appRunning           the unit active AND the launcher's witness names the
+ *                        INSTALLED release (installed is not running)
+ *   configurationLoaded  the POS in a state that has verified a configuration
+ *   pinSet               unbuilt
+ *   active               NEVER done in this build: the Terminal must not become
+ *                        fully operational before its PIN is set (LOCKED, §10)
  */
 export function deriveLadder(
   input: {
@@ -126,18 +164,36 @@ export function deriveLadder(
   const sessionLive =
     session !== null && session.state === "open" && Date.parse(session.expiresAt) > now.getTime();
 
+  // A report only counts for the device bound to this seat, and only while fresh.
+  const runtime = bound === null ? null : (terminal.runtime ?? null);
+  const fresh = runtime !== null && runtime.ageSeconds <= RUNTIME_FRESH_SECONDS;
+  const stale = runtime !== null && !fresh;
+  const app = fresh ? runtime.application : null;
+  const pos = fresh ? runtime.pos : null;
+
   const done: Record<RungKey, boolean> = {
     hubActive: hub.kind === "active",
     // A bound device means a code was consumed, which means one was issued:
     // a fact chain, not an inference about a later rung.
     issued: sessionLive || (session?.paired ?? false) || bound !== null,
     redeemed: (session?.paired ?? false) || bound !== null,
-    // Nothing reports this. See UNREPORTABLE_RUNGS — it is rendered as
-    // "not available in this build" rather than as a step still being waited on.
-    hubPaired: false,
     activated: bound !== null && bound.lifecycle === "active",
-    appInstalled: false,
+    hubConnected: fresh && runtime.hubLink?.phase === "SERVING",
+    appInstalled:
+      app !== null && app.journalPhase === "COMMITTED" && app.installedReleaseId !== null,
+    appRunning:
+      app !== null &&
+      app.unitActive &&
+      app.installedReleaseId !== null &&
+      app.runningReleaseId === app.installedReleaseId,
+    configurationLoaded:
+      pos !== null &&
+      pos.configurationVersion !== null &&
+      CONFIGURATION_LOADED_STATES.has(pos.state),
+    // Specified, not built. See UNREPORTABLE_RUNGS.
     pinSet: false,
+    // KLD-2026-09-03-TERMINAL-PROVISIONING-001 §10 (LOCKED): "The Terminal must
+    // not become fully operational until this required PIN setup succeeds."
     active: false,
   };
   const detail: Partial<Record<RungKey, string>> = {};
@@ -145,21 +201,35 @@ export function deriveLadder(
     detail.redeemed = bound.deviceReference;
     if (done.activated) detail.activated = bound.deviceReference;
   }
+  if (done.appInstalled && app?.installedVersion) detail.appInstalled = app.installedVersion;
+  if (done.appRunning && app?.installedVersion) detail.appRunning = app.installedVersion;
+  if (done.configurationLoaded && pos !== null) {
+    detail.configurationLoaded =
+      pos.configurationFreshness === "cached_offline"
+        ? `v${String(pos.configurationVersion)} (cached)`
+        : `v${String(pos.configurationVersion)}`;
+  }
 
   let nextMarked = false;
   return LADDER_RUNGS.map((key): LadderRung => {
     // Checked BEFORE `current`, so an unbuildable rung never becomes the step
-    // the operator is told to wait for — which is exactly how this misled.
+    // the operator is told to wait for.
     if (!done[key] && UNREPORTABLE_RUNGS.has(key)) {
-      // Nothing after an unbuildable rung is "current" either. A step sitting
-      // behind one that can never complete is not the thing being waited for,
-      // and saying so would replace one untruth with another.
       nextMarked = true;
       return { key, state: "unbuilt" };
     }
     if (done[key]) {
       const d = detail[key];
-      return d === undefined ? { key, state: "done" } : { key, state: "done", detail: d };
+      const source = RUNTIME_RUNGS.has(key) ? { source: "device_reported" as const } : {};
+      return d === undefined
+        ? { key, state: "done", ...source }
+        : { key, state: "done", detail: d, ...source };
+    }
+    if (stale && RUNTIME_RUNGS.has(key)) {
+      // Something WAS reported, too long ago to still be true: neither done nor
+      // "nothing reported yet". The first such rung is the one to look at.
+      nextMarked = true;
+      return { key, state: "stale", source: "device_reported" };
     }
     if (key === "hubActive") {
       nextMarked = true;

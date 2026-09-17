@@ -51,7 +51,43 @@ export interface PhysicalTerminalDto {
     readonly failedAttemptCount: number;
     readonly locked: boolean;
   };
+  /**
+   * What the bound Terminal last reported about its own runtime (cloud group
+   * 0229): its Store Hub link, its POS release and the POS runtime state.
+   * DEVICE-REPORTED — signed by the Terminal's identity key, not observed by
+   * the Store Hub — and aged by the CLOUD's receipt clock. Null when the seat
+   * has no bound device or the device has never reported.
+   */
+  readonly runtime: TerminalRuntimeDto | null;
   readonly createdAt: string;
+}
+
+export interface TerminalRuntimeDto {
+  readonly source: "device_reported";
+  readonly receivedAt: string;
+  readonly ageSeconds: number;
+  readonly hubLink: null | {
+    readonly phase: string;
+    readonly hubDeviceId: string | null;
+    readonly checkedAt: string;
+  };
+  readonly application: null | {
+    readonly product: string;
+    readonly installedReleaseId: string | null;
+    readonly installedVersion: string | null;
+    readonly journalPhase: string;
+    readonly lastOutcome: string | null;
+    readonly runningReleaseId: string | null;
+    readonly unitActive: boolean;
+  };
+  readonly pos: null | {
+    readonly state: string;
+    readonly refusalCode: string | null;
+    readonly applicationVersion: string;
+    readonly configurationVersion: number | null;
+    readonly configurationFreshness: string | null;
+    readonly staffSignedIn: boolean;
+  };
 }
 
 export interface TerminalRefusal {
@@ -170,6 +206,9 @@ interface TerminalRow {
   session_paired_at: Date | string | null;
   session_failed: string | number | null;
   session_locked_at: Date | string | null;
+  runtime_report: Record<string, unknown> | null;
+  runtime_received_at: Date | string | null;
+  runtime_age_seconds: string | number | null;
 }
 
 const TERMINAL_SELECT = `
@@ -189,7 +228,10 @@ const TERMINAL_SELECT = `
          s.expires_at                                    as session_expires_at,
          s.paired_at                                     as session_paired_at,
          s.failed_attempt_count                          as session_failed,
-         s.locked_at                                     as session_locked_at
+         s.locked_at                                     as session_locked_at,
+         rs.report                                       as runtime_report,
+         rs.received_at                                  as runtime_received_at,
+         rs.report_age_seconds                           as runtime_age_seconds
     from kitluy_devices.physical_terminals pt
     left join kitluy_core.store_locations sl on sl.id = pt.store_location_id
     left join kitluy_devices.devices d on d.id = pt.bound_device_id
@@ -197,7 +239,64 @@ const TERMINAL_SELECT = `
     left join lateral (
       select * from kitluy_devices.terminal_pairing_sessions s
        where s.physical_terminal_id = pt.id
-       order by s.created_at desc limit 1) s on true`;
+       order by s.created_at desc limit 1) s on true
+    left join kitluy_devices.device_runtime_status_read rs on rs.device_id = d.id`;
+
+function text(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+/**
+ * The runtime facts a Partner may see, copied field by field from the stored
+ * v1 report (which group 0229 and the registry already validated). Nothing is
+ * derived here: no rung, no "operational", no merged state.
+ */
+function toRuntimeDto(row: TerminalRow): TerminalRuntimeDto | null {
+  const report = row.runtime_report;
+  if (report === null || row.runtime_received_at === null || row.runtime_age_seconds === null) {
+    return null;
+  }
+  const hub = report["hubLink"] as Record<string, unknown> | null | undefined;
+  const app = report["application"] as Record<string, unknown> | null | undefined;
+  const pos = report["pos"] as Record<string, unknown> | null | undefined;
+  return {
+    source: "device_reported",
+    receivedAt: iso(row.runtime_received_at),
+    ageSeconds: Number(row.runtime_age_seconds),
+    hubLink:
+      hub === null || hub === undefined
+        ? null
+        : {
+            phase: text(hub["phase"]) ?? "unknown",
+            hubDeviceId: text(hub["hubDeviceId"]),
+            checkedAt: text(hub["checkedAt"]) ?? "",
+          },
+    application:
+      app === null || app === undefined
+        ? null
+        : {
+            product: text(app["product"]) ?? "unknown",
+            installedReleaseId: text(app["installedReleaseId"]),
+            installedVersion: text(app["installedVersion"]),
+            journalPhase: text(app["journalPhase"]) ?? "unknown",
+            lastOutcome: text(app["lastOutcome"]),
+            runningReleaseId: text(app["runningReleaseId"]),
+            unitActive: app["unitActive"] === true,
+          },
+    pos:
+      pos === null || pos === undefined
+        ? null
+        : {
+            state: text(pos["state"]) ?? "unknown",
+            refusalCode: text(pos["refusalCode"]),
+            applicationVersion: text(pos["applicationVersion"]) ?? "unknown",
+            configurationVersion:
+              typeof pos["configurationVersion"] === "number" ? pos["configurationVersion"] : null,
+            configurationFreshness: text(pos["configurationFreshness"]),
+            staffSignedIn: pos["staffSignedIn"] === true,
+          },
+  };
+}
 
 function toTerminalDto(row: TerminalRow): PhysicalTerminalDto {
   return {
@@ -227,6 +326,7 @@ function toTerminalDto(row: TerminalRow): PhysicalTerminalDto {
             failedAttemptCount: Number(row.session_failed ?? 0),
             locked: row.session_locked_at !== null,
           },
+    runtime: row.bound_device_id === null ? null : toRuntimeDto(row),
     createdAt: iso(row.created_at),
   };
 }

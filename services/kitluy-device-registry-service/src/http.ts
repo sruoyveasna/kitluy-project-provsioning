@@ -21,6 +21,7 @@ import {
 import { DEVICE_ENROLLMENT_PREFIX, type EnrollmentRouter } from "./enrollment-routes.js";
 import { HUB_PAIRING_PREFIX, type HubPairingRouter } from "./hub-pairing-routes.js";
 import { DEVICE_BOOT_PREFIX, type DeviceBootRouter } from "./device-boot-routes.js";
+import { DEVICE_RUNTIME_PREFIX, type DeviceRuntimeRouter } from "./device-runtime-routes.js";
 import { TERMINAL_PAIRING_PREFIX, type TerminalPairingRouter } from "./terminal-pairing-routes.js";
 import {
   OPERATIONAL_CERTIFICATE_PREFIX,
@@ -43,6 +44,7 @@ export interface KernelDeps {
   readonly terminalPairingRouter?: TerminalPairingRouter;
   readonly operationalCertificateRouter?: OperationalCertificateRouter;
   readonly deviceBootRouter?: DeviceBootRouter;
+  readonly deviceRuntimeRouter?: DeviceRuntimeRouter;
 }
 
 /**
@@ -216,6 +218,29 @@ export async function handleRequest(
       };
     }
     const response = await deps.deviceBootRouter.handle({
+      method: request.method,
+      path,
+      headers: request.headers,
+      sourceIp: request.sourceIp ?? "",
+      rawBody: request.rawBody ?? "",
+    });
+    return { status: response.status, body: response.body, headers: response.headers };
+  }
+
+  // Device runtime status (T1-STORE-OPERATIONS-001, group 0229). Same placement
+  // and the same fail-closed 503: a Terminal whose report cannot be recorded is
+  // told so, never told its device does not exist.
+  if (path.startsWith(DEVICE_RUNTIME_PREFIX)) {
+    if (deps.deviceRuntimeRouter === undefined) {
+      return {
+        status: 503,
+        body: errorEnvelope(
+          "DEPENDENCY_UNAVAILABLE",
+          "device-runtime routes are not configured on this instance",
+        ),
+      };
+    }
+    const response = await deps.deviceRuntimeRouter.handle({
       method: request.method,
       path,
       headers: request.headers,

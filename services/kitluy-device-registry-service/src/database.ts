@@ -96,6 +96,10 @@ export const REGISTRY_ROLES = {
    *  writes nothing. `/v1/device-boot` is pre-credential, so it must never run
    *  as `service_role`. */
   deviceBoot: "kitluy_device_boot_service",
+  /** Device runtime status (group 0229): EXACTLY record_device_runtime_report_v1.
+   *  `/v1/device-runtime` is authenticated by a device identity signature, not a
+   *  session, so it must never run as `service_role`. */
+  deviceRuntime: "kitluy_device_runtime_service",
   /** A human acting under their own `auth.uid()` (group 0150/0152). */
   human: "authenticated",
 } as const;
@@ -172,6 +176,7 @@ export async function withServiceRole<T>(
     | "kitluy_activation_service"
     | "kitluy_device_certificate_issuer"
     | "kitluy_device_boot_service"
+    | "kitluy_device_runtime_service"
   >,
   fn: (client: pg.PoolClient) => Promise<T>,
 ): Promise<T> {

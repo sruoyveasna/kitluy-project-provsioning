@@ -26,6 +26,8 @@ import { createEnrollmentRouter, DEVICE_ENROLLMENT_PREFIX } from "./enrollment-r
 import { HubPairingComposition } from "./hub-pairing-composition.js";
 import { createHubPairingRouter, HUB_PAIRING_PREFIX } from "./hub-pairing-routes.js";
 import { createDeviceBootRouter, DEVICE_BOOT_PREFIX } from "./device-boot-routes.js";
+import { createDeviceRuntimeRouter, DEVICE_RUNTIME_PREFIX } from "./device-runtime-routes.js";
+import { recordDeviceRuntimeReport } from "./device-runtime-status.js";
 import { classifyDeviceBoot } from "./device-boot-classification.js";
 import { createTerminalPairingRouter, TERMINAL_PAIRING_PREFIX } from "./terminal-pairing-routes.js";
 import { TerminalPairingComposition } from "./terminal-pairing-composition.js";
@@ -238,6 +240,14 @@ const deviceBootRouter = createDeviceBootRouter({
   logger: { info: (fields) => log.info("device-boot-route", fields) },
 });
 
+// Device runtime status (group 0229): a Terminal's own signed report of its Hub
+// link, POS release and POS runtime. The signature is verified in the route; the
+// door binds the key to the current sealed enrollment.
+const deviceRuntimeRouter = createDeviceRuntimeRouter({
+  record: (input) => recordDeviceRuntimeReport(revocation.pool, input),
+  logger: { info: (fields) => log.info("device-runtime-route", fields) },
+});
+
 // Pi Terminal pairing (group 0213): the same two-door shape as Hub pairing,
 // with the assignment performed inside the consume door, then the same
 // separate trust advance so a paired terminal can reach `active`.
@@ -323,7 +333,9 @@ const server = createServer((req, res) => {
       url.startsWith(TERMINAL_PAIRING_PREFIX) ||
       // Boot classification is pre-credential too, and its limiter must see
       // every attempt, malformed ones included.
-      url.startsWith(DEVICE_BOOT_PREFIX);
+      url.startsWith(DEVICE_BOOT_PREFIX) ||
+      // The runtime report's limiter must see every attempt too.
+      url.startsWith(DEVICE_RUNTIME_PREFIX);
     let parsed: unknown;
     if (!isBootstrap && raw.text.length > 0) {
       try {
@@ -363,6 +375,7 @@ const server = createServer((req, res) => {
         terminalPairingRouter,
         operationalCertificateRouter,
         deviceBootRouter,
+        deviceRuntimeRouter,
       },
     );
     res.writeHead(status, { "content-type": "application/json", ...(headers ?? {}) });
@@ -391,7 +404,7 @@ server.listen(port, () => {
     // `/v1/hub-pairing` is wired above but was missing from this line, so the
     // startup log reported a smaller surface than the service actually answers —
     // and this log is the one place an operator checks what a deployment serves.
-    governedRoutes: `/v1/device-credentials/*, /v1/terminal-provisioning/*, /v1/device-enrollment/*, ${HUB_PAIRING_PREFIX}, ${DEVICE_BOOT_PREFIX}/classification`,
+    governedRoutes: `/v1/device-credentials/*, /v1/terminal-provisioning/*, /v1/device-enrollment/*, ${HUB_PAIRING_PREFIX}, ${DEVICE_BOOT_PREFIX}/classification, ${DEVICE_RUNTIME_PREFIX}/report`,
     trustEnvironment,
     // Whether this deployment can complete an enrollment, not merely start one.
     // A key REFERENCE is a name, never key material — nothing secret is logged.

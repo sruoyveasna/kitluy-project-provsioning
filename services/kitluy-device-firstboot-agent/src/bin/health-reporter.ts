@@ -8,6 +8,16 @@
  * becomes the caller of the canonical fleet health contract
  * (`device_fleet.health_projection_reported`), not a new one.
  *
+ * ===========================================================================
+ * AND ON A PI TERMINAL, ITS SIGNED RUNTIME REPORT (T1-STORE-OPERATIONS-001)
+ * ===========================================================================
+ * The canonical Hub-observed contract above still has no Hub->cloud transport
+ * (BLK-006). Until it does, a registered Pi Terminal also sends its own signed,
+ * DEVICE-ATTESTED runtime report — its Store Hub link, its POS release and the
+ * POS runtime — to the registry (cloud group 0229), on the same beat. It is a
+ * report of facts other components wrote, never a new state machine; see
+ * `runtime-report.ts`.
+ *
  * The interval is deliberately conservative. The owner-ruled liveness
  * thresholds (OD-EDGE-LIVENESS-001) are ONLINE <= 90s, so a 60s beat keeps a
  * healthy device green with one missed beat of headroom.
@@ -36,6 +46,7 @@ import { SERVICE_VERSION } from "../version.js";
 import { readBootstrapState, writeBootstrapState } from "../bootstrap-state.js";
 import { readImageEnv } from "../image-env.js";
 import { readRegistrationState, type RegistrationPhase } from "../registration-state.js";
+import { reportRuntimeOnce } from "../runtime-report.js";
 
 /** One beat under the 90s ONLINE threshold, with headroom for one loss. */
 export const BEAT_SECONDS = 60;
@@ -105,6 +116,7 @@ export function buildHealthSummary(options: HealthSummaryOptions = {}): HealthSu
 }
 
 export async function main(): Promise<void> {
+  let lastRuntimeLine = "";
   for (;;) {
     const summary = buildHealthSummary();
     process.stdout.write(
@@ -112,6 +124,15 @@ export async function main(): Promise<void> {
     );
     const state = readBootstrapState();
     if (state !== null) writeBootstrapState({ ...state, updatedAt: summary.observedAt });
+    const runtime = await reportRuntimeOnce();
+    const runtimeLine = runtime.sent
+      ? `event=kitluy.health.runtime-report status=${String(runtime.status)} outcome=${runtime.outcome}`
+      : `event=kitluy.health.runtime-report sent=no reason=${JSON.stringify(runtime.reason)}`;
+    // One line per CHANGE: a report every minute would bury the journal.
+    if (runtimeLine !== lastRuntimeLine) {
+      lastRuntimeLine = runtimeLine;
+      process.stdout.write(`${runtimeLine}\n`);
+    }
     await new Promise((r) => setTimeout(r, BEAT_SECONDS * 1000));
   }
 }

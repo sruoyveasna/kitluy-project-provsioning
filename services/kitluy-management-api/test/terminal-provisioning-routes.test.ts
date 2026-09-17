@@ -72,6 +72,9 @@ const terminalRow = (id: string, storeId: string) => ({
   session_paired_at: null,
   session_failed: null,
   session_locked_at: null,
+  runtime_report: null,
+  runtime_received_at: null,
+  runtime_age_seconds: null,
 });
 
 /** Records every door call so the route's inputs are visible. */
