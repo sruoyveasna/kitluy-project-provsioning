@@ -135,7 +135,48 @@ describe("hubLink and pos copy the owners, and drop what is not in the vocabular
       hubDeviceId: "549a41c6-21e9-4838-8b48-34a3878ba290",
       checkedAt: "2026-09-17T03:00:00.000Z",
       reads: { authorityTime: "ok", eligibility: "ok", configuration: "ok" },
+      // No PIN read recorded (an older Hub, or not reached): null, never guessed.
+      terminalPin: null,
     });
+  });
+
+  it("carries the Store Hub's Terminal PIN answer, and nothing else about the PIN", () => {
+    writeFileSync(
+      join(dir, "edge-status.json"),
+      JSON.stringify({
+        phase: "SERVING",
+        checkedAt: "2026-09-17T03:00:00.000Z",
+        hub: { hubDeviceId: "549a41c6-21e9-4838-8b48-34a3878ba290" },
+        reads: { authorityTime: "ok", eligibility: "ok", configuration: "ok" },
+        terminalPin: {
+          state: "set",
+          setAt: "2026-09-17T02:58:00.000Z",
+          lockedUntil: null,
+          pin: "4826",
+          verifier: "$argon2id$v=19$m=19456,t=2,p=1$x$y",
+        },
+      }),
+    );
+    const hubLink = collect()["hubLink"] as Record<string, unknown>;
+    expect(hubLink["terminalPin"]).toEqual({
+      state: "set",
+      setAt: "2026-09-17T02:58:00.000Z",
+      lockedUntil: null,
+    });
+    expect(JSON.stringify(hubLink)).not.toContain("4826");
+    expect(JSON.stringify(hubLink)).not.toContain("argon2id");
+  });
+
+  it("an invented PIN state is dropped to null — 'PIN set' is only ever the Hub's word", () => {
+    writeFileSync(
+      join(dir, "edge-status.json"),
+      JSON.stringify({
+        phase: "SERVING",
+        checkedAt: "2026-09-17T03:00:00.000Z",
+        terminalPin: { state: "configured", setAt: null, lockedUntil: null },
+      }),
+    );
+    expect((collect()["hubLink"] as Record<string, unknown>)["terminalPin"]).toBeNull();
   });
 
   it("an invented edge phase is dropped to null, never forwarded", () => {
@@ -146,17 +187,18 @@ describe("hubLink and pos copy the owners, and drop what is not in the vocabular
     expect(collect()["hubLink"]).toBeNull();
   });
 
-  it("copies the POS runtime state, but never staff identity", () => {
+  it("copies the POS runtime state, but never an identity or a PIN", () => {
     writeFileSync(
       join(dir, "pos.json"),
       JSON.stringify({
-        schema: "kitluy.pos-runtime-status.v1",
+        schema: "kitluy.pos-runtime-status.v2",
         applicationVersion: "0.1.0",
         state: "staff_authentication_required",
         refusalCode: null,
         configuration: { configurationVersion: 7, freshness: "current" },
-        staffSignedIn: false,
+        terminalUnlocked: false,
         staffName: "should never be read",
+        pin: "4826",
         observedAt: "2026-09-17T03:00:01.000Z",
       }),
     );
@@ -167,10 +209,27 @@ describe("hubLink and pos copy the owners, and drop what is not in the vocabular
       applicationVersion: "0.1.0",
       configurationVersion: 7,
       configurationFreshness: "current",
-      staffSignedIn: false,
+      terminalUnlocked: false,
       observedAt: "2026-09-17T03:00:01.000Z",
     });
     expect(JSON.stringify(pos)).not.toContain("should never be read");
+    expect(JSON.stringify(pos)).not.toContain("4826");
+  });
+
+  it("a v1 POS file (before the Terminal PIN) still reports its unlock flag", () => {
+    writeFileSync(
+      join(dir, "pos.json"),
+      JSON.stringify({
+        schema: "kitluy.pos-runtime-status.v1",
+        applicationVersion: "0.1.0",
+        state: "ready",
+        refusalCode: null,
+        configuration: { configurationVersion: 7, freshness: "current" },
+        staffSignedIn: true,
+        observedAt: "2026-09-17T03:00:01.000Z",
+      }),
+    );
+    expect(collect()["pos"]).toMatchObject({ state: "ready", terminalUnlocked: true });
   });
 
   it("an unknown POS state is dropped to null", () => {

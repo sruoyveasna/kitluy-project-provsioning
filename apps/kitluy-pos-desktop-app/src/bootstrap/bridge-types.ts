@@ -18,17 +18,31 @@ export interface T1RuntimeBridge {
 }
 
 /**
- * T1-STORE-OPERATIONS-001 — the two named staff operations. A staff id and a
- * passcode go in; only a verdict comes back (never a session id).
+ * TERMINAL-PIN-AND-REAL-POS-AUTH-001 — the four named Terminal PIN operations.
+ * Four-digit PINs go in; only a verdict comes back (never a session id, never a
+ * PIN). No staff sign-in exists on a Pi Terminal
+ * (KLD-2026-09-17-TERMINAL-PIN-DEVICE-CREDENTIAL-001).
  */
-export const T1_STAFF_BRIDGE_KEY = "kitluyT1Staff" as const;
+export const T1_PIN_BRIDGE_KEY = "kitluyT1Pin" as const;
 
-export type StaffVerdict =
-  { readonly ok: true } | { readonly ok: false; readonly code: string; readonly detail: string };
+export type PinVerdict =
+  | { readonly ok: true }
+  | {
+      readonly ok: false;
+      readonly code: string;
+      readonly detail: string;
+      readonly pin?: T1BootstrapReport["pin"];
+    };
 
-export interface T1StaffBridge {
-  signIn(input: { readonly actorId: string; readonly passcode: string }): Promise<StaffVerdict>;
-  signOut(): Promise<{ readonly ok: true }>;
+export interface T1PinBridge {
+  setup(input: { readonly pin: string; readonly pinConfirmation: string }): Promise<PinVerdict>;
+  unlock(input: { readonly pin: string }): Promise<PinVerdict>;
+  change(input: {
+    readonly currentPin: string;
+    readonly newPin: string;
+    readonly newPinConfirmation: string;
+  }): Promise<PinVerdict>;
+  lock(): Promise<{ readonly ok: true }>;
 }
 
 /** WS-12-T002-P02 §5 — the eight named intake operations, as the renderer sees them. */

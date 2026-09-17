@@ -36,7 +36,7 @@ let pool: pg.Pool;
 let work: string;
 
 const REPORT = {
-  schema: "kitluy.device-runtime-report.v1",
+  schema: "kitluy.device-runtime-report.v2",
   deviceClass: "terminal",
   imageVersion: "0.2.0-dev",
   agentVersion: "0.1.0",
@@ -45,6 +45,7 @@ const REPORT = {
     hubDeviceId: "549a41c6-21e9-4838-8b48-34a3878ba290",
     checkedAt: "2026-09-17T03:00:00.000Z",
     reads: { authorityTime: "ok", eligibility: "ok", configuration: "ok" },
+    terminalPin: { state: "set", setAt: "2026-09-17T02:58:00.000Z", lockedUntil: null },
   },
   application: {
     product: "kitluy-terminal",
@@ -63,9 +64,19 @@ const REPORT = {
     applicationVersion: "0.1.0",
     configurationVersion: 7,
     configurationFreshness: "current",
-    staffSignedIn: true,
+    terminalUnlocked: true,
     observedAt: "2026-09-17T03:00:01.000Z",
   },
+};
+
+/** What a terminal still on the 0229-era agent sends. */
+const REPORT_V1 = {
+  ...REPORT,
+  schema: "kitluy.device-runtime-report.v1",
+  hubLink: (({ terminalPin: _p, ...rest }) => rest)(REPORT.hubLink),
+  pos: (({ terminalUnlocked, ...rest }) => ({ ...rest, staffSignedIn: terminalUnlocked }))(
+    REPORT.pos,
+  ),
 };
 
 interface Board {
@@ -158,8 +169,41 @@ describe("a Terminal's signed report is recorded, once, under its enrolled key",
     expect(answer.body["outcome"]).toBe("ACCEPTED");
     const row = await stored(board.deviceId);
     expect(row?.report_sequence).toBe("1000");
-    expect(row?.report["hubLink"]).toMatchObject({ phase: "SERVING" });
+    expect(row?.report["hubLink"]).toMatchObject({
+      phase: "SERVING",
+      terminalPin: { state: "set" },
+    });
     expect(Number(row?.report_age_seconds)).toBeLessThan(60);
+  });
+
+  it("still accepts a v1 report from a terminal in the field, and a v2 one after it", async () => {
+    const board = await enrolled("terminal");
+    const v1 = await send(
+      signRuntimeReport({
+        deviceId: board.deviceId,
+        reportSequence: 500,
+        observedAt: "2026-09-17T03:00:02.000Z",
+        report: REPORT_V1,
+        keyPath: board.keyPath,
+      }),
+    );
+    expect(v1.status, JSON.stringify(v1.body)).toBe(200);
+    expect((await stored(board.deviceId))?.report["schema"]).toBe(
+      "kitluy.device-runtime-report.v1",
+    );
+    const v2 = await send(
+      signRuntimeReport({
+        deviceId: board.deviceId,
+        reportSequence: 501,
+        observedAt: "2026-09-17T03:00:03.000Z",
+        report: REPORT,
+        keyPath: board.keyPath,
+      }),
+    );
+    expect(v2.status, JSON.stringify(v2.body)).toBe(200);
+    expect((await stored(board.deviceId))?.report["schema"]).toBe(
+      "kitluy.device-runtime-report.v2",
+    );
   });
 
   it("a replay, and an older sequence, are STALE and change nothing", async () => {
@@ -232,7 +276,7 @@ describe("who may NOT write a Terminal's status", () => {
     });
     const answer = await send({
       ...body,
-      report: { ...REPORT, pos: { ...REPORT.pos, staffSignedIn: false } },
+      report: { ...REPORT, pos: { ...REPORT.pos, terminalUnlocked: false } },
     });
     expect(answer.status).toBe(403);
     expect(await stored(board.deviceId)).toBeUndefined();

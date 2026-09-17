@@ -402,6 +402,11 @@ export const HUB_MIGRATION_ORDER = [
   // advance); every 0040 business rule retained.
   "0041_booking_draft_sync_acknowledgment.sql",
   "0042_terminal_pairing_signing_credential.sql",
+  // TERMINAL-PIN-AND-REAL-POS-AUTH-001 (KLD-2026-09-03-TERMINAL-PROVISIONING-001
+  // §10-§15; KLD-2026-09-17-TERMINAL-PIN-DEVICE-CREDENTIAL-001): the Terminal
+  // PIN's Argon2id verifier and durable attempt state, and the credential kind
+  // of a terminal session.
+  "0043_terminal_pin.sql",
 ] as const;
 
 /**

@@ -77,11 +77,12 @@ export type RungState = "done" | "current" | "not_reported" | "blocked" | "unbui
  * Terminal now reports its own Store Hub link, and the rung became
  * `hubConnected`, done from that report and nothing else.
  *
- * `pinSet` is here because the Terminal PIN is SPECIFIED and NOT BUILT
- * (KLD-2026-09-03-TERMINAL-PROVISIONING-001 §10-§14): no verifier, no setup
- * screen, no reporter. When it is built, delete the entry.
+ * `pinSet` left it the same day (TERMINAL-PIN-AND-REAL-POS-AUTH-001): the
+ * Store Hub holds the PIN verifier and answers the Terminal its state, and the
+ * Terminal reports that answer (runtime report v2). Empty, kept so the rule
+ * that an unreportable rung is never "the next step" stays where it is.
  */
-export const UNREPORTABLE_RUNGS: ReadonlySet<string> = new Set(["pinSet"]);
+export const UNREPORTABLE_RUNGS: ReadonlySet<string> = new Set([]);
 
 /**
  * Rungs that come from the Terminal's own runtime report. Each is done ONLY
@@ -93,6 +94,8 @@ export const RUNTIME_RUNGS: ReadonlySet<RungKey> = new Set([
   "appInstalled",
   "appRunning",
   "configurationLoaded",
+  "pinSet",
+  "active",
 ]);
 
 /**
@@ -117,7 +120,12 @@ export interface LadderRung {
   readonly detail?: string;
   /** Set when the rung's evidence is the Terminal's own report, not a cloud door. */
   readonly source?: "device_reported";
+  /** A reported posture worth a word next to the rung, in the reader's language. */
+  readonly note?: LadderNote;
 }
+
+/** The Terminal PIN is locked after too many wrong entries, or awaits a reset. */
+export type LadderNote = "pinLocked" | "pinResetRequired";
 
 export interface SessionFacts {
   readonly state: string;
@@ -146,9 +154,15 @@ export function sessionFacts(
  *   appRunning           the unit active AND the launcher's witness names the
  *                        INSTALLED release (installed is not running)
  *   configurationLoaded  the POS in a state that has verified a configuration
- *   pinSet               unbuilt
- *   active               NEVER done in this build: the Terminal must not become
- *                        fully operational before its PIN is set (LOCKED, §10)
+ *   pinSet               the STORE HUB's answer, carried by the Terminal: a PIN
+ *                        verifier is established (state `set`) — its own
+ *                        evidence, never derived from the application running
+ *   active               every rung above it done, from the SAME fresh report,
+ *                        and no security posture in the way: no containment
+ *                        (the Hub would not be SERVING), the PIN not locked, not
+ *                        awaiting a reset. The Terminal may not be operational
+ *                        before its PIN is set (KLD-2026-09-03 §10, LOCKED), so
+ *                        `active` can never be done while `pinSet` is not.
  */
 export function deriveLadder(
   input: {
@@ -170,6 +184,7 @@ export function deriveLadder(
   const stale = runtime !== null && !fresh;
   const app = fresh ? runtime.application : null;
   const pos = fresh ? runtime.pos : null;
+  const pin = fresh ? (runtime.hubLink?.terminalPin ?? null) : null;
 
   const done: Record<RungKey, boolean> = {
     hubActive: hub.kind === "active",
@@ -190,13 +205,25 @@ export function deriveLadder(
       pos !== null &&
       pos.configurationVersion !== null &&
       CONFIGURATION_LOADED_STATES.has(pos.state),
-    // Specified, not built. See UNREPORTABLE_RUNGS.
-    pinSet: false,
-    // KLD-2026-09-03-TERMINAL-PROVISIONING-001 §10 (LOCKED): "The Terminal must
-    // not become fully operational until this required PIN setup succeeds."
+    pinSet: pin !== null && pin.state === "set",
     active: false,
   };
+  // KLD-2026-09-03-TERMINAL-PROVISIONING-001 §10 (LOCKED): "The Terminal must
+  // not become fully operational until this required PIN setup succeeds." And
+  // the owner mission §11: Operational is the conjunction of reported facts,
+  // never a rung inferred from another. All from the same fresh report.
+  done.active =
+    done.hubConnected &&
+    done.appInstalled &&
+    done.appRunning &&
+    done.configurationLoaded &&
+    done.pinSet &&
+    pin !== null &&
+    pin.lockedUntil === null;
   const detail: Partial<Record<RungKey, string>> = {};
+  const note: Partial<Record<RungKey, LadderNote>> = {};
+  if (pin !== null && pin.lockedUntil !== null) note.pinSet = "pinLocked";
+  if (pin !== null && pin.state === "reset_required") note.pinSet = "pinResetRequired";
   if (bound !== null) {
     detail.redeemed = bound.deviceReference;
     if (done.activated) detail.activated = bound.deviceReference;
@@ -218,18 +245,26 @@ export function deriveLadder(
       nextMarked = true;
       return { key, state: "unbuilt" };
     }
+    const n = note[key];
+    const noted = n === undefined ? {} : { note: n };
     if (done[key]) {
       const d = detail[key];
       const source = RUNTIME_RUNGS.has(key) ? { source: "device_reported" as const } : {};
       return d === undefined
-        ? { key, state: "done", ...source }
-        : { key, state: "done", detail: d, ...source };
+        ? { key, state: "done", ...source, ...noted }
+        : { key, state: "done", detail: d, ...source, ...noted };
     }
     if (stale && RUNTIME_RUNGS.has(key)) {
       // Something WAS reported, too long ago to still be true: neither done nor
       // "nothing reported yet". The first such rung is the one to look at.
       nextMarked = true;
       return { key, state: "stale", source: "device_reported" };
+    }
+    if (!nextMarked && n !== undefined) {
+      // A reported posture on the rung itself (a locked PIN, a reset): the step
+      // to look at, said in words, not "nothing reported".
+      nextMarked = true;
+      return { key, state: "current", source: "device_reported", ...noted };
     }
     if (key === "hubActive") {
       nextMarked = true;

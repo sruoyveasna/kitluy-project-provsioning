@@ -30,6 +30,7 @@
     "@kitluy/shared-config": "workspace:*",
     "@kitluy/shared-types": "workspace:*",
     "@kitluy/sync-protocol": "workspace:*",
+    "hash-wasm": "catalog:",
     "pg": "catalog:"
   },
   "devDependencies": {

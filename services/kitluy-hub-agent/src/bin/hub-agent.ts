@@ -352,8 +352,66 @@ async function publishDevelopmentConfigurationCommand(path: string): Promise<voi
   }
 }
 
+/**
+ * `hub-agent reset-terminal-pin --terminal <uuid> --operator <ref> --reason <code>`
+ *
+ * KLD-2026-09-03-TERMINAL-PROVISIONING-001 §14: a forgotten PIN is reset by a
+ * governed, audited action, never by revealing it. The GOVERNED path — a Partner
+ * request in the Partner Portal delivered to this Hub — needs the cloud-to-Hub
+ * delivery that BLK-006 has not built. Until it exists this is the reset, and
+ * only on a DEVELOPMENT Hub: the operator reference and reason land in the
+ * immutable audit journal, the verifier is cleared, every open PIN session on the
+ * terminal is closed, and the terminal asks for a new PIN twice.
+ */
+async function resetTerminalPinCommand(args: readonly string[]): Promise<void> {
+  const environment = process.env.KITLUY_ENVIRONMENT ?? "unknown";
+  if (environment !== "development") {
+    throw new Error(
+      `this Hub is '${environment}': a Terminal PIN reset outside development is the Partner ` +
+        "Portal's governed action, which needs the cloud-to-Hub delivery (BLK-006)",
+    );
+  }
+  const option = (name: string): string | undefined => {
+    const index = args.indexOf(name);
+    return index === -1 ? undefined : args[index + 1];
+  };
+  const terminalDeviceId = option("--terminal");
+  const operator = option("--operator");
+  const reason = option("--reason");
+  if (terminalDeviceId === undefined || operator === undefined || reason === undefined) {
+    throw new Error("usage: reset-terminal-pin --terminal <uuid> --operator <ref> --reason <code>");
+  }
+  const { randomUUID } = await import("node:crypto");
+  const { resetTerminalPin } = await import("../hub/edge/terminal-pin.js");
+  const pool = createHubPool();
+  try {
+    const outcome = await resetTerminalPin(pool, {
+      terminalDeviceId,
+      actorRef: operator,
+      reasonCode: reason,
+      correlationId: randomUUID(),
+    });
+    if (outcome.outcome !== "ok") throw new Error(`${outcome.refusal}: ${outcome.detail}`);
+    log.info("Terminal PIN reset", {
+      result: outcome.result,
+      terminalDeviceId,
+      state: outcome.value.pin.state,
+      sessionsClosed: outcome.value.sessionsClosed,
+    });
+  } finally {
+    await pool.end().catch(() => undefined);
+  }
+}
+
 const subcommand = process.argv[2];
-if (subcommand === "publish-development-configuration") {
+if (subcommand === "reset-terminal-pin") {
+  resetTerminalPinCommand(process.argv.slice(3)).catch((error: unknown) => {
+    log.error("Terminal PIN reset was REFUSED", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    process.exit(1);
+  });
+} else if (subcommand === "publish-development-configuration") {
   const path = process.argv[3];
   if (path === undefined) {
     log.error("publish-development-configuration needs the delivery file path");

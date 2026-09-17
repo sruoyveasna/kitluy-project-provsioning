@@ -17,7 +17,6 @@ import type { HubCall } from "../electron/edge-operations-session.js";
 const T1 = "laundry.t1.intake_cashier";
 const TERMINAL = "7a6f1e26-21c8-4a40-8b4b-1ad789a040e9";
 const HUB = "549a41c6-21e9-4838-8b48-34a3878ba290";
-const ACTOR = "e0000000-0000-4000-8000-0000000000aa";
 const SCOPE = {
   tenantId: "e0000000-0000-4000-8000-000000000001",
   digitalStoreId: "e0000000-0000-4000-8000-000000000002",
@@ -38,16 +37,22 @@ const STATUS: EdgeBridgeStatusWire = {
   terminal: { deviceId: TERMINAL, assignmentGeneration: 3, profileCodes: [T1] },
 };
 
-/** A scripted Hub. `gate`, when set, holds the NEXT authority-time read open. */
+/**
+ * A scripted Hub with a Terminal PIN. `gate`, when set, holds the NEXT
+ * authority-time read open. The PIN starts UNSET; five wrong entries lock it.
+ */
 function hub() {
-  const state: { passcode: string; gate: Promise<void> | null; opened: number } = {
-    passcode: "2468",
-    gate: null,
-    opened: 0,
-  };
+  const state: {
+    pin: string | null;
+    failures: number;
+    lockedUntil: string | null;
+    gate: Promise<void> | null;
+    opened: number;
+    sessions: Map<string, "open" | "closed">;
+  } = { pin: null, failures: 0, lockedUntil: null, gate: null, opened: 0, sessions: new Map() };
   const now = () => new Date().toISOString();
   const payloadJson = "{}";
-  const call: HubCall = async (method, path, body) => {
+  const call: HubCall = async (method, path, body, headers) => {
     if (path === "/edge/v1/runtime/authority-time") {
       const gate = state.gate;
       state.gate = null;
@@ -122,34 +127,85 @@ function hub() {
         },
       };
     }
-    if (method === "POST" && path === "/edge/v1/sessions/open") {
-      const input = body as { passcode: string; profileCode: string };
-      if (input.passcode !== state.passcode) {
-        return {
-          status: 403,
-          body: { error: { message: "no", details: { result: "STAFF_CREDENTIAL_INVALID" } } },
-        };
-      }
+    const posture = () => ({
+      state: state.pin === null ? "setup_required" : "set",
+      pinVersion: state.pin === null ? 0 : 1,
+      setAt: state.pin === null ? null : now(),
+      lockedUntil: state.lockedUntil,
+      attemptsBeforeLock: state.lockedUntil === null ? 5 - state.failures : 0,
+    });
+    const refuse = (status: number, result: string) => ({
+      status,
+      body: { error: { message: "no", details: { result, retryable: false, pin: posture() } } },
+    });
+    const session = () => {
       state.opened += 1;
+      const sessionId = `pin-sess-${String(state.opened)}`;
+      state.sessions.set(sessionId, "open");
+      return {
+        sessionId,
+        actorId: TERMINAL,
+        displayName: "",
+        profileCode: T1,
+        openedAt: now(),
+        expiresAt: new Date(Date.now() + 8 * 3_600_000).toISOString(),
+        sessionGeneration: state.opened,
+        effectivePermissions: ["pos.t1.use", "customers.read", "laundry.bookings.create"],
+        authorityTime: now(),
+        credentialKind: "terminal_pin",
+      };
+    };
+    if (path === "/edge/v1/terminal-pin/status") {
+      const held = headers?.["x-kitluy-session-id"];
       return {
         status: 200,
         body: {
-          session: {
-            sessionId: "sess-1",
-            actorId: ACTOR,
-            displayName: "Cashier Sokha",
-            profileCode: input.profileCode,
-            openedAt: now(),
-            expiresAt: new Date(Date.now() + 1_800_000).toISOString(),
-            sessionGeneration: 1,
-            effectivePermissions: ["pos.t1.use", "laundry.bookings.create"],
-            authorityTime: now(),
-          },
+          result: "TERMINAL_PIN_STATUS",
+          pin: posture(),
+          session:
+            held === undefined
+              ? null
+              : { state: state.sessions.get(held) ?? "unknown", expiresAt: null },
+          authorityTime: now(),
         },
       };
     }
-    if (method === "POST" && path === "/edge/v1/sessions/close") {
-      return { status: 200, body: { session: {} } };
+    if (method === "POST" && path === "/edge/v1/terminal-pin/setup") {
+      const input = body as { pin: string; pinConfirmation: string };
+      if (state.pin !== null) return refuse(409, "PIN_ALREADY_SET");
+      if (input.pin !== input.pinConfirmation) return refuse(422, "PIN_CONFIRMATION_MISMATCH");
+      state.pin = input.pin;
+      return {
+        status: 200,
+        body: { result: "PIN_ESTABLISHED", session: session(), pin: posture() },
+      };
+    }
+    if (method === "POST" && path === "/edge/v1/terminal-pin/unlock") {
+      const input = body as { pin: string };
+      if (state.pin === null) return refuse(409, "PIN_SETUP_REQUIRED");
+      if (state.lockedUntil !== null) return refuse(429, "PIN_LOCKED");
+      if (input.pin !== state.pin) {
+        state.failures += 1;
+        if (state.failures >= 5) {
+          state.lockedUntil = new Date(Date.now() + 900_000).toISOString();
+          state.failures = 0;
+          return refuse(429, "PIN_LOCKED");
+        }
+        return refuse(401, "PIN_INCORRECT");
+      }
+      state.failures = 0;
+      return {
+        status: 200,
+        body: { result: "TERMINAL_UNLOCKED", session: session(), pin: posture() },
+      };
+    }
+    if (method === "POST" && path === "/edge/v1/terminal-pin/lock") {
+      const input = body as { sessionId: string };
+      state.sessions.set(input.sessionId, "closed");
+      return { status: 200, body: { result: "TERMINAL_LOCKED" } };
+    }
+    if (method === "POST" && path === "/edge/v1/sessions/open") {
+      throw new Error("the staff session door must never be called from a Pi Terminal");
     }
     return { status: 404, body: null };
   };
@@ -170,28 +226,106 @@ function runtime(h: ReturnType<typeof hub>) {
 }
 
 describe("the Pi Terminal runtime", () => {
-  it("waits for staff, signs into T1, and opens intake only when READY", async () => {
+  it("locked until a PIN is set up twice; unlocked into T1; intake only when READY; locked again on demand", async () => {
     const h = hub();
     const pos = runtime(h);
-    expect((await pos.refresh()).state).toBe("staff_authentication_required");
+    const first = await pos.refresh();
+    expect(first.state).toBe("staff_authentication_required");
+    // The Hub's answer, carried for the screen: no PIN yet.
+    expect(first.pin).toMatchObject({ state: "setup_required", lockedUntil: null });
     expect(pos.intakeOperations()).toBeNull();
-    expect(await pos.signIn({ actorId: ACTOR, passcode: "0000" })).toMatchObject({
+
+    // No PIN exists: an unlock cannot succeed, and a mismatched setup is refused.
+    expect(await pos.unlock({ pin: "2468" })).toMatchObject({
       ok: false,
-      code: "STAFF_CREDENTIAL_INVALID",
+      code: "PIN_SETUP_REQUIRED",
+    });
+    expect(await pos.setupPin({ pin: "2468", pinConfirmation: "2486" })).toMatchObject({
+      ok: false,
+      code: "PIN_CONFIRMATION_MISMATCH",
     });
     expect(pos.intakeOperations()).toBeNull();
-    const signed = await pos.signIn({ actorId: ACTOR, passcode: "2468" });
-    expect(signed.ok).toBe(true);
+
+    // Set up twice: unlocked at once, READY, intake open.
+    const established = await pos.setupPin({ pin: "2468", pinConfirmation: "2468" });
+    expect(established.ok, JSON.stringify(established)).toBe(true);
     expect(pos.report?.state).toBe("ready");
+    expect(pos.report?.pin).toMatchObject({ state: "set" });
     expect(pos.intakeOperations()).not.toBeNull();
     const status = readFileSync(join(dir, "pos-runtime.json"), "utf8");
-    expect(status).toContain('"staffSignedIn": true');
+    expect(status).toContain('"schema": "kitluy.pos-runtime-status.v2"');
+    expect(status).toContain('"terminalUnlocked": true');
     expect(status).not.toContain("2468");
-    expect(status).not.toContain(ACTOR);
+    expect(status).not.toContain("pin-sess");
 
-    await pos.signOut();
+    // Locked: the session is closed on the Hub and intake is gone.
+    await pos.lock();
     expect(pos.report?.state).toBe("staff_authentication_required");
+    expect(pos.report?.pin).toMatchObject({ state: "set" });
     expect(pos.intakeOperations()).toBeNull();
+    expect(readFileSync(join(dir, "pos-runtime.json"), "utf8")).toContain(
+      '"terminalUnlocked": false',
+    );
+
+    // A wrong PIN is refused with the Hub's count; the right one unlocks.
+    const wrong = await pos.unlock({ pin: "0000" });
+    expect(wrong).toMatchObject({
+      ok: false,
+      code: "PIN_INCORRECT",
+      pin: { attemptsBeforeLock: 4 },
+    });
+    expect(pos.intakeOperations()).toBeNull();
+    expect((await pos.unlock({ pin: "2468" })).ok).toBe(true);
+    expect(pos.report?.state).toBe("ready");
+  });
+
+  it("five wrong PINs lock the terminal on the Hub's say-so, and the right PIN does not open it while locked", async () => {
+    const h = hub();
+    const pos = runtime(h);
+    await pos.refresh();
+    expect((await pos.setupPin({ pin: "1357", pinConfirmation: "1357" })).ok).toBe(true);
+    await pos.lock();
+    for (let i = 0; i < 4; i += 1) {
+      expect((await pos.unlock({ pin: "9999" })).ok).toBe(false);
+    }
+    const locking = await pos.unlock({ pin: "9999" });
+    expect(locking).toMatchObject({ ok: false, code: "PIN_LOCKED" });
+    const whileLocked = await pos.unlock({ pin: "1357" });
+    expect(whileLocked).toMatchObject({ ok: false, code: "PIN_LOCKED" });
+    const report = await pos.refresh();
+    expect(report.state).toBe("staff_authentication_required");
+    expect(report.pin?.lockedUntil).not.toBeNull();
+    expect(pos.intakeOperations()).toBeNull();
+  });
+
+  it("a session the Hub closed elsewhere (a reset) is let go on the next run, never kept on the terminal's word", async () => {
+    const h = hub();
+    const pos = runtime(h);
+    await pos.refresh();
+    expect((await pos.setupPin({ pin: "1470", pinConfirmation: "1470" })).ok).toBe(true);
+    expect(pos.report?.state).toBe("ready");
+    for (const id of h.state.sessions.keys()) h.state.sessions.set(id, "closed");
+    expect((await pos.refresh()).state).toBe("staff_authentication_required");
+    expect(pos.intakeOperations()).toBeNull();
+  });
+
+  it("no PIN action is possible while the terminal-level checks fail", async () => {
+    const h = hub();
+    const pos = new PiTerminalRuntime({
+      socketPath: "/nonexistent",
+      applicationVersion: "0.1.0",
+      statusPath: null,
+      call: h.call,
+      bridgeStatus: () =>
+        Promise.resolve({ ...STATUS, edge: { phase: "NOT_ACTIVATED", detail: "", checkedAt: "" } }),
+      logger: { log: () => undefined },
+    });
+    const report = await pos.refresh();
+    expect(report.state).not.toBe("staff_authentication_required");
+    expect(report.pin).toBeUndefined();
+    const refused = await pos.setupPin({ pin: "2468", pinConfirmation: "2468" });
+    expect(refused.ok).toBe(false);
+    expect(h.state.pin).toBeNull();
   });
 
   // What this proves: a sign-in that lands while the 30-second refresh is blocked
@@ -201,23 +335,25 @@ describe("the Pi Terminal runtime", () => {
   // wide and no I/O gate reaches it; a mutation reverting the fix survives this
   // test, and the fix is kept because it is strictly safer, not because a test
   // demonstrated the failure.
-  it("a sign-in during an in-flight background refresh still ends READY", async () => {
+  it("an unlock during an in-flight background refresh still ends READY", async () => {
     const h = hub();
     const pos = runtime(h);
     await pos.refresh();
+    expect((await pos.setupPin({ pin: "2468", pinConfirmation: "2468" })).ok).toBe(true);
+    await pos.lock();
     let release: () => void = () => undefined;
     h.state.gate = new Promise<void>((resolve) => {
       release = resolve;
     });
     // The 30-second cadence fires and blocks inside the Hub read...
     const background = pos.refresh();
-    // ...while a cashier signs in.
-    const signing = pos.signIn({ actorId: ACTOR, passcode: "2468" });
+    // ...while someone at the counter enters the PIN.
+    const unlocking = pos.unlock({ pin: "2468" });
     await new Promise((r) => setTimeout(r, 10));
     release();
     await background;
-    const signed = await signing;
-    expect(signed.ok, JSON.stringify(signed)).toBe(true);
+    const unlocked = await unlocking;
+    expect(unlocked.ok, JSON.stringify(unlocked)).toBe(true);
     expect(pos.report?.state).toBe("ready");
   });
 });

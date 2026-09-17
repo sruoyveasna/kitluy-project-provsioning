@@ -1,8 +1,10 @@
 /**
- * Boundaries the Pi Terminal composition must keep (T1-STORE-OPERATIONS-001):
+ * Boundaries the Pi Terminal composition must keep (T1-STORE-OPERATIONS-001;
+ * TERMINAL-PIN-AND-REAL-POS-AUTH-001):
  *
- *   - the staff IPC takes a staff id and a passcode and NOTHING else — never a
- *     profile, a scope or a Hub;
+ *   - the PIN IPC takes four-digit PINs and NOTHING else — never a profile, a
+ *     scope, a Hub, an actor, an email or a password;
+ *   - no staff sign-in, email or password path exists on the Pi at all;
  *   - the POS has no path to Supabase or any cloud for normal Store operations
  *     (PROJECT_HOME §3.5, CLAUDE.md hard rule 6): no client, no URL, no key;
  *   - the Pi composition's only transport is the edge bridge socket.
@@ -11,48 +13,86 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { registerStaffIpc, STAFF_CHANNELS, validateSignIn } from "../electron/staff-ipc.js";
+import {
+  PIN_CHANNELS,
+  registerPinIpc,
+  validateChange,
+  validateSetup,
+  validateUnlock,
+} from "../electron/pin-ipc.js";
 
-const ACTOR = "e0000000-0000-4000-8000-0000000000aa";
-
-describe("the staff sign-in IPC boundary", () => {
-  it("accepts exactly a staff id and a 4-128 character passcode", () => {
-    expect(validateSignIn({ actorId: ACTOR, passcode: "1234" })).toEqual({
-      actorId: ACTOR,
-      passcode: "1234",
+describe("the Terminal PIN IPC boundary", () => {
+  it("accepts exactly four-digit PINs in the named fields", () => {
+    expect(validateSetup({ pin: "1234", pinConfirmation: "1234" })).toEqual({
+      pin: "1234",
+      pinConfirmation: "1234",
+    });
+    expect(validateUnlock({ pin: "0000" })).toEqual({ pin: "0000" });
+    expect(
+      validateChange({ currentPin: "1234", newPin: "5678", newPinConfirmation: "5678" }),
+    ).toEqual({
+      currentPin: "1234",
+      newPin: "5678",
+      newPinConfirmation: "5678",
     });
   });
 
   it.each([
-    [{ actorId: ACTOR, passcode: "1234", profileCode: "laundry.t2.customer_display" }],
-    [{ actorId: ACTOR, passcode: "1234", tenantId: "x" }],
-    [{ actorId: "not-a-uuid", passcode: "1234" }],
-    [{ actorId: ACTOR, passcode: "123" }],
-    [{ actorId: ACTOR, passcode: "x".repeat(129) }],
-    [{ actorId: ACTOR, passcode: "12\n34" }],
-    [{ actorId: ACTOR }],
-    [[ACTOR, "1234"]],
+    [{ pin: "123" }],
+    [{ pin: "12345" }],
+    [{ pin: "12a4" }],
+    [{ pin: " 1234" }],
+    [{ pin: "12\n34" }],
+    [{ pin: 1234 }],
+    [{ pin: "1234", actorId: "e0000000-0000-4000-8000-0000000000aa" }],
+    [{ pin: "1234", email: "cashier@shop.com", password: "x" }],
+    [{ pin: "1234", profileCode: "laundry.t2.customer_display" }],
+    [{ pin: "1234", tenantId: "x" }],
+    [{}],
+    [["1234"]],
     [null],
-  ])("refuses %j", (payload) => {
-    expect(validateSignIn(payload)).toBeNull();
+  ])("unlock refuses %j", (payload) => {
+    expect(validateUnlock(payload)).toBeNull();
   });
 
-  it("returns only a verdict, never a session", async () => {
+  it("setup and change refuse a missing or extra field", () => {
+    expect(validateSetup({ pin: "1234" })).toBeNull();
+    expect(validateSetup({ pin: "1234", pinConfirmation: "1234", staffId: "x" })).toBeNull();
+    expect(validateChange({ currentPin: "1234", newPin: "5678" })).toBeNull();
+  });
+
+  it("returns only a verdict and the public PIN posture, never a session or a PIN", async () => {
     const handlers = new Map<string, (e: unknown, p: unknown) => unknown>();
-    registerStaffIpc(
+    registerPinIpc(
       { handle: (channel, listener) => handlers.set(channel, listener) },
       {
-        signIn: () =>
+        setupPin: () =>
           Promise.resolve({ ok: true as const, report: { sessionId: "secret" } } as never),
-        signOut: () => Promise.resolve(undefined),
+        unlock: () =>
+          Promise.resolve({
+            ok: false as const,
+            code: "PIN_INCORRECT",
+            detail: "no",
+            pin: { state: "set" as const, lockedUntil: null, attemptsBeforeLock: 4 },
+          }),
+        changePin: () => Promise.resolve({ ok: true as const }),
+        lock: () => Promise.resolve(undefined),
       },
     );
-    const answer = await handlers.get(STAFF_CHANNELS.signIn)?.(null, {
-      actorId: ACTOR,
-      passcode: "1234",
+    const established = await handlers.get(PIN_CHANNELS.setup)?.(null, {
+      pin: "1234",
+      pinConfirmation: "1234",
     });
-    expect(answer).toEqual({ ok: true });
-    const invalid = await handlers.get(STAFF_CHANNELS.signIn)?.(null, { actorId: ACTOR });
+    expect(established).toEqual({ ok: true });
+    const wrong = await handlers.get(PIN_CHANNELS.unlock)?.(null, { pin: "1234" });
+    expect(wrong).toEqual({
+      ok: false,
+      code: "PIN_INCORRECT",
+      detail: "no",
+      pin: { state: "set", lockedUntil: null, attemptsBeforeLock: 4 },
+    });
+    expect(JSON.stringify(wrong)).not.toContain("1234");
+    const invalid = await handlers.get(PIN_CHANNELS.unlock)?.(null, { pin: "123" });
     expect(invalid).toMatchObject({ ok: false, code: "INVALID_INPUT" });
   });
 });
@@ -71,6 +111,30 @@ describe("no cloud path for Store operations", () => {
 
   it("scans the whole application", () => {
     expect(files.length).toBeGreaterThan(20);
+  });
+
+  it("the Pi path has no staff sign-in, no email and no password", () => {
+    const pi = [
+      "electron/main.ts",
+      "electron/pi-runtime.ts",
+      "electron/pin-ipc.ts",
+      "electron/terminal-pin-client.ts",
+      "electron/preload.cts",
+      "src/App.tsx",
+      "src/pin-screen.tsx",
+      "src/intake-screen.tsx",
+    ].map((file) =>
+      // Code, not comments: the comments SAY there is no such thing.
+      readFileSync(join(root, file), "utf8")
+        .replace(/\/\*[\s\S]*?\*\//gu, "")
+        .replace(/^\s*\/\/.*$/gmu, ""),
+    );
+    for (const source of pi) {
+      expect(source).not.toMatch(
+        /signInWithPassword|signInWithOtp|type="password"|\bpassword\b|\bemail\b|sessions\/open|kitluyT1Staff|staff:sign-in/u,
+      );
+    }
+    expect(files.map((f) => f.split("/").pop())).not.toContain("staff-sign-in.tsx");
   });
 
   it.each([

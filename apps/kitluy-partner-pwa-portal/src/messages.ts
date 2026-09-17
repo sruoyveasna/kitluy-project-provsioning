@@ -122,6 +122,8 @@ export const MESSAGES = {
     rungBlocked: "ត្រូវបានរារាំង",
     rungStale: "គ្មានរបាយការណ៍ថ្មីៗ",
     deviceReported: "រាយការណ៍ដោយ Terminal",
+    pinLocked: "PIN ត្រូវបានចាក់សោបន្ទោះ (បញ្ចូលខុសច្រើនដងពេក)",
+    pinResetRequired: "ត្រូវកំណត់ PIN ថ្មី",
     ladderHonesty: "ជំហានដែលមិនទាន់រាយការណ៍ មិនមែនបរាជ័យទេ — គ្រាន់តែមិនទាន់មានព័ត៌មានអំពីវានៅឡើយ។",
     dataAsOf: "ទិន្នន័យគិតត្រឹម",
   },
@@ -237,6 +239,8 @@ export const MESSAGES = {
     rungBlocked: "Blocked",
     rungStale: "No recent report",
     deviceReported: "reported by the Terminal",
+    pinLocked: "PIN locked for now (too many wrong entries)",
+    pinResetRequired: "a new PIN must be set",
     ladderHonesty:
       "A step that is not yet reported has not failed — nothing has been reported about it yet.",
     dataAsOf: "Data as of",

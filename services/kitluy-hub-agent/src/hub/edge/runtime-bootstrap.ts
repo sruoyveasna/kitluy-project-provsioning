@@ -65,6 +65,26 @@ export const PERMISSION_CONSENT_RECORD = "customers.consent.record" as const;
 export const PERMISSION_BOOKINGS_READ = "laundry.bookings.read" as const;
 export const PERMISSION_BOOKINGS_CREATE = "laundry.bookings.create" as const;
 
+/**
+ * What a TERMINAL PIN session may do: the T1 intake surface, and nothing else.
+ *
+ * KLD-2026-09-17-TERMINAL-PIN-DEVICE-CREDENTIAL-001 (owner ruling): on a Pi
+ * Terminal there is no staff login; the DEVICE credential plus the Terminal PIN
+ * unlock is the operating credential. This is therefore not an actor grant (the
+ * Hub still never authors one, KLREQ-025): it is the closed route set of the
+ * T1 profile, and it applies only while the terminal's own T1 profile grant is
+ * current. Financial, custody, refund and override actions are not in it — they
+ * still need a human actor (KLD-2026-09-03-TERMINAL-PROVISIONING-001 §11).
+ */
+export const T1_TERMINAL_PIN_PERMISSIONS: readonly string[] = [
+  PERMISSION_POS_T1_USE,
+  PERMISSION_CUSTOMERS_READ,
+  PERMISSION_CUSTOMERS_CREATE,
+  PERMISSION_CONSENT_RECORD,
+  PERMISSION_BOOKINGS_READ,
+  PERMISSION_BOOKINGS_CREATE,
+];
+
 // ---------------------------------------------------------------------------
 // Authority time (§1)
 // ---------------------------------------------------------------------------
@@ -266,6 +286,27 @@ async function readBlockingContainment(
 ): Promise<string | null> {
   const directive = await readContainmentDirective(client, terminalDeviceId);
   return isBlockingContainment(directive) ? directive : null;
+}
+
+/** The terminal's enabled, effective T1 profile grant from the ACTIVE snapshot. */
+export async function terminalHoldsCurrentT1Grant(
+  client: HubClient,
+  terminalDeviceId: string,
+): Promise<boolean> {
+  const grant = await client.query<{ profile_code: string }>(
+    `select tpa.profile_code
+       from edge_config.terminal_profile_assignment tpa
+       join edge_config.configuration_snapshot cs on cs.id = tpa.source_snapshot_id
+      where tpa.terminal_device_id = $1::uuid
+        and tpa.enabled
+        and tpa.effective_from <= now()
+        and (tpa.effective_until is null or tpa.effective_until > now())
+        and cs.state = 'active'
+      order by tpa.assignment_version desc
+      limit 1`,
+    [terminalDeviceId],
+  );
+  return grant.rows[0]?.profile_code === T1_PROFILE_CODE;
 }
 
 export async function deriveEligibility(
@@ -1009,6 +1050,7 @@ async function loadOwnedOpenSession(
         expires_at: Date;
         closed_at: Date | null;
         session_generation: number;
+        credential_kind: "staff" | "terminal_pin";
       };
     }
   | { readonly ok: false; readonly refusal: SessionRefusal; readonly detail: string }
@@ -1025,9 +1067,10 @@ async function loadOwnedOpenSession(
     expires_at: Date;
     closed_at: Date | null;
     session_generation: number;
+    credential_kind: "staff" | "terminal_pin";
   }>(
     `select id, actor_id, tenant_id, digital_store_id, location_id, terminal_device_id, profile_code,
-            opened_at, expires_at, closed_at, session_generation
+            opened_at, expires_at, closed_at, session_generation, credential_kind
        from edge_identity.terminal_session where id = $1::uuid`,
     [sessionId],
   );
@@ -1094,6 +1137,48 @@ export async function authorizeT1IntakeSession(
     return { ok: false, refusal: "T1_NOT_AUTHORIZED", detail: "the session is not a T1 session" };
   }
   const scope = sessionScope(row);
+  if (row.credential_kind === "terminal_pin") {
+    // The DEVICE is the actor (asserted by 0043's CHECK). What authorizes it is
+    // the terminal's own T1 profile grant from the ACTIVE snapshot and the
+    // absence of a blocking containment — re-read on every request, like the
+    // staff path re-reads its grants. The mTLS gate has already proved the
+    // credential current before this runs.
+    if (row.actor_id !== input.terminalDeviceId) {
+      return { ok: false, refusal: "SESSION_UNKNOWN", detail: "no such session" };
+    }
+    if (!(await terminalHoldsCurrentT1Grant(client, input.terminalDeviceId))) {
+      return {
+        ok: false,
+        refusal: "T1_NOT_AUTHORIZED",
+        detail: "the terminal no longer holds a current T1 profile grant",
+      };
+    }
+    if ((await readBlockingContainment(client, input.terminalDeviceId)) !== null) {
+      return {
+        ok: false,
+        refusal: "T1_NOT_AUTHORIZED",
+        detail: "a containment directive is in effect",
+      };
+    }
+    if (!T1_TERMINAL_PIN_PERMISSIONS.includes(input.routePermission)) {
+      return {
+        ok: false,
+        refusal: "SESSION_PERMISSION_DENIED",
+        detail: `${input.routePermission} is not part of the T1 terminal surface`,
+      };
+    }
+    return {
+      ok: true,
+      authority: {
+        sessionId: row.id,
+        actorId: row.actor_id,
+        tenantId: row.tenant_id,
+        digitalStoreId: row.digital_store_id,
+        locationId: row.location_id,
+        profileCode: row.profile_code,
+      },
+    };
+  }
   if ((await resolveGrant(client, scope, row.actor_id, PERMISSION_POS_T1_USE)) !== "allow") {
     return {
       ok: false,
@@ -1136,6 +1221,11 @@ export async function refreshStaffSession(
       const owned = await loadOwnedOpenSession(client, input.sessionId, input.terminalDeviceId);
       if (!owned.ok) return refuse(owned.refusal, owned.detail);
       const row = owned.row;
+      // A Terminal PIN session is not a staff session: it is locked through the
+      // terminal-pin routes and never extended by a staff grant.
+      if (row.credential_kind !== "staff") {
+        return refuse("SESSION_UNKNOWN", "no such staff session");
+      }
 
       const nowRow = await client.query<{ now: Date }>(`select now() as now`);
       const now = nowRow.rows[0]?.now ?? new Date(0);
@@ -1217,6 +1307,11 @@ export async function closeStaffSession(
       const owned = await loadOwnedOpenSession(client, input.sessionId, input.terminalDeviceId);
       if (!owned.ok) return refuse(owned.refusal, owned.detail);
       const row = owned.row;
+      // A Terminal PIN session is not a staff session: it is locked through the
+      // terminal-pin routes and never extended by a staff grant.
+      if (row.credential_kind !== "staff") {
+        return refuse("SESSION_UNKNOWN", "no such staff session");
+      }
       if (
         (await resolveGrant(
           client,

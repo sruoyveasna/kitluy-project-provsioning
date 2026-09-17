@@ -1,44 +1,53 @@
 /**
- * The POS runtime on a KitLuy Pi Terminal — T1-STORE-OPERATIONS-001.
+ * The POS runtime on a KitLuy Pi Terminal — T1-STORE-OPERATIONS-001, and the
+ * Terminal PIN (TERMINAL-PIN-AND-REAL-POS-AUTH-001).
  *
  * Composition root and controller for the edge-bridge path: it runs
- * `bootstrapT1ThroughEdge` on a cadence, owns the ONE staff session this
- * terminal holds, hands the renderer intake operations only while the terminal
- * is READY, and publishes a public runtime-status file for the health reporter.
+ * `bootstrapT1ThroughEdge` on a cadence, owns the ONE session this terminal
+ * holds, hands the renderer intake operations only while the terminal is READY,
+ * and publishes a public runtime-status file for the health reporter.
+ *
+ * THE SESSION IS A TERMINAL PIN SESSION, NOT A STAFF LOGIN
+ * (KLD-2026-09-17-TERMINAL-PIN-DEVICE-CREDENTIAL-001). The terminal's device
+ * credential proves the device (the bridge's pinned mTLS, re-checked by the Hub
+ * on every request); the 4-digit Terminal PIN, verified by the Store Hub,
+ * unlocks it. The session the Hub issues names the terminal itself as the actor
+ * and carries the T1 surface. `staff_authentication_required` is therefore read
+ * on this path as "the terminal is locked": the state vocabulary is closed
+ * (states.ts) and the report's `pin` says which posture the lock is in.
  *
  * WHAT NEVER HAPPENS HERE
  *   - no TLS, no key, no certificate: the Hub is reached through the root edge
  *     bridge, which pins the verified Hub certificate;
  *   - no Supabase, no cloud call of any kind: normal Store operations go to the
  *     Store Hub (PROJECT_HOME §3.5);
- *   - the renderer never chooses a profile: sign-in is always into T1;
- *   - a passcode is never stored, logged or written to the status file.
+ *   - no staff login, no email, no password: there is no such route from here;
+ *   - a PIN is never stored, logged or written to the status file.
  */
 import { renameSync, writeFileSync, chmodSync } from "node:fs";
-
-import { TERMINAL_PROFILE_T1_INTAKE_CASHIER } from "@kitluy/edge-contracts";
 
 import {
   bootstrapT1ThroughEdge,
   type EdgeBridgeStatusWire,
   type EdgeVerifiedConfiguration,
 } from "../src/bootstrap/edge-machine.js";
-import type {
-  BootstrapLogger,
-  EdgeOperationsSession,
-  StaffSessionWire,
-} from "../src/bootstrap/ports.js";
+import type { BootstrapLogger, EdgeOperationsSession } from "../src/bootstrap/ports.js";
 import type { T1BootstrapReport } from "../src/bootstrap/states.js";
 import type { IntakeOperations } from "../src/intake/ports.js";
 import { bridgeCall, readBridgeStatus } from "./edge-bridge-client.js";
 import { createEdgeOperationsSession, type HubCall } from "./edge-operations-session.js";
 import { createIntakeOperationsWithCall } from "./t1-intake-client.js";
+import {
+  createTerminalPinClient,
+  type TerminalPinClient,
+  type TerminalPinRefusal,
+  type TerminalPinSessionWire,
+} from "./terminal-pin-client.js";
 
 /** Read by the health reporter (root). Public facts only; 0644. */
 export const POS_RUNTIME_STATUS_PATH = "/var/lib/kitluy/terminal/pos-runtime.json";
-export const POS_RUNTIME_STATUS_SCHEMA = "kitluy.pos-runtime-status.v1";
-/** Refresh a staff session when less than this remains of its lifetime. */
-const STAFF_REFRESH_MARGIN_MS = 5 * 60 * 1000;
+/** v2: `terminalUnlocked` (there is no staff login on a Pi Terminal). */
+export const POS_RUNTIME_STATUS_SCHEMA = "kitluy.pos-runtime-status.v2";
 
 export interface PosRuntimeStatusRecord {
   readonly schema: typeof POS_RUNTIME_STATUS_SCHEMA;
@@ -52,8 +61,8 @@ export interface PosRuntimeStatusRecord {
     readonly freshness: "current" | "cached_offline";
     readonly validUntil: string;
   } | null;
-  /** Whether a staff member is signed in. Never who. */
-  readonly staffSignedIn: boolean;
+  /** Whether the terminal is unlocked by its PIN. Never the PIN. */
+  readonly terminalUnlocked: boolean;
   readonly link: "edge_bridge";
   /** The device wall clock — DIAGNOSTIC ONLY, for the reporter's staleness check. */
   readonly observedAt: string;
@@ -79,15 +88,20 @@ export function statusRecordOf(
             freshness: report.configuration.freshness,
             validUntil: report.configuration.validUntil,
           },
-    staffSignedIn: report.staff !== undefined,
+    terminalUnlocked: report.staff !== undefined,
     link: "edge_bridge",
     observedAt: observedAt.toISOString(),
   };
 }
 
-export type StaffSignInResult =
+export type PinActionResult =
   | { readonly ok: true; readonly report: T1BootstrapReport }
-  | { readonly ok: false; readonly code: string; readonly detail: string };
+  | {
+      readonly ok: false;
+      readonly code: string;
+      readonly detail: string;
+      readonly pin?: T1BootstrapReport["pin"];
+    };
 
 export interface PiTerminalRuntimeOptions {
   readonly socketPath: string;
@@ -103,18 +117,25 @@ export interface PiTerminalRuntimeOptions {
   readonly bridgeStatus?: () => Promise<EdgeBridgeStatusWire>;
 }
 
+/** The states in which the terminal-level checks have passed and a PIN may be asked for. */
+const PIN_STATES: ReadonlySet<T1BootstrapReport["state"]> = new Set([
+  "staff_authentication_required",
+  "ready",
+  "offline_ready",
+]);
+
 export class PiTerminalRuntime {
   readonly #options: PiTerminalRuntimeOptions;
   readonly #call: HubCall;
   readonly #hub: EdgeOperationsSession;
+  readonly #pin: TerminalPinClient;
   readonly #monotonic: () => number;
   #report: T1BootstrapReport | null = null;
   #configuration: EdgeVerifiedConfiguration | null = null;
-  #staff: {
-    readonly wire: StaffSessionWire;
-    readonly lifetimeMs: number;
-    readonly at: number;
-  } | null = null;
+  /** The Terminal PIN session the Hub issued, in memory only. */
+  #session: TerminalPinSessionWire | null = null;
+  /** The Hub's latest answer about the PIN. Never a PIN. */
+  #pinPosture: T1BootstrapReport["pin"] | undefined = undefined;
   #listeners = new Set<(report: T1BootstrapReport) => void>();
   #running: Promise<T1BootstrapReport> | null = null;
 
@@ -122,6 +143,7 @@ export class PiTerminalRuntime {
     this.#options = options;
     this.#call = options.call ?? bridgeCall(options.socketPath);
     this.#hub = createEdgeOperationsSession(this.#call);
+    this.#pin = createTerminalPinClient(this.#call);
     this.#monotonic = options.monotonicNow ?? (() => performance.now());
   }
 
@@ -144,9 +166,9 @@ export class PiTerminalRuntime {
 
   /**
    * A run that STARTS after now. Sharing an in-flight run is right for the
-   * 30-second cadence, and wrong after a sign-in or sign-out: a run that began
+   * 30-second cadence, and wrong after an unlock or a lock: a run that began
    * before the session changed reports the terminal as it was, and the person at
-   * the counter would be told their correct passcode did not work.
+   * the counter would be told their correct PIN did not work.
    */
   async #refreshFromNow(): Promise<T1BootstrapReport> {
     const inFlight = this.#running;
@@ -171,105 +193,153 @@ export class PiTerminalRuntime {
             this.#configuration = record;
           },
         },
-        staffSession: { acquire: (hub) => this.#acquireStaff(hub) },
+        staffSession: { acquire: () => this.#acquireSession() },
         logger,
         monotonicNow: this.#monotonic,
       },
       { applicationVersion: this.#options.applicationVersion },
     );
-    this.#report = report;
-    this.#publish(report);
-    for (const listener of this.#listeners) listener(report);
-    return report;
-  }
-
-  async #acquireStaff(hub: EdgeOperationsSession) {
-    const held = this.#staff;
-    if (held === null) return null;
-    const remaining = held.lifetimeMs - (this.#monotonic() - held.at);
-    if (remaining < STAFF_REFRESH_MARGIN_MS) {
-      const refreshed = await hub.refreshStaffSession(held.wire.sessionId);
-      if (refreshed.outcome !== "ok") {
-        // Expired, closed or refused: the session is gone, and the terminal
-        // asks for a staff member again rather than guessing.
-        this.#staff = null;
-        return null;
-      }
-      this.#hold(refreshed.session);
-    }
-    const wire = this.#staff?.wire ?? held.wire;
-    return {
-      actorId: wire.actorId,
-      displayName: wire.displayName,
-      profileCodes: [wire.profileCode],
-      effectivePermissions: wire.effectivePermissions,
-      expiresAt: wire.expiresAt,
-    };
-  }
-
-  #hold(wire: StaffSessionWire): void {
-    const lifetime = new Date(wire.expiresAt).getTime() - new Date(wire.authorityTime).getTime();
-    this.#staff = {
-      wire,
-      lifetimeMs: Number.isFinite(lifetime) && lifetime > 0 ? lifetime : 0,
-      at: this.#monotonic(),
-    };
+    const posture = this.#pinPosture;
+    const withPin: T1BootstrapReport =
+      posture === undefined || !PIN_STATES.has(report.state) ? report : { ...report, pin: posture };
+    this.#report = withPin;
+    this.#publish(withPin);
+    for (const listener of this.#listeners) listener(withPin);
+    return withPin;
   }
 
   /**
-   * Open a staff session INTO T1. Only while every terminal-level check has
-   * passed: a terminal that is not serving never asks a person for a passcode.
+   * Step 7 of the bootstrap: the session that authorizes T1, if this terminal
+   * holds one. The Hub is asked, every run, what it thinks of the PIN and of the
+   * held session — a session the Hub closed (a reset, a lock from elsewhere) is
+   * let go here, never kept on the terminal's say-so.
    */
-  async signIn(input: {
-    readonly actorId: string;
-    readonly passcode: string;
-  }): Promise<StaffSignInResult> {
+  async #acquireSession() {
+    const held = this.#session;
+    try {
+      const status = await this.#pin.status(held?.sessionId ?? null);
+      if (status.outcome === "ok") {
+        this.#pinPosture = status.pin;
+        if (held !== null && status.session !== null && status.session.state !== "open") {
+          this.#session = null;
+          return null;
+        }
+      }
+    } catch {
+      // The status read is evidence, not authority: a missed read changes
+      // nothing, and the held session is still judged by its own expiry below.
+    }
+    if (held === null) return null;
+    return {
+      actorId: held.actorId,
+      displayName: held.displayName,
+      profileCodes: [held.profileCode],
+      effectivePermissions: held.effectivePermissions,
+      expiresAt: held.expiresAt,
+    };
+  }
+
+  /** Every PIN action needs a terminal whose terminal-level checks have passed. */
+  async #gate(): Promise<PinActionResult | null> {
     const current = this.#report ?? (await this.refresh());
-    if (
-      current.state !== "staff_authentication_required" &&
-      current.state !== "ready" &&
-      current.state !== "offline_ready"
-    ) {
+    if (!PIN_STATES.has(current.state)) {
       return {
         ok: false,
         code: current.refusalCode ?? current.state.toUpperCase(),
-        detail: "the terminal is not ready for a staff sign-in",
+        detail: "the terminal is not ready for its PIN",
       };
     }
-    if (this.#staff !== null) await this.signOut();
+    return null;
+  }
 
-    let opened;
-    try {
-      opened = await this.#hub.openStaffSession({
-        actorId: input.actorId,
-        passcode: input.passcode,
-        profileCode: TERMINAL_PROFILE_T1_INTAKE_CASHIER,
-      });
-    } catch (error) {
+  async #afterSession(
+    answer:
+      | {
+          readonly outcome: "ok";
+          readonly session: TerminalPinSessionWire;
+          readonly pin: NonNullable<T1BootstrapReport["pin"]>;
+        }
+      | TerminalPinRefusal,
+  ): Promise<PinActionResult> {
+    if (answer.outcome !== "ok") {
+      if (answer.pin !== undefined) this.#pinPosture = answer.pin;
       return {
         ok: false,
-        code: "HUB_UNREACHABLE",
-        detail: error instanceof Error ? error.message : "the Store Hub did not answer",
+        code: answer.result,
+        detail: answer.detail,
+        ...(answer.pin === undefined ? {} : { pin: answer.pin }),
       };
     }
-    if (opened.outcome !== "ok") return { ok: false, code: opened.result, detail: opened.detail };
-    this.#hold(opened.session);
-
+    this.#session = answer.session;
+    this.#pinPosture = answer.pin;
     const report = await this.#refreshFromNow();
     if (report.state === "ready" || report.state === "offline_ready") return { ok: true, report };
     return {
       ok: false,
       code: report.refusalCode ?? report.state.toUpperCase(),
-      detail: report.detail ?? "the staff session does not authorize T1",
+      detail: report.detail ?? "the Terminal PIN session does not authorize T1",
     };
   }
 
-  async signOut(): Promise<T1BootstrapReport> {
-    const held = this.#staff;
-    this.#staff = null;
+  /** §10: create the Terminal PIN, entered twice. Unlocks on success. */
+  async setupPin(input: {
+    readonly pin: string;
+    readonly pinConfirmation: string;
+  }): Promise<PinActionResult> {
+    const gate = await this.#gate();
+    if (gate !== null) return gate;
+    try {
+      return await this.#afterSession(await this.#pin.setup(input));
+    } catch (error) {
+      return { ok: false, code: "HUB_UNREACHABLE", detail: unreachable(error) };
+    }
+  }
+
+  /** Unlock the terminal with its PIN: the T1 session for this device. */
+  async unlock(input: { readonly pin: string }): Promise<PinActionResult> {
+    const gate = await this.#gate();
+    if (gate !== null) return gate;
+    try {
+      return await this.#afterSession(await this.#pin.unlock(input));
+    } catch (error) {
+      return { ok: false, code: "HUB_UNREACHABLE", detail: unreachable(error) };
+    }
+  }
+
+  /** Change the PIN: the current one, then the new one twice. The session stays. */
+  async changePin(input: {
+    readonly currentPin: string;
+    readonly newPin: string;
+    readonly newPinConfirmation: string;
+  }): Promise<PinActionResult> {
+    const gate = await this.#gate();
+    if (gate !== null) return gate;
+    let answer;
+    try {
+      answer = await this.#pin.change(input);
+    } catch (error) {
+      return { ok: false, code: "HUB_UNREACHABLE", detail: unreachable(error) };
+    }
+    if (answer.outcome !== "ok") {
+      if (answer.pin !== undefined) this.#pinPosture = answer.pin;
+      return {
+        ok: false,
+        code: answer.result,
+        detail: answer.detail,
+        ...(answer.pin === undefined ? {} : { pin: answer.pin }),
+      };
+    }
+    this.#pinPosture = answer.pin;
+    return { ok: true, report: await this.#refreshFromNow() };
+  }
+
+  /** Lock the terminal: the session is closed on the Hub and let go here. */
+  async lock(): Promise<T1BootstrapReport> {
+    const held = this.#session;
+    this.#session = null;
     if (held !== null) {
       try {
-        await this.#hub.closeStaffSession(held.wire.sessionId);
+        await this.#pin.lock(held.sessionId);
       } catch {
         // The Hub expires the session on its own; the terminal has let go.
       }
@@ -277,13 +347,13 @@ export class PiTerminalRuntime {
     return this.#refreshFromNow();
   }
 
-  /** Intake only while READY with a staff session — otherwise null (fail closed). */
+  /** Intake only while READY and unlocked — otherwise null (fail closed). */
   intakeOperations(): IntakeOperations | null {
     const report = this.#report;
-    const staff = this.#staff;
-    if (report === null || staff === null) return null;
+    const session = this.#session;
+    if (report === null || session === null) return null;
     if (report.state !== "ready" && report.state !== "offline_ready") return null;
-    return createIntakeOperationsWithCall({ call: this.#call, sessionId: staff.wire.sessionId });
+    return createIntakeOperationsWithCall({ call: this.#call, sessionId: session.sessionId });
   }
 
   #publish(report: T1BootstrapReport): void {
@@ -304,4 +374,8 @@ export class PiTerminalRuntime {
       // then sees a stale record and says so.
     }
   }
+}
+
+function unreachable(error: unknown): string {
+  return error instanceof Error ? error.message : "the Store Hub did not answer";
 }

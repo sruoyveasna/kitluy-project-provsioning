@@ -41,6 +41,16 @@ export interface TerminalRuntime {
     readonly phase: string;
     readonly hubDeviceId: string | null;
     readonly checkedAt: string;
+    /**
+     * The Terminal PIN as the STORE HUB answered the Terminal. Absent from an
+     * older API, null when the Terminal reported before the PIN existed or the
+     * Hub did not answer. Never a PIN.
+     */
+    readonly terminalPin?: null | {
+      readonly state: "setup_required" | "set" | "reset_required";
+      readonly setAt: string | null;
+      readonly lockedUntil: string | null;
+    };
   };
   readonly application: null | {
     readonly product: string;
@@ -57,7 +67,8 @@ export interface TerminalRuntime {
     readonly applicationVersion: string;
     readonly configurationVersion: number | null;
     readonly configurationFreshness: string | null;
-    readonly staffSignedIn: boolean;
+    /** The Terminal is unlocked by its PIN. Never who unlocked it. */
+    readonly terminalUnlocked: boolean;
   };
 }
 

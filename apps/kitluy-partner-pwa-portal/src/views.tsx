@@ -477,6 +477,14 @@ export function ProvisioningLadder(props: {
                 </small>
               </>
             ) : null}
+            {rung.note === undefined ? null : (
+              <>
+                <br />
+                <small className="kl-muted" data-rung-note={rung.note}>
+                  {t[rung.note]}
+                </small>
+              </>
+            )}
             {rung.reason === undefined ? null : (
               <>
                 <br />

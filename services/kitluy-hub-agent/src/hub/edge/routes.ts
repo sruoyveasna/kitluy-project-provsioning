@@ -75,6 +75,14 @@ import {
   type T1IntakeAuthority,
 } from "./runtime-bootstrap.js";
 import {
+  changeTerminalPin,
+  lockTerminalSession,
+  readTerminalPinStatus,
+  setupTerminalPin,
+  unlockTerminalWithPin,
+  type TerminalPinResult,
+} from "./terminal-pin.js";
+import {
   CONSENT_PURPOSE_KEYS,
   DRAFT_CANCEL_REASONS,
   IntakeRefusalError,
@@ -118,6 +126,16 @@ export const EDGE_CONFIGURATION_CURRENT_PATH = "/edge/v1/configuration/current";
 export const EDGE_SESSIONS_OPEN_PATH = "/edge/v1/sessions/open";
 export const EDGE_SESSIONS_REFRESH_PATH = "/edge/v1/sessions/refresh";
 export const EDGE_SESSIONS_CLOSE_PATH = "/edge/v1/sessions/close";
+
+// The Terminal PIN (KLD-2026-09-03-TERMINAL-PROVISIONING-001 §10-§15;
+// KLD-2026-09-17-TERMINAL-PIN-DEVICE-CREDENTIAL-001). Device-credential routes:
+// the mTLS gate runs first, and setup/unlock/change also demand runtime
+// eligibility, so an untrusted terminal never has its PIN looked at.
+export const EDGE_TERMINAL_PIN_STATUS_PATH = "/edge/v1/terminal-pin/status";
+export const EDGE_TERMINAL_PIN_SETUP_PATH = "/edge/v1/terminal-pin/setup";
+export const EDGE_TERMINAL_PIN_UNLOCK_PATH = "/edge/v1/terminal-pin/unlock";
+export const EDGE_TERMINAL_PIN_CHANGE_PATH = "/edge/v1/terminal-pin/change";
+export const EDGE_TERMINAL_PIN_LOCK_PATH = "/edge/v1/terminal-pin/lock";
 
 // T1 intake surface (KLD-2026-08-06-WS12-T002-001 §5; literals mirrored in
 // @kitluy/edge-contracts EDGE_T002_INTAKE_ROUTES). Every route additionally
@@ -295,6 +313,16 @@ const CANONICAL_ERROR: Readonly<Record<string, KitluyErrorCode>> = {
   SESSION_UNKNOWN: "RESOURCE_NOT_FOUND",
   SESSION_EXPIRED: "AUTHENTICATION_REQUIRED",
   SESSION_CLOSED: "RESOURCE_VERSION_CONFLICT",
+  // The Terminal PIN (closed vocabulary). A wrong PIN and a lock are distinct on
+  // purpose: the PIN is the terminal's own, so there is no one to protect from
+  // knowing how many tries are left, and the person at the counter must be told.
+  PIN_FORMAT_INVALID: "VALIDATION_FAILED",
+  PIN_CONFIRMATION_MISMATCH: "VALIDATION_FAILED",
+  PIN_ALREADY_SET: "RESOURCE_VERSION_CONFLICT",
+  PIN_SETUP_REQUIRED: "RESOURCE_VERSION_CONFLICT",
+  PIN_INCORRECT: "AUTHENTICATION_REQUIRED",
+  PIN_LOCKED: "RATE_LIMITED",
+  TERMINAL_UNKNOWN: "DEVICE_NOT_ASSIGNED",
 };
 
 const CANONICAL_MESSAGE: Readonly<Partial<Record<KitluyErrorCode, string>>> = {
@@ -309,6 +337,7 @@ const CANONICAL_MESSAGE: Readonly<Partial<Record<KitluyErrorCode, string>>> = {
     "the idempotency key was already used with a different request",
   DEPENDENCY_UNAVAILABLE: "a required authority is unavailable",
   HUB_UNREACHABLE: "the cloud activation authority is unreachable; retry later",
+  RATE_LIMITED: "too many attempts; wait until the lock ends",
   INTERNAL_ERROR: "the operation failed and the details are not disclosed",
 };
 
@@ -319,6 +348,23 @@ function refusal(result: string, correlationId: string): EdgeResponse {
     body: errorEnvelope(code, CANONICAL_MESSAGE[code] ?? "the request was refused", {
       correlationId,
       details: { result, retryable: isRetryable(code) },
+    }),
+  };
+}
+
+/** A PIN refusal carries the PIN's public state (never the PIN) when there is one. */
+function pinRefusal(outcome: TerminalPinResult<never>, correlationId: string): EdgeResponse {
+  if (outcome.outcome !== "refused") return refusal("INTERNAL_ERROR", correlationId);
+  const code = CANONICAL_ERROR[outcome.refusal] ?? "INTERNAL_ERROR";
+  return {
+    status: httpStatusFor(code),
+    body: errorEnvelope(code, CANONICAL_MESSAGE[code] ?? "the request was refused", {
+      correlationId,
+      details: {
+        result: outcome.refusal,
+        retryable: isRetryable(code),
+        ...(outcome.status === undefined ? {} : { pin: outcome.status }),
+      },
     }),
   };
 }
@@ -523,7 +569,12 @@ type Matched =
         | "configuration-current"
         | "sessions-open"
         | "sessions-refresh"
-        | "sessions-close";
+        | "sessions-close"
+        | "terminal-pin-status"
+        | "terminal-pin-setup"
+        | "terminal-pin-unlock"
+        | "terminal-pin-change"
+        | "terminal-pin-lock";
     }
   | {
       readonly route: "pairing-proof" | "pairing-complete" | "pairing-receipt";
@@ -573,6 +624,21 @@ function matchRoute(method: string, path: string): Matched | "METHOD_NOT_ALLOWED
   }
   if (clean === EDGE_SESSIONS_CLOSE_PATH) {
     return method === "POST" ? { route: "sessions-close" } : "METHOD_NOT_ALLOWED";
+  }
+  if (clean === EDGE_TERMINAL_PIN_STATUS_PATH) {
+    return method === "GET" ? { route: "terminal-pin-status" } : "METHOD_NOT_ALLOWED";
+  }
+  if (clean === EDGE_TERMINAL_PIN_SETUP_PATH) {
+    return method === "POST" ? { route: "terminal-pin-setup" } : "METHOD_NOT_ALLOWED";
+  }
+  if (clean === EDGE_TERMINAL_PIN_UNLOCK_PATH) {
+    return method === "POST" ? { route: "terminal-pin-unlock" } : "METHOD_NOT_ALLOWED";
+  }
+  if (clean === EDGE_TERMINAL_PIN_CHANGE_PATH) {
+    return method === "POST" ? { route: "terminal-pin-change" } : "METHOD_NOT_ALLOWED";
+  }
+  if (clean === EDGE_TERMINAL_PIN_LOCK_PATH) {
+    return method === "POST" ? { route: "terminal-pin-lock" } : "METHOD_NOT_ALLOWED";
   }
   // WS-12-T002 intake surface (KLD-2026-08-06-WS12-T002-001 §5).
   if (clean === EDGE_CUSTOMERS_SEARCH_PATH) {
@@ -707,6 +773,11 @@ export function createEdgeTerminalRouter(deps: EdgeTerminalRouterDeps): EdgeRequ
         "sessions-open",
         "sessions-refresh",
         "sessions-close",
+        "terminal-pin-status",
+        "terminal-pin-setup",
+        "terminal-pin-unlock",
+        "terminal-pin-change",
+        "terminal-pin-lock",
         // T002: every intake route refuses query strings EXCEPT the search
         // read, whose single bounded `phone` parameter is parsed explicitly.
         "customers-create",
@@ -927,6 +998,16 @@ export function createEdgeTerminalRouter(deps: EdgeTerminalRouterDeps): EdgeRequ
               outcome.result,
             );
           }
+          case "terminal-pin-status":
+          case "terminal-pin-setup":
+          case "terminal-pin-unlock":
+          case "terminal-pin-change":
+          case "terminal-pin-lock":
+            return finish(
+              operation,
+              await handleTerminalPin(deps, terminal, matched.route, request, body, correlationId),
+              "HANDLED",
+            );
           case "customers-search":
           case "customers-read":
           case "customers-create":
@@ -1574,6 +1655,133 @@ const INTAKE_MUTATIONS: readonly string[] = [
 
 const NOTES_MAX = 2000;
 const NAME_MAX = 200;
+
+// ---------------------------------------------------------------------------
+// The Terminal PIN
+// ---------------------------------------------------------------------------
+
+const PIN_BODY_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  "terminal-pin-setup": ["pin", "pinConfirmation"],
+  "terminal-pin-unlock": ["pin"],
+  "terminal-pin-change": ["currentPin", "newPin", "newPinConfirmation"],
+  "terminal-pin-lock": ["sessionId"],
+};
+
+/**
+ * NEVER logs a body: the router log carries the operation and the result only,
+ * and nothing in this handler echoes a PIN back.
+ */
+async function handleTerminalPin(
+  deps: EdgeTerminalRouterDeps,
+  terminal: AuthorizedTerminal,
+  route:
+    | "terminal-pin-status"
+    | "terminal-pin-setup"
+    | "terminal-pin-unlock"
+    | "terminal-pin-change"
+    | "terminal-pin-lock",
+  request: EdgeRequest,
+  body: Record<string, unknown>,
+  correlationId: string,
+): Promise<EdgeResponse> {
+  if (!terminal.activated) return refusal("ACTIVATION_REQUIRED", correlationId);
+
+  if (route === "terminal-pin-status") {
+    if (request.rawBody !== "") return invalid(correlationId, "a GET carries no body");
+    const header = request.headers[INTAKE_SESSION_HEADER];
+    const sessionId = typeof header === "string" && header !== "" ? header : null;
+    if (sessionId !== null && !UUID.test(sessionId)) {
+      return invalid(correlationId, `${INTAKE_SESSION_HEADER} must be a session id`);
+    }
+    const status = await readTerminalPinStatus(deps.pool, {
+      terminalDeviceId: terminal.terminalDeviceId,
+      sessionId,
+    });
+    return { status: 200, body: { result: "TERMINAL_PIN_STATUS", correlationId, ...status } };
+  }
+
+  if (idempotencyKeyFrom(request.headers) === null) {
+    return invalid(correlationId, "an Idempotency-Key header is required");
+  }
+  const allowed = PIN_BODY_FIELDS[route] ?? [];
+  const unknown = unknownFields(body, allowed);
+  if (unknown.length > 0) return invalid(correlationId, "unknown fields", unknown);
+  const text = (key: string): string | null =>
+    typeof body[key] === "string" ? (body[key] as string) : null;
+  const missing = allowed.filter((key) => text(key) === null);
+  if (missing.length > 0) return invalid(correlationId, "required fields are missing", missing);
+
+  if (route === "terminal-pin-lock") {
+    const sessionId = text("sessionId") ?? "";
+    if (!UUID.test(sessionId)) return invalid(correlationId, "sessionId must be a session id");
+    const locked = await lockTerminalSession(deps.pool, {
+      terminalDeviceId: terminal.terminalDeviceId,
+      sessionId,
+    });
+    if (locked.outcome !== "ok")
+      return pinRefusal(locked as TerminalPinResult<never>, correlationId);
+    return { status: 200, body: { result: locked.result, correlationId } };
+  }
+
+  // Setting, verifying or changing a PIN requires a terminal that may OPERATE:
+  // the same eligibility the bootstrap reads prove. The device credential is
+  // checked before the PIN, never instead of it.
+  const eligibility = await readRuntimeEligibility(
+    deps.pool,
+    terminal.terminalDeviceId,
+    terminal.certificateSerial,
+    deps.environment ?? "development",
+  );
+  if (eligibility.outcome === "refused") return refusal(eligibility.refusal, correlationId);
+
+  if (route === "terminal-pin-setup") {
+    const outcome = await setupTerminalPin(deps.pool, {
+      terminalDeviceId: terminal.terminalDeviceId,
+      pin: text("pin") ?? "",
+      pinConfirmation: text("pinConfirmation") ?? "",
+      correlationId,
+    });
+    if (outcome.outcome !== "ok")
+      return pinRefusal(outcome as TerminalPinResult<never>, correlationId);
+    return {
+      status: 200,
+      body: {
+        result: outcome.result,
+        correlationId,
+        session: outcome.value.session,
+        pin: outcome.value.pin,
+      },
+    };
+  }
+  if (route === "terminal-pin-unlock") {
+    const outcome = await unlockTerminalWithPin(deps.pool, {
+      terminalDeviceId: terminal.terminalDeviceId,
+      pin: text("pin") ?? "",
+      correlationId,
+    });
+    if (outcome.outcome !== "ok")
+      return pinRefusal(outcome as TerminalPinResult<never>, correlationId);
+    return {
+      status: 200,
+      body: {
+        result: outcome.result,
+        correlationId,
+        session: outcome.value.session,
+        pin: outcome.value.pin,
+      },
+    };
+  }
+  const changed = await changeTerminalPin(deps.pool, {
+    terminalDeviceId: terminal.terminalDeviceId,
+    currentPin: text("currentPin") ?? "",
+    newPin: text("newPin") ?? "",
+    newPinConfirmation: text("newPinConfirmation") ?? "",
+    correlationId,
+  });
+  if (changed.outcome !== "ok")
+    return pinRefusal(changed as TerminalPinResult<never>, correlationId);
+  return { status: 200, body: { result: changed.result, correlationId, pin: changed.value.pin } };
+}
 
 async function handleT1Intake(
   deps: EdgeTerminalRouterDeps,

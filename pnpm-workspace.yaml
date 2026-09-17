@@ -33,3 +33,8 @@ catalog:
   # plus `pg`, so a file-copy closure cannot package it. Build tooling only:
   # nothing esbuild produces carries esbuild into the image.
   esbuild: "^0.25.12"
+  # Argon2id for the Terminal PIN verifier on the Store Hub
+  # (KLD-2026-09-03-TERMINAL-PROVISIONING-001 §12: "Argon2id or its approved
+  # successor"). WebAssembly, no native addon: it bundles into the one-file Hub
+  # agent and runs on the image's Debian Node 18. Exact version, not a range.
+  hash-wasm: "4.12.0"

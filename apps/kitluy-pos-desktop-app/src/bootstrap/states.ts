@@ -58,10 +58,26 @@ export interface ResolvedHubSummary {
   readonly port: number;
 }
 
-/** Safe projection of the staff session. Never carries a verifier or token. */
+/**
+ * Safe projection of the session that authorizes T1. Never carries a verifier
+ * or token. On a Pi Terminal (KLD-2026-09-17-TERMINAL-PIN-DEVICE-CREDENTIAL-001)
+ * this is the TERMINAL PIN session: the actor is the terminal device itself and
+ * the display name is empty — there is no staff login on that path.
+ */
 export interface StaffSessionSummary {
   readonly actorId: string;
   readonly displayName: string;
+}
+
+/**
+ * The Terminal PIN as the STORE HUB answered this terminal. Public posture only:
+ * never a PIN, never a verifier. Present on the Pi Terminal composition once the
+ * Hub has answered; absent on the WS-12-T001 workstation composition.
+ */
+export interface TerminalPinSummary {
+  readonly state: "setup_required" | "set" | "reset_required";
+  readonly lockedUntil: string | null;
+  readonly attemptsBeforeLock: number;
 }
 
 /**
@@ -87,6 +103,7 @@ export interface T1BootstrapReport {
    * Hub signature itself. Never a key, a signature or a fingerprint.
    */
   readonly link?: HubLinkSummary;
+  readonly pin?: TerminalPinSummary;
 }
 
 export interface HubLinkSummary {

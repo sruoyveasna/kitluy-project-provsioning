@@ -70,6 +70,16 @@ export interface TerminalRuntimeDto {
     readonly phase: string;
     readonly hubDeviceId: string | null;
     readonly checkedAt: string;
+    /**
+     * The Terminal PIN as the STORE HUB answered the terminal (report v2). Its
+     * own evidence for the Partner ladder's "PIN set"; null when the terminal
+     * reported v1 or the Hub did not answer. Never a PIN, never a verifier.
+     */
+    readonly terminalPin: null | {
+      readonly state: "setup_required" | "set" | "reset_required";
+      readonly setAt: string | null;
+      readonly lockedUntil: string | null;
+    };
   };
   readonly application: null | {
     readonly product: string;
@@ -86,7 +96,8 @@ export interface TerminalRuntimeDto {
     readonly applicationVersion: string;
     readonly configurationVersion: number | null;
     readonly configurationFreshness: string | null;
-    readonly staffSignedIn: boolean;
+    /** Unlocked by the Terminal PIN (v2), or signed in (a v1 report). Never who. */
+    readonly terminalUnlocked: boolean;
   };
 }
 
@@ -270,6 +281,7 @@ function toRuntimeDto(row: TerminalRow): TerminalRuntimeDto | null {
             phase: text(hub["phase"]) ?? "unknown",
             hubDeviceId: text(hub["hubDeviceId"]),
             checkedAt: text(hub["checkedAt"]) ?? "",
+            terminalPin: terminalPinDto(hub["terminalPin"]),
           },
     application:
       app === null || app === undefined
@@ -293,9 +305,17 @@ function toRuntimeDto(row: TerminalRow): TerminalRuntimeDto | null {
             configurationVersion:
               typeof pos["configurationVersion"] === "number" ? pos["configurationVersion"] : null,
             configurationFreshness: text(pos["configurationFreshness"]),
-            staffSignedIn: pos["staffSignedIn"] === true,
+            terminalUnlocked: pos["terminalUnlocked"] === true || pos["staffSignedIn"] === true,
           },
   };
+}
+
+function terminalPinDto(value: unknown): NonNullable<TerminalRuntimeDto["hubLink"]>["terminalPin"] {
+  if (value === null || typeof value !== "object") return null;
+  const pin = value as Record<string, unknown>;
+  const state = pin["state"];
+  if (state !== "setup_required" && state !== "set" && state !== "reset_required") return null;
+  return { state, setAt: text(pin["setAt"]), lockedUntil: text(pin["lockedUntil"]) };
 }
 
 function toTerminalDto(row: TerminalRow): PhysicalTerminalDto {

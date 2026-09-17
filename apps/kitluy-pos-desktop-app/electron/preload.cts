@@ -46,11 +46,15 @@ contextBridge.exposeInMainWorld("kitluyT1Intake", {
     ipcRenderer.invoke("kitluy:t1:intake:cancel-draft", payload),
 });
 
-// T1-STORE-OPERATIONS-001: exactly two NAMED staff operations. The renderer
-// supplies a staff id and a passcode; the profile is always T1, chosen by the
-// main process, and the Hub is the verifier (electron/staff-ipc.ts).
-contextBridge.exposeInMainWorld("kitluyT1Staff", {
-  signIn: (payload: unknown): Promise<unknown> =>
-    ipcRenderer.invoke("kitluy:t1:staff:sign-in", payload),
-  signOut: (): Promise<unknown> => ipcRenderer.invoke("kitluy:t1:staff:sign-out"),
+// TERMINAL-PIN-AND-REAL-POS-AUTH-001: exactly four NAMED Terminal PIN
+// operations. The renderer supplies four-digit PINs; the Store Hub is the
+// verifier and the main process holds the session (electron/pin-ipc.ts). There
+// is no staff sign-in channel on a Pi Terminal.
+contextBridge.exposeInMainWorld("kitluyT1Pin", {
+  setup: (payload: unknown): Promise<unknown> => ipcRenderer.invoke("kitluy:t1:pin:setup", payload),
+  unlock: (payload: unknown): Promise<unknown> =>
+    ipcRenderer.invoke("kitluy:t1:pin:unlock", payload),
+  change: (payload: unknown): Promise<unknown> =>
+    ipcRenderer.invoke("kitluy:t1:pin:change", payload),
+  lock: (): Promise<unknown> => ipcRenderer.invoke("kitluy:t1:pin:lock"),
 });

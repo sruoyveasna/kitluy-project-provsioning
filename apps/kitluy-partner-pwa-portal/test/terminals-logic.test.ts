@@ -221,14 +221,21 @@ describe("the ladder reports, never infers", () => {
     applicationVersion: "0.1.0",
     configurationVersion: 7,
     configurationFreshness: "current",
-    staffSignedIn: true,
+    terminalUnlocked: true,
+  };
+  const PIN_SET = { state: "set" as const, setAt: "2026-09-04T09:00:00Z", lockedUntil: null };
+  const SERVING: NonNullable<Runtime["hubLink"]> = {
+    phase: "SERVING",
+    hubDeviceId: "h",
+    checkedAt: "2026-09-04T09:59:20Z",
+    terminalPin: PIN_SET,
   };
   function runtime(over: Partial<Runtime> = {}): Runtime {
     return {
       source: "device_reported",
       receivedAt: "2026-09-04T09:59:30Z",
       ageSeconds: 30,
-      hubLink: { phase: "SERVING", hubDeviceId: "h", checkedAt: "2026-09-04T09:59:20Z" },
+      hubLink: SERVING,
       application: APPLICATION,
       pos: POS,
       ...over,
@@ -257,7 +264,7 @@ describe("the ladder reports, never infers", () => {
       issued: "current",
       redeemed: "not_reported",
       hubConnected: "not_reported",
-      pinSet: "unbuilt",
+      pinSet: "not_reported",
       active: "not_reported",
     });
   });
@@ -316,12 +323,12 @@ describe("the ladder reports, never infers", () => {
       appInstalled: "not_reported",
       appRunning: "not_reported",
       configurationLoaded: "not_reported",
-      pinSet: "unbuilt",
+      pinSet: "not_reported",
       active: "not_reported",
     });
   });
 
-  it("a fresh report of everything: connected, installed (version), running, configuration loaded — each device-reported", () => {
+  it("a fresh report of everything: connected, installed (version), running, configuration loaded, PIN set, Operational — each device-reported", () => {
     const rungs = deriveLadder(
       {
         hub: active,
@@ -335,29 +342,125 @@ describe("the ladder reports, never infers", () => {
       appInstalled: "done",
       appRunning: "done",
       configurationLoaded: "done",
+      pinSet: "done",
+      active: "done",
     });
     expect(rungs.find((r) => r.key === "appInstalled")).toMatchObject({
       detail: "0.1.0-t1a",
       source: "device_reported",
     });
     expect(rungs.find((r) => r.key === "configurationLoaded")?.detail).toBe("v7");
+    expect(rungs.find((r) => r.key === "pinSet")?.source).toBe("device_reported");
+    expect(rungs.find((r) => r.key === "active")?.source).toBe("device_reported");
     expect(rungs.find((r) => r.key === "activated")?.source).toBeUndefined();
   });
 
-  it("OPERATIONAL is never done while the Terminal PIN is unbuilt (LOCKED §10), however ready the POS is", () => {
-    const s = state(
-      deriveLadder(
-        {
-          hub: active,
-          terminal: terminal({ boundDevice: activeDevice, runtime: runtime() }),
-          session: null,
-        },
-        NOW,
+  it("PIN set comes ONLY from the Store Hub's answer — never from the application running", () => {
+    for (const terminalPin of [undefined, null] as const) {
+      const r = runtime({ hubLink: { ...SERVING, terminalPin } });
+      const s = state(
+        deriveLadder(
+          {
+            hub: active,
+            terminal: terminal({ boundDevice: activeDevice, runtime: r }),
+            session: null,
+          },
+          NOW,
+        ),
+      );
+      expect(s).toMatchObject({
+        appRunning: "done",
+        configurationLoaded: "done",
+        pinSet: "current",
+        active: "not_reported",
+      });
+    }
+    const setupRequired = runtime({
+      hubLink: {
+        ...SERVING,
+        terminalPin: { state: "setup_required", setAt: null, lockedUntil: null },
+      },
+    });
+    expect(
+      state(
+        deriveLadder(
+          {
+            hub: active,
+            terminal: terminal({ boundDevice: activeDevice, runtime: setupRequired }),
+            session: null,
+          },
+          NOW,
+        ),
       ),
+    ).toMatchObject({ pinSet: "current", active: "not_reported" });
+  });
+
+  it("OPERATIONAL is never done without the PIN set (LOCKED §10), nor with any earlier rung missing", () => {
+    const cases: Array<[string, Partial<Runtime>]> = [
+      ["no PIN", { hubLink: { ...SERVING, terminalPin: null } }],
+      [
+        "PIN awaiting reset",
+        {
+          hubLink: {
+            ...SERVING,
+            terminalPin: { state: "reset_required", setAt: null, lockedUntil: null },
+          },
+        },
+      ],
+      [
+        "not running",
+        { application: { ...APPLICATION, unitActive: false, runningReleaseId: null } },
+      ],
+      [
+        "no configuration",
+        { pos: { ...POS, state: "hub_unavailable", configurationVersion: null } },
+      ],
+      ["not connected", { hubLink: { ...SERVING, phase: "DEGRADED" } }],
+    ];
+    for (const [label, over] of cases) {
+      const s = state(
+        deriveLadder(
+          {
+            hub: active,
+            terminal: terminal({ boundDevice: activeDevice, runtime: runtime(over) }),
+            session: null,
+          },
+          NOW,
+        ),
+      );
+      expect(s.active, label).not.toBe("done");
+    }
+  });
+
+  it("a locked PIN is set but the Terminal is not Operational, and the ladder says why", () => {
+    const r = runtime({
+      hubLink: { ...SERVING, terminalPin: { ...PIN_SET, lockedUntil: "2026-09-04T10:14:00Z" } },
+    });
+    const rungs = deriveLadder(
+      { hub: active, terminal: terminal({ boundDevice: activeDevice, runtime: r }), session: null },
+      NOW,
     );
-    expect(s.pinSet).toBe("unbuilt");
-    expect(s.active).not.toBe("done");
-    expect(s.active).not.toBe("current");
+    // Set, and the next step is the unlock — said on the rung itself, never "done".
+    expect(state(rungs)).toMatchObject({ pinSet: "done", active: "current" });
+    expect(rungs.find((r) => r.key === "pinSet")?.note).toBe("pinLocked");
+  });
+
+  it("a PIN awaiting reset is the step to look at, in words", () => {
+    const r = runtime({
+      hubLink: {
+        ...SERVING,
+        terminalPin: { state: "reset_required", setAt: null, lockedUntil: null },
+      },
+    });
+    const rungs = deriveLadder(
+      { hub: active, terminal: terminal({ boundDevice: activeDevice, runtime: r }), session: null },
+      NOW,
+    );
+    expect(rungs.find((r) => r.key === "pinSet")).toMatchObject({
+      state: "current",
+      note: "pinResetRequired",
+      source: "device_reported",
+    });
   });
 
   it("installed is not running: a committed release the unit is not running", () => {
@@ -431,6 +534,8 @@ describe("the ladder reports, never infers", () => {
       appInstalled: "stale",
       appRunning: "stale",
       configurationLoaded: "stale",
+      pinSet: "stale",
+      active: "stale",
     });
   });
 
@@ -465,7 +570,7 @@ describe("the ladder reports, never infers", () => {
     expect(rungs[0]).toMatchObject({ state: "blocked", reason: "hubUnreported" });
   });
 
-  it("the unbuilt PIN rung never becomes the step being waited for, and nothing after it does", () => {
+  it("no rung is unbuilt any more: every rung can be reported", () => {
     const s = state(
       deriveLadder(
         {
@@ -476,8 +581,7 @@ describe("the ladder reports, never infers", () => {
         NOW,
       ),
     );
-    expect(s.pinSet).toBe("unbuilt");
-    expect(s.active).toBe("not_reported");
+    expect(Object.values(s)).not.toContain("unbuilt");
   });
 
   it("every rung has a label in both languages, and so does every state", () => {
@@ -489,6 +593,8 @@ describe("the ladder reports, never infers", () => {
         "rungConfigurationLoaded",
         "rungStale",
         "deviceReported",
+        "pinLocked",
+        "pinResetRequired",
       ] as const) {
         expect(m[key].length).toBeGreaterThan(0);
       }

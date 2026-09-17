@@ -27,7 +27,7 @@ import type { IntakeOperations } from "../src/intake/ports.js";
 import { DEFAULT_EDGE_BRIDGE_SOCKET } from "./edge-bridge-client.js";
 import { registerIntakeIpc } from "./intake-ipc.js";
 import { PiTerminalRuntime, POS_RUNTIME_STATUS_PATH } from "./pi-runtime.js";
-import { registerStaffIpc } from "./staff-ipc.js";
+import { registerPinIpc } from "./pin-ipc.js";
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 const REPORT_CHANNEL = "kitluy:t1:report";
@@ -71,7 +71,7 @@ async function startPiTerminal(): Promise<void> {
   });
   ipcMain.handle(REPORT_CHANNEL, () => runtime.report);
   registerIntakeIpc(ipcMain, () => runtime.intakeOperations());
-  registerStaffIpc(ipcMain, runtime);
+  registerPinIpc(ipcMain, runtime);
 
   const window = createWindow();
   runtime.onReport((report) => {

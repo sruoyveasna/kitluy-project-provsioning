@@ -22,7 +22,7 @@ import { AppShell, DataSurface, KitluyErrorBoundary, LocaleProvider } from "@kit
 import type { T1BootstrapReport } from "./bootstrap/states.js";
 import { T1BootstrapView } from "./bootstrap-view.js";
 import { IntakeScreen } from "./intake-screen.js";
-import { StaffSignIn } from "./staff-sign-in.js";
+import { PinScreen } from "./pin-screen.js";
 
 export const PRODUCT_NAME = "kitluy-pos-desktop-app" as const;
 
@@ -83,7 +83,7 @@ export function App(props: { readonly report?: T1BootstrapReport }) {
             <>
               <T1BootstrapView report={report} locale={locale} />
               {report.state === "staff_authentication_required" ? (
-                <StaffSignIn locale={locale} />
+                <PinScreen locale={locale} report={report} />
               ) : null}
               {(report.state === "ready" || report.state === "offline_ready") &&
               report.staff !== undefined ? (

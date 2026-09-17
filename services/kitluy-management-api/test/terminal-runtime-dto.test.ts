@@ -30,7 +30,7 @@ function row(overrides: Record<string, unknown> = {}) {
     session_failed: null,
     session_locked_at: null,
     runtime_report: {
-      schema: "kitluy.device-runtime-report.v1",
+      schema: "kitluy.device-runtime-report.v2",
       deviceClass: "terminal",
       imageVersion: "0.2.0-dev",
       agentVersion: "0.1.0",
@@ -39,6 +39,7 @@ function row(overrides: Record<string, unknown> = {}) {
         hubDeviceId: "549a41c6-21e9-4838-8b48-34a3878ba290",
         checkedAt: "2026-09-17T03:00:00.000Z",
         reads: { authorityTime: "ok", eligibility: "ok", configuration: "ok" },
+        terminalPin: { state: "set", setAt: "2026-09-17T02:58:00.000Z", lockedUntil: null },
       },
       application: {
         product: "kitluy-terminal",
@@ -57,7 +58,7 @@ function row(overrides: Record<string, unknown> = {}) {
         applicationVersion: "0.1.0",
         configurationVersion: 7,
         configurationFreshness: "current",
-        staffSignedIn: true,
+        terminalUnlocked: true,
         observedAt: "2026-09-17T03:00:01.000Z",
       },
     },
@@ -102,6 +103,7 @@ describe("the runtime a Partner sees", () => {
         phase: "SERVING",
         hubDeviceId: "549a41c6-21e9-4838-8b48-34a3878ba290",
         checkedAt: "2026-09-17T03:00:00.000Z",
+        terminalPin: { state: "set", setAt: "2026-09-17T02:58:00.000Z", lockedUntil: null },
       },
       application: {
         product: "kitluy-terminal",
@@ -118,9 +120,57 @@ describe("the runtime a Partner sees", () => {
         applicationVersion: "0.1.0",
         configurationVersion: 7,
         configurationFreshness: "current",
-        staffSignedIn: true,
+        terminalUnlocked: true,
       },
     });
+  });
+
+  it("a v1 report (a terminal before the Terminal PIN) reads with no PIN evidence, and its sign-in as an unlock", async () => {
+    const base = row().runtime_report as Record<string, Record<string, unknown>>;
+    const { terminalPin: _pin, ...hubLinkV1 } = base["hubLink"] as Record<string, unknown>;
+    const { terminalUnlocked: _u, ...posV1 } = base["pos"] as Record<string, unknown>;
+    const p = pool([
+      row({
+        runtime_report: {
+          ...base,
+          schema: "kitluy.device-runtime-report.v1",
+          hubLink: hubLinkV1,
+          pos: { ...posV1, staffSignedIn: true },
+        },
+      }),
+    ]);
+    const [terminal] = await listPhysicalTerminals(p.deps, STORE);
+    expect(terminal?.runtime?.hubLink?.terminalPin).toBeNull();
+    expect(terminal?.runtime?.pos?.terminalUnlocked).toBe(true);
+  });
+
+  it("never carries a PIN or a verifier, whatever the report tried to say", async () => {
+    const base = row().runtime_report as Record<string, Record<string, unknown>>;
+    const p = pool([
+      row({
+        runtime_report: {
+          ...base,
+          hubLink: {
+            ...base["hubLink"],
+            terminalPin: {
+              state: "set",
+              setAt: null,
+              lockedUntil: null,
+              pin: "4826",
+              verifier: "$argon2id$x",
+            },
+          },
+        },
+      }),
+    ]);
+    const [terminal] = await listPhysicalTerminals(p.deps, STORE);
+    expect(terminal?.runtime?.hubLink?.terminalPin).toEqual({
+      state: "set",
+      setAt: null,
+      lockedUntil: null,
+    });
+    expect(JSON.stringify(terminal)).not.toContain("4826");
+    expect(JSON.stringify(terminal)).not.toContain("argon2id");
   });
 
   it("never carries the internal reason text", async () => {

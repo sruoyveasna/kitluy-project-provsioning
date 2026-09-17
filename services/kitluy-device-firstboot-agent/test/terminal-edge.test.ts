@@ -245,6 +245,52 @@ describe("one attempt, and the status an operator is left with", () => {
     expect(JSON.parse(readFileSync(w.lastPath, "utf8"))).toEqual({ host: "10.0.0.5", port: 7443 });
   });
 
+  it("records the Store Hub's Terminal PIN answer, and an older Hub without it is still SERVING", async () => {
+    const w = workspace();
+    writeCredentials(w.operationalDir);
+    const attempt = (pinStatus: number) =>
+      runEdgeAttempt({
+        environment: "development",
+        operationalDir: w.operationalDir,
+        statusPath: w.statusPath,
+        lastEndpointPath: w.lastPath,
+        discover: () => Promise.resolve([{ host: "10.0.0.5", port: 7443, instance: "hub" }]),
+        requestFn: (input) =>
+          Promise.resolve({
+            status: input.path === "/edge/v1/terminal-pin/status" ? pinStatus : 200,
+            body: input.path.startsWith("/.well-known")
+              ? payload()
+              : input.path === "/edge/v1/terminal-pin/status"
+                ? {
+                    result: "TERMINAL_PIN_STATUS",
+                    pin: {
+                      state: "set",
+                      pinVersion: 2,
+                      setAt: "2026-09-17T02:58:00.000Z",
+                      lockedUntil: null,
+                      attemptsBeforeLock: 5,
+                    },
+                    session: null,
+                  }
+                : { ok: true },
+            peerCertificateFingerprint: FINGERPRINT,
+            peerDeviceId: HUB_ID,
+          }),
+      });
+    const withPin = await attempt(200);
+    expect(withPin.phase).toBe("SERVING");
+    expect(withPin.terminalPin).toEqual({
+      state: "set",
+      setAt: "2026-09-17T02:58:00.000Z",
+      lockedUntil: null,
+    });
+    expect(readStatus(w.statusPath)).toMatchObject({ terminalPin: { state: "set" } });
+
+    const olderHub = await attempt(404);
+    expect(olderHub.phase).toBe("SERVING");
+    expect(olderHub.terminalPin).toBeUndefined();
+  });
+
   it("pins the discovered certificate on every call after discovery", async () => {
     const w = workspace();
     writeCredentials(w.operationalDir);
@@ -266,7 +312,8 @@ describe("one attempt, and the status an operator is left with", () => {
       },
     });
     expect(pins[0]).toBeUndefined();
-    expect(pins.slice(1)).toEqual([FINGERPRINT, FINGERPRINT, FINGERPRINT]);
+    // authority time, eligibility, configuration, and the Terminal PIN read.
+    expect(pins.slice(1)).toEqual([FINGERPRINT, FINGERPRINT, FINGERPRINT, FINGERPRINT]);
   });
 
   it("separates a Hub-side dependency (DEGRADED) from a refusal aimed at this terminal", async () => {
@@ -539,6 +586,7 @@ describe("one attempt, and the status an operator is left with", () => {
       `POST /edge/v1/terminal-pairing/sessions/6f0e1d2c-3b4a-4958-8776-655443322110/complete`,
       "GET /edge/v1/runtime/eligibility",
       "GET /edge/v1/configuration/current",
+      "GET /edge/v1/terminal-pin/status",
     ]);
     expect(readStatus(w.statusPath).phase).toBe("SERVING");
 

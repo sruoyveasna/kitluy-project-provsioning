@@ -58,16 +58,23 @@ export const BRIDGE_STATUS_PATH = "/bridge/v1/status";
 export const MAX_BRIDGE_REQUEST_BYTES = 64 * 1024;
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 /**
- * THE CLOSED LIST. The runtime bootstrap reads, the staff session door, and the
- * T1 intake routes (WS-12-T001 / T002) — nothing else.
+ * THE CLOSED LIST. The runtime bootstrap reads, the Terminal PIN, and the T1
+ * intake routes (WS-12-T001 / T002) — nothing else.
+ *
+ * The STAFF session routes are gone from it on purpose
+ * (KLD-2026-09-17-TERMINAL-PIN-DEVICE-CREDENTIAL-001): a Pi Terminal has no
+ * staff login; the device credential plus the Terminal PIN is its operating
+ * credential, so nothing on the board may open a staff session through here.
  */
 export const BRIDGE_ROUTES = [
     { name: "authority-time", method: "GET", pattern: /^\/edge\/v1\/runtime\/authority-time$/u },
     { name: "eligibility", method: "GET", pattern: /^\/edge\/v1\/runtime\/eligibility$/u },
     { name: "configuration", method: "GET", pattern: /^\/edge\/v1\/configuration\/current$/u },
-    { name: "sessions.open", method: "POST", pattern: /^\/edge\/v1\/sessions\/open$/u },
-    { name: "sessions.refresh", method: "POST", pattern: /^\/edge\/v1\/sessions\/refresh$/u },
-    { name: "sessions.close", method: "POST", pattern: /^\/edge\/v1\/sessions\/close$/u },
+    { name: "pin.status", method: "GET", pattern: /^\/edge\/v1\/terminal-pin\/status$/u },
+    { name: "pin.setup", method: "POST", pattern: /^\/edge\/v1\/terminal-pin\/setup$/u },
+    { name: "pin.unlock", method: "POST", pattern: /^\/edge\/v1\/terminal-pin\/unlock$/u },
+    { name: "pin.change", method: "POST", pattern: /^\/edge\/v1\/terminal-pin\/change$/u },
+    { name: "pin.lock", method: "POST", pattern: /^\/edge\/v1\/terminal-pin\/lock$/u },
     {
         name: "customers.search",
         method: "GET",

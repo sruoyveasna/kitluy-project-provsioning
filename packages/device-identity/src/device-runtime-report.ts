@@ -15,8 +15,16 @@
  *                 its launcher actually started (the release journal and the
  *                 launcher witness);
  *   pos           the POS runtime state (pos-runtime.json): the closed T1
- *                 vocabulary, the configuration version, whether a staff member
- *                 is signed in — never who.
+ *                 vocabulary, the configuration version, whether the terminal is
+ *                 unlocked — never who, never a PIN.
+ *
+ * v2 (TERMINAL-PIN-AND-REAL-POS-AUTH-001) adds `hubLink.terminalPin`: the
+ * Terminal PIN's state AS THE STORE HUB ANSWERED IT to terminal-edge (set, setup
+ * or reset required, locked until) — the evidence behind the Partner Portal's
+ * "PIN set" rung, never derived from the application running. It also renames
+ * `pos.staffSignedIn` to `pos.terminalUnlocked`: there is no staff login on a Pi
+ * Terminal (KLD-2026-09-17-TERMINAL-PIN-DEVICE-CREDENTIAL-001). v1 reports from
+ * terminals already in the field still parse.
  *
  * No key, certificate, fingerprint, Store/customer data, staff identity or free
  * text beyond bounded refusal reasons. The shape is CLOSED: an unknown field is
@@ -45,8 +53,20 @@ import { createHash, createPublicKey, verify as cryptoVerify } from "node:crypto
 
 import { publicKeyFingerprint } from "./dev-crypto.js";
 
-/** Domain separator AND the report's `schema` value. The device copy MUST match. */
-export const DEVICE_RUNTIME_REPORT_KIND = "kitluy.device-runtime-report.v1" as const;
+/** The v1 shape (group 0229). Still accepted from terminals in the field. */
+export const DEVICE_RUNTIME_REPORT_KIND_V1 = "kitluy.device-runtime-report.v1" as const;
+/**
+ * The CURRENT kind: domain separator AND the report's `schema` value. The device
+ * copy MUST match. The signed bytes bind whichever kind the report declares.
+ */
+export const DEVICE_RUNTIME_REPORT_KIND = "kitluy.device-runtime-report.v2" as const;
+export const DEVICE_RUNTIME_REPORT_KINDS = [
+  DEVICE_RUNTIME_REPORT_KIND_V1,
+  DEVICE_RUNTIME_REPORT_KIND,
+] as const;
+
+/** The Terminal PIN states the Store Hub answers (hub migration 0043). */
+export const RUNTIME_TERMINAL_PIN_STATES = ["setup_required", "set", "reset_required"] as const;
 
 export const RUNTIME_EDGE_PHASES = [
   "NOT_ACTIVATED",
@@ -91,42 +111,66 @@ export const RUNTIME_POS_STATES = [
   "recovery_required",
 ] as const;
 
-export interface DeviceRuntimeReport {
+interface RuntimeHubLinkV1 {
+  readonly phase: (typeof RUNTIME_EDGE_PHASES)[number];
+  readonly hubDeviceId: string | null;
+  readonly checkedAt: string;
+  readonly reads: {
+    readonly authorityTime: string;
+    readonly eligibility: string;
+    readonly configuration: string;
+  } | null;
+}
+
+/** The Terminal PIN as the Store Hub answered it. Never a PIN or a verifier. */
+export interface RuntimeTerminalPin {
+  readonly state: (typeof RUNTIME_TERMINAL_PIN_STATES)[number];
+  readonly setAt: string | null;
+  readonly lockedUntil: string | null;
+}
+
+interface RuntimeApplication {
+  readonly product: "kitluy-terminal";
+  readonly installedReleaseId: string | null;
+  readonly installedVersion: string | null;
+  readonly journalPhase: (typeof RUNTIME_INSTALL_PHASES)[number];
+  readonly lastOutcome: (typeof RUNTIME_INSTALL_OUTCOMES)[number] | null;
+  readonly lastReason: string | null;
+  readonly runningReleaseId: string | null;
+  readonly runningSince: string | null;
+  readonly unitActive: boolean;
+}
+
+interface RuntimePosCommon {
+  readonly state: (typeof RUNTIME_POS_STATES)[number];
+  readonly refusalCode: string | null;
+  readonly applicationVersion: string;
+  readonly configurationVersion: number | null;
+  readonly configurationFreshness: "current" | "cached_offline" | null;
+  readonly observedAt: string;
+}
+
+export interface DeviceRuntimeReportV1 {
+  readonly schema: typeof DEVICE_RUNTIME_REPORT_KIND_V1;
+  readonly deviceClass: "terminal";
+  readonly imageVersion: string | null;
+  readonly agentVersion: string;
+  readonly hubLink: RuntimeHubLinkV1 | null;
+  readonly application: RuntimeApplication | null;
+  readonly pos: (RuntimePosCommon & { readonly staffSignedIn: boolean }) | null;
+}
+
+export interface DeviceRuntimeReportV2 {
   readonly schema: typeof DEVICE_RUNTIME_REPORT_KIND;
   readonly deviceClass: "terminal";
   readonly imageVersion: string | null;
   readonly agentVersion: string;
-  readonly hubLink: {
-    readonly phase: (typeof RUNTIME_EDGE_PHASES)[number];
-    readonly hubDeviceId: string | null;
-    readonly checkedAt: string;
-    readonly reads: {
-      readonly authorityTime: string;
-      readonly eligibility: string;
-      readonly configuration: string;
-    } | null;
-  } | null;
-  readonly application: {
-    readonly product: "kitluy-terminal";
-    readonly installedReleaseId: string | null;
-    readonly installedVersion: string | null;
-    readonly journalPhase: (typeof RUNTIME_INSTALL_PHASES)[number];
-    readonly lastOutcome: (typeof RUNTIME_INSTALL_OUTCOMES)[number] | null;
-    readonly lastReason: string | null;
-    readonly runningReleaseId: string | null;
-    readonly runningSince: string | null;
-    readonly unitActive: boolean;
-  } | null;
-  readonly pos: {
-    readonly state: (typeof RUNTIME_POS_STATES)[number];
-    readonly refusalCode: string | null;
-    readonly applicationVersion: string;
-    readonly configurationVersion: number | null;
-    readonly configurationFreshness: "current" | "cached_offline" | null;
-    readonly staffSignedIn: boolean;
-    readonly observedAt: string;
-  } | null;
+  readonly hubLink: (RuntimeHubLinkV1 & { readonly terminalPin: RuntimeTerminalPin | null }) | null;
+  readonly application: RuntimeApplication | null;
+  readonly pos: (RuntimePosCommon & { readonly terminalUnlocked: boolean }) | null;
 }
+
+export type DeviceRuntimeReport = DeviceRuntimeReportV1 | DeviceRuntimeReportV2;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const HEX64 = /^[0-9a-f]{64}$/u;
@@ -171,11 +215,15 @@ export function deviceRuntimeReportBytes(input: {
   if (CONTROL.test(input.observedAt) || input.observedAt.length > 64) {
     throw new Error("KLUY-RUNTIME-REPORT-MALFORMED: observedAt is invalid");
   }
+  const kind = input.report.schema;
+  if (!(DEVICE_RUNTIME_REPORT_KINDS as readonly string[]).includes(kind)) {
+    throw new Error("KLUY-RUNTIME-REPORT-MALFORMED: the report declares no known kind");
+  }
   const digest = createHash("sha256").update(canonicalJson(input.report), "utf8").digest("hex");
   return new Uint8Array(
     Buffer.from(
       [
-        DEVICE_RUNTIME_REPORT_KIND,
+        kind,
         input.identityPublicKeyFingerprint,
         input.deviceId.toLowerCase(),
         String(input.reportSequence),
@@ -222,7 +270,10 @@ function instant(value: unknown): boolean {
   return boundedString(value, 40) && !Number.isNaN(new Date(value).getTime());
 }
 
-/** Parse a report against the CLOSED v1 shape. Unknown fields are refused. */
+/**
+ * Parse a report against the CLOSED shape of the kind it declares (v1 or v2).
+ * Unknown fields are refused.
+ */
 export function parseDeviceRuntimeReport(value: unknown): Parsed<DeviceRuntimeReport> {
   const top = exactKeys(
     value,
@@ -230,7 +281,10 @@ export function parseDeviceRuntimeReport(value: unknown): Parsed<DeviceRuntimeRe
     "report",
   );
   if (typeof top === "string") return fail(top);
-  if (top["schema"] !== DEVICE_RUNTIME_REPORT_KIND) return fail("report.schema is not v1");
+  const v2 = top["schema"] === DEVICE_RUNTIME_REPORT_KIND;
+  if (!v2 && top["schema"] !== DEVICE_RUNTIME_REPORT_KIND_V1) {
+    return fail("report.schema is not a known runtime report kind");
+  }
   if (top["deviceClass"] !== "terminal") return fail("report.deviceClass must be terminal");
   if (!(top["imageVersion"] === null || boundedString(top["imageVersion"], 64))) {
     return fail("report.imageVersion is invalid");
@@ -240,7 +294,9 @@ export function parseDeviceRuntimeReport(value: unknown): Parsed<DeviceRuntimeRe
   if (top["hubLink"] !== null) {
     const hub = exactKeys(
       top["hubLink"],
-      ["phase", "hubDeviceId", "checkedAt", "reads"],
+      v2
+        ? ["phase", "hubDeviceId", "checkedAt", "reads", "terminalPin"]
+        : ["phase", "hubDeviceId", "checkedAt", "reads"],
       "report.hubLink",
     );
     if (typeof hub === "string") return fail(hub);
@@ -259,6 +315,23 @@ export function parseDeviceRuntimeReport(value: unknown): Parsed<DeviceRuntimeRe
       if (typeof reads === "string") return fail(reads);
       for (const key of ["authorityTime", "eligibility", "configuration"]) {
         if (!boundedString(reads[key], 80)) return fail(`report.hubLink.reads.${key} is invalid`);
+      }
+    }
+    if (v2 && hub["terminalPin"] !== null) {
+      const pin = exactKeys(
+        hub["terminalPin"],
+        ["state", "setAt", "lockedUntil"],
+        "report.hubLink.terminalPin",
+      );
+      if (typeof pin === "string") return fail(pin);
+      if (!(RUNTIME_TERMINAL_PIN_STATES as readonly unknown[]).includes(pin["state"])) {
+        return fail("report.hubLink.terminalPin.state is not a Terminal PIN state");
+      }
+      if (!(pin["setAt"] === null || instant(pin["setAt"]))) {
+        return fail("report.hubLink.terminalPin.setAt is invalid");
+      }
+      if (!(pin["lockedUntil"] === null || instant(pin["lockedUntil"]))) {
+        return fail("report.hubLink.terminalPin.lockedUntil is invalid");
       }
     }
   }
@@ -316,7 +389,7 @@ export function parseDeviceRuntimeReport(value: unknown): Parsed<DeviceRuntimeRe
         "applicationVersion",
         "configurationVersion",
         "configurationFreshness",
-        "staffSignedIn",
+        v2 ? "terminalUnlocked" : "staffSignedIn",
         "observedAt",
       ],
       "report.pos",
@@ -347,8 +420,9 @@ export function parseDeviceRuntimeReport(value: unknown): Parsed<DeviceRuntimeRe
     )) {
       return fail("report.pos.configurationFreshness is invalid");
     }
-    if (typeof pos["staffSignedIn"] !== "boolean" || !instant(pos["observedAt"])) {
-      return fail("report.pos staff flag or instant is invalid");
+    const flag = v2 ? pos["terminalUnlocked"] : pos["staffSignedIn"];
+    if (typeof flag !== "boolean" || !instant(pos["observedAt"])) {
+      return fail("report.pos unlock flag or instant is invalid");
     }
   }
 

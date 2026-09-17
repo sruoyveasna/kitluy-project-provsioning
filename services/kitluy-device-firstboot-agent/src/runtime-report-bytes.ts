@@ -8,7 +8,12 @@
  */
 import { createHash } from "node:crypto";
 
-export const DEVICE_RUNTIME_REPORT_KIND = "kitluy.device-runtime-report.v1" as const;
+/** The kind this agent signs (v2: Terminal PIN evidence). */
+export const DEVICE_RUNTIME_REPORT_KIND = "kitluy.device-runtime-report.v2" as const;
+const KNOWN_KINDS: readonly string[] = [
+  "kitluy.device-runtime-report.v1",
+  DEVICE_RUNTIME_REPORT_KIND,
+];
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const HEX64 = /^[0-9a-f]{64}$/u;
@@ -54,11 +59,15 @@ export function deviceRuntimeReportBytes(input: {
   if (hasControlCharacter(input.observedAt) || input.observedAt.length > 64) {
     throw new Error("KLUY-RUNTIME-REPORT-MALFORMED: observedAt is invalid");
   }
+  const kind = (input.report as { readonly schema?: unknown } | null)?.schema;
+  if (typeof kind !== "string" || !KNOWN_KINDS.includes(kind)) {
+    throw new Error("KLUY-RUNTIME-REPORT-MALFORMED: the report declares no known kind");
+  }
   const digest = createHash("sha256").update(canonicalJson(input.report), "utf8").digest("hex");
   return new Uint8Array(
     Buffer.from(
       [
-        DEVICE_RUNTIME_REPORT_KIND,
+        kind,
         input.identityPublicKeyFingerprint,
         input.deviceId.toLowerCase(),
         String(input.reportSequence),

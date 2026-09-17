@@ -19,8 +19,8 @@ import type { KitluyLocale } from "@kitluy/localization";
 
 import {
   T1_INTAKE_BRIDGE_KEY,
-  T1_STAFF_BRIDGE_KEY,
-  type T1StaffBridge,
+  T1_PIN_BRIDGE_KEY,
+  type T1PinBridge,
 } from "./bootstrap/bridge-types.js";
 import type { T1BootstrapReport } from "./bootstrap/states.js";
 import type { IntakeCustomer, IntakeDraft, IntakeResult } from "./intake/ports.js";
@@ -58,8 +58,8 @@ const CANCEL_REASONS = [
 
 const TEXT = {
   "km-KH": {
-    signedInAs: "បុគ្គលិក",
-    signOut: "ចាកចេញ",
+    unlocked: "Terminal បានដោះសោ",
+    lock: "ចាក់សោ Terminal",
     search: "ស្វែងរកតាមលេខទូរស័ព្ទ",
     searchButton: "ស្វែងរក",
     noMatch: "រកមិនឃើញអតិថិជន",
@@ -80,8 +80,8 @@ const TEXT = {
     failure: "មិនបានសម្រេច",
   },
   "en-US": {
-    signedInAs: "Staff",
-    signOut: "Sign out",
+    unlocked: "Terminal unlocked",
+    lock: "Lock terminal",
     search: "Search by phone",
     searchButton: "Search",
     noMatch: "No customer found",
@@ -106,8 +106,8 @@ const TEXT = {
 function intakeBridge(): IntakeBridge | undefined {
   return (window as unknown as Record<string, IntakeBridge | undefined>)[T1_INTAKE_BRIDGE_KEY];
 }
-function staffBridge(): T1StaffBridge | undefined {
-  return (window as unknown as Record<string, T1StaffBridge | undefined>)[T1_STAFF_BRIDGE_KEY];
+function pinBridge(): T1PinBridge | undefined {
+  return (window as unknown as Record<string, T1PinBridge | undefined>)[T1_PIN_BRIDGE_KEY];
 }
 
 export function IntakeScreen(props: {
@@ -150,8 +150,8 @@ export function IntakeScreen(props: {
   return (
     <section data-intake-screen="t1" aria-label={text.draftTitle}>
       <p>
-        {text.signedInAs}: <strong>{props.report.staff?.displayName ?? "—"}</strong>{" "}
-        <button onClick={() => void staffBridge()?.signOut()}>{text.signOut}</button>
+        <strong>{text.unlocked}</strong>{" "}
+        <button onClick={() => void pinBridge()?.lock()}>{text.lock}</button>
       </p>
       {failure !== null ? <p role="alert">{failure}</p> : null}
       <form

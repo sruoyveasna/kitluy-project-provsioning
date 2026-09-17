@@ -6,6 +6,9 @@
  * and sends them to the registry:
  *
  *   hubLink      terminal-edge      /var/lib/kitluy/terminal/edge-status.json
+ *                                  (v2: + the Terminal PIN state the Store Hub
+ *                                  answered terminal-edge — the "PIN set"
+ *                                  evidence, never inferred here)
  *   application  update agent       the kitluy-terminal release journal, and the
  *                + POS launcher     launcher's running witness, + `is-active`
  *   pos          the POS itself     /var/lib/kitluy/terminal/pos-runtime.json
@@ -121,7 +124,9 @@ function systemctlIsActive(unit: string): string {
   }
 }
 
-/** Assemble the v1 report from what the owners wrote. Never throws. */
+const TERMINAL_PIN_STATES = new Set(["setup_required", "set", "reset_required"]);
+
+/** Assemble the v2 report from what the owners wrote. Never throws. */
 export function collectRuntimeReport(sources: RuntimeReportSources = {}): Record<string, unknown> {
   // ---- hubLink: terminal-edge's own words.
   const edge = readJson(sources.edgeStatusPath ?? EDGE_STATUS_PATH);
@@ -146,6 +151,7 @@ export function collectRuntimeReport(sources: RuntimeReportSources = {}): Record
               eligibility: clean(reads["eligibility"], 80) ?? "-",
               configuration: clean(reads["configuration"], 80) ?? "-",
             },
+      terminalPin: terminalPinOf(edge["terminalPin"]),
     };
   }
 
@@ -189,7 +195,8 @@ export function collectRuntimeReport(sources: RuntimeReportSources = {}): Record
   const posObservedAt = instant(posFile?.["observedAt"]);
   if (
     posFile !== null &&
-    posFile["schema"] === "kitluy.pos-runtime-status.v1" &&
+    (posFile["schema"] === "kitluy.pos-runtime-status.v1" ||
+      posFile["schema"] === "kitluy.pos-runtime-status.v2") &&
     POS_STATES.has(String(posFile["state"])) &&
     posObservedAt !== null
   ) {
@@ -208,7 +215,12 @@ export function collectRuntimeReport(sources: RuntimeReportSources = {}): Record
           : null,
       configurationFreshness:
         freshness === "current" || freshness === "cached_offline" ? freshness : null,
-      staffSignedIn: posFile["staffSignedIn"] === true,
+      // v2 POS files say `terminalUnlocked`; a v1 POS (before the Terminal PIN)
+      // said `staffSignedIn`, which on a Pi Terminal meant the same thing.
+      terminalUnlocked:
+        posFile["schema"] === "kitluy.pos-runtime-status.v2"
+          ? posFile["terminalUnlocked"] === true
+          : posFile["staffSignedIn"] === true,
       observedAt: posObservedAt,
     };
   }
@@ -221,6 +233,18 @@ export function collectRuntimeReport(sources: RuntimeReportSources = {}): Record
     hubLink,
     application,
     pos,
+  };
+}
+
+/** The Store Hub's answer, as terminal-edge recorded it; anything else is null. */
+function terminalPinOf(value: unknown): Record<string, unknown> | null {
+  if (value === null || typeof value !== "object") return null;
+  const pin = value as Record<string, unknown>;
+  if (!TERMINAL_PIN_STATES.has(String(pin["state"]))) return null;
+  return {
+    state: pin["state"],
+    setAt: instant(pin["setAt"]),
+    lockedUntil: instant(pin["lockedUntil"]),
   };
 }
 

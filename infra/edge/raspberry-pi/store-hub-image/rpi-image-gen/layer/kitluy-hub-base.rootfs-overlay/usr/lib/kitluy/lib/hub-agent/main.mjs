@@ -1195,7 +1195,7 @@ var require_utils2 = __commonJS({
     var nodeCrypto = __require("crypto");
     module.exports = {
       postgresMd5PasswordHash,
-      randomBytes: randomBytes3,
+      randomBytes: randomBytes4,
       deriveKey,
       sha256,
       hashByName,
@@ -1205,7 +1205,7 @@ var require_utils2 = __commonJS({
     var webCrypto = nodeCrypto.webcrypto || globalThis.crypto;
     var subtleCrypto = webCrypto.subtle;
     var textEncoder = new TextEncoder();
-    function randomBytes3(length) {
+    function randomBytes4(length) {
       return webCrypto.getRandomValues(Buffer.alloc(length));
     }
     async function md5(string) {
@@ -3184,40 +3184,40 @@ var require_connection = __commonJS({
         this.sslNegotiation = config.sslNegotiation || "postgres";
         this._ending = false;
         this._emitMessage = false;
-        const self = this;
+        const self2 = this;
         this.on("newListener", function(eventName) {
           if (eventName === "message") {
-            self._emitMessage = true;
+            self2._emitMessage = true;
           }
         });
       }
       connect(port, host) {
-        const self = this;
+        const self2 = this;
         this._connecting = true;
         this.stream.setNoDelay(true);
         this.stream.connect(port, host);
         this.stream.once("connect", function() {
-          if (self._keepAlive) {
-            self.stream.setKeepAlive(true, self._keepAliveInitialDelayMillis);
+          if (self2._keepAlive) {
+            self2.stream.setKeepAlive(true, self2._keepAliveInitialDelayMillis);
           }
-          self.emit("connect");
+          self2.emit("connect");
         });
         const reportStreamError = function(error) {
-          if (self._ending && (error.code === "ECONNRESET" || error.code === "EPIPE")) {
+          if (self2._ending && (error.code === "ECONNRESET" || error.code === "EPIPE")) {
             return;
           }
-          self.emit("error", error);
+          self2.emit("error", error);
         };
         this.stream.on("error", reportStreamError);
         this.stream.on("close", function() {
-          self.emit("end");
+          self2.emit("end");
         });
         if (!this.ssl) {
           return this.attachListeners(this.stream);
         }
         if (this.sslNegotiation === "direct") {
           return this.stream.once("connect", function() {
-            self.upgradeToSSL(host, reportStreamError);
+            self2.upgradeToSSL(host, reportStreamError);
           });
         }
         this.stream.once("data", function(buffer) {
@@ -3226,27 +3226,27 @@ var require_connection = __commonJS({
             case "S":
               break;
             case "N":
-              self.stream.end();
-              return self.emit("error", new Error("The server does not support SSL connections"));
+              self2.stream.end();
+              return self2.emit("error", new Error("The server does not support SSL connections"));
             default:
-              self.stream.end();
-              return self.emit("error", new Error("There was an error establishing an SSL connection"));
+              self2.stream.end();
+              return self2.emit("error", new Error("There was an error establishing an SSL connection"));
           }
-          self.upgradeToSSL(host, reportStreamError);
+          self2.upgradeToSSL(host, reportStreamError);
         });
       }
       upgradeToSSL(host, reportStreamError) {
-        const self = this;
+        const self2 = this;
         const options = {
-          socket: self.stream
+          socket: self2.stream
         };
-        if (self.ssl !== true) {
-          Object.assign(options, self.ssl);
-          if ("key" in self.ssl) {
-            options.key = self.ssl.key;
+        if (self2.ssl !== true) {
+          Object.assign(options, self2.ssl);
+          if ("key" in self2.ssl) {
+            options.key = self2.ssl.key;
           }
         }
-        if (self.sslNegotiation === "direct") {
+        if (self2.sslNegotiation === "direct") {
           options.ALPNProtocols = ["postgresql"];
         }
         const net = __require("net");
@@ -3254,13 +3254,13 @@ var require_connection = __commonJS({
           options.servername = host;
         }
         try {
-          self.stream = stream.getSecureStream(options);
+          self2.stream = stream.getSecureStream(options);
         } catch (err) {
-          return self.emit("error", err);
+          return self2.emit("error", err);
         }
-        self.attachListeners(self.stream);
-        self.stream.on("error", reportStreamError);
-        self.emit("sslconnect");
+        self2.attachListeners(self2.stream);
+        self2.stream.on("error", reportStreamError);
+        self2.emit("sslconnect");
       }
       attachListeners(stream2) {
         parse(stream2, (msg) => {
@@ -3401,9 +3401,9 @@ var require_split2 = __commonJS({
       }
       cb();
     }
-    function push(self, val) {
+    function push(self2, val) {
       if (val !== void 0) {
-        self.push(val);
+        self2.push(val);
       }
     }
     function noop(incoming) {
@@ -3774,7 +3774,7 @@ var require_client = __commonJS({
         this._queryQueue.length = 0;
       }
       _connect(callback) {
-        const self = this;
+        const self2 = this;
         const con = this.connection;
         this._connectionCallback = callback;
         if (this._connecting || this._connected) {
@@ -3800,16 +3800,16 @@ var require_client = __commonJS({
           con.connect(this.port, this.host);
         }
         con.on("connect", function() {
-          if (self.ssl) {
-            if (self.sslNegotiation !== "direct") {
+          if (self2.ssl) {
+            if (self2.sslNegotiation !== "direct") {
               con.requestSsl();
             }
           } else {
-            con.startup(self.getStartupConf());
+            con.startup(self2.getStartupConf());
           }
         });
         con.on("sslconnect", function() {
-          con.startup(self.getStartupConf());
+          con.startup(self2.getStartupConf());
         });
         this._attachListeners(con);
         con.once("end", () => {
@@ -4789,34 +4789,34 @@ var require_query2 = __commonJS({
     };
     NativeQuery.prototype.submit = function(client) {
       this.state = "running";
-      const self = this;
+      const self2 = this;
       this.native = client.native;
       client.native.arrayMode = this._arrayMode;
       let after = function(err, rows, results) {
         client.native.arrayMode = false;
         setImmediate(function() {
-          self.emit("_done");
+          self2.emit("_done");
         });
         if (err) {
-          return self.handleError(err);
+          return self2.handleError(err);
         }
-        if (self._emitRowEvents) {
+        if (self2._emitRowEvents) {
           if (results.length > 1) {
             rows.forEach((rowOfRows, i) => {
               rowOfRows.forEach((row) => {
-                self.emit("row", row, results[i]);
+                self2.emit("row", row, results[i]);
               });
             });
           } else {
             rows.forEach(function(row) {
-              self.emit("row", row, results);
+              self2.emit("row", row, results);
             });
           }
         }
-        self.state = "end";
-        self.emit("end", results);
-        if (self.callback) {
-          self.callback(null, results);
+        self2.state = "end";
+        self2.emit("end", results);
+        if (self2.callback) {
+          self2.callback(null, results);
         }
       };
       if (process.domain) {
@@ -4838,8 +4838,8 @@ var require_query2 = __commonJS({
         }
         return client.native.prepare(this.name, this.text, values.length, function(err) {
           if (err) return after(err);
-          client.namedQueries[self.name] = self.text;
-          return self.native.execute(self.name, values, after);
+          client.namedQueries[self2.name] = self2.text;
+          return self2.native.execute(self2.name, values, after);
         });
       } else if (this.values) {
         if (!Array.isArray(this.values)) {
@@ -4921,34 +4921,34 @@ var require_client2 = __commonJS({
       this._queryQueue.length = 0;
     };
     Client2.prototype._connect = function(cb) {
-      const self = this;
+      const self2 = this;
       if (this._connecting) {
         process.nextTick(() => cb(new Error("Client has already been connected. You cannot reuse a client.")));
         return;
       }
       this._connecting = true;
       this.connectionParameters.getLibpqConnectionString(function(err, conString) {
-        if (self.connectionParameters.nativeConnectionString) conString = self.connectionParameters.nativeConnectionString;
+        if (self2.connectionParameters.nativeConnectionString) conString = self2.connectionParameters.nativeConnectionString;
         if (err) return cb(err);
-        self.native.connect(conString, function(err2) {
+        self2.native.connect(conString, function(err2) {
           if (err2) {
-            self.native.end();
+            self2.native.end();
             return cb(err2);
           }
-          self._connected = true;
-          self.native.on("error", function(err3) {
-            self._queryable = false;
-            self._errorAllQueries(err3);
-            self.emit("error", err3);
+          self2._connected = true;
+          self2.native.on("error", function(err3) {
+            self2._queryable = false;
+            self2._errorAllQueries(err3);
+            self2.emit("error", err3);
           });
-          self.native.on("notification", function(msg) {
-            self.emit("notification", {
+          self2.native.on("notification", function(msg) {
+            self2.emit("notification", {
               channel: msg.relname,
               payload: msg.extra
             });
           });
-          self.emit("connect");
-          self._pulseQueryQueue(true);
+          self2.emit("connect");
+          self2._pulseQueryQueue(true);
           cb(null, this);
         });
       });
@@ -5041,7 +5041,7 @@ var require_client2 = __commonJS({
       return result;
     };
     Client2.prototype.end = function(cb) {
-      const self = this;
+      const self2 = this;
       this._ending = true;
       if (this._connecting && !this._connected) {
         this.once("connect", () => {
@@ -5056,10 +5056,10 @@ var require_client2 = __commonJS({
         });
       }
       this.native.end(function() {
-        self._connected = false;
-        self._errorAllQueries(new Error("Connection terminated"));
+        self2._connected = false;
+        self2._errorAllQueries(new Error("Connection terminated"));
         process.nextTick(() => {
-          self.emit("end");
+          self2.emit("end");
           if (cb) cb();
         });
       });
@@ -5084,9 +5084,9 @@ var require_client2 = __commonJS({
       }
       this._activeQuery = query;
       query.submit(this);
-      const self = this;
+      const self2 = this;
       query.once("_done", function() {
-        self._pulseQueryQueue();
+        self2._pulseQueryQueue();
       });
     };
     Client2.prototype.cancel = function(query) {
@@ -5332,6 +5332,223 @@ var init_db = __esm({
   }
 });
 
+// src/hub/repositories/audit.ts
+async function appendAuditEvent(client, input) {
+  await client.query(
+    `insert into edge_audit.audit_event
+       (id, tenant_id, digital_store_id, location_id, event_code, actor_type, actor_id,
+        requester_id, approver_id, terminal_device_id, hub_device_id, profile_code,
+        resource_type, resource_id, reason_code, correlation_id, occurred_at,
+        payload_sha256, details_json, local_sequence)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+             now(), $17, $18::jsonb, $19)`,
+    [
+      input.id,
+      input.tenantId,
+      input.digitalStoreId,
+      input.locationId,
+      input.eventCode,
+      input.actorType,
+      input.actorId,
+      input.requesterId,
+      input.approverId,
+      input.terminalDeviceId,
+      input.hubDeviceId,
+      input.profileCode,
+      input.resourceType,
+      input.resourceId,
+      input.reasonCode,
+      input.correlationId,
+      input.payloadSha256,
+      JSON.stringify(input.details),
+      input.localSequence.toString()
+    ]
+  );
+}
+async function recordSecurityEvent(client, input) {
+  await client.query(
+    `insert into edge_audit.security_event
+       (id, tenant_id, digital_store_id, location_id, event_code, severity, device_id,
+        certificate_serial, detected_at, details_json)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, now(), $9::jsonb)`,
+    [
+      input.id,
+      input.tenantId,
+      input.digitalStoreId,
+      input.locationId,
+      input.eventCode,
+      input.severity,
+      input.deviceId,
+      input.certificateSerial,
+      JSON.stringify(input.details)
+    ]
+  );
+}
+var init_audit = __esm({
+  "src/hub/repositories/audit.ts"() {
+    "use strict";
+  }
+});
+
+// src/hub/errors.ts
+var HubCommandError;
+var init_errors = __esm({
+  "src/hub/errors.ts"() {
+    "use strict";
+    HubCommandError = class extends Error {
+      constructor(code, message, details = {}) {
+        super(`${code}: ${message}`);
+        this.code = code;
+        this.details = details;
+        this.name = "HubCommandError";
+      }
+    };
+  }
+});
+
+// src/hub/repositories/sync.ts
+var sync_exports = {};
+__export(sync_exports, {
+  WS09_DELIVERY_STATE: () => WS09_DELIVERY_STATE,
+  WS09_WIRE_SYNC_STATE: () => WS09_WIRE_SYNC_STATE,
+  allocateHubSequence: () => allocateHubSequence,
+  assertWs09DeliveryState: () => assertWs09DeliveryState,
+  countPendingOutbox: () => countPendingOutbox,
+  findOutboxEntry: () => findOutboxEntry,
+  findSyncCursor: () => findSyncCursor,
+  insertLocalEventWithOutbox: () => insertLocalEventWithOutbox,
+  listLocalEventsForAggregate: () => listLocalEventsForAggregate,
+  recordSequenceGap: () => recordSequenceGap
+});
+async function allocateHubSequence(client) {
+  const result = await client.query(
+    `select edge_sync.allocate_hub_sequence()`
+  );
+  const value = result.rows[0]?.allocate_hub_sequence;
+  if (value === void 0) {
+    throw new Error("edge_sync.allocate_hub_sequence() returned no row.");
+  }
+  return value;
+}
+async function insertLocalEventWithOutbox(client, input) {
+  await client.query(
+    `insert into edge_sync.local_event
+       (id, tenant_id, digital_store_id, location_id, hub_device_id, origin_device_id,
+        actor_id, aggregate_type, aggregate_id, aggregate_version, event_type,
+        schema_version, business_date, occurred_at, hub_sequence, origin_sequence,
+        assignment_generation, idempotency_key, payload_sha256, payload, created_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::date, now(),
+             $14, $15, $16, $17, $18, $19::jsonb, now())`,
+    [
+      input.id,
+      input.tenantId,
+      input.digitalStoreId,
+      input.locationId,
+      input.hubDeviceId,
+      input.originDeviceId,
+      input.actorId,
+      input.aggregateType,
+      input.aggregateId,
+      input.aggregateVersion.toString(),
+      input.eventType,
+      input.schemaVersion,
+      input.businessDate,
+      input.hubSequence.toString(),
+      input.originSequence.toString(),
+      input.assignmentGeneration,
+      input.idempotencyKey,
+      input.payloadSha256,
+      JSON.stringify(input.payload)
+    ]
+  );
+  await client.query(
+    `insert into edge_sync.outbox
+       (event_id, tenant_id, digital_store_id, location_id, hub_sequence,
+        assignment_generation, delivery_state, attempt_count, next_attempt_at)
+     values ($1, $2, $3, $4, $5, $6, $7::edge_sync.delivery_state, 0, now())`,
+    [
+      input.id,
+      input.tenantId,
+      input.digitalStoreId,
+      input.locationId,
+      input.hubSequence.toString(),
+      input.assignmentGeneration,
+      WS09_DELIVERY_STATE
+    ]
+  );
+}
+async function listLocalEventsForAggregate(client, aggregateId) {
+  const result = await client.query(
+    `select id, aggregate_type, aggregate_id, aggregate_version, event_type,
+            schema_version, hub_sequence, origin_sequence, assignment_generation,
+            idempotency_key, payload_sha256, payload
+       from edge_sync.local_event where aggregate_id = $1 order by hub_sequence`,
+    [aggregateId]
+  );
+  return result.rows;
+}
+async function findOutboxEntry(client, eventId) {
+  const result = await client.query(
+    `select event_id, hub_sequence, assignment_generation, delivery_state,
+            attempt_count, cloud_ack_id, acknowledged_at
+       from edge_sync.outbox where event_id = $1`,
+    [eventId]
+  );
+  return result.rows[0];
+}
+async function countPendingOutbox(client, locationId) {
+  const result = await client.query(
+    `select count(*)::text as count from edge_sync.outbox
+      where location_id = $1 and delivery_state = 'pending'`,
+    [locationId]
+  );
+  return Number(result.rows[0]?.count ?? "0");
+}
+function assertWs09DeliveryState(state) {
+  if (state !== WS09_DELIVERY_STATE) {
+    throw new HubCommandError(
+      "EDGE_COMMAND_INACTIVE",
+      `WS-09 may only write delivery_state '${WS09_DELIVERY_STATE}'; '${state}' belongs to WS-10 (amendment \xA72).`,
+      { deliveryState: state }
+    );
+  }
+}
+async function recordSequenceGap(client, input) {
+  await client.query(
+    `select edge_sync.record_sequence_gap($1::uuid, $2::uuid, $3::uuid, $4::uuid,
+              $5::integer, $6::bigint, $7::text, $8::text, $9::text)`,
+    [
+      input.id,
+      input.tenantId,
+      input.digitalStoreId,
+      input.locationId,
+      input.assignmentGeneration,
+      input.hubSequence.toString(),
+      input.gapReason,
+      input.recordedBy,
+      input.note
+    ]
+  );
+}
+async function findSyncCursor(client, locationId, streamCode) {
+  const result = await client.query(
+    `select location_id, stream_code, last_pushed_hub_sequence, last_acked_hub_sequence,
+            last_pulled_cloud_sequence, last_applied_cloud_sequence
+       from edge_sync.sync_cursor where location_id = $1 and stream_code = $2`,
+    [locationId, streamCode]
+  );
+  return result.rows[0];
+}
+var WS09_DELIVERY_STATE, WS09_WIRE_SYNC_STATE;
+var init_sync = __esm({
+  "src/hub/repositories/sync.ts"() {
+    "use strict";
+    init_errors();
+    WS09_DELIVERY_STATE = "pending";
+    WS09_WIRE_SYNC_STATE = "pending_cloud_sync";
+  }
+});
+
 // ../../packages/device-identity/dist/environments.js
 var init_environments = __esm({
   "../../packages/device-identity/dist/environments.js"() {
@@ -5341,7 +5558,7 @@ var init_environments = __esm({
 
 // ../../packages/device-identity/dist/errors.js
 var PKI_BLOCKER_REF, RequiredCryptographicValueError;
-var init_errors = __esm({
+var init_errors2 = __esm({
   "../../packages/device-identity/dist/errors.js"() {
     "use strict";
     PKI_BLOCKER_REF = "BLK-005";
@@ -5357,6 +5574,20 @@ var init_errors = __esm({
         this.requiredValue = requiredValue;
         this.environment = environment;
       }
+    };
+  }
+});
+
+// ../../packages/device-identity/dist/trusted-time.js
+var MAX_REVOCATION_SNAPSHOT_AGE_HOURS;
+var init_trusted_time = __esm({
+  "../../packages/device-identity/dist/trusted-time.js"() {
+    "use strict";
+    init_errors2();
+    MAX_REVOCATION_SNAPSHOT_AGE_HOURS = {
+      development: 30 * 24,
+      pilot: 14 * 24,
+      production: 14 * 24
     };
   }
 });
@@ -5383,7 +5614,7 @@ var init_dev_crypto = __esm({
   "../../packages/device-identity/dist/dev-crypto.js"() {
     "use strict";
     init_environments();
-    init_errors();
+    init_errors2();
     sha256Hex = (data) => createHash2("sha256").update(typeof data === "string" ? Buffer.from(data, "utf8") : data).digest("hex");
     PrivateKeyVault = class {
       #keys = /* @__PURE__ */ new Map();
@@ -5420,9 +5651,4307 @@ var init_dev_crypto = __esm({
   }
 });
 
+// ../../packages/device-identity/dist/certificate-validity.js
+var init_certificate_validity = __esm({
+  "../../packages/device-identity/dist/certificate-validity.js"() {
+    "use strict";
+    init_trusted_time();
+    init_dev_crypto();
+  }
+});
+
+// ../../packages/device-identity/dist/certificate-renewal.js
+var MS_PER_DAY;
+var init_certificate_renewal = __esm({
+  "../../packages/device-identity/dist/certificate-renewal.js"() {
+    "use strict";
+    init_certificate_validity();
+    init_trusted_time();
+    MS_PER_DAY = 1e3 * 60 * 60 * 24;
+  }
+});
+
+// ../../packages/device-identity/dist/revocation-snapshot.js
+var MS_PER_HOUR;
+var init_revocation_snapshot = __esm({
+  "../../packages/device-identity/dist/revocation-snapshot.js"() {
+    "use strict";
+    init_certificate_validity();
+    init_trusted_time();
+    MS_PER_HOUR = 1e3 * 60 * 60;
+  }
+});
+
+// ../../packages/device-identity/dist/configuration-validity.js
+var init_configuration_validity = __esm({
+  "../../packages/device-identity/dist/configuration-validity.js"() {
+    "use strict";
+    init_certificate_validity();
+    init_trusted_time();
+  }
+});
+
+// ../../packages/device-identity/dist/certificate-issuance.js
+var init_certificate_issuance = __esm({
+  "../../packages/device-identity/dist/certificate-issuance.js"() {
+    "use strict";
+    init_errors2();
+    init_trusted_time();
+    init_dev_crypto();
+  }
+});
+
+// ../../packages/device-identity/dist/operational-recovery-identity.js
+var init_operational_recovery_identity = __esm({
+  "../../packages/device-identity/dist/operational-recovery-identity.js"() {
+    "use strict";
+    init_dev_crypto();
+  }
+});
+
+// ../../packages/device-identity/dist/issuance-adapter.js
+var init_issuance_adapter = __esm({
+  "../../packages/device-identity/dist/issuance-adapter.js"() {
+    "use strict";
+    init_dev_crypto();
+  }
+});
+
+// ../../packages/device-identity/dist/replacement-key-pop.js
+var init_replacement_key_pop = __esm({
+  "../../packages/device-identity/dist/replacement-key-pop.js"() {
+    "use strict";
+    init_trusted_time();
+    init_dev_crypto();
+  }
+});
+
+// ../../packages/device-identity/dist/provisioning-pop.js
+var init_provisioning_pop = __esm({
+  "../../packages/device-identity/dist/provisioning-pop.js"() {
+    "use strict";
+    init_trusted_time();
+    init_dev_crypto();
+  }
+});
+
+// ../../packages/device-identity/dist/activation-ack.js
+var init_activation_ack = __esm({
+  "../../packages/device-identity/dist/activation-ack.js"() {
+    "use strict";
+    init_trusted_time();
+    init_dev_crypto();
+  }
+});
+
+// ../../packages/device-identity/dist/pairing.js
+import { createHash as createHash3 } from "node:crypto";
+function transcriptFields(t) {
+  return [
+    t.pairingSessionId,
+    t.protocolVersion,
+    t.purpose,
+    t.tenantId,
+    t.digitalStoreId,
+    t.storeLocationId,
+    t.environment,
+    t.hubDeviceId,
+    String(t.hubAssignmentGeneration),
+    t.hubCertificateSerial,
+    t.hubCertificateFingerprint,
+    t.terminalDeviceId,
+    String(t.terminalAssignmentGeneration),
+    t.terminalProfileKey,
+    t.terminalCertificateSerial,
+    t.terminalCertificateFingerprint,
+    t.terminalNonce,
+    t.hubNonce,
+    t.issuedAt.toISOString(),
+    t.expiresAt.toISOString()
+  ];
+}
+function pairingTranscriptBytes(t) {
+  return Buffer.from([PAIRING_TRANSCRIPT_KIND, ...transcriptFields(t)].join("\n"), "utf8");
+}
+function pairingTranscriptHash(t) {
+  return createHash3("sha256").update(Buffer.from(pairingTranscriptBytes(t))).digest("hex");
+}
+function terminalPairingProofBytes(t) {
+  return Buffer.from([PAIRING_TERMINAL_PROOF_KIND, ...transcriptFields(t)].join("\n"), "utf8");
+}
+function hubPairingProofBytes(t) {
+  return Buffer.from([PAIRING_HUB_PROOF_KIND, ...transcriptFields(t)].join("\n"), "utf8");
+}
+function pairingReceiptBytes(r) {
+  return Buffer.from([
+    PAIRING_RECEIPT_KIND,
+    r.receiptId,
+    r.receiptVersion,
+    r.pairingSessionId,
+    r.transcriptHash,
+    r.hubDeviceId,
+    r.hubCertificateFingerprint,
+    r.terminalDeviceId,
+    r.terminalCertificateFingerprint,
+    r.tenantId,
+    r.digitalStoreId,
+    r.storeLocationId,
+    r.environment,
+    String(r.terminalAssignmentGeneration),
+    r.terminalProfileKey,
+    r.pairedAt.toISOString(),
+    r.validUntil === null ? "-" : r.validUntil.toISOString(),
+    r.correlationId
+  ].join("\n"), "utf8");
+}
+function checkBindings(t, e, now) {
+  const refuse = (refusalCode, detail) => ({
+    verified: false,
+    refusalCode,
+    detail
+  });
+  if (t.protocolVersion !== PAIRING_PROTOCOL_VERSION || e.protocolVersion !== PAIRING_PROTOCOL_VERSION) {
+    return refuse("PAIR_VERSION_INCOMPATIBLE", `protocol ${t.protocolVersion} is not ${PAIRING_PROTOCOL_VERSION}`);
+  }
+  if (t.purpose !== PAIRING_PURPOSE || e.purpose !== PAIRING_PURPOSE) {
+    return refuse("PAIR_SESSION_MISMATCH", `the transcript purpose is ${t.purpose}`);
+  }
+  if (t.pairingSessionId !== e.pairingSessionId) {
+    return refuse("PAIR_SESSION_MISMATCH", "the proof belongs to another pairing session");
+  }
+  if (t.tenantId !== e.tenantId || t.digitalStoreId !== e.digitalStoreId || t.storeLocationId !== e.storeLocationId) {
+    return refuse("PAIR_ASSIGNMENT_MISMATCH", "the proof belongs to another Tenant, Store or Location");
+  }
+  if (t.environment !== e.environment) {
+    return refuse("PAIR_ASSIGNMENT_MISMATCH", `the proof is for environment ${t.environment}`);
+  }
+  if (t.hubDeviceId !== e.hubDeviceId || t.hubAssignmentGeneration !== e.hubAssignmentGeneration || t.hubCertificateSerial !== e.hubCertificateSerial || t.hubCertificateFingerprint !== e.hubCertificateFingerprint) {
+    return refuse("PAIR_ASSIGNMENT_MISMATCH", "the proof names a different Store Hub identity");
+  }
+  if (t.terminalDeviceId !== e.terminalDeviceId || t.terminalAssignmentGeneration !== e.terminalAssignmentGeneration || t.terminalCertificateSerial !== e.terminalCertificateSerial || t.terminalCertificateFingerprint !== e.terminalCertificateFingerprint) {
+    return refuse("PAIR_ASSIGNMENT_MISMATCH", "the proof names a different terminal identity");
+  }
+  if (t.terminalProfileKey !== e.terminalProfileKey) {
+    return refuse("PAIR_PROFILE_FORBIDDEN", "the proof names a profile the assignment does not grant");
+  }
+  if (t.terminalNonce !== e.terminalNonce || t.hubNonce !== e.hubNonce) {
+    return refuse("PAIR_NONCE_MISMATCH", "a directional nonce is not the one this session bound");
+  }
+  if (now.getTime() < t.issuedAt.getTime()) {
+    return refuse("PAIR_CHALLENGE_NOT_YET_VALID", "the session is dated in the future");
+  }
+  if (now.getTime() >= t.expiresAt.getTime()) {
+    return refuse("PAIR_CHALLENGE_EXPIRED", "the pairing session expired");
+  }
+  return null;
+}
+function verifyTerminalPairingProof(transcript, signature, terminalPublicKeyPem, expectation, hubTime, computeFingerprint, verifySignature = verifyDetachedSignature) {
+  const bound = checkBindings(transcript, expectation, hubTime);
+  if (bound !== null)
+    return bound;
+  const actual = computeFingerprint(terminalPublicKeyPem);
+  if (actual !== expectation.signerKeyFingerprint || transcript.terminalCertificateFingerprint !== expectation.signerKeyFingerprint) {
+    return {
+      verified: false,
+      refusalCode: "PAIR_CERT_INVALID",
+      detail: "the presented key is not the terminal's credentialed key"
+    };
+  }
+  if (!verifySignature(terminalPublicKeyPem, terminalPairingProofBytes(transcript), signature)) {
+    return {
+      verified: false,
+      refusalCode: "PAIR_CHALLENGE_FAILED",
+      detail: "the terminal proof does not verify under the credentialed key"
+    };
+  }
+  return { verified: true, transcriptHash: pairingTranscriptHash(transcript) };
+}
+var PAIRING_PROTOCOL_VERSION, PAIRING_PURPOSE, PAIRING_TERMINAL_PROOF_KIND, PAIRING_HUB_PROOF_KIND, PAIRING_RECEIPT_KIND, PAIRING_TRANSCRIPT_KIND;
+var init_pairing = __esm({
+  "../../packages/device-identity/dist/pairing.js"() {
+    "use strict";
+    init_dev_crypto();
+    PAIRING_PROTOCOL_VERSION = "1.0";
+    PAIRING_PURPOSE = "hub_terminal_pairing";
+    PAIRING_TERMINAL_PROOF_KIND = "kitluy.pairing-terminal-proof.v1";
+    PAIRING_HUB_PROOF_KIND = "kitluy.pairing-hub-proof.v1";
+    PAIRING_RECEIPT_KIND = "kitluy.pairing-receipt.v1";
+    PAIRING_TRANSCRIPT_KIND = "kitluy.pairing-transcript.v1";
+  }
+});
+
+// ../../packages/device-identity/dist/same-key-renewal-preflight.js
+var init_same_key_renewal_preflight = __esm({
+  "../../packages/device-identity/dist/same-key-renewal-preflight.js"() {
+    "use strict";
+    init_certificate_validity();
+    init_certificate_renewal();
+    init_trusted_time();
+    init_dev_crypto();
+  }
+});
+
+// ../../packages/device-identity/dist/same-key-renewal-issuance.js
+var init_same_key_renewal_issuance = __esm({
+  "../../packages/device-identity/dist/same-key-renewal-issuance.js"() {
+    "use strict";
+    init_certificate_validity();
+    init_trusted_time();
+    init_dev_crypto();
+    init_issuance_adapter();
+    init_same_key_renewal_preflight();
+  }
+});
+
+// ../../packages/device-identity/dist/replacement-key-provider.js
+var init_replacement_key_provider = __esm({
+  "../../packages/device-identity/dist/replacement-key-provider.js"() {
+    "use strict";
+    init_errors2();
+    init_dev_crypto();
+  }
+});
+
+// ../../packages/device-identity/dist/rotate-key-renewal-issuance.js
+var init_rotate_key_renewal_issuance = __esm({
+  "../../packages/device-identity/dist/rotate-key-renewal-issuance.js"() {
+    "use strict";
+    init_certificate_validity();
+    init_trusted_time();
+    init_dev_crypto();
+    init_issuance_adapter();
+    init_replacement_key_pop();
+    init_same_key_renewal_preflight();
+    init_same_key_renewal_issuance();
+    init_replacement_key_provider();
+  }
+});
+
+// ../../packages/device-identity/dist/renewal-reconciliation.js
+var init_renewal_reconciliation = __esm({
+  "../../packages/device-identity/dist/renewal-reconciliation.js"() {
+    "use strict";
+    init_trusted_time();
+  }
+});
+
+// ../../packages/device-identity/dist/credential-lifecycle.js
+var init_credential_lifecycle = __esm({
+  "../../packages/device-identity/dist/credential-lifecycle.js"() {
+    "use strict";
+    init_trusted_time();
+  }
+});
+
+// ../../packages/device-identity/dist/credential-lifecycle-jobs.js
+var DEVICE_JOB_MAX_ATTEMPTS;
+var init_credential_lifecycle_jobs = __esm({
+  "../../packages/device-identity/dist/credential-lifecycle-jobs.js"() {
+    "use strict";
+    init_credential_lifecycle();
+    init_renewal_reconciliation();
+    DEVICE_JOB_MAX_ATTEMPTS = 5;
+  }
+});
+
+// ../../packages/device-identity/dist/credential-revocation.js
+var COMPROMISE_REASONS, COMPROMISE_REASON_SET;
+var init_credential_revocation = __esm({
+  "../../packages/device-identity/dist/credential-revocation.js"() {
+    "use strict";
+    COMPROMISE_REASONS = [
+      "KEY_COMPROMISE",
+      "DEVICE_STOLEN",
+      "PROVIDER_COMPROMISE",
+      // DEVICE_LOST belongs here for the same reason DEVICE_STOLEN does. The
+      // distinction between lost and stolen is about intent, not about custody:
+      // either way a device holding a private key is somewhere the operator does
+      // not control. Leaving it out allowed a lost device to be revoked with
+      // NO_RECOVERY, which opens no case and schedules no replacement — the exact
+      // outcome this list exists to prevent.
+      "DEVICE_LOST"
+    ];
+    COMPROMISE_REASON_SET = new Set(COMPROMISE_REASONS);
+  }
+});
+
+// ../../packages/device-identity/dist/pg-revocation-gateway.js
+var init_pg_revocation_gateway = __esm({
+  "../../packages/device-identity/dist/pg-revocation-gateway.js"() {
+    "use strict";
+  }
+});
+
+// ../../packages/device-identity/dist/pg-revocation-lookup.js
+var init_pg_revocation_lookup = __esm({
+  "../../packages/device-identity/dist/pg-revocation-lookup.js"() {
+    "use strict";
+  }
+});
+
+// ../../packages/device-identity/dist/key-destruction.js
+var MAX_DESTRUCTION_EXECUTION_ATTEMPTS;
+var init_key_destruction = __esm({
+  "../../packages/device-identity/dist/key-destruction.js"() {
+    "use strict";
+    init_replacement_key_provider();
+    MAX_DESTRUCTION_EXECUTION_ATTEMPTS = 5;
+  }
+});
+
+// ../../packages/device-identity/dist/revocation-and-destruction-jobs.js
+function completed(resultCode) {
+  return { kind: "completed", resultCode };
+}
+function failed(failureCode) {
+  return { kind: "failed", failureCode };
+}
+var DEVICE_DESTRUCTION_JOB_MAX_ATTEMPTS, DEVICE_REVOCATION_JOB_FAILURE_CODES, REVOCATION_OUTCOME_ROUTING, REVOCATION_OUTCOME_INDEX, REVOCATION_REFUSAL_ROUTING, REVOCATION_REFUSAL_INDEX, KEY_DESTRUCTION_OUTCOME_ROUTING, KEY_DESTRUCTION_OUTCOME_INDEX, RECOVERY_DISPOSITION_ROUTING, RECOVERY_DISPOSITION_INDEX, DESTRUCTION_REQUEST_STATUS_ROUTING, DESTRUCTION_REQUEST_STATUS_INDEX;
+var init_revocation_and_destruction_jobs = __esm({
+  "../../packages/device-identity/dist/revocation-and-destruction-jobs.js"() {
+    "use strict";
+    init_credential_lifecycle_jobs();
+    init_environments();
+    init_credential_revocation();
+    init_key_destruction();
+    DEVICE_DESTRUCTION_JOB_MAX_ATTEMPTS = Math.min(DEVICE_JOB_MAX_ATTEMPTS, MAX_DESTRUCTION_EXECUTION_ATTEMPTS);
+    DEVICE_REVOCATION_JOB_FAILURE_CODES = {
+      /** The payload carried no approval request id. Rule: a worker never approves. */
+      APPROVAL_REFERENCE_ABSENT: "REVOCATION_APPROVAL_REFERENCE_ABSENT",
+      /** The payload named no approver. Same rule, other half of the pair. */
+      APPROVER_ABSENT: "REVOCATION_APPROVER_ABSENT",
+      /** The payload named the WORKER as approver — a synthesised approval. */
+      WORKER_SELF_APPROVED: "REVOCATION_WORKER_SELF_APPROVED",
+      REVOCATION_REFUSED: "REVOCATION_REFUSED",
+      REVOCATION_MANUAL_REVIEW: "REVOCATION_MANUAL_REVIEW_REQUIRED",
+      RECOVERY_DOWNGRADED: "RECOVERY_DISPOSITION_DOWNGRADED",
+      RECOVERY_MANUAL_REVIEW: "RECOVERY_MANUAL_SECURITY_REVIEW",
+      RECOVERY_UNKNOWN_REASON: "RECOVERY_UNKNOWN_REVOCATION_REASON",
+      RECOVERY_UNKNOWN_DISPOSITION: "RECOVERY_UNKNOWN_DISPOSITION",
+      DESTRUCTION_REFUSED: "DESTRUCTION_REFUSED",
+      DESTRUCTION_MANUAL_REVIEW: "DESTRUCTION_MANUAL_REVIEW_REQUIRED",
+      /** The provider was asked and did not say. NOT a retry. See Rule 3 below. */
+      DESTRUCTION_RECONCILIATION_REQUIRED: "DESTRUCTION_RECONCILIATION_REQUIRED",
+      DESTRUCTION_ATTEMPTS_EXHAUSTED: "DESTRUCTION_ATTEMPTS_EXHAUSTED",
+      DESTRUCTION_REQUEST_NOT_FOUND: "DESTRUCTION_REQUEST_NOT_FOUND",
+      DESTRUCTION_UNKNOWN_REQUEST_STATE: "DESTRUCTION_UNKNOWN_REQUEST_STATE",
+      PAYLOAD_INCOMPLETE: "DEVICE_JOB_PAYLOAD_INCOMPLETE",
+      ENVIRONMENT_UNRECOGNISED: "DEVICE_JOB_ENVIRONMENT_UNRECOGNISED",
+      /** The job named a different device from its subject. Runtime-classified. */
+      SCOPE_MISMATCH: "AUTHORIZATION_FAILED"
+    };
+    REVOCATION_OUTCOME_ROUTING = {
+      REVOKED: completed("REVOKED"),
+      // Not "REVOKED, again". The credential was already repudiated, this attempt
+      // added no second effect, and that is precisely what makes replaying a job
+      // with the same dedupe key safe. Recorded as a replay, not a fresh success.
+      ALREADY_REVOKED: completed("JOB_RESULT_REPLAYED"),
+      REVOCATION_REFUSED: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.REVOCATION_REFUSED),
+      // Group 0136 saying a DIFFERENT intent met an already-revoked credential.
+      // Flattening it into a success is how a conflict becomes a green tick.
+      MANUAL_REVIEW_REQUIRED: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.REVOCATION_MANUAL_REVIEW)
+    };
+    REVOCATION_OUTCOME_INDEX = new Map(Object.entries(REVOCATION_OUTCOME_ROUTING));
+    REVOCATION_REFUSAL_ROUTING = {
+      REVOCATION_NO_REQUEST_ID: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.PAYLOAD_INCOMPLETE),
+      REVOCATION_NO_REQUESTER: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.PAYLOAD_INCOMPLETE),
+      REVOCATION_NO_SOURCE: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.PAYLOAD_INCOMPLETE),
+      REVOCATION_NO_REASON: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.PAYLOAD_INCOMPLETE),
+      REVOCATION_SELF_APPROVED: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.WORKER_SELF_APPROVED),
+      REVOCATION_RECOVERY_DOWNGRADED: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.RECOVERY_DOWNGRADED),
+      // The only retryable one, and only because nothing was decided.
+      REVOCATION_GATEWAY_FAILED: failed("DATABASE_UNAVAILABLE"),
+      // NOT retryable. A privilege denial is permanent: retrying it burns the
+      // attempt budget and then dead-letters an AUTHORIZATION failure as a database
+      // outage, which sends whoever reads it looking at the wrong thing.
+      REVOCATION_NOT_AUTHORIZED: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.REVOCATION_MANUAL_REVIEW),
+      REVOCATION_UNKNOWN_OUTCOME: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.REVOCATION_MANUAL_REVIEW)
+    };
+    REVOCATION_REFUSAL_INDEX = new Map(Object.entries(REVOCATION_REFUSAL_ROUTING));
+    KEY_DESTRUCTION_OUTCOME_ROUTING = {
+      DESTROYED: completed("DESTROYED"),
+      // The provider had already erased it and said so with evidence. One key, one
+      // erasure: this is a replay, and recording it as a fresh destruction would
+      // make the attempt log claim two keys died.
+      ALREADY_DESTROYED: completed("JOB_RESULT_REPLAYED"),
+      ALREADY_CONFIRMED: completed("JOB_RESULT_REPLAYED"),
+      DESTRUCTION_REFUSED: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.DESTRUCTION_REFUSED),
+      // AMBIGUITY IS NOT A TRANSIENT FAULT. The provider was asked and did not say,
+      // so nobody knows whether a private key still exists. A retry would call the
+      // provider AGAIN on a request whose first call may have succeeded; this code
+      // is absent from `RETRYABLE_FAILURE_CODES` on purpose, so the runtime routes
+      // it to manual review, and the handler additionally proposes a reconcile job.
+      RECONCILIATION_REQUIRED: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.DESTRUCTION_RECONCILIATION_REQUIRED),
+      MANUAL_REVIEW_REQUIRED: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.DESTRUCTION_MANUAL_REVIEW)
+    };
+    KEY_DESTRUCTION_OUTCOME_INDEX = new Map(Object.entries(KEY_DESTRUCTION_OUTCOME_ROUTING));
+    RECOVERY_DISPOSITION_ROUTING = {
+      NO_RECOVERY: completed("NO_ACTION_REQUIRED"),
+      RECOVERY_REQUIRED: completed("RECOVERY_REQUIRED"),
+      REPROVISION_REQUIRED: completed("REPROVISION_REQUIRED"),
+      REASSIGNMENT_REQUIRED: completed("REASSIGNMENT_REQUIRED"),
+      MANUAL_SECURITY_REVIEW: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.RECOVERY_MANUAL_REVIEW)
+    };
+    RECOVERY_DISPOSITION_INDEX = new Map(Object.entries(RECOVERY_DISPOSITION_ROUTING));
+    DESTRUCTION_REQUEST_STATUS_ROUTING = {
+      executed: completed("JOB_RESULT_REPLAYED"),
+      requested: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.DESTRUCTION_RECONCILIATION_REQUIRED),
+      approved: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.DESTRUCTION_RECONCILIATION_REQUIRED),
+      pending_execution: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.DESTRUCTION_RECONCILIATION_REQUIRED),
+      failed: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.DESTRUCTION_RECONCILIATION_REQUIRED),
+      manual_review: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.DESTRUCTION_RECONCILIATION_REQUIRED),
+      cancelled: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.DESTRUCTION_RECONCILIATION_REQUIRED),
+      expired: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.DESTRUCTION_RECONCILIATION_REQUIRED)
+    };
+    DESTRUCTION_REQUEST_STATUS_INDEX = new Map(Object.entries(DESTRUCTION_REQUEST_STATUS_ROUTING));
+  }
+});
+
+// ../../packages/device-identity/dist/snapshot-signing.js
+var init_snapshot_signing = __esm({
+  "../../packages/device-identity/dist/snapshot-signing.js"() {
+    "use strict";
+  }
+});
+
+// ../../packages/device-identity/dist/release-manifest.js
+var init_release_manifest = __esm({
+  "../../packages/device-identity/dist/release-manifest.js"() {
+    "use strict";
+  }
+});
+
+// ../../packages/device-identity/dist/edge-discovery.js
+function edgeDiscoveryRecordBytes(record) {
+  return Buffer.from([
+    EDGE_DISCOVERY_KIND,
+    record.protocolVersion,
+    record.recordId,
+    record.hubDeviceId,
+    record.hubCertificateFingerprint,
+    record.tenantId,
+    record.digitalStoreId,
+    record.storeLocationId,
+    record.environment,
+    record.hostname,
+    String(record.port),
+    record.issuedAt.toISOString(),
+    record.expiresAt.toISOString()
+  ].join("\n"), "utf8");
+}
+var EDGE_DISCOVERY_KIND, EDGE_DISCOVERY_SERVICE_TYPE, EDGE_DISCOVERY_REFRESH_SECONDS, EDGE_DISCOVERY_VALIDITY_SECONDS, EDGE_LAN_PORT;
+var init_edge_discovery = __esm({
+  "../../packages/device-identity/dist/edge-discovery.js"() {
+    "use strict";
+    init_dev_crypto();
+    EDGE_DISCOVERY_KIND = "kitluy.edge-discovery.v1";
+    EDGE_DISCOVERY_SERVICE_TYPE = "_kitluy-edge._tcp.local";
+    EDGE_DISCOVERY_REFRESH_SECONDS = 30;
+    EDGE_DISCOVERY_VALIDITY_SECONDS = 90;
+    EDGE_LAN_PORT = 7443;
+  }
+});
+
+// ../../packages/device-identity/dist/enrollment-time-token.js
+var init_enrollment_time_token = __esm({
+  "../../packages/device-identity/dist/enrollment-time-token.js"() {
+    "use strict";
+    init_snapshot_signing();
+  }
+});
+
+// ../../packages/device-identity/dist/manufacturing-enrollment-pop.js
+var init_manufacturing_enrollment_pop = __esm({
+  "../../packages/device-identity/dist/manufacturing-enrollment-pop.js"() {
+    "use strict";
+    init_dev_crypto();
+  }
+});
+
+// ../../packages/device-identity/dist/hub-claim-payload.js
+var init_hub_claim_payload = __esm({
+  "../../packages/device-identity/dist/hub-claim-payload.js"() {
+    "use strict";
+  }
+});
+
+// ../../packages/device-identity/dist/terminal-configuration-delivery.js
+function terminalConfigurationDeliveryBytes(d) {
+  return Buffer.from([
+    TERMINAL_CONFIGURATION_DELIVERY_KIND,
+    d.snapshotId,
+    String(d.configurationVersion),
+    String(d.schemaVersion),
+    d.tenantId,
+    d.digitalStoreId,
+    d.storeLocationId,
+    d.environment,
+    d.hubDeviceId,
+    d.terminalDeviceId,
+    String(d.assignmentGeneration),
+    d.terminalProfileCode,
+    d.minimumApplicationVersion,
+    d.maximumApplicationVersion === null ? "-" : d.maximumApplicationVersion,
+    d.issuedAt.toISOString(),
+    d.effectiveAt.toISOString(),
+    d.validUntil.toISOString(),
+    d.manifestSha256,
+    d.payloadSha256,
+    d.signingKeyId,
+    d.correlationId
+  ].join("\n"), "utf8");
+}
+var TERMINAL_CONFIGURATION_DELIVERY_KIND;
+var init_terminal_configuration_delivery = __esm({
+  "../../packages/device-identity/dist/terminal-configuration-delivery.js"() {
+    "use strict";
+    init_dev_crypto();
+    TERMINAL_CONFIGURATION_DELIVERY_KIND = "kitluy.terminal-configuration-delivery.v1";
+  }
+});
+
+// ../../packages/device-identity/dist/credential-package.js
+var init_credential_package = __esm({
+  "../../packages/device-identity/dist/credential-package.js"() {
+    "use strict";
+    init_dev_crypto();
+    init_certificate_validity();
+  }
+});
+
+// ../../packages/device-identity/dist/device-registration-request.js
+var init_device_registration_request = __esm({
+  "../../packages/device-identity/dist/device-registration-request.js"() {
+    "use strict";
+    init_dev_crypto();
+  }
+});
+
+// ../../packages/device-identity/dist/device-runtime-report.js
+var init_device_runtime_report = __esm({
+  "../../packages/device-identity/dist/device-runtime-report.js"() {
+    "use strict";
+    init_dev_crypto();
+  }
+});
+
+// ../../packages/device-identity/dist/index.js
+var init_dist = __esm({
+  "../../packages/device-identity/dist/index.js"() {
+    "use strict";
+    init_environments();
+    init_errors2();
+    init_errors2();
+    init_trusted_time();
+    init_certificate_validity();
+    init_certificate_renewal();
+    init_revocation_snapshot();
+    init_configuration_validity();
+    init_dev_crypto();
+    init_certificate_issuance();
+    init_operational_recovery_identity();
+    init_issuance_adapter();
+    init_replacement_key_pop();
+    init_provisioning_pop();
+    init_activation_ack();
+    init_pairing();
+    init_same_key_renewal_preflight();
+    init_same_key_renewal_issuance();
+    init_replacement_key_provider();
+    init_rotate_key_renewal_issuance();
+    init_renewal_reconciliation();
+    init_credential_lifecycle();
+    init_credential_lifecycle_jobs();
+    init_credential_revocation();
+    init_pg_revocation_gateway();
+    init_pg_revocation_lookup();
+    init_key_destruction();
+    init_revocation_and_destruction_jobs();
+    init_snapshot_signing();
+    init_release_manifest();
+    init_edge_discovery();
+    init_enrollment_time_token();
+    init_manufacturing_enrollment_pop();
+    init_hub_claim_payload();
+    init_terminal_configuration_delivery();
+    init_credential_package();
+    init_device_registration_request();
+    init_device_runtime_report();
+  }
+});
+
+// src/hub/edge/runtime-bootstrap.ts
+import { createHash as createHash5, randomUUID as randomUUID5, scryptSync, timingSafeEqual } from "node:crypto";
+async function readAuthorityTime(pool) {
+  const instant = await withHubTransaction(
+    pool,
+    async (client) => {
+      const result = await client.query(`select now() as now`);
+      const row = result.rows[0];
+      if (row === void 0) throw new Error("the Hub database returned no transaction time");
+      return row.now;
+    },
+    HUB_RUNTIME_ROLE
+  );
+  const iso = instant.toISOString();
+  return {
+    protocolVersion: RUNTIME_PROTOCOL_VERSION,
+    authorityTime: iso,
+    authoritySource: "hub_database",
+    responseId: randomUUID5(),
+    generatedAt: iso,
+    maxCacheAgeSeconds: AUTHORITY_TIME_MAX_CACHE_AGE_SECONDS
+  };
+}
+async function readRuntimeEligibility(pool, terminalDeviceId, certificateSerial, environment) {
+  return withHubTransaction(
+    pool,
+    async (client) => deriveEligibility(client, terminalDeviceId, certificateSerial, environment),
+    HUB_RUNTIME_ROLE
+  );
+}
+async function selectOperationalHubIdentity(client) {
+  const operational = await client.query(
+    `select id
+       from edge_identity.hub_device
+      where device_kind = 'store_hub'
+        and trust_status = 'trusted'
+        and lifecycle_status = 'deployed'
+      order by created_at
+      limit 1`
+  );
+  const row = operational.rows[0];
+  if (row !== void 0) {
+    return { kind: "operational", id: row.id };
+  }
+  const newest = await client.query(
+    `select lifecycle_status
+       from edge_identity.hub_device
+      where device_kind = 'store_hub'
+      order by created_at desc
+      limit 1`
+  );
+  const current = newest.rows[0];
+  if (current === void 0) {
+    return {
+      kind: "refused",
+      refusal: "HUB_NOT_OPERATIONAL",
+      detail: "no Store Hub device record exists"
+    };
+  }
+  if (current.lifecycle_status === "retired") {
+    return { kind: "refused", refusal: "HUB_RETIRED", detail: "this Store Hub is retired" };
+  }
+  return {
+    kind: "refused",
+    refusal: "HUB_NOT_OPERATIONAL",
+    detail: "this Store Hub has no trusted, deployed identity"
+  };
+}
+async function readContainmentDirective(client, terminalDeviceId) {
+  const containment = await client.query(
+    `select directive from edge_identity.effective_containment where device_uuid = $1::uuid`,
+    [terminalDeviceId]
+  );
+  return containment.rows[0]?.directive ?? "none";
+}
+function isBlockingContainment(directive) {
+  return directive === "operations_restricted" || directive === "suspended" || directive === "quarantined";
+}
+async function readBlockingContainment(client, terminalDeviceId) {
+  const directive = await readContainmentDirective(client, terminalDeviceId);
+  return isBlockingContainment(directive) ? directive : null;
+}
+async function terminalHoldsCurrentT1Grant(client, terminalDeviceId) {
+  const grant = await client.query(
+    `select tpa.profile_code
+       from edge_config.terminal_profile_assignment tpa
+       join edge_config.configuration_snapshot cs on cs.id = tpa.source_snapshot_id
+      where tpa.terminal_device_id = $1::uuid
+        and tpa.enabled
+        and tpa.effective_from <= now()
+        and (tpa.effective_until is null or tpa.effective_until > now())
+        and cs.state = 'active'
+      order by tpa.assignment_version desc
+      limit 1`,
+    [terminalDeviceId]
+  );
+  return grant.rows[0]?.profile_code === T1_PROFILE_CODE;
+}
+async function deriveEligibility(client, terminalDeviceId, certificateSerial, environment) {
+  const refuse = (refusal2, detail) => ({
+    outcome: "refused",
+    refusal: refusal2,
+    detail
+  });
+  const identity = await selectOperationalHubIdentity(client);
+  if (identity.kind === "refused") {
+    return refuse(identity.refusal, identity.detail);
+  }
+  const hubRow = { id: identity.id };
+  const replacement = await client.query(
+    `select mode from edge_identity.hub_replacement_state where singleton = true`
+  );
+  const mode = replacement.rows[0]?.mode ?? "normal";
+  if (mode !== "normal") {
+    return mode === "retired_rejected" ? refuse("HUB_RETIRED", "this Store Hub is locally retired") : refuse("HUB_REPLACEMENT_BLOCKED", `hub replacement state is ${mode}`);
+  }
+  const hubAssignment = await client.query(
+    `select hub_device_id, tenant_id, digital_store_id, location_id, assignment_generation
+       from edge_identity.hub_assignment
+      where hub_device_id = $1 and ended_at is null
+      order by assignment_generation desc
+      limit 1`,
+    [hubRow.id]
+  );
+  const scope = hubAssignment.rows[0];
+  if (scope === void 0) {
+    return refuse("HUB_ASSIGNMENT_MISSING", "this Store Hub has no active assignment");
+  }
+  const terminal = await client.query(
+    `select tenant_id, digital_store_id, location_id, assignment_generation, lifecycle_status
+       from edge_identity.terminal_device
+      where id = $1::uuid`,
+    [terminalDeviceId]
+  );
+  const terminalRow = terminal.rows[0];
+  if (terminalRow === void 0) {
+    return refuse("CREDENTIAL_NOT_CURRENT", "the terminal projection is missing");
+  }
+  if (terminalRow.tenant_id !== scope.tenant_id || terminalRow.digital_store_id !== scope.digital_store_id || terminalRow.location_id !== scope.location_id) {
+    return refuse(
+      "ASSIGNMENT_SCOPE_MISMATCH",
+      "the terminal belongs to another Tenant, Store or Location"
+    );
+  }
+  const credential = await client.query(
+    `select id, rotation_generation, status
+       from edge_identity.device_credential
+      where certificate_serial = $1`,
+    [certificateSerial]
+  );
+  const credentialRow = credential.rows[0];
+  if (credentialRow === void 0 || credentialRow.status !== "active") {
+    return refuse("CREDENTIAL_NOT_CURRENT", "the presented credential is not current");
+  }
+  const receipt = await client.query(
+    `select terminal_assignment_generation, terminal_profile_code, paired_at
+       from edge_identity.pairing_receipt
+      where terminal_device_id = $1::uuid
+      order by terminal_assignment_generation desc, paired_at desc
+      limit 1`,
+    [terminalDeviceId]
+  );
+  const receiptRow = receipt.rows[0];
+  if (receiptRow === void 0) {
+    return refuse("PAIRING_REQUIRED", "no pairing receipt exists for this terminal");
+  }
+  if (receiptRow.terminal_assignment_generation > terminalRow.assignment_generation) {
+    return refuse(
+      "ASSIGNMENT_GENERATION_STALE",
+      "the terminal's assignment generation is behind one it has already paired at on this Hub"
+    );
+  }
+  if (receiptRow.terminal_assignment_generation < terminalRow.assignment_generation) {
+    const blocking = await readBlockingContainment(client, terminalDeviceId);
+    if (blocking !== null) {
+      return refuse("CONTAINMENT_PROHIBITS", `containment directive ${blocking} is in effect`);
+    }
+    return refuse(
+      "PAIRING_REQUIRED",
+      "the pairing receipt binds an earlier assignment generation; pair again at the current one"
+    );
+  }
+  const grant = await client.query(
+    `select tpa.id, tpa.profile_code
+       from edge_config.terminal_profile_assignment tpa
+       join edge_config.configuration_snapshot cs on cs.id = tpa.source_snapshot_id
+      where tpa.terminal_device_id = $1::uuid
+        and tpa.enabled
+        and tpa.effective_from <= now()
+        and (tpa.effective_until is null or tpa.effective_until > now())
+        and cs.state = 'active'
+      order by tpa.assignment_version desc
+      limit 1`,
+    [terminalDeviceId]
+  );
+  const grantRow = grant.rows[0];
+  if (grantRow === void 0) {
+    return refuse("PROFILE_NOT_GRANTED", "no enabled profile assignment exists");
+  }
+  if (grantRow.profile_code !== T1_PROFILE_CODE) {
+    return refuse("PROFILE_NOT_T1", `the assigned profile is ${grantRow.profile_code}`);
+  }
+  if (receiptRow.terminal_profile_code !== grantRow.profile_code) {
+    return refuse("ASSIGNMENT_GENERATION_STALE", "the pairing receipt binds another profile");
+  }
+  const directive = await readContainmentDirective(client, terminalDeviceId);
+  if (isBlockingContainment(directive)) {
+    return refuse("CONTAINMENT_PROHIBITS", `containment directive ${directive} is in effect`);
+  }
+  const containmentState = directive === "cleared" ? "none" : directive;
+  const snapshot = await client.query(
+    `select snapshot_version
+       from edge_config.configuration_snapshot
+      where location_id = $1::uuid and state = 'active'`,
+    [terminalRow.location_id]
+  );
+  const requiredVersion = snapshot.rows[0]?.snapshot_version;
+  const nowRow = await client.query(`select now() as now`);
+  const authorityTime = nowRow.rows[0]?.now ?? /* @__PURE__ */ new Date(0);
+  return {
+    outcome: "eligible",
+    payload: {
+      protocolVersion: RUNTIME_PROTOCOL_VERSION,
+      tenantId: terminalRow.tenant_id,
+      digitalStoreId: terminalRow.digital_store_id,
+      storeLocationId: terminalRow.location_id,
+      environment,
+      hubDeviceId: hubRow.id,
+      terminalDeviceId,
+      assignmentId: grantRow.id,
+      assignmentGeneration: terminalRow.assignment_generation,
+      terminalProfileCode: grantRow.profile_code,
+      credentialId: credentialRow.id,
+      credentialGeneration: credentialRow.rotation_generation,
+      credentialEligibility: "eligible",
+      activationEligibility: "activated",
+      pairingEligibility: "paired",
+      pairedAt: receiptRow.paired_at.toISOString(),
+      containmentState,
+      hubReplacementState: mode,
+      requiredConfigurationVersion: requiredVersion === void 0 ? null : Number(requiredVersion),
+      authorityTime: authorityTime.toISOString()
+    }
+  };
+}
+async function readCurrentConfigurationDelivery(pool, terminalDeviceId, certificateSerial, environment, signer, correlationId) {
+  return withHubTransaction(
+    pool,
+    async (client) => {
+      const eligibility = await deriveEligibility(
+        client,
+        terminalDeviceId,
+        certificateSerial,
+        environment
+      );
+      if (eligibility.outcome === "refused") {
+        return {
+          outcome: "refused",
+          refusal: eligibility.refusal,
+          detail: eligibility.detail
+        };
+      }
+      const scope = eligibility.payload;
+      const snapshot = await client.query(
+        `select id, snapshot_version, schema_version, created_at, not_before,
+                expires_at, manifest_sha256, signing_key_id
+           from edge_config.configuration_snapshot
+          where location_id = $1::uuid and state = 'active'`,
+        [scope.storeLocationId]
+      );
+      const snapshotRow = snapshot.rows[0];
+      if (snapshotRow === void 0) {
+        return {
+          outcome: "refused",
+          refusal: "CONFIGURATION_MISSING",
+          detail: "no active configuration snapshot exists for this Location"
+        };
+      }
+      const sections = await client.query(
+        `select section_code, content_json
+           from edge_config.configuration_section
+          where snapshot_id = $1::uuid
+          order by section_code asc`,
+        [snapshotRow.id]
+      );
+      const payload = {};
+      for (const row of sections.rows) payload[row.section_code] = row.content_json;
+      const payloadJson = canonicalJson(payload);
+      const payloadSha256 = createHash5("sha256").update(Buffer.from(payloadJson, "utf8")).digest("hex");
+      const profilesSection = payload["terminal_profiles"];
+      const compatibility = profilesSection?.application_compatibility;
+      const minimumApplicationVersion = typeof compatibility?.["minimum_application_version"] === "string" ? compatibility["minimum_application_version"] : "0.0.0";
+      const maximumApplicationVersion = typeof compatibility?.["maximum_application_version"] === "string" ? compatibility["maximum_application_version"] : null;
+      const nowRow = await client.query(`select now() as now`);
+      const now = nowRow.rows[0] ?? { now: /* @__PURE__ */ new Date(0) };
+      const validUntil = snapshotRow.expires_at ?? new Date(now.now.getTime() + DEV_DELIVERY_VALIDITY_HOURS * 36e5);
+      const rollback = await client.query(
+        `select snapshot_version
+           from edge_config.configuration_snapshot
+          where location_id = $1::uuid and state = 'staged'
+          order by snapshot_version desc
+          limit 1`,
+        [scope.storeLocationId]
+      );
+      const rollbackRow = rollback.rows[0];
+      const delivery = {
+        snapshotId: snapshotRow.id,
+        configurationVersion: Number(snapshotRow.snapshot_version),
+        schemaVersion: snapshotRow.schema_version,
+        tenantId: scope.tenantId,
+        digitalStoreId: scope.digitalStoreId,
+        storeLocationId: scope.storeLocationId,
+        environment,
+        hubDeviceId: scope.hubDeviceId,
+        terminalDeviceId,
+        assignmentGeneration: scope.assignmentGeneration,
+        terminalProfileCode: scope.terminalProfileCode,
+        minimumApplicationVersion,
+        maximumApplicationVersion,
+        issuedAt: snapshotRow.created_at,
+        effectiveAt: snapshotRow.not_before,
+        validUntil,
+        manifestSha256: snapshotRow.manifest_sha256,
+        payloadSha256,
+        signingKeyId: snapshotRow.signing_key_id,
+        correlationId
+      };
+      const deliverySignature = Buffer.from(
+        signer.sign(terminalConfigurationDeliveryBytes(delivery))
+      ).toString("base64url");
+      return {
+        outcome: "delivery",
+        body: {
+          delivery: {
+            ...delivery,
+            issuedAt: delivery.issuedAt.toISOString(),
+            effectiveAt: delivery.effectiveAt.toISOString(),
+            validUntil: delivery.validUntil.toISOString()
+          },
+          payloadJson,
+          deliverySignature,
+          deliverySignerCertificateSerial: signer.certificateSerial,
+          deliverySignerPublicKeyFingerprint: publicKeyFingerprint(signer.publicKeyPem),
+          rollbackReference: rollbackRow === void 0 ? null : Number(rollbackRow.snapshot_version)
+        }
+      };
+    },
+    HUB_RUNTIME_ROLE
+  );
+}
+function staffCredentialVerifier(actorId, passcode) {
+  return scryptSync(passcode, `kitluy.staff.${actorId}`, 32, { N: 16384, r: 8, p: 1 });
+}
+function verifyStaffCredential(actorId, passcode, storedVerifier) {
+  if (storedVerifier.length !== 32) return false;
+  const presented = staffCredentialVerifier(actorId, passcode);
+  return timingSafeEqual(presented, storedVerifier);
+}
+async function resolveGrant(client, scope, actorId, permissionKey) {
+  const result = await client.query(
+    `select edge_config.resolve_permission_grant(
+              $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5,
+              'store_location', $3::uuid, true, now()) as verdict`,
+    [scope.tenantId, scope.digitalStoreId, scope.locationId, actorId, permissionKey]
+  );
+  return result.rows[0]?.verdict ?? "unknown";
+}
+async function effectivePermissions(client, scope, actorId) {
+  const keys = [
+    PERMISSION_STAFF_SESSIONS_OPEN,
+    PERMISSION_STAFF_SESSIONS_READ,
+    PERMISSION_STAFF_SESSIONS_REFRESH,
+    PERMISSION_STAFF_SESSIONS_CLOSE,
+    PERMISSION_POS_T1_USE,
+    PERMISSION_CUSTOMERS_READ,
+    PERMISSION_CUSTOMERS_CREATE,
+    PERMISSION_CONSENT_RECORD,
+    PERMISSION_BOOKINGS_READ,
+    PERMISSION_BOOKINGS_CREATE
+  ];
+  const held = [];
+  for (const key of keys) {
+    if (await resolveGrant(client, scope, actorId, key) === "allow") held.push(key);
+  }
+  return held;
+}
+function staffScope(row) {
+  return {
+    tenantId: row.tenant_id,
+    digitalStoreId: row.digital_store_id,
+    locationId: row.location_id
+  };
+}
+function sessionScope(row) {
+  return {
+    tenantId: row.tenant_id,
+    digitalStoreId: row.digital_store_id,
+    locationId: row.location_id
+  };
+}
+async function openStaffSession(pool, input) {
+  return withHubTransaction(
+    pool,
+    async (client) => {
+      const refuse = (refusal2, detail) => ({
+        outcome: "refused",
+        refusal: refusal2,
+        detail
+      });
+      const terminal = await client.query(
+        `select id, tenant_id, digital_store_id, location_id, assignment_generation, lifecycle_status
+           from edge_identity.terminal_device where id = $1::uuid`,
+        [input.terminalDeviceId]
+      );
+      const terminalRow = terminal.rows[0];
+      if (terminalRow === void 0) return refuse("SESSION_UNKNOWN", "unknown terminal");
+      const staff = await client.query(
+        `select actor_id, tenant_id, digital_store_id, location_id, display_name,
+                credential_verifier, profile_codes, offline_valid_until, disabled
+           from edge_identity.staff_cache where actor_id = $1::uuid`,
+        [input.actorId]
+      );
+      const staffRow = staff.rows[0];
+      if (staffRow === void 0) return refuse("STAFF_UNKNOWN", "no such staff member");
+      if (staffRow.disabled) return refuse("STAFF_DISABLED", "the staff member is disabled");
+      if (staffRow.tenant_id !== terminalRow.tenant_id || staffRow.digital_store_id !== terminalRow.digital_store_id || staffRow.location_id !== terminalRow.location_id) {
+        return refuse("STAFF_SCOPE_MISMATCH", "the staff member belongs to another Store");
+      }
+      if (!verifyStaffCredential(input.actorId, input.passcode, staffRow.credential_verifier)) {
+        return refuse("STAFF_CREDENTIAL_INVALID", "the presented credential does not verify");
+      }
+      if (!staffRow.profile_codes.includes(input.profileCode)) {
+        return refuse(
+          "STAFF_PROFILE_NOT_AUTHORIZED",
+          "the staff member is not authorized for this profile"
+        );
+      }
+      if (await resolveGrant(
+        client,
+        staffScope(staffRow),
+        input.actorId,
+        PERMISSION_STAFF_SESSIONS_OPEN
+      ) !== "allow") {
+        return refuse(
+          "SESSION_PERMISSION_DENIED",
+          `${PERMISSION_STAFF_SESSIONS_OPEN} is not granted`
+        );
+      }
+      const nowRow = await client.query(`select now() as now`);
+      const now = nowRow.rows[0]?.now ?? /* @__PURE__ */ new Date(0);
+      if (now.getTime() >= staffRow.offline_valid_until.getTime()) {
+        return refuse("STAFF_DISABLED", "the staff cache entry is beyond its governed validity");
+      }
+      const existing = await client.query(
+        `select id, actor_id, opened_at, expires_at, session_generation
+           from edge_identity.terminal_session
+          where terminal_device_id = $1::uuid and profile_code = $2 and closed_at is null`,
+        [input.terminalDeviceId, input.profileCode]
+      );
+      const open = existing.rows[0];
+      if (open !== void 0) {
+        if (open.expires_at.getTime() <= now.getTime()) {
+          await client.query(
+            `update edge_identity.terminal_session set closed_at = now(), status = 'expired' where id = $1::uuid`,
+            [open.id]
+          );
+        } else if (open.actor_id === input.actorId) {
+          const held2 = await effectivePermissions(client, staffScope(staffRow), input.actorId);
+          return {
+            outcome: "ok",
+            result: "SESSION_ALREADY_OPEN",
+            session: {
+              sessionId: open.id,
+              actorId: input.actorId,
+              displayName: staffRow.display_name,
+              profileCode: input.profileCode,
+              openedAt: open.opened_at.toISOString(),
+              expiresAt: open.expires_at.toISOString(),
+              sessionGeneration: open.session_generation,
+              effectivePermissions: held2,
+              authorityTime: now.toISOString()
+            }
+          };
+        } else {
+          return refuse("SESSION_OCCUPIED", "another staff member's session is open");
+        }
+      }
+      const lifetimeMs = DEV_STAFF_SESSION_LIFETIME_MINUTES * 6e4;
+      const expiresAt = new Date(
+        Math.min(now.getTime() + lifetimeMs, staffRow.offline_valid_until.getTime())
+      );
+      const sessionId = randomUUID5();
+      const generation = (open?.session_generation ?? 0) + 1;
+      await client.query(
+        `insert into edge_identity.terminal_session
+           (id, tenant_id, digital_store_id, location_id, terminal_device_id, actor_id,
+            profile_code, opened_at, expires_at, closed_at, session_generation,
+            last_event_sequence, status)
+         values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6::uuid,
+                 $7, $8, $9, null, $10, 0, 'open')`,
+        [
+          sessionId,
+          staffRow.tenant_id,
+          staffRow.digital_store_id,
+          staffRow.location_id,
+          input.terminalDeviceId,
+          input.actorId,
+          input.profileCode,
+          now,
+          expiresAt,
+          generation
+        ]
+      );
+      const held = await effectivePermissions(client, staffScope(staffRow), input.actorId);
+      return {
+        outcome: "ok",
+        result: "SESSION_OPENED",
+        session: {
+          sessionId,
+          actorId: input.actorId,
+          displayName: staffRow.display_name,
+          profileCode: input.profileCode,
+          openedAt: now.toISOString(),
+          expiresAt: expiresAt.toISOString(),
+          sessionGeneration: generation,
+          effectivePermissions: held,
+          authorityTime: now.toISOString()
+        }
+      };
+    },
+    HUB_RUNTIME_ROLE
+  );
+}
+async function loadOwnedOpenSession(client, sessionId, terminalDeviceId) {
+  const result = await client.query(
+    `select id, actor_id, tenant_id, digital_store_id, location_id, terminal_device_id, profile_code,
+            opened_at, expires_at, closed_at, session_generation, credential_kind
+       from edge_identity.terminal_session where id = $1::uuid`,
+    [sessionId]
+  );
+  const row = result.rows[0];
+  if (row === void 0)
+    return { ok: false, refusal: "SESSION_UNKNOWN", detail: "no such session" };
+  if (row.terminal_device_id !== terminalDeviceId) {
+    return { ok: false, refusal: "SESSION_UNKNOWN", detail: "no such session" };
+  }
+  if (row.closed_at !== null) {
+    return { ok: false, refusal: "SESSION_CLOSED", detail: "the session is closed" };
+  }
+  return { ok: true, row };
+}
+async function authorizeT1IntakeSession(client, input) {
+  const owned = await loadOwnedOpenSession(client, input.sessionId, input.terminalDeviceId);
+  if (!owned.ok) return { ok: false, refusal: owned.refusal, detail: owned.detail };
+  const row = owned.row;
+  const nowRow = await client.query(`select now() as now`);
+  const now = nowRow.rows[0];
+  if (now === void 0) {
+    return { ok: false, refusal: "SESSION_UNKNOWN", detail: "no transaction time" };
+  }
+  if (row.expires_at.getTime() <= now.now.getTime()) {
+    return { ok: false, refusal: "SESSION_EXPIRED", detail: "the session already expired" };
+  }
+  if (row.profile_code !== T1_PROFILE_CODE) {
+    return { ok: false, refusal: "T1_NOT_AUTHORIZED", detail: "the session is not a T1 session" };
+  }
+  const scope = sessionScope(row);
+  if (row.credential_kind === "terminal_pin") {
+    if (row.actor_id !== input.terminalDeviceId) {
+      return { ok: false, refusal: "SESSION_UNKNOWN", detail: "no such session" };
+    }
+    if (!await terminalHoldsCurrentT1Grant(client, input.terminalDeviceId)) {
+      return {
+        ok: false,
+        refusal: "T1_NOT_AUTHORIZED",
+        detail: "the terminal no longer holds a current T1 profile grant"
+      };
+    }
+    if (await readBlockingContainment(client, input.terminalDeviceId) !== null) {
+      return {
+        ok: false,
+        refusal: "T1_NOT_AUTHORIZED",
+        detail: "a containment directive is in effect"
+      };
+    }
+    if (!T1_TERMINAL_PIN_PERMISSIONS.includes(input.routePermission)) {
+      return {
+        ok: false,
+        refusal: "SESSION_PERMISSION_DENIED",
+        detail: `${input.routePermission} is not part of the T1 terminal surface`
+      };
+    }
+    return {
+      ok: true,
+      authority: {
+        sessionId: row.id,
+        actorId: row.actor_id,
+        tenantId: row.tenant_id,
+        digitalStoreId: row.digital_store_id,
+        locationId: row.location_id,
+        profileCode: row.profile_code
+      }
+    };
+  }
+  if (await resolveGrant(client, scope, row.actor_id, PERMISSION_POS_T1_USE) !== "allow") {
+    return {
+      ok: false,
+      refusal: "T1_NOT_AUTHORIZED",
+      detail: `${PERMISSION_POS_T1_USE} is not granted`
+    };
+  }
+  if (await resolveGrant(client, scope, row.actor_id, input.routePermission) !== "allow") {
+    return {
+      ok: false,
+      refusal: "SESSION_PERMISSION_DENIED",
+      detail: `${input.routePermission} is not granted`
+    };
+  }
+  return {
+    ok: true,
+    authority: {
+      sessionId: row.id,
+      actorId: row.actor_id,
+      tenantId: row.tenant_id,
+      digitalStoreId: row.digital_store_id,
+      locationId: row.location_id,
+      profileCode: row.profile_code
+    }
+  };
+}
+async function refreshStaffSession(pool, input) {
+  return withHubTransaction(
+    pool,
+    async (client) => {
+      const refuse = (refusal2, detail) => ({
+        outcome: "refused",
+        refusal: refusal2,
+        detail
+      });
+      const owned = await loadOwnedOpenSession(client, input.sessionId, input.terminalDeviceId);
+      if (!owned.ok) return refuse(owned.refusal, owned.detail);
+      const row = owned.row;
+      if (row.credential_kind !== "staff") {
+        return refuse("SESSION_UNKNOWN", "no such staff session");
+      }
+      const nowRow = await client.query(`select now() as now`);
+      const now = nowRow.rows[0]?.now ?? /* @__PURE__ */ new Date(0);
+      if (row.expires_at.getTime() <= now.getTime()) {
+        await client.query(
+          `update edge_identity.terminal_session set closed_at = now(), status = 'expired' where id = $1::uuid`,
+          [row.id]
+        );
+        return refuse("SESSION_EXPIRED", "the session already expired");
+      }
+      if (await resolveGrant(
+        client,
+        sessionScope(row),
+        row.actor_id,
+        PERMISSION_STAFF_SESSIONS_REFRESH
+      ) !== "allow") {
+        return refuse(
+          "SESSION_PERMISSION_DENIED",
+          `${PERMISSION_STAFF_SESSIONS_REFRESH} is not granted`
+        );
+      }
+      const staff = await client.query(
+        `select actor_id, tenant_id, digital_store_id, location_id, display_name,
+                credential_verifier, profile_codes, offline_valid_until, disabled
+           from edge_identity.staff_cache where actor_id = $1::uuid`,
+        [row.actor_id]
+      );
+      const staffRow = staff.rows[0];
+      if (staffRow === void 0 || staffRow.disabled) {
+        return refuse("STAFF_DISABLED", "the staff member is no longer eligible");
+      }
+      const lifetimeMs = DEV_STAFF_SESSION_LIFETIME_MINUTES * 6e4;
+      const expiresAt = new Date(
+        Math.min(now.getTime() + lifetimeMs, staffRow.offline_valid_until.getTime())
+      );
+      if (expiresAt.getTime() <= now.getTime()) {
+        return refuse("STAFF_DISABLED", "the staff cache entry is beyond its governed validity");
+      }
+      await client.query(
+        `update edge_identity.terminal_session set expires_at = $2 where id = $1::uuid`,
+        [row.id, expiresAt]
+      );
+      const held = await effectivePermissions(client, sessionScope(row), row.actor_id);
+      return {
+        outcome: "ok",
+        result: "SESSION_REFRESHED",
+        session: {
+          sessionId: row.id,
+          actorId: row.actor_id,
+          displayName: staffRow.display_name,
+          profileCode: row.profile_code,
+          openedAt: row.opened_at.toISOString(),
+          expiresAt: expiresAt.toISOString(),
+          sessionGeneration: row.session_generation,
+          effectivePermissions: held,
+          authorityTime: now.toISOString()
+        }
+      };
+    },
+    HUB_RUNTIME_ROLE
+  );
+}
+async function closeStaffSession(pool, input) {
+  return withHubTransaction(
+    pool,
+    async (client) => {
+      const refuse = (refusal2, detail) => ({
+        outcome: "refused",
+        refusal: refusal2,
+        detail
+      });
+      const owned = await loadOwnedOpenSession(client, input.sessionId, input.terminalDeviceId);
+      if (!owned.ok) return refuse(owned.refusal, owned.detail);
+      const row = owned.row;
+      if (row.credential_kind !== "staff") {
+        return refuse("SESSION_UNKNOWN", "no such staff session");
+      }
+      if (await resolveGrant(
+        client,
+        sessionScope(row),
+        row.actor_id,
+        PERMISSION_STAFF_SESSIONS_CLOSE
+      ) !== "allow") {
+        return refuse(
+          "SESSION_PERMISSION_DENIED",
+          `${PERMISSION_STAFF_SESSIONS_CLOSE} is not granted`
+        );
+      }
+      const nowRow = await client.query(`select now() as now`);
+      const now = nowRow.rows[0]?.now ?? /* @__PURE__ */ new Date(0);
+      await client.query(
+        `update edge_identity.terminal_session set closed_at = now(), status = 'closed' where id = $1::uuid`,
+        [row.id]
+      );
+      const held = await effectivePermissions(client, sessionScope(row), row.actor_id);
+      return {
+        outcome: "ok",
+        result: "SESSION_CLOSED",
+        session: {
+          sessionId: row.id,
+          actorId: row.actor_id,
+          displayName: "",
+          profileCode: row.profile_code,
+          openedAt: row.opened_at.toISOString(),
+          expiresAt: row.expires_at.toISOString(),
+          sessionGeneration: row.session_generation,
+          effectivePermissions: held,
+          authorityTime: now.toISOString()
+        }
+      };
+    },
+    HUB_RUNTIME_ROLE
+  );
+}
+var RUNTIME_PROTOCOL_VERSION, AUTHORITY_TIME_MAX_CACHE_AGE_SECONDS, DEV_STAFF_SESSION_LIFETIME_MINUTES, T1_PROFILE_CODE, PERMISSION_STAFF_SESSIONS_OPEN, PERMISSION_STAFF_SESSIONS_READ, PERMISSION_STAFF_SESSIONS_REFRESH, PERMISSION_STAFF_SESSIONS_CLOSE, PERMISSION_POS_T1_USE, PERMISSION_CUSTOMERS_READ, PERMISSION_CUSTOMERS_CREATE, PERMISSION_CONSENT_RECORD, PERMISSION_BOOKINGS_READ, PERMISSION_BOOKINGS_CREATE, T1_TERMINAL_PIN_PERMISSIONS, DEV_DELIVERY_VALIDITY_HOURS;
+var init_runtime_bootstrap = __esm({
+  "src/hub/edge/runtime-bootstrap.ts"() {
+    "use strict";
+    init_dist();
+    init_db();
+    init_hub_database();
+    RUNTIME_PROTOCOL_VERSION = "1.0";
+    AUTHORITY_TIME_MAX_CACHE_AGE_SECONDS = 30;
+    DEV_STAFF_SESSION_LIFETIME_MINUTES = 30;
+    T1_PROFILE_CODE = "laundry.t1.intake_cashier";
+    PERMISSION_STAFF_SESSIONS_OPEN = "staff.sessions.open";
+    PERMISSION_STAFF_SESSIONS_READ = "staff.sessions.read";
+    PERMISSION_STAFF_SESSIONS_REFRESH = "staff.sessions.refresh";
+    PERMISSION_STAFF_SESSIONS_CLOSE = "staff.sessions.close";
+    PERMISSION_POS_T1_USE = "pos.t1.use";
+    PERMISSION_CUSTOMERS_READ = "customers.read";
+    PERMISSION_CUSTOMERS_CREATE = "customers.create";
+    PERMISSION_CONSENT_RECORD = "customers.consent.record";
+    PERMISSION_BOOKINGS_READ = "laundry.bookings.read";
+    PERMISSION_BOOKINGS_CREATE = "laundry.bookings.create";
+    T1_TERMINAL_PIN_PERMISSIONS = [
+      PERMISSION_POS_T1_USE,
+      PERMISSION_CUSTOMERS_READ,
+      PERMISSION_CUSTOMERS_CREATE,
+      PERMISSION_CONSENT_RECORD,
+      PERMISSION_BOOKINGS_READ,
+      PERMISSION_BOOKINGS_CREATE
+    ];
+    DEV_DELIVERY_VALIDITY_HOURS = 24;
+  }
+});
+
+// ../../node_modules/.pnpm/hash-wasm@4.12.0/node_modules/hash-wasm/dist/index.umd.js
+var require_index_umd = __commonJS({
+  "../../node_modules/.pnpm/hash-wasm@4.12.0/node_modules/hash-wasm/dist/index.umd.js"(exports, module) {
+    (function(global2, factory) {
+      typeof exports === "object" && typeof module !== "undefined" ? factory(exports) : typeof define === "function" && define.amd ? define(["exports"], factory) : (global2 = typeof globalThis !== "undefined" ? globalThis : global2 || self, factory(global2.hashwasm = {}));
+    })(exports, (function(exports2) {
+      "use strict";
+      var name$l = "adler32";
+      var data$l = "AGFzbQEAAAABDANgAAF/YAAAYAF/AAMHBgABAgEAAgUEAQECAgYOAn8BQYCJBQt/AEGACAsHcAgGbWVtb3J5AgAOSGFzaF9HZXRCdWZmZXIAAAlIYXNoX0luaXQAAQtIYXNoX1VwZGF0ZQACCkhhc2hfRmluYWwAAw1IYXNoX0dldFN0YXRlAAQOSGFzaF9DYWxjdWxhdGUABQpTVEFURV9TSVpFAwEK6wkGBQBBgAkLCgBBAEEBNgKECAvjCAEHf0EAKAKECCIBQf//A3EhAiABQRB2IQMCQAJAIABBAUcNACACQQAtAIAJaiIBQY+AfGogASABQfD/A0sbIgEgA2oiBEEQdCIFQYCAPGogBSAEQfD/A0sbIAFyIQEMAQsCQAJAAkACQAJAIABBEEkNAEGACSEGIABBsCtJDQFBgAkhBgNAQQAhBQNAIAYgBWoiASgCACIEQf8BcSACaiICIANqIAIgBEEIdkH/AXFqIgJqIAIgBEEQdkH/AXFqIgJqIAIgBEEYdmoiAmogAiABQQRqKAIAIgRB/wFxaiICaiACIARBCHZB/wFxaiICaiACIARBEHZB/wFxaiICaiACIARBGHZqIgJqIAIgAUEIaigCACIEQf8BcWoiAmogAiAEQQh2Qf8BcWoiAmogAiAEQRB2Qf8BcWoiAmogAiAEQRh2aiIEaiAEIAFBDGooAgAiAUH/AXFqIgRqIAQgAUEIdkH/AXFqIgRqIAQgAUEQdkH/AXFqIgRqIAQgAUEYdmoiAmohAyAFQRBqIgVBsCtHDQALIANB8f8DcCEDIAJB8f8DcCECIAZBsCtqIQYgAEHQVGoiAEGvK0sNAAsgAEUNBCAAQQ9LDQEMAgsCQCAARQ0AAkACQCAAQQNxIgUNAEGACSEBIAAhBAwBCyAAQXxxIQRBACEBA0AgAiABQYAJai0AAGoiAiADaiEDIAUgAUEBaiIBRw0ACyAFQYAJaiEBCyAAQQRJDQADQCACIAEtAABqIgUgAS0AAWoiBiABLQACaiIAIAFBA2otAABqIgIgACAGIAUgA2pqamohAyABQQRqIQEgBEF8aiIEDQALCyACQY+AfGogAiACQfD/A0sbIANB8f8DcEEQdHIhAQwECwNAIAYoAgAiAUH/AXEgAmoiBCADaiAEIAFBCHZB/wFxaiIEaiAEIAFBEHZB/wFxaiIEaiAEIAFBGHZqIgRqIAQgBkEEaigCACIBQf8BcWoiBGogBCABQQh2Qf8BcWoiBGogBCABQRB2Qf8BcWoiBGogBCABQRh2aiIEaiAEIAZBCGooAgAiAUH/AXFqIgRqIAQgAUEIdkH/AXFqIgRqIAQgAUEQdkH/AXFqIgRqIAQgAUEYdmoiBGogBCAGQQxqKAIAIgFB/wFxaiIEaiAEIAFBCHZB/wFxaiIEaiAEIAFBEHZB/wFxaiIEaiAEIAFBGHZqIgJqIQMgBkEQaiEGIABBcGoiAEEPSw0ACyAARQ0BCyAAQX9qIQcCQCAAQQNxIgVFDQAgAEF8cSEAIAUhBCAGIQEDQCACIAEtAABqIgIgA2ohAyABQQFqIQEgBEF/aiIEDQALIAYgBWohBgsgB0EDSQ0AA0AgAiAGLQAAaiIBIAYtAAFqIgQgBi0AAmoiBSAGQQNqLQAAaiICIAUgBCABIANqampqIQMgBkEEaiEGIABBfGoiAA0ACwsgA0Hx/wNwIQMgAkHx/wNwIQILIAIgA0EQdHIhAQtBACABNgKECAsxAQF/QQBBACgChAgiAEEYdCAAQYD+A3FBCHRyIABBCHZBgP4DcSAAQRh2cnI2AoAJCwUAQYQICzsAQQBBATYChAggABACQQBBACgChAgiAEEYdCAAQYD+A3FBCHRyIABBCHZBgP4DcSAAQRh2cnI2AoAJCwsVAgBBgAgLBAQAAAAAQYQICwQBAAAA";
+      var hash$l = "02ddbd17";
+      var wasmJson$l = {
+        name: name$l,
+        data: data$l,
+        hash: hash$l
+      };
+      function __awaiter(thisArg, _arguments, P, generator) {
+        function adopt(value) {
+          return value instanceof P ? value : new P(function(resolve) {
+            resolve(value);
+          });
+        }
+        return new (P || (P = Promise))(function(resolve, reject) {
+          function fulfilled(value) {
+            try {
+              step(generator.next(value));
+            } catch (e) {
+              reject(e);
+            }
+          }
+          function rejected(value) {
+            try {
+              step(generator["throw"](value));
+            } catch (e) {
+              reject(e);
+            }
+          }
+          function step(result) {
+            result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected);
+          }
+          step((generator = generator.apply(thisArg, _arguments || [])).next());
+        });
+      }
+      typeof SuppressedError === "function" ? SuppressedError : function(error, suppressed, message) {
+        var e = new Error(message);
+        return e.name = "SuppressedError", e.error = error, e.suppressed = suppressed, e;
+      };
+      class Mutex {
+        constructor() {
+          this.mutex = Promise.resolve();
+        }
+        lock() {
+          let begin = () => {
+          };
+          this.mutex = this.mutex.then(() => new Promise(begin));
+          return new Promise((res) => {
+            begin = res;
+          });
+        }
+        dispatch(fn) {
+          return __awaiter(this, void 0, void 0, function* () {
+            const unlock = yield this.lock();
+            try {
+              return yield Promise.resolve(fn());
+            } finally {
+              unlock();
+            }
+          });
+        }
+      }
+      var _a;
+      function getGlobal() {
+        if (typeof globalThis !== "undefined")
+          return globalThis;
+        if (typeof self !== "undefined")
+          return self;
+        if (typeof window !== "undefined")
+          return window;
+        return global;
+      }
+      const globalObject = getGlobal();
+      const nodeBuffer = (_a = globalObject.Buffer) !== null && _a !== void 0 ? _a : null;
+      const textEncoder = globalObject.TextEncoder ? new globalObject.TextEncoder() : null;
+      function intArrayToString(arr, len) {
+        return String.fromCharCode(...arr.subarray(0, len));
+      }
+      function hexCharCodesToInt(a, b) {
+        return (a & 15) + (a >> 6 | a >> 3 & 8) << 4 | (b & 15) + (b >> 6 | b >> 3 & 8);
+      }
+      function writeHexToUInt8(buf, str) {
+        const size = str.length >> 1;
+        for (let i = 0; i < size; i++) {
+          const index = i << 1;
+          buf[i] = hexCharCodesToInt(str.charCodeAt(index), str.charCodeAt(index + 1));
+        }
+      }
+      function hexStringEqualsUInt8(str, buf) {
+        if (str.length !== buf.length * 2) {
+          return false;
+        }
+        for (let i = 0; i < buf.length; i++) {
+          const strIndex = i << 1;
+          if (buf[i] !== hexCharCodesToInt(str.charCodeAt(strIndex), str.charCodeAt(strIndex + 1))) {
+            return false;
+          }
+        }
+        return true;
+      }
+      const alpha = "a".charCodeAt(0) - 10;
+      const digit = "0".charCodeAt(0);
+      function getDigestHex(tmpBuffer, input, hashLength) {
+        let p = 0;
+        for (let i = 0; i < hashLength; i++) {
+          let nibble = input[i] >>> 4;
+          tmpBuffer[p++] = nibble > 9 ? nibble + alpha : nibble + digit;
+          nibble = input[i] & 15;
+          tmpBuffer[p++] = nibble > 9 ? nibble + alpha : nibble + digit;
+        }
+        return String.fromCharCode.apply(null, tmpBuffer);
+      }
+      const getUInt8Buffer = nodeBuffer !== null ? (data2) => {
+        if (typeof data2 === "string") {
+          const buf = nodeBuffer.from(data2, "utf8");
+          return new Uint8Array(buf.buffer, buf.byteOffset, buf.length);
+        }
+        if (nodeBuffer.isBuffer(data2)) {
+          return new Uint8Array(data2.buffer, data2.byteOffset, data2.length);
+        }
+        if (ArrayBuffer.isView(data2)) {
+          return new Uint8Array(data2.buffer, data2.byteOffset, data2.byteLength);
+        }
+        throw new Error("Invalid data type!");
+      } : (data2) => {
+        if (typeof data2 === "string") {
+          return textEncoder.encode(data2);
+        }
+        if (ArrayBuffer.isView(data2)) {
+          return new Uint8Array(data2.buffer, data2.byteOffset, data2.byteLength);
+        }
+        throw new Error("Invalid data type!");
+      };
+      const base64Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+      const base64Lookup = new Uint8Array(256);
+      for (let i = 0; i < base64Chars.length; i++) {
+        base64Lookup[base64Chars.charCodeAt(i)] = i;
+      }
+      function encodeBase64(data2, pad = true) {
+        const len = data2.length;
+        const extraBytes = len % 3;
+        const parts = [];
+        const len2 = len - extraBytes;
+        for (let i = 0; i < len2; i += 3) {
+          const tmp = (data2[i] << 16 & 16711680) + (data2[i + 1] << 8 & 65280) + (data2[i + 2] & 255);
+          const triplet = base64Chars.charAt(tmp >> 18 & 63) + base64Chars.charAt(tmp >> 12 & 63) + base64Chars.charAt(tmp >> 6 & 63) + base64Chars.charAt(tmp & 63);
+          parts.push(triplet);
+        }
+        if (extraBytes === 1) {
+          const tmp = data2[len - 1];
+          const a = base64Chars.charAt(tmp >> 2);
+          const b = base64Chars.charAt(tmp << 4 & 63);
+          parts.push(`${a}${b}`);
+          if (pad) {
+            parts.push("==");
+          }
+        } else if (extraBytes === 2) {
+          const tmp = (data2[len - 2] << 8) + data2[len - 1];
+          const a = base64Chars.charAt(tmp >> 10);
+          const b = base64Chars.charAt(tmp >> 4 & 63);
+          const c = base64Chars.charAt(tmp << 2 & 63);
+          parts.push(`${a}${b}${c}`);
+          if (pad) {
+            parts.push("=");
+          }
+        }
+        return parts.join("");
+      }
+      function getDecodeBase64Length(data2) {
+        let bufferLength = Math.floor(data2.length * 0.75);
+        const len = data2.length;
+        if (data2[len - 1] === "=") {
+          bufferLength -= 1;
+          if (data2[len - 2] === "=") {
+            bufferLength -= 1;
+          }
+        }
+        return bufferLength;
+      }
+      function decodeBase64(data2) {
+        const bufferLength = getDecodeBase64Length(data2);
+        const len = data2.length;
+        const bytes = new Uint8Array(bufferLength);
+        let p = 0;
+        for (let i = 0; i < len; i += 4) {
+          const encoded1 = base64Lookup[data2.charCodeAt(i)];
+          const encoded2 = base64Lookup[data2.charCodeAt(i + 1)];
+          const encoded3 = base64Lookup[data2.charCodeAt(i + 2)];
+          const encoded4 = base64Lookup[data2.charCodeAt(i + 3)];
+          bytes[p] = encoded1 << 2 | encoded2 >> 4;
+          p += 1;
+          bytes[p] = (encoded2 & 15) << 4 | encoded3 >> 2;
+          p += 1;
+          bytes[p] = (encoded3 & 3) << 6 | encoded4 & 63;
+          p += 1;
+        }
+        return bytes;
+      }
+      const MAX_HEAP = 16 * 1024;
+      const WASM_FUNC_HASH_LENGTH = 4;
+      const wasmMutex = new Mutex();
+      const wasmModuleCache = /* @__PURE__ */ new Map();
+      function WASMInterface(binary, hashLength) {
+        return __awaiter(this, void 0, void 0, function* () {
+          let wasmInstance = null;
+          let memoryView = null;
+          let initialized = false;
+          if (typeof WebAssembly === "undefined") {
+            throw new Error("WebAssembly is not supported in this environment!");
+          }
+          const writeMemory = (data2, offset = 0) => {
+            memoryView.set(data2, offset);
+          };
+          const getMemory = () => memoryView;
+          const getExports = () => wasmInstance.exports;
+          const setMemorySize = (totalSize) => {
+            wasmInstance.exports.Hash_SetMemorySize(totalSize);
+            const arrayOffset = wasmInstance.exports.Hash_GetBuffer();
+            const memoryBuffer = wasmInstance.exports.memory.buffer;
+            memoryView = new Uint8Array(memoryBuffer, arrayOffset, totalSize);
+          };
+          const getStateSize = () => {
+            const view = new DataView(wasmInstance.exports.memory.buffer);
+            const stateSize = view.getUint32(wasmInstance.exports.STATE_SIZE, true);
+            return stateSize;
+          };
+          const loadWASMPromise = wasmMutex.dispatch(() => __awaiter(this, void 0, void 0, function* () {
+            if (!wasmModuleCache.has(binary.name)) {
+              const asm = decodeBase64(binary.data);
+              const promise = WebAssembly.compile(asm);
+              wasmModuleCache.set(binary.name, promise);
+            }
+            const module2 = yield wasmModuleCache.get(binary.name);
+            wasmInstance = yield WebAssembly.instantiate(module2, {
+              // env: {
+              //   emscripten_memcpy_big: (dest, src, num) => {
+              //     const memoryBuffer = wasmInstance.exports.memory.buffer;
+              //     const memView = new Uint8Array(memoryBuffer, 0);
+              //     memView.set(memView.subarray(src, src + num), dest);
+              //   },
+              //   print_memory: (offset, len) => {
+              //     const memoryBuffer = wasmInstance.exports.memory.buffer;
+              //     const memView = new Uint8Array(memoryBuffer, 0);
+              //     console.log('print_int32', memView.subarray(offset, offset + len));
+              //   },
+              // },
+            });
+          }));
+          const setupInterface = () => __awaiter(this, void 0, void 0, function* () {
+            if (!wasmInstance) {
+              yield loadWASMPromise;
+            }
+            const arrayOffset = wasmInstance.exports.Hash_GetBuffer();
+            const memoryBuffer = wasmInstance.exports.memory.buffer;
+            memoryView = new Uint8Array(memoryBuffer, arrayOffset, MAX_HEAP);
+          });
+          const init = (bits = null) => {
+            initialized = true;
+            wasmInstance.exports.Hash_Init(bits);
+          };
+          const updateUInt8Array = (data2) => {
+            let read = 0;
+            while (read < data2.length) {
+              const chunk = data2.subarray(read, read + MAX_HEAP);
+              read += chunk.length;
+              memoryView.set(chunk);
+              wasmInstance.exports.Hash_Update(chunk.length);
+            }
+          };
+          const update = (data2) => {
+            if (!initialized) {
+              throw new Error("update() called before init()");
+            }
+            const Uint8Buffer = getUInt8Buffer(data2);
+            updateUInt8Array(Uint8Buffer);
+          };
+          const digestChars = new Uint8Array(hashLength * 2);
+          const digest = (outputType, padding = null) => {
+            if (!initialized) {
+              throw new Error("digest() called before init()");
+            }
+            initialized = false;
+            wasmInstance.exports.Hash_Final(padding);
+            if (outputType === "binary") {
+              return memoryView.slice(0, hashLength);
+            }
+            return getDigestHex(digestChars, memoryView, hashLength);
+          };
+          const save = () => {
+            if (!initialized) {
+              throw new Error("save() can only be called after init() and before digest()");
+            }
+            const stateOffset = wasmInstance.exports.Hash_GetState();
+            const stateLength = getStateSize();
+            const memoryBuffer = wasmInstance.exports.memory.buffer;
+            const internalState = new Uint8Array(memoryBuffer, stateOffset, stateLength);
+            const prefixedState = new Uint8Array(WASM_FUNC_HASH_LENGTH + stateLength);
+            writeHexToUInt8(prefixedState, binary.hash);
+            prefixedState.set(internalState, WASM_FUNC_HASH_LENGTH);
+            return prefixedState;
+          };
+          const load = (state) => {
+            if (!(state instanceof Uint8Array)) {
+              throw new Error("load() expects an Uint8Array generated by save()");
+            }
+            const stateOffset = wasmInstance.exports.Hash_GetState();
+            const stateLength = getStateSize();
+            const overallLength = WASM_FUNC_HASH_LENGTH + stateLength;
+            const memoryBuffer = wasmInstance.exports.memory.buffer;
+            if (state.length !== overallLength) {
+              throw new Error(`Bad state length (expected ${overallLength} bytes, got ${state.length})`);
+            }
+            if (!hexStringEqualsUInt8(binary.hash, state.subarray(0, WASM_FUNC_HASH_LENGTH))) {
+              throw new Error("This state was written by an incompatible hash implementation");
+            }
+            const internalState = state.subarray(WASM_FUNC_HASH_LENGTH);
+            new Uint8Array(memoryBuffer, stateOffset, stateLength).set(internalState);
+            initialized = true;
+          };
+          const isDataShort = (data2) => {
+            if (typeof data2 === "string") {
+              return data2.length < MAX_HEAP / 4;
+            }
+            return data2.byteLength < MAX_HEAP;
+          };
+          let canSimplify = isDataShort;
+          switch (binary.name) {
+            case "argon2":
+            case "scrypt":
+              canSimplify = () => true;
+              break;
+            case "blake2b":
+            case "blake2s":
+              canSimplify = (data2, initParam) => initParam <= 512 && isDataShort(data2);
+              break;
+            case "blake3":
+              canSimplify = (data2, initParam) => initParam === 0 && isDataShort(data2);
+              break;
+            case "xxhash64":
+            // cannot simplify
+            case "xxhash3":
+            case "xxhash128":
+            case "crc64":
+              canSimplify = () => false;
+              break;
+          }
+          const calculate = (data2, initParam = null, digestParam = null) => {
+            if (!canSimplify(data2, initParam)) {
+              init(initParam);
+              update(data2);
+              return digest("hex", digestParam);
+            }
+            const buffer = getUInt8Buffer(data2);
+            memoryView.set(buffer);
+            wasmInstance.exports.Hash_Calculate(buffer.length, initParam, digestParam);
+            return getDigestHex(digestChars, memoryView, hashLength);
+          };
+          yield setupInterface();
+          return {
+            getMemory,
+            writeMemory,
+            getExports,
+            setMemorySize,
+            init,
+            update,
+            digest,
+            save,
+            load,
+            calculate,
+            hashLength
+          };
+        });
+      }
+      function lockedCreate(mutex2, binary, hashLength) {
+        return __awaiter(this, void 0, void 0, function* () {
+          const unlock = yield mutex2.lock();
+          const wasm = yield WASMInterface(binary, hashLength);
+          unlock();
+          return wasm;
+        });
+      }
+      const mutex$l = new Mutex();
+      let wasmCache$l = null;
+      function adler32(data2) {
+        if (wasmCache$l === null) {
+          return lockedCreate(mutex$l, wasmJson$l, 4).then((wasm) => {
+            wasmCache$l = wasm;
+            return wasmCache$l.calculate(data2);
+          });
+        }
+        try {
+          const hash2 = wasmCache$l.calculate(data2);
+          return Promise.resolve(hash2);
+        } catch (err) {
+          return Promise.reject(err);
+        }
+      }
+      function createAdler32() {
+        return WASMInterface(wasmJson$l, 4).then((wasm) => {
+          wasm.init();
+          const obj = {
+            init: () => {
+              wasm.init();
+              return obj;
+            },
+            update: (data2) => {
+              wasm.update(data2);
+              return obj;
+            },
+            // biome-ignore lint/suspicious/noExplicitAny: Conflict with IHasher type
+            digest: (outputType) => wasm.digest(outputType),
+            save: () => wasm.save(),
+            load: (data2) => {
+              wasm.load(data2);
+              return obj;
+            },
+            blockSize: 4,
+            digestSize: 4
+          };
+          return obj;
+        });
+      }
+      var name$k = "argon2";
+      var data$k = "AGFzbQEAAAABKQVgAX8Bf2AAAX9gEH9/f39/f39/f39/f39/f38AYAR/f39/AGACf38AAwYFAAECAwQFBgEBAoCAAgYIAX8BQZCoBAsHQQQGbWVtb3J5AgASSGFzaF9TZXRNZW1vcnlTaXplAAAOSGFzaF9HZXRCdWZmZXIAAQ5IYXNoX0NhbGN1bGF0ZQAECvEyBVgBAn9BACEBAkAgAEEAKAKICCICRg0AAkAgACACayIAQRB2IABBgIB8cSAASWoiAEAAQX9HDQBB/wHADwtBACEBQQBBACkDiAggAEEQdK18NwOICAsgAcALcAECfwJAQQAoAoAIIgANAEEAPwBBEHQiADYCgAhBACgCiAgiAUGAgCBGDQACQEGAgCAgAWsiAEEQdiAAQYCAfHEgAElqIgBAAEF/Rw0AQQAPC0EAQQApA4gIIABBEHStfDcDiAhBACgCgAghAAsgAAvcDgECfiAAIAQpAwAiECAAKQMAIhF8IBFCAYZC/v///x+DIBBC/////w+DfnwiEDcDACAMIBAgDCkDAIVCIIkiEDcDACAIIBAgCCkDACIRfCARQgGGQv7///8fgyAQQv////8Pg358IhA3AwAgBCAQIAQpAwCFQiiJIhA3AwAgACAQIAApAwAiEXwgEEL/////D4MgEUIBhkL+////H4N+fCIQNwMAIAwgECAMKQMAhUIwiSIQNwMAIAggECAIKQMAIhF8IBBC/////w+DIBFCAYZC/v///x+DfnwiEDcDACAEIBAgBCkDAIVCAYk3AwAgASAFKQMAIhAgASkDACIRfCARQgGGQv7///8fgyAQQv////8Pg358IhA3AwAgDSAQIA0pAwCFQiCJIhA3AwAgCSAQIAkpAwAiEXwgEUIBhkL+////H4MgEEL/////D4N+fCIQNwMAIAUgECAFKQMAhUIoiSIQNwMAIAEgECABKQMAIhF8IBBC/////w+DIBFCAYZC/v///x+DfnwiEDcDACANIBAgDSkDAIVCMIkiEDcDACAJIBAgCSkDACIRfCAQQv////8PgyARQgGGQv7///8fg358IhA3AwAgBSAQIAUpAwCFQgGJNwMAIAIgBikDACIQIAIpAwAiEXwgEUIBhkL+////H4MgEEL/////D4N+fCIQNwMAIA4gECAOKQMAhUIgiSIQNwMAIAogECAKKQMAIhF8IBFCAYZC/v///x+DIBBC/////w+DfnwiEDcDACAGIBAgBikDAIVCKIkiEDcDACACIBAgAikDACIRfCAQQv////8PgyARQgGGQv7///8fg358IhA3AwAgDiAQIA4pAwCFQjCJIhA3AwAgCiAQIAopAwAiEXwgEEL/////D4MgEUIBhkL+////H4N+fCIQNwMAIAYgECAGKQMAhUIBiTcDACADIAcpAwAiECADKQMAIhF8IBFCAYZC/v///x+DIBBC/////w+DfnwiEDcDACAPIBAgDykDAIVCIIkiEDcDACALIBAgCykDACIRfCARQgGGQv7///8fgyAQQv////8Pg358IhA3AwAgByAQIAcpAwCFQiiJIhA3AwAgAyAQIAMpAwAiEXwgEEL/////D4MgEUIBhkL+////H4N+fCIQNwMAIA8gECAPKQMAhUIwiSIQNwMAIAsgECALKQMAIhF8IBBC/////w+DIBFCAYZC/v///x+DfnwiEDcDACAHIBAgBykDAIVCAYk3AwAgACAFKQMAIhAgACkDACIRfCARQgGGQv7///8fgyAQQv////8Pg358IhA3AwAgDyAQIA8pAwCFQiCJIhA3AwAgCiAQIAopAwAiEXwgEUIBhkL+////H4MgEEL/////D4N+fCIQNwMAIAUgECAFKQMAhUIoiSIQNwMAIAAgECAAKQMAIhF8IBBC/////w+DIBFCAYZC/v///x+DfnwiEDcDACAPIBAgDykDAIVCMIkiEDcDACAKIBAgCikDACIRfCAQQv////8PgyARQgGGQv7///8fg358IhA3AwAgBSAQIAUpAwCFQgGJNwMAIAEgBikDACIQIAEpAwAiEXwgEUIBhkL+////H4MgEEL/////D4N+fCIQNwMAIAwgECAMKQMAhUIgiSIQNwMAIAsgECALKQMAIhF8IBFCAYZC/v///x+DIBBC/////w+DfnwiEDcDACAGIBAgBikDAIVCKIkiEDcDACABIBAgASkDACIRfCAQQv////8PgyARQgGGQv7///8fg358IhA3AwAgDCAQIAwpAwCFQjCJIhA3AwAgCyAQIAspAwAiEXwgEEL/////D4MgEUIBhkL+////H4N+fCIQNwMAIAYgECAGKQMAhUIBiTcDACACIAcpAwAiECACKQMAIhF8IBFCAYZC/v///x+DIBBC/////w+DfnwiEDcDACANIBAgDSkDAIVCIIkiEDcDACAIIBAgCCkDACIRfCARQgGGQv7///8fgyAQQv////8Pg358IhA3AwAgByAQIAcpAwCFQiiJIhA3AwAgAiAQIAIpAwAiEXwgEEL/////D4MgEUIBhkL+////H4N+fCIQNwMAIA0gECANKQMAhUIwiSIQNwMAIAggECAIKQMAIhF8IBBC/////w+DIBFCAYZC/v///x+DfnwiEDcDACAHIBAgBykDAIVCAYk3AwAgAyAEKQMAIhAgAykDACIRfCARQgGGQv7///8fgyAQQv////8Pg358IhA3AwAgDiAQIA4pAwCFQiCJIhA3AwAgCSAQIAkpAwAiEXwgEUIBhkL+////H4MgEEL/////D4N+fCIQNwMAIAQgECAEKQMAhUIoiSIQNwMAIAMgECADKQMAIhF8IBBC/////w+DIBFCAYZC/v///x+DfnwiEDcDACAOIBAgDikDAIVCMIkiEDcDACAJIBAgCSkDACIRfCAQQv////8PgyARQgGGQv7///8fg358IhA3AwAgBCAQIAQpAwCFQgGJNwMAC98aAQN/QQAhBEEAIAIpAwAgASkDAIU3A5AIQQAgAikDCCABKQMIhTcDmAhBACACKQMQIAEpAxCFNwOgCEEAIAIpAxggASkDGIU3A6gIQQAgAikDICABKQMghTcDsAhBACACKQMoIAEpAyiFNwO4CEEAIAIpAzAgASkDMIU3A8AIQQAgAikDOCABKQM4hTcDyAhBACACKQNAIAEpA0CFNwPQCEEAIAIpA0ggASkDSIU3A9gIQQAgAikDUCABKQNQhTcD4AhBACACKQNYIAEpA1iFNwPoCEEAIAIpA2AgASkDYIU3A/AIQQAgAikDaCABKQNohTcD+AhBACACKQNwIAEpA3CFNwOACUEAIAIpA3ggASkDeIU3A4gJQQAgAikDgAEgASkDgAGFNwOQCUEAIAIpA4gBIAEpA4gBhTcDmAlBACACKQOQASABKQOQAYU3A6AJQQAgAikDmAEgASkDmAGFNwOoCUEAIAIpA6ABIAEpA6ABhTcDsAlBACACKQOoASABKQOoAYU3A7gJQQAgAikDsAEgASkDsAGFNwPACUEAIAIpA7gBIAEpA7gBhTcDyAlBACACKQPAASABKQPAAYU3A9AJQQAgAikDyAEgASkD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";
+      var hash$k = "e4cdc523";
+      var wasmJson$k = {
+        name: name$k,
+        data: data$k,
+        hash: hash$k
+      };
+      var name$j = "blake2b";
+      var data$j = "AGFzbQEAAAABEQRgAAF/YAJ/fwBgAX8AYAAAAwoJAAECAwECAgABBQQBAQICBg4CfwFBsIsFC38AQYAICwdwCAZtZW1vcnkCAA5IYXNoX0dldEJ1ZmZlcgAACkhhc2hfRmluYWwAAwlIYXNoX0luaXQABQtIYXNoX1VwZGF0ZQAGDUhhc2hfR2V0U3RhdGUABw5IYXNoX0NhbGN1bGF0ZQAIClNUQVRFX1NJWkUDAQrTOAkFAEGACQvrAgIFfwF+AkAgAUEBSA0AAkACQAJAIAFBgAFBACgC4IoBIgJrIgNKDQAgASEEDAELQQBBADYC4IoBAkAgAkH/AEoNACACQeCJAWohBSAAIQRBACEGA0AgBSAELQAAOgAAIARBAWohBCAFQQFqIQUgAyAGQQFqIgZB/wFxSg0ACwtBAEEAKQPAiQEiB0KAAXw3A8CJAUEAQQApA8iJASAHQv9+Vq18NwPIiQFB4IkBEAIgACADaiEAAkAgASADayIEQYEBSA0AIAIgAWohBQNAQQBBACkDwIkBIgdCgAF8NwPAiQFBAEEAKQPIiQEgB0L/flatfDcDyIkBIAAQAiAAQYABaiEAIAVBgH9qIgVBgAJLDQALIAVBgH9qIQQMAQsgBEEATA0BC0EAIQUDQCAFQQAoAuCKAWpB4IkBaiAAIAVqLQAAOgAAIAQgBUEBaiIFQf8BcUoNAAsLQQBBACgC4IoBIARqNgLgigELC78uASR+QQBBACkD0IkBQQApA7CJASIBQQApA5CJAXwgACkDICICfCIDhULr+obav7X2wR+FQiCJIgRCq/DT9K/uvLc8fCIFIAGFQiiJIgYgA3wgACkDKCIBfCIHIASFQjCJIgggBXwiCSAGhUIBiSIKQQApA8iJAUEAKQOoiQEiBEEAKQOIiQF8IAApAxAiA3wiBYVCn9j52cKR2oKbf4VCIIkiC0K7zqqm2NDrs7t/fCIMIASFQiiJIg0gBXwgACkDGCIEfCIOfCAAKQNQIgV8Ig9BACkDwIkBQQApA6CJASIQQQApA4CJASIRfCAAKQMAIgZ8IhKFQtGFmu/6z5SH0QCFQiCJIhNCiJLznf/M+YTqAHwiFCAQhUIoiSIVIBJ8IAApAwgiEHwiFiAThUIwiSIXhUIgiSIYQQApA9iJAUEAKQO4iQEiE0EAKQOYiQF8IAApAzAiEnwiGYVC+cL4m5Gjs/DbAIVCIIkiGkLx7fT4paf9p6V/fCIbIBOFQiiJIhwgGXwgACkDOCITfCIZIBqFQjCJIhogG3wiG3wiHSAKhUIoiSIeIA98IAApA1giCnwiDyAYhUIwiSIYIB18Ih0gDiALhUIwiSIOIAx8Ih8gDYVCAYkiDCAWfCAAKQNAIgt8Ig0gGoVCIIkiFiAJfCIaIAyFQiiJIiAgDXwgACkDSCIJfCIhIBaFQjCJIhYgGyAchUIBiSIMIAd8IAApA2AiB3wiDSAOhUIgiSIOIBcgFHwiFHwiFyAMhUIoiSIbIA18IAApA2giDHwiHCAOhUIwiSIOIBd8IhcgG4VCAYkiGyAZIBQgFYVCAYkiFHwgACkDcCINfCIVIAiFQiCJIhkgH3wiHyAUhUIoiSIUIBV8IAApA3giCHwiFXwgDHwiIoVCIIkiI3wiJCAbhUIoiSIbICJ8IBJ8IiIgFyAYIBUgGYVCMIkiFSAffCIZIBSFQgGJIhQgIXwgDXwiH4VCIIkiGHwiFyAUhUIoiSIUIB98IAV8Ih8gGIVCMIkiGCAXfCIXIBSFQgGJIhR8IAF8IiEgFiAafCIWIBUgHSAehUIBiSIaIBx8IAl8IhyFQiCJIhV8Ih0gGoVCKIkiGiAcfCAIfCIcIBWFQjCJIhWFQiCJIh4gGSAOIBYgIIVCAYkiFiAPfCACfCIPhUIgiSIOfCIZIBaFQiiJIhYgD3wgC3wiDyAOhUIwiSIOIBl8Ihl8IiAgFIVCKIkiFCAhfCAEfCIhIB6FQjCJIh4gIHwiICAiICOFQjCJIiIgJHwiIyAbhUIBiSIbIBx8IAp8IhwgDoVCIIkiDiAXfCIXIBuFQiiJIhsgHHwgE3wiHCAOhUIwiSIOIBkgFoVCAYkiFiAffCAQfCIZICKFQiCJIh8gFSAdfCIVfCIdIBaFQiiJIhYgGXwgB3wiGSAfhUIwiSIfIB18Ih0gFoVCAYkiFiAVIBqFQgGJIhUgD3wgBnwiDyAYhUIgiSIYICN8IhogFYVCKIkiFSAPfCADfCIPfCAHfCIihUIgiSIjfCIkIBaFQiiJIhYgInwgBnwiIiAjhUIwiSIjICR8IiQgFoVCAYkiFiAOIBd8Ig4gDyAYhUIwiSIPICAgFIVCAYkiFCAZfCAKfCIXhUIgiSIYfCIZIBSFQiiJIhQgF3wgC3wiF3wgBXwiICAPIBp8Ig8gHyAOIBuFQgGJIg4gIXwgCHwiGoVCIIkiG3wiHyAOhUIoiSIOIBp8IAx8IhogG4VCMIkiG4VCIIkiISAdIB4gDyAVhUIBiSIPIBx8IAF8IhWFQiCJIhx8Ih0gD4VCKIkiDyAVfCADfCIVIByFQjCJIhwgHXwiHXwiHiAWhUIoiSIWICB8IA18IiAgIYVCMIkiISAefCIeIBogFyAYhUIwiSIXIBl8IhggFIVCAYkiFHwgCXwiGSAchUIgiSIaICR8IhwgFIVCKIkiFCAZfCACfCIZIBqFQjCJIhogHSAPhUIBiSIPICJ8IAR8Ih0gF4VCIIkiFyAbIB98Iht8Ih8gD4VCKIkiDyAdfCASfCIdIBeFQjCJIhcgH3wiHyAPhUIBiSIPIBsgDoVCAYkiDiAVfCATfCIVICOFQiCJIhsgGHwiGCAOhUIoiSIOIBV8IBB8IhV8IAx8IiKFQiCJIiN8IiQgD4VCKIkiDyAifCAHfCIiICOFQjCJIiMgJHwiJCAPhUIBiSIPIBogHHwiGiAVIBuFQjCJIhUgHiAWhUIBiSIWIB18IAR8IhuFQiCJIhx8Ih0gFoVCKIkiFiAbfCAQfCIbfCABfCIeIBUgGHwiFSAXIBogFIVCAYkiFCAgfCATfCIYhUIgiSIXfCIaIBSFQiiJIhQgGHwgCXwiGCAXhUIwiSIXhUIgiSIgIB8gISAVIA6FQgGJIg4gGXwgCnwiFYVCIIkiGXwiHyAOhUIoiSIOIBV8IA18IhUgGYVCMIkiGSAffCIffCIhIA+FQiiJIg8gHnwgBXwiHiAghUIwiSIgICF8IiEgGyAchUIwiSIbIB18IhwgFoVCAYkiFiAYfCADfCIYIBmFQiCJIhkgJHwiHSAWhUIoiSIWIBh8IBJ8IhggGYVCMIkiGSAfIA6FQgGJIg4gInwgAnwiHyAbhUIgiSIbIBcgGnwiF3wiGiAOhUIoiSIOIB98IAZ8Ih8gG4VCMIkiGyAafCIaIA6FQgGJIg4gFSAXIBSFQgGJIhR8IAh8IhUgI4VCIIkiFyAcfCIcIBSFQiiJIhQgFXwgC3wiFXwgBXwiIoVCIIkiI3wiJCAOhUIoiSIOICJ8IAh8IiIgGiAgIBUgF4VCMIkiFSAcfCIXIBSFQgGJIhQgGHwgCXwiGIVCIIkiHHwiGiAUhUIoiSIUIBh8IAZ8IhggHIVCMIkiHCAafCIaIBSFQgGJIhR8IAR8IiAgGSAdfCIZIBUgISAPhUIBiSIPIB98IAN8Ih2FQiCJIhV8Ih8gD4VCKIkiDyAdfCACfCIdIBWFQjCJIhWFQiCJIiEgFyAbIBkgFoVCAYkiFiAefCABfCIZhUIgiSIbfCIXIBaFQiiJIhYgGXwgE3wiGSAbhUIwiSIbIBd8Ihd8Ih4gFIVCKIkiFCAgfCAMfCIgICGFQjCJIiEgHnwiHiAiICOFQjCJIiIgJHwiIyAOhUIBiSIOIB18IBJ8Ih0gG4VCIIkiGyAafCIaIA6FQiiJIg4gHXwgC3wiHSAbhUIwiSIbIBcgFoVCAYkiFiAYfCANfCIXICKFQiCJIhggFSAffCIVfCIfIBaFQiiJIhYgF3wgEHwiFyAYhUIwiSIYIB98Ih8gFoVCAYkiFiAVIA+FQgGJIg8gGXwgCnwiFSAchUIgiSIZICN8IhwgD4VCKIkiDyAVfCAHfCIVfCASfCIihUIgiSIjfCIkIBaFQiiJIhYgInwgBXwiIiAjhUIwiSIjICR8IiQgFoVCAYkiFiAbIBp8IhogFSAZhUIwiSIVIB4gFIVCAYkiFCAXfCADfCIXhUIgiSIZfCIbIBSFQiiJIhQgF3wgB3wiF3wgAnwiHiAVIBx8IhUgGCAaIA6FQgGJIg4gIHwgC3wiGoVCIIkiGHwiHCAOhUIoiSIOIBp8IAR8IhogGIVCMIkiGIVCIIkiICAfICEgFSAPhUIBiSIPIB18IAZ8IhWFQiCJIh18Ih8gD4VCKIkiDyAVfCAKfCIVIB2FQjCJIh0gH3wiH3wiISAWhUIoiSIWIB58IAx8Ih4gIIVCMIkiICAhfCIhIBogFyAZhUIwiSIXIBt8IhkgFIVCAYkiFHwgEHwiGiAdhUIgiSIbICR8Ih0gFIVCKIkiFCAafCAJfCIaIBuFQjCJIhsgHyAPhUIBiSIPICJ8IBN8Ih8gF4VCIIkiFyAYIBx8Ihh8IhwgD4VCKIkiDyAffCABfCIfIBeFQjCJIhcgHHwiHCAPhUIBiSIPIBggDoVCAYkiDiAVfCAIfCIVICOFQiCJIhggGXwiGSAOhUIoiSIOIBV8IA18IhV8IA18IiKFQiCJIiN8IiQgD4VCKIkiDyAifCAMfCIiICOFQjCJIiMgJHwiJCAPhUIBiSIPIBsgHXwiGyAVIBiFQjCJIhUgISAWhUIBiSIWIB98IBB8IhiFQiCJIh18Ih8gFoVCKIkiFiAYfCAIfCIYfCASfCIhIBUgGXwiFSAXIBsgFIVCAYkiFCAefCAHfCIZhUIgiSIXfCIbIBSFQiiJIhQgGXwgAXwiGSAXhUIwiSIXhUIgiSIeIBwgICAVIA6FQgGJIg4gGnwgAnwiFYVCIIkiGnwiHCAOhUIoiSIOIBV8IAV8IhUgGoVCMIkiGiAcfCIcfCIgIA+FQiiJIg8gIXwgBHwiISAehUIwiSIeICB8IiAgGCAdhUIwiSIYIB98Ih0gFoVCAYkiFiAZfCAGfCIZIBqFQiCJIhogJHwiHyAWhUIoiSIWIBl8IBN8IhkgGoVCMIkiGiAcIA6FQgGJIg4gInwgCXwiHCAYhUIgiSIYIBcgG3wiF3wiGyAOhUIoiSIOIBx8IAN8IhwgGIVCMIkiGCAbfCIbIA6FQgGJIg4gFSAXIBSFQgGJIhR8IAt8IhUgI4VCIIkiFyAdfCIdIBSFQiiJIhQgFXwgCnwiFXwgBHwiIoVCIIkiI3wiJCAOhUIoiSIOICJ8IAl8IiIgGyAeIBUgF4VCMIkiFSAdfCIXIBSFQgGJIhQgGXwgDHwiGYVCIIkiHXwiGyAUhUIoiSIUIBl8IAp8IhkgHYVCMIkiHSAbfCIbIBSFQgGJIhR8IAN8Ih4gGiAffCIaIBUgICAPhUIBiSIPIBx8IAd8IhyFQiCJIhV8Ih8gD4VCKIkiDyAcfCAQfCIcIBWFQjCJIhWFQiCJIiAgFyAYIBogFoVCAYkiFiAhfCATfCIahUIgiSIYfCIXIBaFQiiJIhYgGnwgDXwiGiAYhUIwiSIYIBd8Ihd8IiEgFIVCKIkiFCAefCAFfCIeICCFQjCJIiAgIXwiISAiICOFQjCJIiIgJHwiIyAOhUIBiSIOIBx8IAt8IhwgGIVCIIkiGCAbfCIbIA6FQiiJIg4gHHwgEnwiHCAYhUIwiSIYIBcgFoVCAYkiFiAZfCABfCIXICKFQiCJIhkgFSAffCIVfCIfIBaFQiiJIhYgF3wgBnwiFyAZhUIwiSIZIB98Ih8gFoVCAYkiFiAVIA+FQgGJIg8gGnwgCHwiFSAdhUIgiSIaICN8Ih0gD4VCKIkiDyAVfCACfCIVfCANfCIihUIgiSIjfCIkIBaFQiiJIhYgInwgCXwiIiAjhUIwiSIjICR8IiQgFoVCAYkiFiAYIBt8IhggFSAahUIwiSIVICEgFIVCAYkiFCAXfCASfCIXhUIgiSIafCIbIBSFQiiJIhQgF3wgCHwiF3wgB3wiISAVIB18IhUgGSAYIA6FQgGJIg4gHnwgBnwiGIVCIIkiGXwiHSAOhUIoiSIOIBh8IAt8IhggGYVCMIkiGYVCIIkiHiAfICAgFSAPhUIBiSIPIBx8IAp8IhWFQiCJIhx8Ih8gD4VCKIkiDyAVfCAEfCIVIByFQjCJIhwgH3wiH3wiICAWhUIoiSIWICF8IAN8IiEgHoVCMIkiHiAgfCIgIBggFyAahUIwiSIXIBt8IhogFIVCAYkiFHwgBXwiGCAchUIgiSIbICR8IhwgFIVCKIkiFCAYfCABfCIYIBuFQjCJIhsgHyAPhUIBiSIPICJ8IAx8Ih8gF4VCIIkiFyAZIB18Ihl8Ih0gD4VCKIkiDyAffCATfCIfIBeFQjCJIhcgHXwiHSAPhUIBiSIPIBkgDoVCAYkiDiAVfCAQfCIVICOFQiCJIhkgGnwiGiAOhUIoiSIOIBV8IAJ8IhV8IBN8IiKFQiCJIiN8IiQgD4VCKIkiDyAifCASfCIiICOFQjCJIiMgJHwiJCAPhUIBiSIPIBsgHHwiGyAVIBmFQjCJIhUgICAWhUIBiSIWIB98IAt8IhmFQiCJIhx8Ih8gFoVCKIkiFiAZfCACfCIZfCAJfCIgIBUgGnwiFSAXIBsgFIVCAYkiFCAhfCAFfCIahUIgiSIXfCIbIBSFQiiJIhQgGnwgA3wiGiAXhUIwiSIXhUIgiSIhIB0gHiAVIA6FQgGJIg4gGHwgEHwiFYVCIIkiGHwiHSAOhUIoiSIOIBV8IAF8IhUgGIVCMIkiGCAdfCIdfCIeIA+FQiiJIg8gIHwgDXwiICAhhUIwiSIhIB58Ih4gGSAchUIwiSIZIB98IhwgFoVCAYkiFiAafCAIfCIaIBiFQiCJIhggJHwiHyAWhUIoiSIWIBp8IAp8IhogGIVCMIkiGCAdIA6FQgGJIg4gInwgBHwiHSAZhUIgiSIZIBcgG3wiF3wiGyAOhUIoiSIOIB18IAd8Ih0gGYVCMIkiGSAbfCIbIA6FQgGJIg4gFSAXIBSFQgGJIhR8IAx8IhUgI4VCIIkiFyAcfCIcIBSFQiiJIhQgFXwgBnwiFXwgEnwiIoVCIIkiI3wiJCAOhUIoiSIOICJ8IBN8IiIgGyAhIBUgF4VCMIkiFSAcfCIXIBSFQgGJIhQgGnwgBnwiGoVCIIkiHHwiGyAUhUIoiSIUIBp8IBB8IhogHIVCMIkiHCAbfCIbIBSFQgGJIhR8IA18IiEgGCAffCIYIBUgHiAPhUIBiSIPIB18IAJ8Ih2FQiCJIhV8Ih4gD4VCKIkiDyAdfCABfCIdIBWFQjCJIhWFQiCJIh8gFyAZIBggFoVCAYkiFiAgfCADfCIYhUIgiSIZfCIXIBaFQiiJIhYgGHwgBHwiGCAZhUIwiSIZIBd8Ihd8IiAgFIVCKIkiFCAhfCAIfCIhIB+FQjCJIh8gIHwiICAiICOFQjCJIiIgJHwiIyAOhUIBiSIOIB18IAd8Ih0gGYVCIIkiGSAbfCIbIA6FQiiJIg4gHXwgDHwiHSAZhUIwiSIZIBcgFoVCAYkiFiAafCALfCIXICKFQiCJIhogFSAefCIVfCIeIBaFQiiJIhYgF3wgCXwiFyAahUIwiSIaIB58Ih4gFoVCAYkiFiAVIA+FQgGJIg8gGHwgBXwiFSAchUIgiSIYICN8IhwgD4VCKIkiDyAVfCAKfCIVfCACfCIChUIgiSIifCIjIBaFQiiJIhYgAnwgC3wiAiAihUIwiSILICN8IiIgFoVCAYkiFiAZIBt8IhkgFSAYhUIwiSIVICAgFIVCAYkiFCAXfCANfCINhUIgiSIXfCIYIBSFQiiJIhQgDXwgBXwiBXwgEHwiECAVIBx8Ig0gGiAZIA6FQgGJIg4gIXwgDHwiDIVCIIkiFXwiGSAOhUIoiSIOIAx8IBJ8IhIgFYVCMIkiDIVCIIkiFSAeIB8gDSAPhUIBiSINIB18IAl8IgmFQiCJIg98IhogDYVCKIkiDSAJfCAIfCIJIA+FQjCJIgggGnwiD3wiGiAWhUIoiSIWIBB8IAd8IhAgEYUgDCAZfCIHIA6FQgGJIgwgCXwgCnwiCiALhUIgiSILIAUgF4VCMIkiBSAYfCIJfCIOIAyFQiiJIgwgCnwgE3wiEyALhUIwiSIKIA58IguFNwOAiQFBACADIAYgDyANhUIBiSINIAJ8fCICIAWFQiCJIgUgB3wiBiANhUIoiSIHIAJ8fCICQQApA4iJAYUgBCABIBIgCSAUhUIBiSIDfHwiASAIhUIgiSISICJ8IgkgA4VCKIkiAyABfHwiASAShUIwiSIEIAl8IhKFNwOIiQFBACATQQApA5CJAYUgECAVhUIwiSIQIBp8IhOFNwOQiQFBACABQQApA5iJAYUgAiAFhUIwiSICIAZ8IgGFNwOYiQFBACASIAOFQgGJQQApA6CJAYUgAoU3A6CJAUEAIBMgFoVCAYlBACkDqIkBhSAKhTcDqIkBQQAgASAHhUIBiUEAKQOwiQGFIASFNwOwiQFBACALIAyFQgGJQQApA7iJAYUgEIU3A7iJAQvdAgUBfwF+AX8BfgJ/IwBBwABrIgAkAAJAQQApA9CJAUIAUg0AQQBBACkDwIkBIgFBACgC4IoBIgKsfCIDNwPAiQFBAEEAKQPIiQEgAyABVK18NwPIiQECQEEALQDoigFFDQBBAEJ/NwPYiQELQQBCfzcD0IkBAkAgAkH/AEoNAEEAIQQDQCACIARqQeCJAWpBADoAACAEQQFqIgRBgAFBACgC4IoBIgJrSA0ACwtB4IkBEAIgAEEAKQOAiQE3AwAgAEEAKQOIiQE3AwggAEEAKQOQiQE3AxAgAEEAKQOYiQE3AxggAEEAKQOgiQE3AyAgAEEAKQOoiQE3AyggAEEAKQOwiQE3AzAgAEEAKQO4iQE3AzhBACgC5IoBIgVBAUgNAEEAIQRBACECA0AgBEGACWogACAEai0AADoAACAEQQFqIQQgBSACQQFqIgJB/wFxSg0ACwsgAEHAAGokAAv9AwMBfwF+AX8jAEGAAWsiAiQAQQBBgQI7AfKKAUEAIAE6APGKAUEAIAA6APCKAUGQfiEAA0AgAEGAiwFqQgA3AAAgAEH4igFqQgA3AAAgAEHwigFqQgA3AAAgAEEYaiIADQALQQAhAEEAQQApA/CKASIDQoiS853/zPmE6gCFNwOAiQFBAEEAKQP4igFCu86qptjQ67O7f4U3A4iJAUEAQQApA4CLAUKr8NP0r+68tzyFNwOQiQFBAEEAKQOIiwFC8e30+KWn/aelf4U3A5iJAUEAQQApA5CLAULRhZrv+s+Uh9EAhTcDoIkBQQBBACkDmIsBQp/Y+dnCkdqCm3+FNwOoiQFBAEEAKQOgiwFC6/qG2r+19sEfhTcDsIkBQQBBACkDqIsBQvnC+JuRo7Pw2wCFNwO4iQFBACADp0H/AXE2AuSKAQJAIAFBAUgNACACQgA3A3ggAkIANwNwIAJCADcDaCACQgA3A2AgAkIANwNYIAJCADcDUCACQgA3A0ggAkIANwNAIAJCADcDOCACQgA3AzAgAkIANwMoIAJCADcDICACQgA3AxggAkIANwMQIAJCADcDCCACQgA3AwBBACEEA0AgAiAAaiAAQYAJai0AADoAACAAQQFqIQAgBEEBaiIEQf8BcSABSA0ACyACQYABEAELIAJBgAFqJAALEgAgAEEDdkH/P3EgAEEQdhAECwkAQYAJIAAQAQsGAEGAiQELGwAgAUEDdkH/P3EgAUEQdhAEQYAJIAAQARADCwsLAQBBgAgLBPAAAAA=";
+      var hash$j = "c6f286e6";
+      var wasmJson$j = {
+        name: name$j,
+        data: data$j,
+        hash: hash$j
+      };
+      const mutex$k = new Mutex();
+      let wasmCache$k = null;
+      function validateBits$4(bits) {
+        if (!Number.isInteger(bits) || bits < 8 || bits > 512 || bits % 8 !== 0) {
+          return new Error("Invalid variant! Valid values: 8, 16, ..., 512");
+        }
+        return null;
+      }
+      function getInitParam$1(outputBits, keyBits) {
+        return outputBits | keyBits << 16;
+      }
+      function blake2b(data2, bits = 512, key = null) {
+        if (validateBits$4(bits)) {
+          return Promise.reject(validateBits$4(bits));
+        }
+        let keyBuffer = null;
+        let initParam = bits;
+        if (key !== null) {
+          keyBuffer = getUInt8Buffer(key);
+          if (keyBuffer.length > 64) {
+            return Promise.reject(new Error("Max key length is 64 bytes"));
+          }
+          initParam = getInitParam$1(bits, keyBuffer.length);
+        }
+        const hashLength = bits / 8;
+        if (wasmCache$k === null || wasmCache$k.hashLength !== hashLength) {
+          return lockedCreate(mutex$k, wasmJson$j, hashLength).then((wasm) => {
+            wasmCache$k = wasm;
+            if (initParam > 512) {
+              wasmCache$k.writeMemory(keyBuffer);
+            }
+            return wasmCache$k.calculate(data2, initParam);
+          });
+        }
+        try {
+          if (initParam > 512) {
+            wasmCache$k.writeMemory(keyBuffer);
+          }
+          const hash2 = wasmCache$k.calculate(data2, initParam);
+          return Promise.resolve(hash2);
+        } catch (err) {
+          return Promise.reject(err);
+        }
+      }
+      function createBLAKE2b(bits = 512, key = null) {
+        if (validateBits$4(bits)) {
+          return Promise.reject(validateBits$4(bits));
+        }
+        let keyBuffer = null;
+        let initParam = bits;
+        if (key !== null) {
+          keyBuffer = getUInt8Buffer(key);
+          if (keyBuffer.length > 64) {
+            return Promise.reject(new Error("Max key length is 64 bytes"));
+          }
+          initParam = getInitParam$1(bits, keyBuffer.length);
+        }
+        const outputSize = bits / 8;
+        return WASMInterface(wasmJson$j, outputSize).then((wasm) => {
+          if (initParam > 512) {
+            wasm.writeMemory(keyBuffer);
+          }
+          wasm.init(initParam);
+          const obj = {
+            init: initParam > 512 ? () => {
+              wasm.writeMemory(keyBuffer);
+              wasm.init(initParam);
+              return obj;
+            } : () => {
+              wasm.init(initParam);
+              return obj;
+            },
+            update: (data2) => {
+              wasm.update(data2);
+              return obj;
+            },
+            // biome-ignore lint/suspicious/noExplicitAny: Conflict with IHasher type
+            digest: (outputType) => wasm.digest(outputType),
+            save: () => wasm.save(),
+            load: (data2) => {
+              wasm.load(data2);
+              return obj;
+            },
+            blockSize: 128,
+            digestSize: outputSize
+          };
+          return obj;
+        });
+      }
+      function encodeResult(salt, options, res) {
+        const parameters = [
+          `m=${options.memorySize}`,
+          `t=${options.iterations}`,
+          `p=${options.parallelism}`
+        ].join(",");
+        return `$argon2${options.hashType}$v=19$${parameters}$${encodeBase64(salt, false)}$${encodeBase64(res, false)}`;
+      }
+      const uint32View = new DataView(new ArrayBuffer(4));
+      function int32LE(x) {
+        uint32View.setInt32(0, x, true);
+        return new Uint8Array(uint32View.buffer);
+      }
+      function hashFunc(blake512, buf, len) {
+        return __awaiter(this, void 0, void 0, function* () {
+          if (len <= 64) {
+            const blake = yield createBLAKE2b(len * 8);
+            blake.update(int32LE(len));
+            blake.update(buf);
+            return blake.digest("binary");
+          }
+          const r = Math.ceil(len / 32) - 2;
+          const ret = new Uint8Array(len);
+          blake512.init();
+          blake512.update(int32LE(len));
+          blake512.update(buf);
+          let vp = blake512.digest("binary");
+          ret.set(vp.subarray(0, 32), 0);
+          for (let i = 1; i < r; i++) {
+            blake512.init();
+            blake512.update(vp);
+            vp = blake512.digest("binary");
+            ret.set(vp.subarray(0, 32), i * 32);
+          }
+          const partialBytesNeeded = len - 32 * r;
+          let blakeSmall;
+          if (partialBytesNeeded === 64) {
+            blakeSmall = blake512;
+            blakeSmall.init();
+          } else {
+            blakeSmall = yield createBLAKE2b(partialBytesNeeded * 8);
+          }
+          blakeSmall.update(vp);
+          vp = blakeSmall.digest("binary");
+          ret.set(vp.subarray(0, partialBytesNeeded), r * 32);
+          return ret;
+        });
+      }
+      function getHashType(type) {
+        switch (type) {
+          case "d":
+            return 0;
+          case "i":
+            return 1;
+          default:
+            return 2;
+        }
+      }
+      function argon2Internal(options) {
+        return __awaiter(this, void 0, void 0, function* () {
+          var _a2;
+          const { parallelism, iterations, hashLength } = options;
+          const password = getUInt8Buffer(options.password);
+          const salt = getUInt8Buffer(options.salt);
+          const version = 19;
+          const hashType = getHashType(options.hashType);
+          const { memorySize } = options;
+          const secret = getUInt8Buffer((_a2 = options.secret) !== null && _a2 !== void 0 ? _a2 : "");
+          const [argon2Interface, blake512] = yield Promise.all([
+            WASMInterface(wasmJson$k, 1024),
+            createBLAKE2b(512)
+          ]);
+          argon2Interface.setMemorySize(memorySize * 1024 + 1024);
+          const initVector = new Uint8Array(24);
+          const initVectorView = new DataView(initVector.buffer);
+          initVectorView.setInt32(0, parallelism, true);
+          initVectorView.setInt32(4, hashLength, true);
+          initVectorView.setInt32(8, memorySize, true);
+          initVectorView.setInt32(12, iterations, true);
+          initVectorView.setInt32(16, version, true);
+          initVectorView.setInt32(20, hashType, true);
+          argon2Interface.writeMemory(initVector, memorySize * 1024);
+          blake512.init();
+          blake512.update(initVector);
+          blake512.update(int32LE(password.length));
+          blake512.update(password);
+          blake512.update(int32LE(salt.length));
+          blake512.update(salt);
+          blake512.update(int32LE(secret.length));
+          blake512.update(secret);
+          blake512.update(int32LE(0));
+          const segments = Math.floor(memorySize / (parallelism * 4));
+          const lanes = segments * 4;
+          const param = new Uint8Array(72);
+          const H0 = blake512.digest("binary");
+          param.set(H0);
+          for (let lane = 0; lane < parallelism; lane++) {
+            param.set(int32LE(0), 64);
+            param.set(int32LE(lane), 68);
+            let position = lane * lanes;
+            let chunk = yield hashFunc(blake512, param, 1024);
+            argon2Interface.writeMemory(chunk, position * 1024);
+            position += 1;
+            param.set(int32LE(1), 64);
+            chunk = yield hashFunc(blake512, param, 1024);
+            argon2Interface.writeMemory(chunk, position * 1024);
+          }
+          const C = new Uint8Array(1024);
+          writeHexToUInt8(C, argon2Interface.calculate(new Uint8Array([]), memorySize));
+          const res = yield hashFunc(blake512, C, hashLength);
+          if (options.outputType === "hex") {
+            const digestChars = new Uint8Array(hashLength * 2);
+            return getDigestHex(digestChars, res, hashLength);
+          }
+          if (options.outputType === "encoded") {
+            return encodeResult(salt, options, res);
+          }
+          return res;
+        });
+      }
+      const validateOptions$3 = (options) => {
+        var _a2;
+        if (!options || typeof options !== "object") {
+          throw new Error("Invalid options parameter. It requires an object.");
+        }
+        if (!options.password) {
+          throw new Error("Password must be specified");
+        }
+        options.password = getUInt8Buffer(options.password);
+        if (options.password.length < 1) {
+          throw new Error("Password must be specified");
+        }
+        if (!options.salt) {
+          throw new Error("Salt must be specified");
+        }
+        options.salt = getUInt8Buffer(options.salt);
+        if (options.salt.length < 8) {
+          throw new Error("Salt should be at least 8 bytes long");
+        }
+        options.secret = getUInt8Buffer((_a2 = options.secret) !== null && _a2 !== void 0 ? _a2 : "");
+        if (!Number.isInteger(options.iterations) || options.iterations < 1) {
+          throw new Error("Iterations should be a positive number");
+        }
+        if (!Number.isInteger(options.parallelism) || options.parallelism < 1) {
+          throw new Error("Parallelism should be a positive number");
+        }
+        if (!Number.isInteger(options.hashLength) || options.hashLength < 4) {
+          throw new Error("Hash length should be at least 4 bytes.");
+        }
+        if (!Number.isInteger(options.memorySize)) {
+          throw new Error("Memory size should be specified.");
+        }
+        if (options.memorySize < 8 * options.parallelism) {
+          throw new Error("Memory size should be at least 8 * parallelism.");
+        }
+        if (options.outputType === void 0) {
+          options.outputType = "hex";
+        }
+        if (!["hex", "binary", "encoded"].includes(options.outputType)) {
+          throw new Error(`Insupported output type ${options.outputType}. Valid values: ['hex', 'binary', 'encoded']`);
+        }
+      };
+      function argon2i(options) {
+        return __awaiter(this, void 0, void 0, function* () {
+          validateOptions$3(options);
+          return argon2Internal(Object.assign(Object.assign({}, options), { hashType: "i" }));
+        });
+      }
+      function argon2id2(options) {
+        return __awaiter(this, void 0, void 0, function* () {
+          validateOptions$3(options);
+          return argon2Internal(Object.assign(Object.assign({}, options), { hashType: "id" }));
+        });
+      }
+      function argon2d(options) {
+        return __awaiter(this, void 0, void 0, function* () {
+          validateOptions$3(options);
+          return argon2Internal(Object.assign(Object.assign({}, options), { hashType: "d" }));
+        });
+      }
+      const getHashParameters = (password, encoded, secret) => {
+        const regex = /^\$argon2(id|i|d)\$v=([0-9]+)\$((?:[mtp]=[0-9]+,){2}[mtp]=[0-9]+)\$([A-Za-z0-9+/]+)\$([A-Za-z0-9+/]+)$/;
+        const match = encoded.match(regex);
+        if (!match) {
+          throw new Error("Invalid hash");
+        }
+        const [, hashType, version, parameters, salt, hash2] = match;
+        if (version !== "19") {
+          throw new Error(`Unsupported version: ${version}`);
+        }
+        const parsedParameters = {};
+        const paramMap = { m: "memorySize", p: "parallelism", t: "iterations" };
+        for (const x of parameters.split(",")) {
+          const [n, v] = x.split("=");
+          parsedParameters[paramMap[n]] = Number(v);
+        }
+        return Object.assign(Object.assign({}, parsedParameters), {
+          password,
+          secret,
+          hashType,
+          salt: decodeBase64(salt),
+          hashLength: getDecodeBase64Length(hash2),
+          outputType: "encoded"
+        });
+      };
+      const validateVerifyOptions$1 = (options) => {
+        if (!options || typeof options !== "object") {
+          throw new Error("Invalid options parameter. It requires an object.");
+        }
+        if (options.hash === void 0 || typeof options.hash !== "string") {
+          throw new Error("Hash should be specified");
+        }
+      };
+      function argon2Verify2(options) {
+        return __awaiter(this, void 0, void 0, function* () {
+          validateVerifyOptions$1(options);
+          const params = getHashParameters(options.password, options.hash, options.secret);
+          validateOptions$3(params);
+          const hashStart = options.hash.lastIndexOf("$") + 1;
+          const result = yield argon2Internal(params);
+          return result.substring(hashStart) === options.hash.substring(hashStart);
+        });
+      }
+      var name$i = "blake2s";
+      var data$i = "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";
+      var hash$i = "5c0ff166";
+      var wasmJson$i = {
+        name: name$i,
+        data: data$i,
+        hash: hash$i
+      };
+      const mutex$j = new Mutex();
+      let wasmCache$j = null;
+      function validateBits$3(bits) {
+        if (!Number.isInteger(bits) || bits < 8 || bits > 256 || bits % 8 !== 0) {
+          return new Error("Invalid variant! Valid values: 8, 16, ..., 256");
+        }
+        return null;
+      }
+      function getInitParam(outputBits, keyBits) {
+        return outputBits | keyBits << 16;
+      }
+      function blake2s(data2, bits = 256, key = null) {
+        if (validateBits$3(bits)) {
+          return Promise.reject(validateBits$3(bits));
+        }
+        let keyBuffer = null;
+        let initParam = bits;
+        if (key !== null) {
+          keyBuffer = getUInt8Buffer(key);
+          if (keyBuffer.length > 32) {
+            return Promise.reject(new Error("Max key length is 32 bytes"));
+          }
+          initParam = getInitParam(bits, keyBuffer.length);
+        }
+        const hashLength = bits / 8;
+        if (wasmCache$j === null || wasmCache$j.hashLength !== hashLength) {
+          return lockedCreate(mutex$j, wasmJson$i, hashLength).then((wasm) => {
+            wasmCache$j = wasm;
+            if (initParam > 512) {
+              wasmCache$j.writeMemory(keyBuffer);
+            }
+            return wasmCache$j.calculate(data2, initParam);
+          });
+        }
+        try {
+          if (initParam > 512) {
+            wasmCache$j.writeMemory(keyBuffer);
+          }
+          const hash2 = wasmCache$j.calculate(data2, initParam);
+          return Promise.resolve(hash2);
+        } catch (err) {
+          return Promise.reject(err);
+        }
+      }
+      function createBLAKE2s(bits = 256, key = null) {
+        if (validateBits$3(bits)) {
+          return Promise.reject(validateBits$3(bits));
+        }
+        let keyBuffer = null;
+        let initParam = bits;
+        if (key !== null) {
+          keyBuffer = getUInt8Buffer(key);
+          if (keyBuffer.length > 32) {
+            return Promise.reject(new Error("Max key length is 32 bytes"));
+          }
+          initParam = getInitParam(bits, keyBuffer.length);
+        }
+        const outputSize = bits / 8;
+        return WASMInterface(wasmJson$i, outputSize).then((wasm) => {
+          if (initParam > 512) {
+            wasm.writeMemory(keyBuffer);
+          }
+          wasm.init(initParam);
+          const obj = {
+            init: initParam > 512 ? () => {
+              wasm.writeMemory(keyBuffer);
+              wasm.init(initParam);
+              return obj;
+            } : () => {
+              wasm.init(initParam);
+              return obj;
+            },
+            update: (data2) => {
+              wasm.update(data2);
+              return obj;
+            },
+            // biome-ignore lint/suspicious/noExplicitAny: Conflict with IHasher type
+            digest: (outputType) => wasm.digest(outputType),
+            save: () => wasm.save(),
+            load: (data2) => {
+              wasm.load(data2);
+              return obj;
+            },
+            blockSize: 64,
+            digestSize: outputSize
+          };
+          return obj;
+        });
+      }
+      var name$h = "blake3";
+      var data$h = "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IQEgAkFAaiICQcAASw0ACwsCQEHAACAHQf8BcSIGayIFIAIgBSACSRsiCUUNACAJQQNxIQtBACEFAkAgCUEESQ0AIAAgBmohByAJQfwAcSEIQQAhBQNAIAcgBWoiAkEoaiABIAVqIgotAAA6AAAgAkEpaiAKQQFqLQAAOgAAIAJBKmogCkECai0AADoAACACQStqIApBA2otAAA6AAAgCCAFQQRqIgVHDQALCwJAIAtFDQAgASAFaiEBIAUgBmogAGpBKGohBQNAIAUgAS0AADoAACABQQFqIQEgBUEBaiEFIAtBf2oiCw0ACwsgAC0AaCEHCyAAIAcgCWo6AGggA0HAAGokAAveAwQFfwN+BX8GfiMAQdABayIBJAACQCAAe6ciAkEALQCQigEiA08NAEEALQCKigFBBHIhBCABQShqIQVBACkDmIkBIQBBACkDkIkBIQZBACkDiIkBIQdBACkDgIkBIQggAyEJA0AgASAANwMYIAEgBjcDECABIAc3AwggASAINwMAIAEgA0EFdCIDQdGJAWoiCikDADcDKCABIANB2YkBaiILKQMANwMwIAEgA0HhiQFqIgwpAwA3AzggASADQemJAWoiDSkDADcDQCABIANB8YkBaikDADcDSCABIANB+YkBaikDADcDUCABIANBgYoBaikDADcDWCADQYmKAWopAwAhDiABQcAAOgBoIAEgDjcDYCABQgA3AyAgASAEOgBpIAEgADcDiAEgASAGNwOAASABIAc3A3ggASAINwNwIAFBkAFqIAFB8ABqIAVBwABCACAEQf8BcRACIAEpA7ABIQ4gASkDkAEhDyABKQO4ASEQIAEpA5gBIREgASkDwAEhEiABKQOgASETIA0gASkDyAEgASkDqAGFNwMAIAwgEiAThTcDACALIBAgEYU3AwAgCiAOIA+FNwMAIAlBf2oiCUH/AXEiAyACSw0AC0EAIAk6AJCKAQsgAUHQAWokAAvHCQIKfwV+IwBB4AJrIgUkAAJAAkAgAUGACEsNACAFIAA2AvwBIAVB/AFqIAFBgAhGIgZBECACQQEgA0EBQQIgBBABIAZBCnQiByABTw0BIAVB4ABqIgZCADcDACAFQdgAaiIIQgA3AwAgBUHQAGoiCUIANwMAIAVByABqIgpCADcDACAFQcAAaiILQgA3AwAgBUE4aiIMQgA3AwAgBUEwaiINQgA3AwAgBSADOgBqIAVCADcDKCAFQQA7AWggBUEAKQOAiQE3AwAgBUEAKQOIiQE3AwggBUEAKQOQiQE3AxAgBUEAKQOYiQE3AxggBSABQYAIRiIOrSACfDcDICAFIAAgB2pBACABIA4bEAQgBUGIAWpBMGogDSkDADcDACAFQYgBakE4aiAMKQMANwMAIAUgBSkDACIPNwOIASAFIAUpAwgiEDcDkAEgBSAFKQMQIhE3A5gBIAUgBSkDGCISNwOgASAFIAUpAyg3A7ABIAUtAGohACAFLQBpIQcgBSkDICECIAUtAGghASAFQYgBakHAAGogCykDADcDACAFQYgBakHIAGogCikDADcDACAFQYgBakHQAGogCSkDADcDACAFQYgBakHYAGogCCkDADcDACAFQYgBakHgAGogBikDADcDACAFIAE6APABIAUgAjcDqAEgBSAAIAdFckECciIAOgDxASAFIBI3A5gCIAUgETcDkAIgBSAQNwOIAiAFIA83A4ACIAVBoAJqIAVBgAJqIAVBsAFqIAEgAiAAQf8BcRACIAUpA8ACIQIgBSkDoAIhDyAFKQPIAiEQIAUpA6gCIREgBSkD0AIhEiAFKQOwAiETIAQgDkEFdGoiASAFKQPYAiAFKQO4AoU3AxggASASIBOFNwMQIAEgECARhTcDCCABIAIgD4U3AwBBAkEBIA4bIQYMAQsgAEIBIAFBf2pBCnZBAXKteUI/hYYiD6dBCnQiDiACIAMgBRAGIQcgACAOaiABIA5rIA9C////AYMgAnwgAyAFQcAAQSAgDkGACEsbahAGIQECQCAHQQFHDQAgBCAFKQMANwMAIAQgBSkDCDcDCCAEIAUpAxA3AxAgBCAFKQMYNwMYIAQgBSkDIDcDICAEIAUpAyg3AyggBCAFKQMwNwMwIAQgBSkDODcDOEECIQYMAQtBACEGQQAhAAJAIAEgB2oiCUECSQ0AIAlBfmoiCkEBdkEBaiIGQQNxIQ5BACEHAkAgCkEGSQ0AIAZB/P///wdxIQhBACEHIAVBiAFqIQEgBSEAA0AgASAANgIAIAFBDGogAEHAAWo2AgAgAUEIaiAAQYABajYCACABQQRqIABBwABqNgIAIABBgAJqIQAgAUEQaiEBIAggB0EEaiIHRw0ACwsgCkF+cSEIAkAgDkUNACAFIAdBBnRqIQEgBUGIAWogB0ECdGohAANAIAAgATYCACABQcAAaiEBIABBBGohACAOQX9qIg4NAAsLIAhBAmohAAsgBUGIAWogBkEBQgBBACADQQRyQQBBACAEEAEgACAJTw0AIAQgBkEFdGoiASAFIAZBBnRqIgApAwA3AwAgASAAKQMINwMIIAEgACkDEDcDECABIAApAxg3AxggBkEBaiEGCyAFQeACaiQAIAYLrRAIAn8EfgF/AX4EfwR+BH8EfiMAQfABayIBJAACQCAARQ0AAkBBAC0AkIoBIgINACABQTBqQQApA9CJATcDACABQThqQQApA9iJATcDACABQQApA6CJASIDNwMAIAFBACkDqIkBIgQ3AwggAUEAKQOwiQEiBTcDECABQQApA7iJASIGNwMYIAFBACkDyIkBNwMoQQAtAIqKASECQQAtAImKASEHQQApA8CJASEIQQAtAIiKASEJIAFBwABqQQApA+CJATcDACABQcgAakEAKQPoiQE3AwAgAUHQAGpBACkD8IkBNwMAIAFB2ABqQQApA/iJATcDACABQeAAakEAKQOAigE3AwAgASAJOgBoIAEgCDcDICABIAIgB0VyIgJBAnI6AGkgAUEoaiEKQgAhCEGACSELIAJBCnJB/wFxIQwDQCABQbABaiABIAogCUH/AXEgCCAMEAIgASABKQPQASINIAEpA7ABhTcDcCABIAEpA9gBIg4gASkDuAGFNwN4IAEgASkD4AEiDyABKQPAAYU3A4ABIAEgASkD6AEiECAGhTcDqAEgASAPIAWFNwOgASABIA4gBIU3A5gBIAEgDSADhTcDkAEgASAQIAEpA8gBhTcDiAEgAEHAACAAQcAASRsiEUF/aiESAkACQCARQQdxIhMNACABQfAAaiECIAshByARIRQMAQsgEUH4AHEhFCABQfAAaiECIAshBwNAIAcgAi0AADoAACAHQQFqIQcgAkEBaiECIBNBf2oiEw0ACwsCQCASQQdJDQADQCAHIAIpAAA3AAAgB0EIaiEHIAJBCGohAiAUQXhqIhQNAAsLIAhCAXwhCCALIBFqIQsgACARayIADQAMAgsLAkACQAJAQQAtAImKASIHQQZ0QQBBAC0AiIoBIhFrRg0AIAEgEToAaCABQQApA4CKATcDYCABQQApA/iJATcDWCABQQApA/CJATcDUCABQQApA+iJATcDSCABQQApA+CJATcDQCABQQApA9iJATcDOCABQQApA9CJATcDMCABQQApA8iJATcDKCABQQApA8CJASIINwMgIAFBACkDuIkBIgM3AxggAUEAKQOwiQEiBDcDECABQQApA6iJASIFNwMIIAFBACkDoIkBIgY3AwAgAUEALQCKigEiEyAHRXJBAnIiCzoAaSATQQRyIRNBACkDmIkBIQ1BACkDkIkBIQ5BACkDiIkBIQ9BACkDgIkBIRAMAQtBwAAhESABQcAAOgBoQgAhCCABQgA3AyAgAUEAKQOYiQEiDTcDGCABQQApA5CJASIONwMQIAFBACkDiIkBIg83AwggAUEAKQOAiQEiEDcDACABQQAtAIqKAUEEciITOgBpIAEgAkF+aiICQQV0IgdByYoBaikDADcDYCABIAdBwYoBaikDADcDWCABIAdBuYoBaikDADcDUCABIAdBsYoBaikDADcDSCABIAdBqYoBaikDADcDQCABIAdBoYoBaikDADcDOCABIAdBmYoBaikDADcDMCABIAdBkYoBaikDADcDKCATIQsgECEGIA8hBSAOIQQgDSEDIAJFDQELIAJBf2oiB0EFdCIUQZGKAWopAwAhFSAUQZmKAWopAwAhFiAUQaGKAWopAwAhFyAUQamKAWopAwAhGCABIAM3A4gBIAEgBDcDgAEgASAFNwN4IAEgBjcDcCABQbABaiABQfAAaiABQShqIhQgESAIIAtB/wFxEAIgASATOgBpIAFBwAA6AGggASAYNwNAIAEgFzcDOCABIBY3AzAgASAVNwMoIAFCADcDICABIA03AxggASAONwMQIAEgDzcDCCABIBA3AwAgASABKQPoASABKQPIAYU3A2AgASABKQPgASABKQPAAYU3A1ggASABKQPYASABKQO4AYU3A1AgASABKQPQASABKQOwAYU3A0ggB0UNACACQQV0QemJAWohAiATQf8BcSERA0AgAkFoaikDACEIIAJBcGopAwAhAyACQXhqKQMAIQQgAikDACEFIAEgDTcDiAEgASAONwOAASABIA83A3ggASAQNwNwIAFBsAFqIAFB8ABqIBRBwABCACAREAIgASATOgBpIAFBwAA6AGggASAFNwNAIAEgBDcDOCABIAM3AzAgASAINwMoIAFCADcDICABIA03AxggASAONwMQIAEgDzcDCCABIBA3AwAgASABKQPoASABKQPIAYU3A2AgASABKQPgASABKQPAAYU3A1ggASABKQPYASABKQO4AYU3A1AgASABKQPQASABKQOwAYU3A0ggAkFgaiECIAdBf2oiBw0ACwsgAUEoaiEJQgAhCEGACSELIBNBCHJB/wFxIQoDQCABQbABaiABIAlBwAAgCCAKEAIgASABKQPQASIDIAEpA7ABhTcDcCABIAEpA9gBIgQgASkDuAGFNwN4IAEgASkD4AEiBSABKQPAAYU3A4ABIAEgDSABKQPoASIGhTcDqAEgASAOIAWFNwOgASABIA8gBIU3A5gBIAEgECADhTcDkAEgASAGIAEpA8gBhTcDiAEgAEHAACAAQcAASRsiEUF/aiESAkACQCARQQdxIhMNACABQfAAaiECIAshByARIRQMAQsgEUH4AHEhFCABQfAAaiECIAshBwNAIAcgAi0AADoAACAHQQFqIQcgAkEBaiECIBNBf2oiEw0ACwsCQCASQQdJDQADQCAHIAIpAAA3AAAgB0EIaiEHIAJBCGohAiAUQXhqIhQNAAsLIAhCAXwhCCALIBFqIQsgACARayIADQALCyABQfABaiQAC6MCAQR+AkACQCAAQSBGDQBCq7OP/JGjs/DbACEBQv+kuYjFkdqCm38hAkLy5rvjo6f9p6V/IQNC58yn0NbQ67O7fyEEQQAhAAwBC0EAKQOYCSEBQQApA5AJIQJBACkDiAkhA0EAKQOACSEEQRAhAAtBACAAOgCKigFBAEIANwOAigFBAEIANwP4iQFBAEIANwPwiQFBAEIANwPoiQFBAEIANwPgiQFBAEIANwPYiQFBAEIANwPQiQFBAEIANwPIiQFBAEIANwPAiQFBACABNwO4iQFBACACNwOwiQFBACADNwOoiQFBACAENwOgiQFBACABNwOYiQFBACACNwOQiQFBACADNwOIiQFBACAENwOAiQFBAEEAOgCQigFBAEEAOwGIigELBgAgABADCwYAIAAQBwsGAEGAiQELqwIBBH4CQAJAIAFBIEYNAEKrs4/8kaOz8NsAIQNC/6S5iMWR2oKbfyEEQvLmu+Ojp/2npX8hBULnzKfQ1tDrs7t/IQZBACEBDAELQQApA5gJIQNBACkDkAkhBEEAKQOICSEFQQApA4AJIQZBECEBC0EAIAE6AIqKAUEAQgA3A4CKAUEAQgA3A/iJAUEAQgA3A/CJAUEAQgA3A+iJAUEAQgA3A+CJAUEAQgA3A9iJAUEAQgA3A9CJAUEAQgA3A8iJAUEAQgA3A8CJAUEAIAM3A7iJAUEAIAQ3A7CJAUEAIAU3A6iJAUEAIAY3A6CJAUEAIAM3A5iJAUEAIAQ3A5CJAUEAIAU3A4iJAUEAIAY3A4CJAUEAQQA6AJCKAUEAQQA7AYiKASAAEAMgAhAHCwsLAQBBgAgLBHgHAAA=";
+      var hash$h = "215d875f";
+      var wasmJson$h = {
+        name: name$h,
+        data: data$h,
+        hash: hash$h
+      };
+      const mutex$i = new Mutex();
+      let wasmCache$i = null;
+      function validateBits$2(bits) {
+        if (!Number.isInteger(bits) || bits < 8 || bits % 8 !== 0) {
+          return new Error("Invalid variant! Valid values: 8, 16, ...");
+        }
+        return null;
+      }
+      function blake3(data2, bits = 256, key = null) {
+        if (validateBits$2(bits)) {
+          return Promise.reject(validateBits$2(bits));
+        }
+        let keyBuffer = null;
+        let initParam = 0;
+        if (key !== null) {
+          keyBuffer = getUInt8Buffer(key);
+          if (keyBuffer.length !== 32) {
+            return Promise.reject(new Error("Key length must be exactly 32 bytes"));
+          }
+          initParam = 32;
+        }
+        const hashLength = bits / 8;
+        const digestParam = hashLength;
+        if (wasmCache$i === null || wasmCache$i.hashLength !== hashLength) {
+          return lockedCreate(mutex$i, wasmJson$h, hashLength).then((wasm) => {
+            wasmCache$i = wasm;
+            if (initParam === 32) {
+              wasmCache$i.writeMemory(keyBuffer);
+            }
+            return wasmCache$i.calculate(data2, initParam, digestParam);
+          });
+        }
+        try {
+          if (initParam === 32) {
+            wasmCache$i.writeMemory(keyBuffer);
+          }
+          const hash2 = wasmCache$i.calculate(data2, initParam, digestParam);
+          return Promise.resolve(hash2);
+        } catch (err) {
+          return Promise.reject(err);
+        }
+      }
+      function createBLAKE3(bits = 256, key = null) {
+        if (validateBits$2(bits)) {
+          return Promise.reject(validateBits$2(bits));
+        }
+        let keyBuffer = null;
+        let initParam = 0;
+        if (key !== null) {
+          keyBuffer = getUInt8Buffer(key);
+          if (keyBuffer.length !== 32) {
+            return Promise.reject(new Error("Key length must be exactly 32 bytes"));
+          }
+          initParam = 32;
+        }
+        const outputSize = bits / 8;
+        const digestParam = outputSize;
+        return WASMInterface(wasmJson$h, outputSize).then((wasm) => {
+          if (initParam === 32) {
+            wasm.writeMemory(keyBuffer);
+          }
+          wasm.init(initParam);
+          const obj = {
+            init: initParam === 32 ? () => {
+              wasm.writeMemory(keyBuffer);
+              wasm.init(initParam);
+              return obj;
+            } : () => {
+              wasm.init(initParam);
+              return obj;
+            },
+            update: (data2) => {
+              wasm.update(data2);
+              return obj;
+            },
+            // biome-ignore lint/suspicious/noExplicitAny: Conflict with IHasher type
+            digest: (outputType) => wasm.digest(outputType, digestParam),
+            save: () => wasm.save(),
+            load: (data2) => {
+              wasm.load(data2);
+              return obj;
+            },
+            blockSize: 64,
+            digestSize: outputSize
+          };
+          return obj;
+        });
+      }
+      var name$g = "crc32";
+      var data$g = "AGFzbQEAAAABEQRgAAF/YAF/AGAAAGACf38AAwgHAAEBAQIAAwUEAQECAgYOAn8BQZDJBQt/AEGACAsHcAgGbWVtb3J5AgAOSGFzaF9HZXRCdWZmZXIAAAlIYXNoX0luaXQAAgtIYXNoX1VwZGF0ZQADCkhhc2hfRmluYWwABA1IYXNoX0dldFN0YXRlAAUOSGFzaF9DYWxjdWxhdGUABgpTVEFURV9TSVpFAwEKkggHBQBBgAkLwwMBA39BgIkBIQFBACECA0AgAUEAQQBBAEEAQQBBAEEAQQAgAkEBcWsgAHEgAkEBdnMiA0EBcWsgAHEgA0EBdnMiA0EBcWsgAHEgA0EBdnMiA0EBcWsgAHEgA0EBdnMiA0EBcWsgAHEgA0EBdnMiA0EBcWsgAHEgA0EBdnMiA0EBcWsgAHEgA0EBdnMiA0EBcWsgAHEgA0EBdnM2AgAgAUEEaiEBIAJBAWoiAkGAAkcNAAtBACEAA0AgAEGEkQFqIABBhIkBaigCACICQf8BcUECdEGAiQFqKAIAIAJBCHZzIgI2AgAgAEGEmQFqIAJB/wFxQQJ0QYCJAWooAgAgAkEIdnMiAjYCACAAQYShAWogAkH/AXFBAnRBgIkBaigCACACQQh2cyICNgIAIABBhKkBaiACQf8BcUECdEGAiQFqKAIAIAJBCHZzIgI2AgAgAEGEsQFqIAJB/wFxQQJ0QYCJAWooAgAgAkEIdnMiAjYCACAAQYS5AWogAkH/AXFBAnRBgIkBaigCACACQQh2cyICNgIAIABBhMEBaiACQf8BcUECdEGAiQFqKAIAIAJBCHZzNgIAIABBBGoiAEH8B0cNAAsLJwACQEEAKAKAyQEgAEYNACAAEAFBACAANgKAyQELQQBBADYChMkBC4gDAQN/QQAoAoTJAUF/cyEBQYAJIQICQCAAQQhJDQBBgAkhAgNAIAJBBGooAgAiA0EOdkH8B3FBgJEBaigCACADQRZ2QfwHcUGAiQFqKAIAcyADQQZ2QfwHcUGAmQFqKAIAcyADQf8BcUECdEGAoQFqKAIAcyACKAIAIAFzIgFBFnZB/AdxQYCpAWooAgBzIAFBDnZB/AdxQYCxAWooAgBzIAFBBnZB/AdxQYC5AWooAgBzIAFB/wFxQQJ0QYDBAWooAgBzIQEgAkEIaiECIABBeGoiAEEHSw0ACwsCQCAARQ0AAkACQCAAQQFxDQAgACEDDAELIAFB/wFxIAItAABzQQJ0QYCJAWooAgAgAUEIdnMhASACQQFqIQIgAEF/aiEDCyAAQQFGDQADQCABQf8BcSACLQAAc0ECdEGAiQFqKAIAIAFBCHZzIgFB/wFxIAJBAWotAABzQQJ0QYCJAWooAgAgAUEIdnMhASACQQJqIQIgA0F+aiIDDQALC0EAIAFBf3M2AoTJAQsyAQF/QQBBACgChMkBIgBBGHQgAEGA/gNxQQh0ciAAQQh2QYD+A3EgAEEYdnJyNgKACQsGAEGEyQELWQACQEEAKAKAyQEgAUYNACABEAFBACABNgKAyQELQQBBADYChMkBIAAQA0EAQQAoAoTJASIBQRh0IAFBgP4DcUEIdHIgAUEIdkGA/gNxIAFBGHZycjYCgAkLCwsBAEGACAsEBAAAAA==";
+      var hash$g = "d2eba587";
+      var wasmJson$g = {
+        name: name$g,
+        data: data$g,
+        hash: hash$g
+      };
+      const mutex$h = new Mutex();
+      let wasmCache$h = null;
+      function validatePoly(poly) {
+        if (!Number.isInteger(poly) || poly < 0 || poly > 4294967295) {
+          return new Error("Polynomial must be a valid 32-bit long unsigned integer");
+        }
+        return null;
+      }
+      function crc32(data2, polynomial = 3988292384) {
+        if (validatePoly(polynomial)) {
+          return Promise.reject(validatePoly(polynomial));
+        }
+        if (wasmCache$h === null) {
+          return lockedCreate(mutex$h, wasmJson$g, 4).then((wasm) => {
+            wasmCache$h = wasm;
+            return wasmCache$h.calculate(data2, polynomial);
+          });
+        }
+        try {
+          const hash2 = wasmCache$h.calculate(data2, polynomial);
+          return Promise.resolve(hash2);
+        } catch (err) {
+          return Promise.reject(err);
+        }
+      }
+      function createCRC32(polynomial = 3988292384) {
+        if (validatePoly(polynomial)) {
+          return Promise.reject(validatePoly(polynomial));
+        }
+        return WASMInterface(wasmJson$g, 4).then((wasm) => {
+          wasm.init(polynomial);
+          const obj = {
+            init: () => {
+              wasm.init(polynomial);
+              return obj;
+            },
+            update: (data2) => {
+              wasm.update(data2);
+              return obj;
+            },
+            // biome-ignore lint/suspicious/noExplicitAny: Conflict with IHasher type
+            digest: (outputType) => wasm.digest(outputType),
+            save: () => wasm.save(),
+            load: (data2) => {
+              wasm.load(data2);
+              return obj;
+            },
+            blockSize: 4,
+            digestSize: 4
+          };
+          return obj;
+        });
+      }
+      var name$f = "crc64";
+      var data$f = "AGFzbQEAAAABDANgAAF/YAAAYAF/AAMHBgABAgEAAQUEAQECAgYOAn8BQZCJBgt/AEGACAsHcAgGbWVtb3J5AgAOSGFzaF9HZXRCdWZmZXIAAAlIYXNoX0luaXQAAQtIYXNoX1VwZGF0ZQACCkhhc2hfRmluYWwAAw1IYXNoX0dldFN0YXRlAAQOSGFzaF9DYWxjdWxhdGUABQpTVEFURV9TSVpFAwEKgwgGBQBBgAkL9QMDAX4BfwJ+AkBBACkDgIkCQQApA4AJIgBRDQBBgIkBIQFCACECA0AgAUIAQgBCAEIAQgBCAEIAQgAgAkIBg30gAIMgAkIBiIUiA0IBg30gAIMgA0IBiIUiA0IBg30gAIMgA0IBiIUiA0IBg30gAIMgA0IBiIUiA0IBg30gAIMgA0IBiIUiA0IBg30gAIMgA0IBiIUiA0IBg30gAIMgA0IBiIUiA0IBg30gAIMgA0IBiIU3AwAgAUEIaiEBIAJCAXwiAkKAAlINAAtBACEBA0AgAUGImQFqIAFBiIkBaikDACICp0H/AXFBA3RBgIkBaikDACACQgiIhSICNwMAIAFBiKkBaiACp0H/AXFBA3RBgIkBaikDACACQgiIhSICNwMAIAFBiLkBaiACp0H/AXFBA3RBgIkBaikDACACQgiIhSICNwMAIAFBiMkBaiACp0H/AXFBA3RBgIkBaikDACACQgiIhSICNwMAIAFBiNkBaiACp0H/AXFBA3RBgIkBaikDACACQgiIhSICNwMAIAFBiOkBaiACp0H/AXFBA3RBgIkBaikDACACQgiIhSICNwMAIAFBiPkBaiACp0H/AXFBA3RBgIkBaikDACACQgiIhTcDACABQQhqIgFB+A9HDQALQQAgADcDgIkCC0EAQgA3A4iJAguUAwIBfgJ/QQApA4iJAkJ/hSEBQYAJIQICQCAAQQhJDQBBgAkhAgNAIAIpAwAgAYUiAUIwiKdB/wFxQQN0QYCZAWopAwAgAUI4iKdBA3RBgIkBaikDAIUgAUIoiKdB/wFxQQN0QYCpAWopAwCFIAFCIIinQf8BcUEDdEGAuQFqKQMAhSABpyIDQRV2QfgPcUGAyQFqKQMAhSADQQ12QfgPcUGA2QFqKQMAhSADQQV2QfgPcUGA6QFqKQMAhSADQf8BcUEDdEGA+QFqKQMAhSEBIAJBCGohAiAAQXhqIgBBB0sNAAsLAkAgAEUNAAJAAkAgAEEBcQ0AIAAhAwwBCyABQv8BgyACMQAAhadBA3RBgIkBaikDACABQgiIhSEBIAJBAWohAiAAQX9qIQMLIABBAUYNAANAIAFC/wGDIAIxAACFp0EDdEGAiQFqKQMAIAFCCIiFIgFC/wGDIAJBAWoxAACFp0EDdEGAiQFqKQMAIAFCCIiFIQEgAkECaiECIANBfmoiAw0ACwtBACABQn+FNwOIiQILZAEBfkEAQQApA4iJAiIAQjiGIABCgP4Dg0IohoQgAEKAgPwHg0IYhiAAQoCAgPgPg0IIhoSEIABCCIhCgICA+A+DIABCGIhCgID8B4OEIABCKIhCgP4DgyAAQjiIhISENwOACQsGAEGIiQILAgALCwsBAEGACAsECAAAAA==";
+      var hash$f = "c5ac6c16";
+      var wasmJson$f = {
+        name: name$f,
+        data: data$f,
+        hash: hash$f
+      };
+      const mutex$g = new Mutex();
+      let wasmCache$g = null;
+      const polyBuffer = new Uint8Array(8);
+      function parsePoly(poly) {
+        const errText = "Polynomial must be provided as a 16 char long hex string";
+        if (typeof poly !== "string" || poly.length !== 16) {
+          return { hi: 0, lo: 0, err: new Error(errText) };
+        }
+        const hi = Number(`0x${poly.slice(0, 8)}`);
+        const lo = Number(`0x${poly.slice(8)}`);
+        if (Number.isNaN(hi) || Number.isNaN(lo)) {
+          return { hi, lo, err: new Error(errText) };
+        }
+        return { hi, lo, err: null };
+      }
+      function writePoly(arr, lo, hi) {
+        const buffer = new DataView(arr);
+        buffer.setUint32(0, lo, true);
+        buffer.setUint32(4, hi, true);
+      }
+      function crc64(data2, polynomial = "c96c5795d7870f42") {
+        const { hi, lo, err } = parsePoly(polynomial);
+        if (err !== null) {
+          return Promise.reject(err);
+        }
+        if (wasmCache$g === null) {
+          return lockedCreate(mutex$g, wasmJson$f, 8).then((wasm) => {
+            wasmCache$g = wasm;
+            writePoly(polyBuffer.buffer, lo, hi);
+            wasmCache$g.writeMemory(polyBuffer);
+            return wasmCache$g.calculate(data2);
+          });
+        }
+        try {
+          writePoly(polyBuffer.buffer, lo, hi);
+          wasmCache$g.writeMemory(polyBuffer);
+          const hash2 = wasmCache$g.calculate(data2);
+          return Promise.resolve(hash2);
+        } catch (err2) {
+          return Promise.reject(err2);
+        }
+      }
+      function createCRC64(polynomial = "c96c5795d7870f42") {
+        const { hi, lo, err } = parsePoly(polynomial);
+        if (err !== null) {
+          return Promise.reject(err);
+        }
+        return WASMInterface(wasmJson$f, 8).then((wasm) => {
+          const instanceBuffer = new Uint8Array(8);
+          writePoly(instanceBuffer.buffer, lo, hi);
+          wasm.writeMemory(instanceBuffer);
+          wasm.init();
+          const obj = {
+            init: () => {
+              wasm.writeMemory(instanceBuffer);
+              wasm.init();
+              return obj;
+            },
+            update: (data2) => {
+              wasm.update(data2);
+              return obj;
+            },
+            // biome-ignore lint/suspicious/noExplicitAny: Conflict with IHasher type
+            digest: (outputType) => wasm.digest(outputType),
+            save: () => wasm.save(),
+            load: (data2) => {
+              wasm.load(data2);
+              return obj;
+            },
+            blockSize: 8,
+            digestSize: 8
+          };
+          return obj;
+        });
+      }
+      var name$e = "md4";
+      var data$e = "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";
+      var hash$e = "bd8ce7c7";
+      var wasmJson$e = {
+        name: name$e,
+        data: data$e,
+        hash: hash$e
+      };
+      const mutex$f = new Mutex();
+      let wasmCache$f = null;
+      function md4(data2) {
+        if (wasmCache$f === null) {
+          return lockedCreate(mutex$f, wasmJson$e, 16).then((wasm) => {
+            wasmCache$f = wasm;
+            return wasmCache$f.calculate(data2);
+          });
+        }
+        try {
+          const hash2 = wasmCache$f.calculate(data2);
+          return Promise.resolve(hash2);
+        } catch (err) {
+          return Promise.reject(err);
+        }
+      }
+      function createMD4() {
+        return WASMInterface(wasmJson$e, 16).then((wasm) => {
+          wasm.init();
+          const obj = {
+            init: () => {
+              wasm.init();
+              return obj;
+            },
+            update: (data2) => {
+              wasm.update(data2);
+              return obj;
+            },
+            // biome-ignore lint/suspicious/noExplicitAny: Conflict with IHasher type
+            digest: (outputType) => wasm.digest(outputType),
+            save: () => wasm.save(),
+            load: (data2) => {
+              wasm.load(data2);
+              return obj;
+            },
+            blockSize: 64,
+            digestSize: 16
+          };
+          return obj;
+        });
+      }
+      var name$d = "md5";
+      var data$d = "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";
+      var hash$d = "e6508e4b";
+      var wasmJson$d = {
+        name: name$d,
+        data: data$d,
+        hash: hash$d
+      };
+      const mutex$e = new Mutex();
+      let wasmCache$e = null;
+      function md5(data2) {
+        if (wasmCache$e === null) {
+          return lockedCreate(mutex$e, wasmJson$d, 16).then((wasm) => {
+            wasmCache$e = wasm;
+            return wasmCache$e.calculate(data2);
+          });
+        }
+        try {
+          const hash2 = wasmCache$e.calculate(data2);
+          return Promise.resolve(hash2);
+        } catch (err) {
+          return Promise.reject(err);
+        }
+      }
+      function createMD5() {
+        return WASMInterface(wasmJson$d, 16).then((wasm) => {
+          wasm.init();
+          const obj = {
+            init: () => {
+              wasm.init();
+              return obj;
+            },
+            update: (data2) => {
+              wasm.update(data2);
+              return obj;
+            },
+            // biome-ignore lint/suspicious/noExplicitAny: Conflict with IHasher type
+            digest: (outputType) => wasm.digest(outputType),
+            save: () => wasm.save(),
+            load: (data2) => {
+              wasm.load(data2);
+              return obj;
+            },
+            blockSize: 64,
+            digestSize: 16
+          };
+          return obj;
+        });
+      }
+      var name$c = "sha1";
+      var data$c = "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";
+      var hash$c = "6b530c24";
+      var wasmJson$c = {
+        name: name$c,
+        data: data$c,
+        hash: hash$c
+      };
+      const mutex$d = new Mutex();
+      let wasmCache$d = null;
+      function sha1(data2) {
+        if (wasmCache$d === null) {
+          return lockedCreate(mutex$d, wasmJson$c, 20).then((wasm) => {
+            wasmCache$d = wasm;
+            return wasmCache$d.calculate(data2);
+          });
+        }
+        try {
+          const hash2 = wasmCache$d.calculate(data2);
+          return Promise.resolve(hash2);
+        } catch (err) {
+          return Promise.reject(err);
+        }
+      }
+      function createSHA1() {
+        return WASMInterface(wasmJson$c, 20).then((wasm) => {
+          wasm.init();
+          const obj = {
+            init: () => {
+              wasm.init();
+              return obj;
+            },
+            update: (data2) => {
+              wasm.update(data2);
+              return obj;
+            },
+            // biome-ignore lint/suspicious/noExplicitAny: Conflict with IHasher type
+            digest: (outputType) => wasm.digest(outputType),
+            save: () => wasm.save(),
+            load: (data2) => {
+              wasm.load(data2);
+              return obj;
+            },
+            blockSize: 64,
+            digestSize: 20
+          };
+          return obj;
+        });
+      }
+      var name$b = "sha3";
+      var data$b = "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";
+      var hash$b = "fb24e536";
+      var wasmJson$b = {
+        name: name$b,
+        data: data$b,
+        hash: hash$b
+      };
+      const mutex$c = new Mutex();
+      let wasmCache$c = null;
+      function validateBits$1(bits) {
+        if (![224, 256, 384, 512].includes(bits)) {
+          return new Error("Invalid variant! Valid values: 224, 256, 384, 512");
+        }
+        return null;
+      }
+      function sha3(data2, bits = 512) {
+        if (validateBits$1(bits)) {
+          return Promise.reject(validateBits$1(bits));
+        }
+        const hashLength = bits / 8;
+        if (wasmCache$c === null || wasmCache$c.hashLength !== hashLength) {
+          return lockedCreate(mutex$c, wasmJson$b, hashLength).then((wasm) => {
+            wasmCache$c = wasm;
+            return wasmCache$c.calculate(data2, bits, 6);
+          });
+        }
+        try {
+          const hash2 = wasmCache$c.calculate(data2, bits, 6);
+          return Promise.resolve(hash2);
+        } catch (err) {
+          return Promise.reject(err);
+        }
+      }
+      function createSHA3(bits = 512) {
+        if (validateBits$1(bits)) {
+          return Promise.reject(validateBits$1(bits));
+        }
+        const outputSize = bits / 8;
+        return WASMInterface(wasmJson$b, outputSize).then((wasm) => {
+          wasm.init(bits);
+          const obj = {
+            init: () => {
+              wasm.init(bits);
+              return obj;
+            },
+            update: (data2) => {
+              wasm.update(data2);
+              return obj;
+            },
+            // biome-ignore lint/suspicious/noExplicitAny: Conflict with IHasher type
+            digest: (outputType) => wasm.digest(outputType, 6),
+            save: () => wasm.save(),
+            load: (data2) => {
+              wasm.load(data2);
+              return obj;
+            },
+            blockSize: 200 - 2 * outputSize,
+            digestSize: outputSize
+          };
+          return obj;
+        });
+      }
+      const mutex$b = new Mutex();
+      let wasmCache$b = null;
+      function validateBits(bits) {
+        if (![224, 256, 384, 512].includes(bits)) {
+          return new Error("Invalid variant! Valid values: 224, 256, 384, 512");
+        }
+        return null;
+      }
+      function keccak(data2, bits = 512) {
+        if (validateBits(bits)) {
+          return Promise.reject(validateBits(bits));
+        }
+        const hashLength = bits / 8;
+        if (wasmCache$b === null || wasmCache$b.hashLength !== hashLength) {
+          return lockedCreate(mutex$b, wasmJson$b, hashLength).then((wasm) => {
+            wasmCache$b = wasm;
+            return wasmCache$b.calculate(data2, bits, 1);
+          });
+        }
+        try {
+          const hash2 = wasmCache$b.calculate(data2, bits, 1);
+          return Promise.resolve(hash2);
+        } catch (err) {
+          return Promise.reject(err);
+        }
+      }
+      function createKeccak(bits = 512) {
+        if (validateBits(bits)) {
+          return Promise.reject(validateBits(bits));
+        }
+        const outputSize = bits / 8;
+        return WASMInterface(wasmJson$b, outputSize).then((wasm) => {
+          wasm.init(bits);
+          const obj = {
+            init: () => {
+              wasm.init(bits);
+              return obj;
+            },
+            update: (data2) => {
+              wasm.update(data2);
+              return obj;
+            },
+            // biome-ignore lint/suspicious/noExplicitAny: Conflict with IHasher type
+            digest: (outputType) => wasm.digest(outputType, 1),
+            save: () => wasm.save(),
+            load: (data2) => {
+              wasm.load(data2);
+              return obj;
+            },
+            blockSize: 200 - 2 * outputSize,
+            digestSize: outputSize
+          };
+          return obj;
+        });
+      }
+      var name$a = "sha256";
+      var data$a = "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c2pBx6KerX1qIhkgASADcyACcSABIANxcyABQR53IAFBE3dzIAFBCndzaiAaaiICaiIJIBMgEnNxIBJzaiAJQRp3IAlBFXdzIAlBB3dzakHRxqk2aiIaIAIgAXMgA3EgAiABcXMgAkEedyACQRN3cyACQQp3c2ogGGoiA2oiESAJIBNzcSATc2ogEUEadyARQRV3cyARQQd3c2pB59KkoQFqIhggAyACcyABcSADIAJxcyADQR53IANBE3dzIANBCndzaiAUaiIBaiISIBEgCXNxIAlzaiASQRp3IBJBFXdzIBJBB3dzakGFldy9AmoiFCABIANzIAJxIAEgA3FzIAFBHncgAUETd3MgAUEKd3NqIBdqIgJqIhMgI2ogJiASaiAiIBFqICUgCWogEyASIBFzcSARc2ogE0EadyATQRV3cyATQQd3c2pBuMLs8AJqIhcgAiABcyADcSACIAFxcyACQR53IAJBE3dzIAJBCndzaiAZaiIDaiIJIBMgEnNxIBJzaiAJQRp3IAlBFXdzIAlBB3dzakH827HpBGoiGSADIAJzIAFxIAMgAnFzIANBHncgA0ETd3MgA0EKd3NqIBpqIgFqIhEgCSATc3EgE3NqIBFBGncgEUEVd3MgEUEHd3NqQZOa4JkFaiIaIAEgA3MgAnEgASADcXMgAUEedyABQRN3cyABQQp3c2ogGGoiAmoiEiARIAlzcSAJc2ogEkEadyASQRV3cyASQQd3c2pB1OapqAZqIhggAiABcyADcSACIAFxcyACQR53IAJBE3dzIAJBCndzaiAUaiIDaiITaiAoIBJqICQgEWogJyAJaiATIBIgEXNxIBFzaiATQRp3IBNBFXdzIBNBB3dzakG7laizB2oiFCADIAJzIAFxIAMgAnFzIANBHncgA0ETd3MgA0EKd3NqIBdqIgFqIgkgEyASc3EgEnNqIAlBGncgCUEVd3MgCUEHd3NqQa6Si454aiIXIAEgA3MgAnEgASADcXMgAUEedyABQRN3cyABQQp3c2ogGWoiAmoiESAJIBNzcSATc2ogEUEadyARQRV3cyARQQd3c2pBhdnIk3lqIhkgAiABcyADcSACIAFxcyACQR53IAJBE3dzIAJBCndzaiAaaiIDaiISIBEgCXNxIAlzaiASQRp3IBJBFXdzIBJBB3dzakGh0f+VemoiGiADIAJz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";
+      var hash$a = "8c18dd94";
+      var wasmJson$a = {
+        name: name$a,
+        data: data$a,
+        hash: hash$a
+      };
+      const mutex$a = new Mutex();
+      let wasmCache$a = null;
+      function sha224(data2) {
+        if (wasmCache$a === null) {
+          return lockedCreate(mutex$a, wasmJson$a, 28).then((wasm) => {
+            wasmCache$a = wasm;
+            return wasmCache$a.calculate(data2, 224);
+          });
+        }
+        try {
+          const hash2 = wasmCache$a.calculate(data2, 224);
+          return Promise.resolve(hash2);
+        } catch (err) {
+          return Promise.reject(err);
+        }
+      }
+      function createSHA224() {
+        return WASMInterface(wasmJson$a, 28).then((wasm) => {
+          wasm.init(224);
+          const obj = {
+            init: () => {
+              wasm.init(224);
+              return obj;
+            },
+            update: (data2) => {
+              wasm.update(data2);
+              return obj;
+            },
+            // biome-ignore lint/suspicious/noExplicitAny: Conflict with IHasher type
+            digest: (outputType) => wasm.digest(outputType),
+            save: () => wasm.save(),
+            load: (data2) => {
+              wasm.load(data2);
+              return obj;
+            },
+            blockSize: 64,
+            digestSize: 28
+          };
+          return obj;
+        });
+      }
+      const mutex$9 = new Mutex();
+      let wasmCache$9 = null;
+      function sha256(data2) {
+        if (wasmCache$9 === null) {
+          return lockedCreate(mutex$9, wasmJson$a, 32).then((wasm) => {
+            wasmCache$9 = wasm;
+            return wasmCache$9.calculate(data2, 256);
+          });
+        }
+        try {
+          const hash2 = wasmCache$9.calculate(data2, 256);
+          return Promise.resolve(hash2);
+        } catch (err) {
+          return Promise.reject(err);
+        }
+      }
+      function createSHA256() {
+        return WASMInterface(wasmJson$a, 32).then((wasm) => {
+          wasm.init(256);
+          const obj = {
+            init: () => {
+              wasm.init(256);
+              return obj;
+            },
+            update: (data2) => {
+              wasm.update(data2);
+              return obj;
+            },
+            // biome-ignore lint/suspicious/noExplicitAny: Conflict with IHasher type
+            digest: (outputType) => wasm.digest(outputType),
+            save: () => wasm.save(),
+            load: (data2) => {
+              wasm.load(data2);
+              return obj;
+            },
+            blockSize: 64,
+            digestSize: 32
+          };
+          return obj;
+        });
+      }
+      var name$9 = "sha512";
+      var data$9 = "AGFzbQEAAAABEQRgAAF/YAF/AGAAAGACf38AAwgHAAEBAQIAAwUEAQECAgYOAn8BQdCKBQt/AEGACAsHcAgGbWVtb3J5AgAOSGFzaF9HZXRCdWZmZXIAAAlIYXNoX0luaXQAAQtIYXNoX1VwZGF0ZQACCkhhc2hfRmluYWwABA1IYXNoX0dldFN0YXRlAAUOSGFzaF9DYWxjdWxhdGUABgpTVEFURV9TSVpFAwEKlWgHBQBBgAkLmwIAQQBCADcDgIoBQQBBMEHAACAAQYADRiIAGzYCyIoBQQBCpJ/p99uD0trHAEL5wvibkaOz8NsAIAAbNwPAigFBAEKnn+an1sGLhltC6/qG2r+19sEfIAAbNwO4igFBAEKRquDC9tCS2o5/Qp/Y+dnCkdqCm38gABs3A7CKAUEAQrGWgP7/zMmZ5wBC0YWa7/rPlIfRACAAGzcDqIoBQQBCubK5uI+b+5cVQvHt9Pilp/2npX8gABs3A6CKAUEAQpe6w4Ojq8CskX9Cq/DT9K/uvLc8IAAbNwOYigFBAEKHqvOzo6WKzeIAQrvOqqbY0Ouzu38gABs3A5CKAUEAQti9lojcq+fdS0KIkvOd/8z5hOoAIAAbNwOIigEL8gICAX4Gf0EAQQApA4CKASIBIACtfDcDgIoBAkACQAJAIAGnQf8AcSICDQBBgAkhAwwBCwJAQYABIAJrIgQgACAEIABJGyIDRQ0AIANBA3EhBSACQYCJAWohBkEAIQICQCADQQRJDQAgA0H8AXEhB0EAIQIDQCAGIAJqIgMgAkGACWotAAA6AAAgA0EBaiACQYEJai0AADoAACADQQJqIAJBgglqLQAAOgAAIANBA2ogAkGDCWotAAA6AAAgByACQQRqIgJHDQALCyAFRQ0AA0AgBiACaiACQYAJai0AADoAACACQQFqIQIgBUF/aiIFDQALCyAAIARJDQFBgIkBEAMgACAEayEAIARBgAlqIQMLAkAgAEGAAUkNAANAIAMQAyADQYABaiEDIABBgH9qIgBB/wBLDQALCyAARQ0AQQAhAkEAIQUDQCACQYCJAWogAyACai0AADoAACACQQFqIQIgACAFQQFqIgVB/wFxSw0ACwsL3FYBVn5BACAAKQMIIgFCOIYgAUKA/gODQiiGhCABQoCA/AeDQhiGIAFCgICA+A+DQgiGhIQgAUIIiEKAgID4D4MgAUIYiEKAgPwHg4QgAUIoiEKA/gODIAFCOIiEhIQiAkI/iSACQjiJhSACQgeIhSAAKQMAIgFCOIYgAUKA/gODQiiGhCABQoCA/AeDQhiGIAFCgICA+A+DQgiGhIQgAUIIiEKAgID4D4MgAUIYiEKAgPwHg4QgAUIoiEKA/gODIAFCOIiEhIQiA3wgACkDSCIBQjiGIAFCgP4Dg0IohoQgAUKAgPwHg0IYhiABQoCAgPgPg0IIhoSEIAFCCIhCgICA+A+DIAFCGIhCgID8B4OEIAFCKIhCgP4DgyABQjiIhISEIgR8IAApA3AiAUI4hiABQoD+A4NCKIaEIAFCgID8B4NCGIYgAUKAgID4D4NCCIaEhCABQgiIQoCAgPgPgyABQhiIQoCA/AeDhCABQiiIQoD+A4MgAUI4iISEhCIFQi2JIAVCA4mFIAVCBoiFfCIGQj+JIAZCOImFIAZCB4iFIAApA3giAUI4hiABQoD+A4NCKIaEIAFCgID8B4NCGIYgAUKAgID4D4NCCIaEhCABQgiIQoCAgPgPgyABQhiIQoCA/AeDhCABQiiIQoD+A4MgAUI4iISEhCIHfCAEQj+JIARCOImFIARCB4iFIAApA0AiAUI4hiABQoD+A4NCKIaEIAFCgID8B4NCGIYgAUKAgID4D4NCCIaEhCABQgiIQoCAgPgPgyABQhiIQoCA/AeDhCABQiiIQoD+A4MgAUI4iISEhCIIfCAAKQMQIgFCOIYgAUKA/gODQiiGhCABQoCA/AeDQhiGIAFCgICA+A+DQgiGhIQgAUIIiEKAgID4D4MgAUIYiEKAgPwHg4QgAUIoiEKA/gODIAFCOIiEhIQiCUI/iSAJQjiJhSAJQgeIhSACfCAAKQNQIgFCOIYgAUKA/gODQiiGhCABQoCA/AeDQhiGIAFCgICA+A+DQgiGhIQgAUIIiEKAgID4D4MgAUIYiEKAgPwHg4QgAUIoiEKA/gODIAFCOIiEhIQiCnwgB0ItiSAHQgOJhSAHQgaIhXwiC3wgACkDOCIBQjiGIAFCgP4Dg0IohoQgAUKAgPwHg0IYhiABQoCAgPgPg0IIhoSEIAFCCIhCgICA+A+DIAFCGIhCgID8B4OEIAFCKIhCgP4DgyABQjiIhISEIgxCP4kgDEI4iYUgDEIHiIUgACkDMCIBQjiGIAFCgP4Dg0IohoQgAUKAgPwHg0IYhiABQoCAgPgPg0IIhoSEIAFCCIhCgICA+A+DIAFCGIhCgID8B4OEIAFCKIhCgP4DgyABQjiIhISEIg18IAd8IAApAygiAUI4hiABQoD+A4NCKIaEIAFCgID8B4NCGIYgAUKAgID4D4NCCIaEhCABQgiIQoCAgPgPgyABQhiIQoCA/AeDhCABQiiIQoD+A4MgAUI4iISEhCIOQj+JIA5COImFIA5CB4iFIAApAyAiAUI4hiABQoD+A4NCKIaEIAFCgID8B4NCGIYgAUKAgID4D4NCCIaEhCABQgiIQoCAgPgPgyABQhiIQoCA/AeDhCABQiiIQoD+A4MgAUI4iISEhCIPfCAAKQNoIgFCOIYgAUKA/gODQiiGhCABQoCA/AeDQhiGIAFCgICA+A+DQgiGhIQgAUIIiEKAgID4D4MgAUIYiEKAgPwHg4QgAUIoiEKA/gODIAFCOIiEhIQiEHwgACkDGCIBQjiGIAFCgP4Dg0IohoQgAUKAgPwHg0IYhiABQoCAgPgPg0IIhoSEIAFCCIhCgICA+A+DIAFCGIhCgID8B4OEIAFCKIhCgP4DgyABQjiIhISEIhFCP4kgEUI4iYUgEUIHiIUgCXwgACkDWCIBQjiGIAFCgP4Dg0IohoQgAUKAgPwHg0IYhiABQoCAgPgPg0IIhoSEIAFCCIhCgICA+A+DIAFCGIhCgID8B4OEIAFCKIhCgP4DgyABQjiIhISEIhJ8IAZCLYkgBkIDiYUgBkIGiIV8IhNCLYkgE0IDiYUgE0IGiIV8IhRCLYkgFEIDiYUgFEIGiIV8IhVCLYkgFUIDiYUgFUIGiIV8IhZ8IAVCP4kgBUI4iYUgBUIHiIUgEHwgFXwgACkDYCIBQjiGIAFCgP4Dg0IohoQgAUKAgPwHg0IYhiABQoCAgPgPg0IIhoSEIAFCCIhCgICA+A+DIAFCGIhCgID8B4OEIAFCKIhCgP4DgyABQjiIhISEIhdCP4kgF0I4iYUgF0IHiIUgEnwgFHwgCkI/iSAKQjiJhSAKQgeIhSAEfCATfCAIQj+JIAhCOImFIAhCB4iFIAx8IAZ8IA1CP4kgDUI4iYUgDUIHiIUgDnwgBXwgD0I/iSAPQjiJhSAPQgeIhSARfCAXfCALQi2JIAtCA4mFIAtCBoiFfCIYQi2JIBhCA4mFIBhCBoiFfCIZQi2JIBlCA4mFIBlCBoiFfCIaQi2JIBpCA4mFIBpCBoiFfCIbQi2JIBtCA4mFIBtCBoiFfCIcQi2JIBxCA4mFIBxCBoiFfCIdQi2JIB1CA4mFIB1CBoiFfCIeQj+JIB5COImFIB5CB4iFIAdCP4kgB0I4iYUgB0IHiIUgBXwgGnwgEEI/iSAQQjiJhSAQQgeIhSAXfCAZfCASQj+JIBJCOImFIBJCB4iFIAp8IBh8IBZCLYkgFkIDiYUgFkIGiIV8Ih9CLYkgH0IDiYUgH0IGiIV8IiBCLYkgIEIDiYUgIEIGiIV8IiF8IBZCP4kgFkI4iYUgFkIHiIUgGnwgC0I/iSALQjiJhSALQgeIhSAGfCAbfCAhQi2JICFCA4mFICFCBoiFfCIifCAVQj+JIBVCOImFIBVCB4iFIBl8ICF8IBRCP4kgFEI4iYUgFEIHiIUgGHwgIHwgE0I/iSATQjiJhSATQgeIhSALfCAffCAeQi2JIB5CA4mFIB5CBoiFfCIjQi2JICNCA4mFICNCBoiFfCIkQi2JICRCA4mFICRCBoiFfCIlQi2JICVCA4mFICVCBoiFfCImfCAdQj+JIB1COImFIB1CB4iFICB8ICV8IBxCP4kgHEI4iYUgHEIHiIUgH3wgJHwgG0I/iSAbQjiJhSAbQgeIhSAWfCAjfCAaQj+JIBpCOImFIBpCB4iFIBV8IB58IBlCP4kgGUI4iYUgGUIHiIUgFHwgHXwgGEI/iSAYQjiJhSAYQgeIhSATfCAcfCAiQi2JICJCA4mFICJCBoiFfCInQi2JICdCA4mFICdCBoiFfCIoQi2JIChCA4mFIChCBoiFfCIpQi2JIClCA4mFIClCBoiFfCIqQi2JICpCA4mFICpCBoiFfCIrQi2JICtCA4mFICtCBoiFfCIsQi2JICxCA4mFICxCBoiFfCItQj+JIC1COImFIC1CB4iFICFCP4kgIUI4iYUgIUIHiIUgHXwgKXwgIEI/iSAgQjiJhSAgQgeIhSAcfCAofCAfQj+JIB9COImFIB9CB4iFIBt8ICd8ICZCLYkgJkIDiYUgJkIGiIV8Ii5CLYkgLkIDiYUgLkIGiIV8Ii9CLYkgL0IDiYUgL0IGiIV8IjB8ICZCP4kgJkI4iYUgJkIHiIUgKXwgIkI/iSAiQjiJhSAiQgeIhSAefCAqfCAwQi2JIDBCA4mFIDBCBoiFfCIxfCAlQj+JICVCOImFICVCB4iFICh8IDB8ICRCP4kgJEI4iYUgJEIHiIUgJ3wgL3wgI0I/iSAjQjiJhSAjQgeIhSAifCAufCAtQi2JIC1CA4mFIC1CBoiFfCIyQi2JIDJCA4mFIDJCBoiFfCIzQi2JIDNCA4mFIDNCBoiFfCI0Qi2JIDRCA4mFIDRCBoiFfCI1fCAsQj+JICxCOImFICxCB4iFIC98IDR8ICtCP4kgK0I4iYUgK0IHiIUgLnwgM3wgKkI/iSAqQjiJhSAqQgeIhSAmfCAyfCApQj+JIClCOImFIClCB4iFICV8IC18IChCP4kgKEI4iYUgKEIHiIUgJHwgLHwgJ0I/iSAnQjiJhSAnQgeIhSAjfCArfCAxQi2JIDFCA4mFIDFCBoiFfCI2Qi2JIDZCA4mFIDZCBoiFfCI3Qi2JIDdCA4mFIDdCBoiFfCI4Qi2JIDhCA4mFIDhCBoiFfCI5Qi2JIDlCA4mFIDlCBoiFfCI6Qi2JIDpCA4mFIDpCBoiFfCI7Qi2JIDtCA4mFIDtCBoiFfCI8Qj+JIDxCOImFIDxCB4iFIDBCP4kgMEI4iYUgMEIHiIUgLHwgOHwgL0I/iSAvQjiJhSAvQgeIhSArfCA3fCAuQj+JIC5COImFIC5CB4iFICp8IDZ8IDVCLYkgNUIDiYUgNUIGiIV8Ij1CLYkgPUIDiYUgPUIGiIV8Ij5CLYkgPkIDiYUgPkIGiIV8Ij98IDVCP4kgNUI4iYUgNUIHiIUgOHwgMUI/iSAxQjiJhSAxQgeIhSAtfCA5fCA/Qi2JID9CA4mFID9CBoiFfCJAfCA0Qj+JIDRCOImFIDRCB4iFIDd8ID98IDNCP4kgM0I4iYUgM0IHiIUgNnwgPnwgMkI/iSAyQjiJhSAyQgeIhSAxfCA9fCA8Qi2JIDxCA4mFIDxCBoiFfCJBQi2JIEFCA4mFIEFCBoiFfCJCQi2JIEJCA4mFIEJCBoiFfCJDQi2JIENCA4mFIENCBoiFfCJEfCA7Qj+JIDtCOImFIDtCB4iFID58IEN8IDpCP4kgOkI4iYUgOkIHiIUgPXwgQnwgOUI/iSA5QjiJhSA5QgeIhSA1fCBBfCA4Qj+JIDhCOImFIDhCB4iFIDR8IDx8IDdCP4kgN0I4iYUgN0IHiIUgM3wgO3wgNkI/iSA2QjiJhSA2QgeIhSAyfCA6fCBAQi2JIEBCA4mFIEBCBoiFfCJFQi2JIEVCA4mFIEVCBoiFfCJGQi2JIEZCA4mFIEZCBoiFfCJHQi2JIEdCA4mFIEdCBoiFfCJIQi2JIEhCA4mFIEhCBoiFfCJJQi2JIElCA4mFIElCBoiFfCJKQi2JIEpCA4mFIEpCBoiFfCJLIEkgRSA/ID0gMiAsICogIiAgIBYgBiAXIAhBACkDqIoBIkxCMokgTEIuiYUgTEIXiYVBACkDwIoBIk18QQApA7iKASJOQQApA7CKASJPhSBMgyBOhXwgA3xCotyiuY3zi8XCAHwiA0EAKQOgigEiUHwiASAPfCBMIBF8IE8gCXwgTiACfCABIE8gTIWDIE+FfCABQjKJIAFCLomFIAFCF4mFfELNy72fkpLRm/EAfCJRQQApA5iKASJSfCIJIAEgTIWDIEyFfCAJQjKJIAlCLomFIAlCF4mFfEKv9rTi/vm+4LV/fCJTQQApA5CKASJUfCIPIAkgAYWDIAGFfCAPQjKJIA9CLomFIA9CF4mFfEK8t6eM2PT22ml8IlVBACkDiIoBIgF8IhEgDyAJhYMgCYV8IBFCMokgEUIuiYUgEUIXiYV8Qrjqopq/y7CrOXwiViBSIFQgAYWDIFQgAYOFIAFCJIkgAUIeiYUgAUIZiYV8IAN8IgJ8IgN8IAwgEXwgDSAPfCAOIAl8IAMgESAPhYMgD4V8IANCMokgA0IuiYUgA0IXiYV8Qpmgl7CbvsT42QB8Ig0gAiABhSBUgyACIAGDhSACQiSJIAJCHomFIAJCGYmFfCBRfCIJfCIIIAMgEYWDIBGFfCAIQjKJIAhCLomFIAhCF4mFfEKbn+X4ytTgn5J/fCIOIAkgAoUgAYMgCSACg4UgCUIkiSAJQh6JhSAJQhmJhXwgU3wiD3wiESAIIAOFgyADhXwgEUIyiSARQi6JhSARQheJhXxCmIK2093al46rf3wiUSAPIAmFIAKDIA8gCYOFIA9CJIkgD0IeiYUgD0IZiYV8IFV8IgJ8IgMgESAIhYMgCIV8IANCMokgA0IuiYUgA0IXiYV8QsKEjJiK0+qDWHwiUyACIA+FIAmDIAIgD4OFIAJCJIkgAkIeiYUgAkIZiYV8IFZ8Igl8Igx8IBIgA3wgCiARfCAEIAh8IAwgAyARhYMgEYV8IAxCMokgDEIuiYUgDEIXiYV8Qr7fwauU4NbBEnwiBCAJIAKFIA+DIAkgAoOFIAlCJIkgCUIeiYUgCUIZiYV8IA18Ig98IhEgDCADhYMgA4V8IBFCMokgEUIuiYUgEUIXiYV8Qozlkvfkt+GYJHwiCiAPIAmFIAKDIA8gCYOFIA9CJIkgD0IeiYUgD0IZiYV8IA58IgJ8IgMgESAMhYMgDIV8IANCMokgA0IuiYUgA0IXiYV8QuLp/q+9uJ+G1QB8IhIgAiAPhSAJgyACIA+DhSACQiSJIAJCHomFIAJCGYmFfCBRfCIJfCIIIAMgEYWDIBGFfCAIQjKJIAhCLomFIAhCF4mFfELvku6Tz66X3/IAfCIXIAkgAoUgD4MgCSACg4UgCUIkiSAJQh6JhSAJQhmJhXwgU3wiD3wiDHwgByAIfCAFIAN8IBAgEXwgDCAIIAOFgyADhXwgDEIyiSAMQi6JhSAMQheJhXxCsa3a2OO/rO+Af3wiAyAPIAmFIAKDIA8gCYOFIA9CJIkgD0IeiYUgD0IZiYV8IAR8IgV8IgIgDCAIhYMgCIV8IAJCMokgAkIuiYUgAkIXiYV8QrWknK7y1IHum398IgggBSAPhSAJgyAFIA+DhSAFQiSJIAVCHomFIAVCGYmFfCAKfCIGfCIJIAIgDIWDIAyFfCAJQjKJIAlCLomFIAlCF4mFfEKUzaT7zK78zUF8IgwgBiAFhSAPgyAGIAWDhSAGQiSJIAZCHomFIAZCGYmFfCASfCIHfCIPIAkgAoWDIAKFfCAPQjKJIA9CLomFIA9CF4mFfELSlcX3mbjazWR8IgQgByAGhSAFgyAHIAaDhSAHQiSJIAdCHomFIAdCGYmFfCAXfCIFfCIRIBR8IBggD3wgEyAJfCALIAJ8IBEgDyAJhYMgCYV8IBFCMokgEUIuiYUgEUIXiYV8QuPLvMLj8JHfb3wiAiAFIAeFIAaDIAUgB4OFIAVCJIkgBUIeiYUgBUIZiYV8IAN8IgZ8IgsgESAPhYMgD4V8IAtCMokgC0IuiYUgC0IXiYV8QrWrs9zouOfgD3wiCSAGIAWFIAeDIAYgBYOFIAZCJIkgBkIeiYUgBkIZiYV8IAh8Igd8IhMgCyARhYMgEYV8IBNCMokgE0IuiYUgE0IXiYV8QuW4sr3HuaiGJHwiDyAHIAaFIAWDIAcgBoOFIAdCJIkgB0IeiYUgB0IZiYV8IAx8IgV8IhQgEyALhYMgC4V8IBRCMokgFEIuiYUgFEIXiYV8QvWErMn1jcv0LXwiESAFIAeFIAaDIAUgB4OFIAVCJIkgBUIeiYUgBUIZiYV8IAR8IgZ8Ihh8IBogFHwgFSATfCAZIAt8IBggFCAThYMgE4V8IBhCMokgGEIuiYUgGEIXiYV8QoPJm/WmlaG6ygB8IhYgBiAFhSAHgyAGIAWDhSAGQiSJIAZCHomFIAZCGYmFfCACfCIHfCILIBggFIWDIBSFfCALQjKJIAtCLomFIAtCF4mFfELU94fqy7uq2NwAfCIZIAcgBoUgBYMgByAGg4UgB0IkiSAHQh6JhSAHQhmJhXwgCXwiBXwiEyALIBiFgyAYhXwgE0IyiSATQi6JhSATQheJhXxCtafFmKib4vz2AHwiGCAFIAeFIAaDIAUgB4OFIAVCJIkgBUIeiYUgBUIZiYV8IA98IgZ8IhQgEyALhYMgC4V8IBRCMokgFEIuiYUgFEIXiYV8Qqu/m/OuqpSfmH98IhogBiAFhSAHgyAGIAWDhSAGQiSJIAZCHomFIAZCGYmFfCARfCIHfCIVfCAcIBR8IB8gE3wgGyALfCAVIBQgE4WDIBOFfCAVQjKJIBVCLomFIBVCF4mFfEKQ5NDt0s3xmKh/fCIbIAcgBoUgBYMgByAGg4UgB0IkiSAHQh6JhSAHQhmJhXwgFnwiBXwiCyAVIBSFgyAUhXwgC0IyiSALQi6JhSALQheJhXxCv8Lsx4n5yYGwf3wiFiAFIAeFIAaDIAUgB4OFIAVCJIkgBUIeiYUgBUIZiYV8IBl8IgZ8IhMgCyAVhYMgFYV8IBNCMokgE0IuiYUgE0IXiYV8QuSdvPf7+N+sv398IhkgBiAFhSAHgyAGIAWDhSAGQiSJIAZCHomFIAZCGYmFfCAYfCIHfCIUIBMgC4WDIAuFfCAUQjKJIBRCLomFIBRCF4mFfELCn6Lts/6C8EZ8IhggByAGhSAFgyAHIAaDhSAHQiSJIAdCHomFIAdCGYmFfCAafCIFfCIVfCAeIBR8ICEgE3wgHSALfCAVIBQgE4WDIBOFfCAVQjKJIBVCLomFIBVCF4mFfEKlzqqY+ajk01V8IhogBSAHhSAGgyAFIAeDhSAFQiSJIAVCHomFIAVCGYmFfCAbfCIGfCILIBUgFIWDIBSFfCALQjKJIAtCLomFIAtCF4mFfELvhI6AnuqY5QZ8IhsgBiAFhSAHgyAGIAWDhSAGQiSJIAZCHomFIAZCGYmFfCAWfCIHfCITIAsgFYWDIBWFfCATQjKJIBNCLomFIBNCF4mFfELw3LnQ8KzKlBR8IhYgByAGhSAFgyAHIAaDhSAHQiSJIAdCHomFIAdCGYmFfCAZfCIFfCIUIBMgC4WDIAuFfCAUQjKJIBRCLomFIBRCF4mFfEL838i21NDC2yd8IhkgBSAHhSAGgyAFIAeDhSAFQiSJIAVCHomFIAVCGYmFfCAYfCIGfCIVICh8ICQgFHwgJyATfCAjIAt8IBUgFCAThYMgE4V8IBVCMokgFUIuiYUgFUIXiYV8QqaSm+GFp8iNLnwiGCAGIAWFIAeDIAYgBYOFIAZCJIkgBkIeiYUgBkIZiYV8IBp8Igd8IgsgFSAUhYMgFIV8IAtCMokgC0IuiYUgC0IXiYV8Qu3VkNbFv5uWzQB8IhogByAGhSAFgyAHIAaDhSAHQiSJIAdCHomFIAdCGYmFfCAbfCIFfCITIAsgFYWDIBWFfCATQjKJIBNCLomFIBNCF4mFfELf59bsuaKDnNMAfCIbIAUgB4UgBoMgBSAHg4UgBUIkiSAFQh6JhSAFQhmJhXwgFnwiBnwiFCATIAuFgyALhXwgFEIyiSAUQi6JhSAUQheJhXxC3se93cjqnIXlAHwiFiAGIAWFIAeDIAYgBYOFIAZCJIkgBkIeiYUgBkIZiYV8IBl8Igd8IhV8ICYgFHwgKSATfCAlIAt8IBUgFCAThYMgE4V8IBVCMokgFUIuiYUgFUIXiYV8Qqjl3uOz14K19gB8IhkgByAGhSAFgyAHIAaDhSAHQiSJIAdCHomFIAdCGYmFfCAYfCIFfCILIBUgFIWDIBSFfCALQjKJIAtCLomFIAtCF4mFfELm3ba/5KWy4YF/fCIYIAUgB4UgBoMgBSAHg4UgBUIkiSAFQh6JhSAFQhmJhXwgGnwiBnwiEyALIBWFgyAVhXwgE0IyiSATQi6JhSATQheJhXxCu+qIpNGQi7mSf3wiGiAGIAWFIAeDIAYgBYOFIAZCJIkgBkIeiYUgBkIZiYV8IBt8Igd8IhQgEyALhYMgC4V8IBRCMokgFEIuiYUgFEIXiYV8QuSGxOeUlPrfon98IhsgByAGhSAFgyAHIAaDhSAHQiSJIAdCHomFIAdCGYmFfCAWfCIFfCIVfCAvIBR8ICsgE3wgLiALfCAVIBQgE4WDIBOFfCAVQjKJIBVCLomFIBVCF4mFfEKB4Ijiu8mZjah/fCIWIAUgB4UgBoMgBSAHg4UgBUIkiSAFQh6JhSAFQhmJhXwgGXwiBnwiCyAVIBSFgyAUhXwgC0IyiSALQi6JhSALQheJhXxCka/ih43u4qVCfCIZIAYgBYUgB4MgBiAFg4UgBkIkiSAGQh6JhSAGQhmJhXwgGHwiB3wiEyALIBWFgyAVhXwgE0IyiSATQi6JhSATQheJhXxCsPzSsrC0lLZHfCIYIAcgBoUgBYMgByAGg4UgB0IkiSAHQh6JhSAHQhmJhXwgGnwiBXwiFCATIAuFgyALhXwgFEIyiSAUQi6JhSAUQheJhXxCmKS9t52DuslRfCIaIAUgB4UgBoMgBSAHg4UgBUIkiSAFQh6JhSAFQhmJhXwgG3wiBnwiFXwgMSAUfCAtIBN8IDAgC3wgFSAUIBOFgyAThXwgFUIyiSAVQi6JhSAVQheJhXxCkNKWq8XEwcxWfCIbIAYgBYUgB4MgBiAFg4UgBkIkiSAGQh6JhSAGQhmJhXwgFnwiB3wiCyAVIBSFgyAUhXwgC0IyiSALQi6JhSALQheJhXxCqsDEu9WwjYd0fCIWIAcgBoUgBYMgByAGg4UgB0IkiSAHQh6JhSAHQhmJhXwgGXwiBXwiEyALIBWFgyAVhXwgE0IyiSATQi6JhSATQheJhXxCuKPvlYOOqLUQfCIZIAUgB4UgBoMgBSAHg4UgBUIkiSAFQh6JhSAFQhmJhXwgGHwiBnwiFCATIAuFgyALhXwgFEIyiSAUQi6JhSAUQheJhXxCyKHLxuuisNIZfCIYIAYgBYUgB4MgBiAFg4UgBkIkiSAGQh6JhSAGQhmJhXwgGnwiB3wiFSA0fCA3IBR8IDMgE3wgNiALfCAVIBQgE4WDIBOFfCAVQjKJIBVCLomFIBVCF4mFfELT1oaKhYHbmx58IhogByAGhSAFgyAHIAaDhSAHQiSJIAdCHomFIAdCGYmFfCAbfCIFfCILIBUgFIWDIBSFfCALQjKJIAtCLomFIAtCF4mFfEKZ17v8zemdpCd8IhsgBSAHhSAGgyAFIAeDhSAFQiSJIAVCHomFIAVCGYmFfCAWfCIGfCITIAsgFYWDIBWFfCATQjKJIBNCLomFIBNCF4mFfEKoke2M3pav2DR8IhYgBiAFhSAHgyAGIAWDhSAGQiSJIAZCHomFIAZCGYmFfCAZfCIHfCIUIBMgC4WDIAuFfCAUQjKJIBRCLomFIBRCF4mFfELjtKWuvJaDjjl8IhkgByAGhSAFgyAHIAaDhSAHQiSJIAdCHomFIAdCGYmFfCAYfCIFfCIVfCA5IBR8IDUgE3wgOCALfCAVIBQgE4WDIBOFfCAVQjKJIBVCLomFIBVCF4mFfELLlYaarsmq7M4AfCIYIAUgB4UgBoMgBSAHg4UgBUIkiSAFQh6JhSAFQhmJhXwgGnwiBnwiCyAVIBSFgyAUhXwgC0IyiSALQi6JhSALQheJhXxC88aPu/fJss7bAHwiGiAGIAWFIAeDIAYgBYOFIAZCJIkgBkIeiYUgBkIZiYV8IBt8Igd8IhMgCyAVhYMgFYV8IBNCMokgE0IuiYUgE0IXiYV8QqPxyrW9/puX6AB8IhsgByAGhSAFgyAHIAaDhSAHQiSJIAdCHomFIAdCGYmFfCAWfCIFfCIUIBMgC4WDIAuFfCAUQjKJIBRCLomFIBRCF4mFfEL85b7v5d3gx/QAfCIWIAUgB4UgBoMgBSAHg4UgBUIkiSAFQh6JhSAFQhmJhXwgGXwiBnwiFXwgOyAUfCA+IBN8IDogC3wgFSAUIBOFgyAThXwgFUIyiSAVQi6JhSAVQheJhXxC4N7cmPTt2NL4AHwiGSAGIAWFIAeDIAYgBYOFIAZCJIkgBkIeiYUgBkIZiYV8IBh8Igd8IgsgFSAUhYMgFIV8IAtCMokgC0IuiYUgC0IXiYV8QvLWwo/Kgp7khH98IhggByAGhSAFgyAHIAaDhSAHQiSJIAdCHomFIAdCGYmFfCAafCIFfCITIAsgFYWDIBWFfCATQjKJIBNCLomFIBNCF4mFfELs85DTgcHA44x/fCIaIAUgB4UgBoMgBSAHg4UgBUIkiSAFQh6JhSAFQhmJhXwgG3wiBnwiFCATIAuFgyALhXwgFEIyiSAUQi6JhSAUQheJhXxCqLyMm6L/v9+Qf3wiGyAGIAWFIAeDIAYgBYOFIAZCJIkgBkIeiYUgBkIZiYV8IBZ8Igd8IhV8IEEgFHwgQCATfCA8IAt8IBUgFCAThYMgE4V8IBVCMokgFUIuiYUgFUIXiYV8Qun7ivS9nZuopH98IhYgByAGhSAFgyAHIAaDhSAHQiSJIAdCHomFIAdCGYmFfCAZfCIFfCILIBUgFIWDIBSFfCALQjKJIAtCLomFIAtCF4mFfEKV8pmW+/7o/L5/fCIZIAUgB4UgBoMgBSAHg4UgBUIkiSAFQh6JhSAFQhmJhXwgGHwiBnwiEyALIBWFgyAVhXwgE0IyiSATQi6JhSATQheJhXxCq6bJm66e3rhGfCIYIAYgBYUgB4MgBiAFg4UgBkIkiSAGQh6JhSAGQhmJhXwgGnwiB3wiFCATIAuFgyALhXwgFEIyiSAUQi6JhSAUQheJhXxCnMOZ0e7Zz5NKfCIaIAcgBoUgBYMgByAGg4UgB0IkiSAHQh6JhSAHQhmJhXwgG3wiBXwiFSBHfCBDIBR8IEYgE3wgQiALfCAVIBQgE4WDIBOFfCAVQjKJIBVCLomFIBVCF4mFfEKHhIOO8piuw1F8IhsgBSAHhSAGgyAFIAeDhSAFQiSJIAVCHomFIAVCGYmFfCAWfCIGfCILIBUgFIWDIBSFfCALQjKJIAtCLomFIAtCF4mFfEKe1oPv7Lqf7Wp8IhYgBiAFhSAHgyAGIAWDhSAGQiSJIAZCHomFIAZCGYmFfCAZfCIHfCITIAsgFYWDIBWFfCATQjKJIBNCLomFIBNCF4mFfEL4orvz/u/TvnV8IhkgByAGhSAFgyAHIAaDhSAHQiSJIAdCHomFIAdCGYmFfCAYfCIFfCIUIBMgC4WDIAuFfCAUQjKJIBRCLomFIBRCF4mFfEK6392Qp/WZ+AZ8IhwgBSAHhSAGgyAFIAeDhSAFQiSJIAVCHomFIAVCGYmFfCAafCIGfCIVfCA9Qj+JID1COImFID1CB4iFIDl8IEV8IERCLYkgREIDiYUgREIGiIV8IhggFHwgSCATfCBEIAt8IBUgFCAThYMgE4V8IBVCMokgFUIuiYUgFUIXiYV8QqaxopbauN+xCnwiGiAGIAWFIAeDIAYgBYOFIAZCJIkgBkIeiYUgBkIZiYV8IBt8Igd8IgsgFSAUhYMgFIV8IAtCMokgC0IuiYUgC0IXiYV8Qq6b5PfLgOafEXwiGyAHIAaFIAWDIAcgBoOFIAdCJIkgB0IeiYUgB0IZiYV8IBZ8IgV8IhMgCyAVhYMgFYV8IBNCMokgE0IuiYUgE0IXiYV8QpuO8ZjR5sK4G3wiHSAFIAeFIAaDIAUgB4OFIAVCJIkgBUIeiYUgBUIZiYV8IBl8IgZ8IhQgEyALhYMgC4V8IBRCMokgFEIuiYUgFEIXiYV8QoT7kZjS/t3tKHwiHiAGIAWFIAeDIAYgBYOFIAZCJIkgBkIeiYUgBkIZiYV8IBx8Igd8IhV8ID9CP4kgP0I4iYUgP0IHiIUgO3wgR3wgPkI/iSA+QjiJhSA+QgeIhSA6fCBGfCAYQi2JIBhCA4mFIBhCBoiFfCIWQi2JIBZCA4mFIBZCBoiFfCIZIBR8IEogE3wgFiALfCAVIBQgE4WDIBOFfCAVQjKJIBVCLomFIBVCF4mFfEKTyZyGtO+q5TJ8IgsgByAGhSAFgyAHIAaDhSAHQiSJIAdCHomFIAdCGYmFfCAafCIFfCITIBUgFIWDIBSFfCATQjKJIBNCLomFIBNCF4mFfEK8/aauocGvzzx8IhogBSAHhSAGgyAFIAeDhSAFQiSJIAVCHomFIAVCGYmFfCAbfCIGfCIUIBMgFYWDIBWFfCAUQjKJIBRCLomFIBRCF4mFfELMmsDgyfjZjsMAfCIbIAYgBYUgB4MgBiAFg4UgBkIkiSAGQh6JhSAGQhmJhXwgHXwiB3wiFSAUIBOFgyAThXwgFUIyiSAVQi6JhSAVQheJhXxCtoX52eyX9eLMAHwiHCAHIAaFIAWDIAcgBoOFIAdCJIkgB0IeiYUgB0IZiYV8IB58IgV8IhYgTXw3A8CKAUEAIFAgBSAHhSAGgyAFIAeDhSAFQiSJIAVCHomFIAVCGYmFfCALfCIGIAWFIAeDIAYgBYOFIAZCJIkgBkIeiYUgBkIZiYV8IBp8IgcgBoUgBYMgByAGg4UgB0IkiSAHQh6JhSAHQhmJhXwgG3wiBSAHhSAGgyAFIAeDhSAFQiSJIAVCHomFIAVCGYmFfCAcfCILfDcDoIoBQQAgTiBAQj+JIEBCOImFIEBCB4iFIDx8IEh8IBlCLYkgGUIDiYUgGUIGiIV8IhkgE3wgFiAVIBSFgyAUhXwgFkIyiSAWQi6JhSAWQheJhXxCqvyV48+zyr/ZAHwiGiAGfCITfDcDuIoBQQAgUiALIAWFIAeDIAsgBYOFIAtCJIkgC0IeiYUgC0IZiYV8IBp8IgZ8NwOYigFBACBPIEFCP4kgQUI4iYUgQUIHiIUgQHwgGHwgS0ItiSBLQgOJhSBLQgaIhXwgFHwgEyAWIBWFgyAVhXwgE0IyiSATQi6JhSATQheJhXxC7PXb1rP12+XfAHwiGCAHfCIUfDcDsIoBQQAgVCAGIAuFIAWDIAYgC4OFIAZCJIkgBkIeiYUgBkIZiYV8IBh8Igd8NwOQigFBACBMIEVCP4kgRUI4iYUgRUIHiIUgQXwgSXwgGUItiSAZQgOJhSAZQgaIhXwgFXwgFCATIBaFgyAWhXwgFEIyiSAUQi6JhSAUQheJhXxCl7Cd0sSxhqLsAHwiEyAFfHw3A6iKAUEAIAEgByAGhSALgyAHIAaDhSAHQiSJIAdCHomFIAdCGYmFfCATfHw3A4iKAQvzCQIBfgR/QQApA4CKASIAp0EDdkEPcSIBQQN0QYCJAWoiAiACKQMAQn8gAEIDhiIAhkJ/hYNCgAEgAIaFNwMAIAFBAWohAwJAIAFBDkkNAAJAIANBD0cNAEEAQgA3A/iJAQtBgIkBEANBACEDCyADIQQCQEEHIANrQQdxIgJFDQAgAyACaiEEIANBA3RBgIkBaiEBA0AgAUIANwMAIAFBCGohASACQX9qIgINAAsLAkAgA0F4akEHSQ0AIARBA3QhAQNAIAFBuIkBakIANwMAIAFBsIkBakIANwMAIAFBqIkBakIANwMAIAFBoIkBakIANwMAIAFBmIkBakIANwMAIAFBkIkBakIANwMAIAFBiIkBakIANwMAIAFBgIkBakIANwMAIAFBwABqIgFB+ABHDQALC0EAIQFBAEEAKQOAigEiAEI7hiAAQiuGQoCAgICAgMD/AIOEIABCG4ZCgICAgIDgP4MgAEILhkKAgICA8B+DhIQgAEIFiEKAgID4D4MgAEIViEKAgPwHg4QgAEIliEKA/gODIABCA4ZCOIiEhIQ3A/iJAUGAiQEQA0EAQQApA8CKASIAQjiGIABCgP4Dg0IohoQgAEKAgPwHg0IYhiAAQoCAgPgPg0IIhoSEIABCCIhCgICA+A+DIABCGIhCgID8B4OEIABCKIhCgP4DgyAAQjiIhISENwPAigFBAEEAKQO4igEiAEI4hiAAQoD+A4NCKIaEIABCgID8B4NCGIYgAEKAgID4D4NCCIaEhCAAQgiIQoCAgPgPgyAAQhiIQoCA/AeDhCAAQiiIQoD+A4MgAEI4iISEhDcDuIoBQQBBACkDsIoBIgBCOIYgAEKA/gODQiiGhCAAQoCA/AeDQhiGIABCgICA+A+DQgiGhIQgAEIIiEKAgID4D4MgAEIYiEKAgPwHg4QgAEIoiEKA/gODIABCOIiEhIQ3A7CKAUEAQQApA6iKASIAQjiGIABCgP4Dg0IohoQgAEKAgPwHg0IYhiAAQoCAgPgPg0IIhoSEIABCCIhCgICA+A+DIABCGIhCgID8B4OEIABCKIhCgP4DgyAAQjiIhISENwOoigFBAEEAKQOgigEiAEI4hiAAQoD+A4NCKIaEIABCgID8B4NCGIYgAEKAgID4D4NCCIaEhCAAQgiIQoCAgPgPgyAAQhiIQoCA/AeDhCAAQiiIQoD+A4MgAEI4iISEhDcDoIoBQQBBACkDmIoBIgBCOIYgAEKA/gODQiiGhCAAQoCA/AeDQhiGIABCgICA+A+DQgiGhIQgAEIIiEKAgID4D4MgAEIYiEKAgPwHg4QgAEIoiEKA/gODIABCOIiEhIQ3A5iKAUEAQQApA5CKASIAQjiGIABCgP4Dg0IohoQgAEKAgPwHg0IYhiAAQoCAgPgPg0IIhoSEIABCCIhCgICA+A+DIABCGIhCgID8B4OEIABCKIhCgP4DgyAAQjiIhISENwOQigFBAEEAKQOIigEiAEI4hiAAQoD+A4NCKIaEIABCgID8B4NCGIYgAEKAgID4D4NCCIaEhCAAQgiIQoCAgPgPgyAAQhiIQoCA/AeDhCAAQiiIQoD+A4MgAEI4iISEhDcDiIoBAkBBACgCyIoBIgNFDQBBACECA0AgAUGACWogAUGIigFqLQAAOgAAIAFBAWohASADIAJBAWoiAkH/AXFLDQALCwsGAEGAiQELoQIAQQBCADcDgIoBQQBBMEHAACABQYADRiIBGzYCyIoBQQBCpJ/p99uD0trHAEL5wvibkaOz8NsAIAEbNwPAigFBAEKnn+an1sGLhltC6/qG2r+19sEfIAEbNwO4igFBAEKRquDC9tCS2o5/Qp/Y+dnCkdqCm38gARs3A7CKAUEAQrGWgP7/zMmZ5wBC0YWa7/rPlIfRACABGzcDqIoBQQBCubK5uI+b+5cVQvHt9Pilp/2npX8gARs3A6CKAUEAQpe6w4Ojq8CskX9Cq/DT9K/uvLc8IAEbNwOYigFBAEKHqvOzo6WKzeIAQrvOqqbY0Ouzu38gARs3A5CKAUEAQti9lojcq+fdS0KIkvOd/8z5hOoAIAEbNwOIigEgABACEAQLCwsBAEGACAsE0AAAAA==";
+      var hash$9 = "f2e40eb1";
+      var wasmJson$9 = {
+        name: name$9,
+        data: data$9,
+        hash: hash$9
+      };
+      const mutex$8 = new Mutex();
+      let wasmCache$8 = null;
+      function sha384(data2) {
+        if (wasmCache$8 === null) {
+          return lockedCreate(mutex$8, wasmJson$9, 48).then((wasm) => {
+            wasmCache$8 = wasm;
+            return wasmCache$8.calculate(data2, 384);
+          });
+        }
+        try {
+          const hash2 = wasmCache$8.calculate(data2, 384);
+          return Promise.resolve(hash2);
+        } catch (err) {
+          return Promise.reject(err);
+        }
+      }
+      function createSHA384() {
+        return WASMInterface(wasmJson$9, 48).then((wasm) => {
+          wasm.init(384);
+          const obj = {
+            init: () => {
+              wasm.init(384);
+              return obj;
+            },
+            update: (data2) => {
+              wasm.update(data2);
+              return obj;
+            },
+            // biome-ignore lint/suspicious/noExplicitAny: Conflict with IHasher type
+            digest: (outputType) => wasm.digest(outputType),
+            save: () => wasm.save(),
+            load: (data2) => {
+              wasm.load(data2);
+              return obj;
+            },
+            blockSize: 128,
+            digestSize: 48
+          };
+          return obj;
+        });
+      }
+      const mutex$7 = new Mutex();
+      let wasmCache$7 = null;
+      function sha512(data2) {
+        if (wasmCache$7 === null) {
+          return lockedCreate(mutex$7, wasmJson$9, 64).then((wasm) => {
+            wasmCache$7 = wasm;
+            return wasmCache$7.calculate(data2, 512);
+          });
+        }
+        try {
+          const hash2 = wasmCache$7.calculate(data2, 512);
+          return Promise.resolve(hash2);
+        } catch (err) {
+          return Promise.reject(err);
+        }
+      }
+      function createSHA512() {
+        return WASMInterface(wasmJson$9, 64).then((wasm) => {
+          wasm.init(512);
+          const obj = {
+            init: () => {
+              wasm.init(512);
+              return obj;
+            },
+            update: (data2) => {
+              wasm.update(data2);
+              return obj;
+            },
+            // biome-ignore lint/suspicious/noExplicitAny: Conflict with IHasher type
+            digest: (outputType) => wasm.digest(outputType),
+            save: () => wasm.save(),
+            load: (data2) => {
+              wasm.load(data2);
+              return obj;
+            },
+            blockSize: 128,
+            digestSize: 64
+          };
+          return obj;
+        });
+      }
+      var name$8 = "xxhash32";
+      var data$8 = "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";
+      var hash$8 = "4bb12485";
+      var wasmJson$8 = {
+        name: name$8,
+        data: data$8,
+        hash: hash$8
+      };
+      const mutex$6 = new Mutex();
+      let wasmCache$6 = null;
+      function validateSeed$3(seed) {
+        if (!Number.isInteger(seed) || seed < 0 || seed > 4294967295) {
+          return new Error("Seed must be a valid 32-bit long unsigned integer.");
+        }
+        return null;
+      }
+      function xxhash32(data2, seed = 0) {
+        if (validateSeed$3(seed)) {
+          return Promise.reject(validateSeed$3(seed));
+        }
+        if (wasmCache$6 === null) {
+          return lockedCreate(mutex$6, wasmJson$8, 4).then((wasm) => {
+            wasmCache$6 = wasm;
+            return wasmCache$6.calculate(data2, seed);
+          });
+        }
+        try {
+          const hash2 = wasmCache$6.calculate(data2, seed);
+          return Promise.resolve(hash2);
+        } catch (err) {
+          return Promise.reject(err);
+        }
+      }
+      function createXXHash32(seed = 0) {
+        if (validateSeed$3(seed)) {
+          return Promise.reject(validateSeed$3(seed));
+        }
+        return WASMInterface(wasmJson$8, 4).then((wasm) => {
+          wasm.init(seed);
+          const obj = {
+            init: () => {
+              wasm.init(seed);
+              return obj;
+            },
+            update: (data2) => {
+              wasm.update(data2);
+              return obj;
+            },
+            // biome-ignore lint/suspicious/noExplicitAny: Conflict with IHasher type
+            digest: (outputType) => wasm.digest(outputType),
+            save: () => wasm.save(),
+            load: (data2) => {
+              wasm.load(data2);
+              return obj;
+            },
+            blockSize: 16,
+            digestSize: 4
+          };
+          return obj;
+        });
+      }
+      var name$7 = "xxhash64";
+      var data$7 = "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";
+      var hash$7 = "177fbfa3";
+      var wasmJson$7 = {
+        name: name$7,
+        data: data$7,
+        hash: hash$7
+      };
+      const mutex$5 = new Mutex();
+      let wasmCache$5 = null;
+      const seedBuffer$2 = new Uint8Array(8);
+      function validateSeed$2(seed) {
+        if (!Number.isInteger(seed) || seed < 0 || seed > 4294967295) {
+          return new Error("Seed must be given as two valid 32-bit long unsigned integers (lo + high).");
+        }
+        return null;
+      }
+      function writeSeed$2(arr, low, high) {
+        const buffer = new DataView(arr);
+        buffer.setUint32(0, low, true);
+        buffer.setUint32(4, high, true);
+      }
+      function xxhash64(data2, seedLow = 0, seedHigh = 0) {
+        if (validateSeed$2(seedLow)) {
+          return Promise.reject(validateSeed$2(seedLow));
+        }
+        if (validateSeed$2(seedHigh)) {
+          return Promise.reject(validateSeed$2(seedHigh));
+        }
+        if (wasmCache$5 === null) {
+          return lockedCreate(mutex$5, wasmJson$7, 8).then((wasm) => {
+            wasmCache$5 = wasm;
+            writeSeed$2(seedBuffer$2.buffer, seedLow, seedHigh);
+            wasmCache$5.writeMemory(seedBuffer$2);
+            return wasmCache$5.calculate(data2);
+          });
+        }
+        try {
+          writeSeed$2(seedBuffer$2.buffer, seedLow, seedHigh);
+          wasmCache$5.writeMemory(seedBuffer$2);
+          const hash2 = wasmCache$5.calculate(data2);
+          return Promise.resolve(hash2);
+        } catch (err) {
+          return Promise.reject(err);
+        }
+      }
+      function createXXHash64(seedLow = 0, seedHigh = 0) {
+        if (validateSeed$2(seedLow)) {
+          return Promise.reject(validateSeed$2(seedLow));
+        }
+        if (validateSeed$2(seedHigh)) {
+          return Promise.reject(validateSeed$2(seedHigh));
+        }
+        return WASMInterface(wasmJson$7, 8).then((wasm) => {
+          const instanceBuffer = new Uint8Array(8);
+          writeSeed$2(instanceBuffer.buffer, seedLow, seedHigh);
+          wasm.writeMemory(instanceBuffer);
+          wasm.init();
+          const obj = {
+            init: () => {
+              wasm.writeMemory(instanceBuffer);
+              wasm.init();
+              return obj;
+            },
+            update: (data2) => {
+              wasm.update(data2);
+              return obj;
+            },
+            // biome-ignore lint/suspicious/noExplicitAny: Conflict with IHasher type
+            digest: (outputType) => wasm.digest(outputType),
+            save: () => wasm.save(),
+            load: (data2) => {
+              wasm.load(data2);
+              return obj;
+            },
+            blockSize: 32,
+            digestSize: 8
+          };
+          return obj;
+        });
+      }
+      var name$6 = "xxhash3";
+      var data$6 = "AGFzbQEAAAABNAhgAAF/YAR/f39/AGAHf39/f39/fwBgBH9+fn4BfmAEf39/fgF+YAN/f34BfmAAAGABfwADDg0AAQIDBAUFBQYHBgAGBQQBAQICBg4CfwFBwI4FC38AQcAJCwdwCAZtZW1vcnkCAA5IYXNoX0dldEJ1ZmZlcgAACUhhc2hfSW5pdAAIC0hhc2hfVXBkYXRlAAkKSGFzaF9GaW5hbAAKDUhhc2hfR2V0U3RhdGUACw5IYXNoX0NhbGN1bGF0ZQAMClNUQVRFX1NJWkUDAQr6QQ0FAEGACgvkAwMPfgF/AX4CQCADRQ0AIAApAzAhBCAAKQM4IQUgACkDICEGIAApAyghByAAKQMQIQggACkDGCEJIAApAwAhCiAAKQMIIQsDQCAFIAFBMGopAwAiDHwgAkE4aikDACABQThqKQMAIg2FIgVCIIggBUL/////D4N+fCEFIAcgAUEgaikDACIOfCACQShqKQMAIAFBKGopAwAiD4UiB0IgiCAHQv////8Pg358IQcgCSABQRBqKQMAIhB8IAJBGGopAwAgAUEYaikDACIRhSIJQiCIIAlC/////w+DfnwhCSALIAEpAwAiEnwgAkEIaiITKQMAIAFBCGopAwAiFIUiC0IgiCALQv////8Pg358IQsgAkEwaikDACAMhSIMQiCIIAxC/////w+DfiAEfCANfCEEIAJBIGopAwAgDoUiDEIgiCAMQv////8Pg34gBnwgD3whBiACQRBqKQMAIBCFIgxCIIggDEL/////D4N+IAh8IBF8IQggAikDACAShSIMQiCIIAxC/////w+DfiAKfCAUfCEKIAFBwABqIQEgEyECIANBf2oiAw0ACyAAIAk3AxggACAKNwMAIAAgCzcDCCAAIAc3AyggACAINwMQIAAgBTcDOCAAIAY3AyAgACAENwMwCwveAgIBfwF+AkAgBCACIAEoAgAiB2siAkkNACAAIAMgBSAHQQN0aiACEAEgACAFIAZqIgcpAwAgACkDACIIQi+IhSAIhUKx893xCX43AwAgACAHKQMIIAApAwgiCEIviIUgCIVCsfPd8Ql+NwMIIAAgBykDECAAKQMQIghCL4iFIAiFQrHz3fEJfjcDECAAIAcpAxggACkDGCIIQi+IhSAIhUKx893xCX43AxggACAHKQMgIAApAyAiCEIviIUgCIVCsfPd8Ql+NwMgIAAgBykDKCAAKQMoIghCL4iFIAiFQrHz3fEJfjcDKCAAIAcpAzAgACkDMCIIQi+IhSAIhUKx893xCX43AzAgACAHKQM4IAApAzgiCEIviIUgCIVCsfPd8Ql+NwM4IAAgAyACQQZ0aiAFIAQgAmsiBxABIAEgBzYCAA8LIAAgAyAFIAdBA3RqIAQQASABIAcgBGo2AgALhQEBAX8gAiABhSADpyIEQRh0IARBgP4DcUEIdHIgBEEIdkGA/gNxIARBGHZycq1CIIYgA4V9QQA1AoCMAUIghiAAQfyLAWo1AgCEhSIDQjGJIANCGImFIAOFQqW+4/TRjIfZn39+IgNCI4ggAK18IAOFQqW+4/TRjIfZn39+IgNCHIggA4ULZwAgAiABc60gA3wiA0IhiEEALQCAjAFBEHQgAEEIdHIgAEEBdkGAjAFqLQAAQRh0ciAAQf+LAWotAAByrYUgA4VCz9bTvtLHq9lCfiIDQh2IIAOFQvnz3fGZ9pmrFn4iA0IgiCADhQuJAwEEfgJAIABBCUkNAEEAKQOAjAEgASkDICABKQMYhSACfIUiA0I4hiADQoD+A4NCKIaEIANCgID8B4NCGIYgA0KAgID4D4NCCIaEhCADQgiIQoCAgPgPgyADQhiIQoCA/AeDhCADQiiIQoD+A4MgA0I4iISEhCAArXwgAEH4iwFqKQMAIAEpAzAgASkDKIUgAn2FIgJ8IAJC/////w+DIgQgA0IgiCIFfiIGQv////8PgyACQiCIIgIgA0L/////D4MiA358IAQgA34iA0IgiHwiBEIghiADQv////8Pg4QgBkIgiCACIAV+fCAEQiCIfIV8IgNCJYggA4VC+fPd8ZnymasWfiIDQiCIIAOFDwsCQCAAQQRJDQAgACABQQhqKQMAIAFBEGopAwAgAhADDwsCQCAARQ0AIAAgASgCACABQQRqKAIAIAIQBA8LIAEpAzggASkDQIUgAoUiA0IhiCADhULP1tO+0ser2UJ+IgNCHYggA4VC+fPd8Zn2masWfiIDQiCIIAOFC94IAQZ+IACtQoeVr6+Ytt6bnn9+IQMCQCAAQSFJDQACQCAAQcEASQ0AAkAgAEHhAEkNACABKQNoIAJ9QQApA7iMAYUiBEL/////D4MiBSABKQNgIAJ8QQApA7CMAYUiBkIgiCIHfiIIQv////8PgyAEQiCIIgQgBkL/////D4MiBn58IAUgBn4iBUIgiHwiBkIghiAFQv////8Pg4QgCEIgiCAEIAd+fCAGQiCIfIUgA3wgASkDeCACfSAAQciLAWopAwCFIgNC/////w+DIgQgASkDcCACfCAAQcCLAWopAwCFIgVCIIgiBn4iB0L/////D4MgA0IgiCIDIAVC/////w+DIgV+fCAEIAV+IgRCIIh8IgVCIIYgBEL/////D4OEIAdCIIggAyAGfnwgBUIgiHyFfCEDCyABKQNIIAJ9QQApA6iMAYUiBEL/////D4MiBSABKQNAIAJ8QQApA6CMAYUiBkIgiCIHfiIIQv////8PgyAEQiCIIgQgBkL/////D4MiBn58IAUgBn4iBUIgiHwiBkIghiAFQv////8Pg4QgCEIgiCAEIAd+fCAGQiCIfIUgA3wgASkDWCACfSAAQdiLAWopAwCFIgNC/////w+DIgQgASkDUCACfCAAQdCLAWopAwCFIgVCIIgiBn4iB0L/////D4MgA0IgiCIDIAVC/////w+DIgV+fCAEIAV+IgRCIIh8IgVCIIYgBEL/////D4OEIAdCIIggAyAGfnwgBUIgiHyFfCEDCyABKQMoIAJ9QQApA5iMAYUiBEL/////D4MiBSABKQMgIAJ8QQApA5CMAYUiBkIgiCIHfiIIQv////8PgyAEQiCIIgQgBkL/////D4MiBn58IAUgBn4iBUIgiHwiBkIghiAFQv////8Pg4QgCEIgiCAEIAd+fCAGQiCIfIUgA3wgASkDOCACfSAAQeiLAWopAwCFIgNC/////w+DIgQgASkDMCACfCAAQeCLAWopAwCFIgVCIIgiBn4iB0L/////D4MgA0IgiCIDIAVC/////w+DIgV+fCAEIAV+IgRCIIh8IgVCIIYgBEL/////D4OEIAdCIIggAyAGfnwgBUIgiHyFfCEDCyABKQMIIAJ9QQApA4iMAYUiBEL/////D4MiBSABKQMAIAJ8QQApA4CMAYUiBkIgiCIHfiIIQv////8PgyAEQiCIIgQgBkL/////D4MiBn58IAUgBn4iBUIgiHwiBkIghiAFQv////8Pg4QgCEIgiCAEIAd+fCAGQiCIfIUgA3wgASkDGCACfSAAQfiLAWopAwCFIgNC/////w+DIgQgASkDECACfCAAQfCLAWopAwCFIgJCIIgiBX4iBkL/////D4MgA0IgiCIDIAJC/////w+DIgJ+fCAEIAJ+IgJCIIh8IgRCIIYgAkL/////D4OEIAZCIIggAyAFfnwgBEIgiHyFfCICQiWIIAKFQvnz3fGZ8pmrFn4iAkIgiCAChQv8CgQBfwV+An8BfkEAIQMgASkDeCACfUEAKQP4jAGFIgRC/////w+DIgUgASkDcCACfEEAKQPwjAGFIgZCIIgiB34iCEL/////D4MgBEIgiCIEIAZC/////w+DIgZ+fCAFIAZ+IgVCIIh8IgZCIIYgBUL/////D4OEIAhCIIggBCAHfnwgBkIgiHyFIAEpA2ggAn1BACkD6IwBhSIEQv////8PgyIFIAEpA2AgAnxBACkD4IwBhSIGQiCIIgd+IghC/////w+DIARCIIgiBCAGQv////8PgyIGfnwgBSAGfiIFQiCIfCIGQiCGIAVC/////w+DhCAIQiCIIAQgB358IAZCIIh8hSABKQNYIAJ9QQApA9iMAYUiBEL/////D4MiBSABKQNQIAJ8QQApA9CMAYUiBkIgiCIHfiIIQv////8PgyAEQiCIIgQgBkL/////D4MiBn58IAUgBn4iBUIgiHwiBkIghiAFQv////8Pg4QgCEIgiCAEIAd+fCAGQiCIfIUgASkDSCACfUEAKQPIjAGFIgRC/////w+DIgUgASkDQCACfEEAKQPAjAGFIgZCIIgiB34iCEL/////D4MgBEIgiCIEIAZC/////w+DIgZ+fCAFIAZ+IgVCIIh8IgZCIIYgBUL/////D4OEIAhCIIggBCAHfnwgBkIgiHyFIAEpAzggAn1BACkDuIwBhSIEQv////8PgyIFIAEpAzAgAnxBACkDsIwBhSIGQiCIIgd+IghC/////w+DIARCIIgiBCAGQv////8PgyIGfnwgBSAGfiIFQiCIfCIGQiCGIAVC/////w+DhCAIQiCIIAQgB358IAZCIIh8hSABKQMoIAJ9QQApA6iMAYUiBEL/////D4MiBSABKQMgIAJ8QQApA6CMAYUiBkIgiCIHfiIIQv////8PgyAEQiCIIgQgBkL/////D4MiBn58IAUgBn4iBUIgiHwiBkIghiAFQv////8Pg4QgCEIgiCAEIAd+fCAGQiCIfIUgASkDGCACfUEAKQOYjAGFIgRC/////w+DIgUgASkDECACfEEAKQOQjAGFIgZCIIgiB34iCEL/////D4MgBEIgiCIEIAZC/////w+DIgZ+fCAFIAZ+IgVCIIh8IgZCIIYgBUL/////D4OEIAhCIIggBCAHfnwgBkIgiHyFIAEpAwggAn1BACkDiIwBhSIEQv////8PgyIFIAEpAwAgAnxBACkDgIwBhSIGQiCIIgd+IghC/////w+DIARCIIgiBCAGQv////8PgyIGfnwgBSAGfiIFQiCIfCIGQiCGIAVC/////w+DhCAIQiCIIAQgB358IAZCIIh8hSAArUKHla+vmLbem55/fnx8fHx8fHx8IgRCJYggBIVC+fPd8ZnymasWfiIEQiCIIASFIQQCQCAAQZABSA0AIABBBHZBeGohCQNAIAEgA2oiCkELaikDACACfSADQYiNAWopAwCFIgVC/////w+DIgYgCkEDaikDACACfCADQYCNAWopAwCFIgdCIIgiCH4iC0L/////D4MgBUIgiCIFIAdC/////w+DIgd+fCAGIAd+IgZCIIh8IgdCIIYgBkL/////D4OEIAtCIIggBSAIfnwgB0IgiHyFIAR8IQQgA0EQaiEDIAlBf2oiCQ0ACwsgASkDfyACfSAAQfiLAWopAwCFIgVC/////w+DIgYgASkDdyACfCAAQfCLAWopAwCFIgJCIIgiB34iCEL/////D4MgBUIgiCIFIAJC/////w+DIgJ+fCAGIAJ+IgJCIIh8IgZCIIYgAkL/////D4OEIAhCIIggBSAHfnwgBkIgiHyFIAR8IgJCJYggAoVC+fPd8ZnymasWfiICQiCIIAKFC98FAgF+AX8CQAJAQQApA4AKIgBQRQ0AQYAIIQFCACEADAELAkBBACkDoI4BIABSDQBBACEBDAELQQAhAUEAQq+v79e895Kg/gAgAH03A/iLAUEAIABCxZbr+djShYIofDcD8IsBQQBCj/Hjja2P9JhOIAB9NwPoiwFBACAAQqus+MXV79HQfHw3A+CLAUEAQtOt1LKShbW0nn8gAH03A9iLAUEAIABCl5r0jvWWvO3JAHw3A9CLAUEAQsWDgv2v/8SxayAAfTcDyIsBQQAgAELqi7OdyOb09UN8NwPAiwFBAELIv/rLnJveueQAIAB9NwO4iwFBACAAQoqjgd/Ume2sMXw3A7CLAUEAQvm57738+MKnHSAA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QQApA4CKATcDACACQQApA4iKATcDCCACQQApA5CKATcDECACQQApA5iKATcDGCACQQApA6CKATcDICACQQApA6iKATcDKCACQQApA7CKASIFNwMwIAJBACkDuIoBIgY3AzgCQAJAQQAoAoCOASIHQcAASQ0AIAJBACgCiI4BNgJAIAIgAkHAAGpBACgCmI4BQYCMASAHQX9qQQZ2IANBACgCnI4BIgAQAiADIABqIgBBeWopAwAhCCAAKQMJIQkgACkDGSEKIAApAykhCyAHQcCLAWopAwAhBSAAKQMBIQwgB0HIiwFqKQMAIQYgB0HQiwFqKQMAIQ0gACkDESEOIAdB2IsBaikDACEPIAdB4IsBaikDACEQIAApAyEhESAHQeiLAWopAwAhEiACKQMAIRMgAikDECEUIAIpAyAhFSACKQMwIRYgAikDCCEXIAIpAxghGCACKQMoIRkgAiACKQM4IAdB8IsBaikDACIafCAAKQMxIAdB+IsBaikDACIbhSIcQiCIIBxC/////w+Dfnw3AzggGSAQfCARIBKFIhFCIIggEUL/////D4N+fCERIBggDXwgDiAPhSIOQiCIIA5C/////w+DfnwhDiAXIAV8IAwgBoUiDEIgiCAMQv////8Pg358IQwgGyAWIAsgGoUiC0IgiCALQv////8Pg358fCELIBIgFSAKIBCFIhBCIIggEEL/////D4N+fHwhECAPIBQgCSANhSINQiCIIA1C/////w+Dfnx8IRIgBiATIAggBYUiBUIgiCAFQv////8Pg358fCEIDAELIAdBwI0BaiEdQcAAIAdrIR4gAkHAAGohAAJAAkACQCAHQThNDQAgHiEfDAELAkACQEE4IAdrQQN2QQFqQQdxIh8NACACQcAAaiEAIB4hHwwBCyACQcAAaiEAIB9BA3QiICEfA0AgACAdKQMANwMAIABBCGohACAdQQhqIR0gH0F4aiIfDQALQcAAIAcgIGprIR8LAkAgBw0AA0AgACAdKQMANwMAIABBCGogHUEIaikDADcDACAAQRBqIB1BEGopAwA3AwAgAEEYaiAdQRhqKQMANwMAIABBIGogHUEgaikDADcDACAAQShqIB1BKGopAwA3AwAgAEEwaiAdQTBqKQMANwMAIABBOGogHUE4aikDADcDACAAQcAAaiEAIB1BwABqIR0gH0FAaiIfQQdLDQALCyAfRQ0BCyAfQX9qISECQCAfQQdxIiBFDQAgH0F4cSEfA0AgACAdLQAAOgAAIABBAWohACAdQQFqIR0gIEF/aiIgDQALCyAhQQdJDQADQCAAIB0pAAA3AAAgAEEIaiEAIB1BCGohHSAfQXhqIh8NAAsLIAJBwABqIB5qIR1BgIwBIQACQAJAAkAgB0EISQ0AAkAgB0E4akEDdkEBakEHcSIfDQAMAgsgH0EDdCEgQYCMASEAA0AgHSAAKQMANwMAIB1BCGohHSAAQQhqIQAgH0F/aiIfDQALIAcgIGshBwsgB0UNAQJAAkAgB0EHcSIgDQAgByEfDAELIAdBeHEhHwNAIB0gAC0AADoAACAdQQFqIR0gAEEBaiEAICBBf2oiIA0ACwsgB0EISQ0BCwNAIB0gACkAADcAACAdQQhqIR0gAEEIaiEAIB9BeGoiHw0ACwsgA0EAKAKcjgFqIgBBeWopAwAhCiAAKQMJIRMgACkDGSEUIAApAykhCyAAKQMBIQwgACkDESEOIAApAyEhESACKQMAIRUgAikDECEWIAIpAyAhFyACKQMIIRggAikDQCENIAIpA0ghDyACKQMYIRkgAikDUCESIAIpA1ghCCACKQMoIRogAikDYCEQIAIpA2ghCSACIAYgAikDcCIbfCAAKQMxIAIpA3giBoUiHEIgiCAcQv////8Pg358NwM4IBogEHwgESAJhSIRQiCIIBFC/////w+DfnwhESAZIBJ8IA4gCIUiDkIgiCAOQv////8Pg358IQ4gGCANfCAMIA+FIgxCIIggDEL/////D4N+fCEMIAYgCyAbhSILQiCIIAtC/////w+DfiAFfHwhCyAJIBcgFCAQhSIFQiCIIAVC/////w+Dfnx8IRAgCCAWIBMgEoUiBUIgiCAFQv////8Pg358fCESIA8gFSAKIA2FIgVCIIggBUL/////D4N+fHwhCAsgAykDQyACKQM4hSIFQv////8PgyIGIAMpAzsgC4UiC0IgiCINfiIPQv////8PgyAFQiCIIgUgC0L/////D4MiC358IAYgC34iBkIgiHwiC0IghiAGQv////8Pg4QgD0IgiCAFIA1+fCALQiCIfIUgAykDMyARhSIFQv////8PgyIGIAMpAysgEIUiC0IgiCINfiIPQv////8PgyAFQiCIIgUgC0L/////D4MiC358IAYgC34iBkIgiHwiC0IghiAGQv////8Pg4QgD0IgiCAFIA1+fCALQiCIfIUgAykDIyAOhSIFQv////8PgyIGIAMpAxsgEoUiC0IgiCINfiIPQv////8PgyAFQiCIIgUgC0L/////D4MiC358IAYgC34iBkIgiHwiC0IghiAGQv////8Pg4QgD0IgiCAFIA1+fCALQiCIfIUgAykDEyAMhSIFQv////8PgyIGIAMpAwsgCIUiC0IgiCINfiIPQv////8PgyAFQiCIIgUgC0L/////D4MiC358IAYgC34iBkIgiHwiC0IghiAGQv////8Pg4QgD0IgiCAFIA1+fCALQiCIfIUgBEKHla+vmLbem55/fnx8fHwiBEIliCAEhUL5893xmfKZqxZ+IgRCIIggBIUhBAwBCyAEpyEAAkBBACkDoI4BIgRQDQACQCAAQRBLDQAgAEGACCAEEAUhBAwCCwJAIABBgAFLDQAgAEGACCAEEAYhBAwCCyAAQYAIIAQQByEEDAELAkAgAEEQSw0AIAAgA0IAEAUhBAwBCwJAIABBgAFLDQAgACADQgAQBiEEDAELIAAgA0IAEAchBAtBACAEQjiGIARCgP4Dg0IohoQgBEKAgPwHg0IYhiAEQoCAgPgPg0IIhoSEIARCCIhCgICA+A+DIARCGIhCgID8B4OEIARCKIhCgP4DgyAEQjiIhISENwOACiABJAALBgBBgIoBCwIACwvMAQEAQYAIC8QBuP5sOSOkS758AYEs9yGtHN7UbemDkJfbckCkpLezZx/LeeZOzMDleIJa0H3M/3IhuAhGdPdDJI7gNZDmgTomTDwoUruRwwDLiNBlixtTLqNxZEiXog35TjgZ70ap3qzYqPp2P+OcND/53LvHxwtPHYpR4EvNtFkxyJ9+ydl4c2TqxayDNNPrw8WBoP/6E2PrFw3dUbfw2knTFlUmKdRonisWvlh9R6H8j/i40XrQMc5FyzqPlRYEKK/X+8q7S0B+QAIAAA==";
+      var hash$6 = "5a2fbdbb";
+      var wasmJson$6 = {
+        name: name$6,
+        data: data$6,
+        hash: hash$6
+      };
+      const mutex$4 = new Mutex();
+      let wasmCache$4 = null;
+      const seedBuffer$1 = new Uint8Array(8);
+      function validateSeed$1(seed) {
+        if (!Number.isInteger(seed) || seed < 0 || seed > 4294967295) {
+          return new Error("Seed must be given as two valid 32-bit long unsigned integers (lo + high).");
+        }
+        return null;
+      }
+      function writeSeed$1(arr, low, high) {
+        const buffer = new DataView(arr);
+        buffer.setUint32(0, low, true);
+        buffer.setUint32(4, high, true);
+      }
+      function xxhash3(data2, seedLow = 0, seedHigh = 0) {
+        if (validateSeed$1(seedLow)) {
+          return Promise.reject(validateSeed$1(seedLow));
+        }
+        if (validateSeed$1(seedHigh)) {
+          return Promise.reject(validateSeed$1(seedHigh));
+        }
+        if (wasmCache$4 === null) {
+          return lockedCreate(mutex$4, wasmJson$6, 8).then((wasm) => {
+            wasmCache$4 = wasm;
+            writeSeed$1(seedBuffer$1.buffer, seedLow, seedHigh);
+            wasmCache$4.writeMemory(seedBuffer$1);
+            return wasmCache$4.calculate(data2);
+          });
+        }
+        try {
+          writeSeed$1(seedBuffer$1.buffer, seedLow, seedHigh);
+          wasmCache$4.writeMemory(seedBuffer$1);
+          const hash2 = wasmCache$4.calculate(data2);
+          return Promise.resolve(hash2);
+        } catch (err) {
+          return Promise.reject(err);
+        }
+      }
+      function createXXHash3(seedLow = 0, seedHigh = 0) {
+        if (validateSeed$1(seedLow)) {
+          return Promise.reject(validateSeed$1(seedLow));
+        }
+        if (validateSeed$1(seedHigh)) {
+          return Promise.reject(validateSeed$1(seedHigh));
+        }
+        return WASMInterface(wasmJson$6, 8).then((wasm) => {
+          const instanceBuffer = new Uint8Array(8);
+          writeSeed$1(instanceBuffer.buffer, seedLow, seedHigh);
+          wasm.writeMemory(instanceBuffer);
+          wasm.init();
+          const obj = {
+            init: () => {
+              wasm.writeMemory(instanceBuffer);
+              wasm.init();
+              return obj;
+            },
+            update: (data2) => {
+              wasm.update(data2);
+              return obj;
+            },
+            // biome-ignore lint/suspicious/noExplicitAny: Conflict with IHasher type
+            digest: (outputType) => wasm.digest(outputType),
+            save: () => wasm.save(),
+            load: (data2) => {
+              wasm.load(data2);
+              return obj;
+            },
+            blockSize: 512,
+            digestSize: 8
+          };
+          return obj;
+        });
+      }
+      var name$5 = "xxhash128";
+      var data$5 = "AGFzbQEAAAABKwdgAAF/YAR/f39/AGAHf39/f39/fwBgA39/fgF+YAR/f39+AGAAAGABfwADDQwAAQIDBAQEBQYFAAUFBAEBAgIGDgJ/AUHAjgULfwBBwAkLB3AIBm1lbW9yeQIADkhhc2hfR2V0QnVmZmVyAAAJSGFzaF9Jbml0AAcLSGFzaF9VcGRhdGUACApIYXNoX0ZpbmFsAAkNSGFzaF9HZXRTdGF0ZQAKDkhhc2hfQ2FsY3VsYXRlAAsKU1RBVEVfU0laRQMBCqBNDAUAQYAKC+QDAw9+AX8BfgJAIANFDQAgACkDMCEEIAApAzghBSAAKQMgIQYgACkDKCEHIAApAxAhCCAAKQMYIQkgACkDACEKIAApAwghCwNAIAUgAUEwaikDACIMfCACQThqKQMAIAFBOGopAwAiDYUiBUIgiCAFQv////8Pg358IQUgByABQSBqKQMAIg58IAJBKGopAwAgAUEoaikDACIPhSIHQiCIIAdC/////w+DfnwhByAJIAFBEGopAwAiEHwgAkEYaikDACABQRhqKQMAIhGFIglCIIggCUL/////D4N+fCEJIAsgASkDACISfCACQQhqIhMpAwAgAUEIaikDACIUhSILQiCIIAtC/////w+DfnwhCyACQTBqKQMAIAyFIgxCIIggDEL/////D4N+IAR8IA18IQQgAkEgaikDACAOhSIMQiCIIAxC/////w+DfiAGfCAPfCEGIAJBEGopAwAgEIUiDEIgiCAMQv////8Pg34gCHwgEXwhCCACKQMAIBKFIgxCIIggDEL/////D4N+IAp8IBR8IQogAUHAAGohASATIQIgA0F/aiIDDQALIAAgCTcDGCAAIAo3AwAgACALNwMIIAAgBzcDKCAAIAg3AxAgACAFNwM4IAAgBjcDICAAIAQ3AzALC94CAgF/AX4CQCAEIAIgASgCACIHayICSQ0AIAAgAyAFIAdBA3RqIAIQASAAIAUgBmoiBykDACAAKQMAIghCL4iFIAiFQrHz3fEJfjcDACAAIAcpAwggACkDCCIIQi+IhSAIhUKx893xCX43AwggACAHKQMQIAApAxAiCEIviIUgCIVCsfPd8Ql+NwMQIAAgBykDGCAAKQMYIghCL4iFIAiFQrHz3fEJfjcDGCAAIAcpAyAgACkDICIIQi+IhSAIhUKx893xCX43AyAgACAHKQMoIAApAygiCEIviIUgCIVCsfPd8Ql+NwMoIAAgBykDMCAAKQMwIghCL4iFIAiFQrHz3fEJfjcDMCAAIAcpAzggACkDOCIIQi+IhSAIhUKx893xCX43AzggACADIAJBBnRqIAUgBCACayIHEAEgASAHNgIADwsgACADIAUgB0EDdGogBBABIAEgByAEajYCAAvtAwEFfiABKQM4IAApAziFIgNC/////w+DIgQgASkDMCAAKQMwhSIFQiCIIgZ+IgdC/////w+DIANCIIgiAyAFQv////8PgyIFfnwgBCAFfiIEQiCIfCIFQiCGIARC/////w+DhCAHQiCIIAMgBn58IAVCIIh8hSABKQMoIAApAyiFIgNC/////w+DIgQgASkDICAAKQMghSIFQiCIIgZ+IgdC/////w+DIANCIIgiAyAFQv////8PgyIFfnwgBCAFfiIEQiCIfCIFQiCGIARC/////w+DhCAHQiCIIAMgBn58IAVCIIh8hSABKQMYIAApAxiFIgNC/////w+DIgQgASkDECAAKQMQhSIFQiCIIgZ+IgdC/////w+DIANCIIgiAyAFQv////8PgyIFfnwgBCAFfiIEQiCIfCIFQiCGIARC/////w+DhCAHQiCIIAMgBn58IAVCIIh8hSABKQMIIAApAwiFIgNC/////w+DIgQgASkDACAAKQMAhSIFQiCIIgZ+IgdC/////w+DIANCIIgiAyAFQv////8PgyIFfnwgBCAFfiIEQiCIfCIFQiCGIARC/////w+DhCAHQiCIIAMgBn58IAVCIIh8hSACfHx8fCICQiWIIAKFQvnz3fGZ8pmrFn4iAkIgiCAChQu6CAIFfgN/AkAgAUEJSQ0AIAAgAUH4iwFqKQMAIgQgAikDOCACKQMwhSADfIUiBUL/////D4NC95Svrwh+IAVCgICAgHCDfEEAKQOAjAEgAikDKCACKQMghSADfYUgBIUiA0IgiCIEQrHz3fEJfnwgBEKHla+vCH4iBEIgiHwgBEL/////D4MgA0L/////D4MiA0Kx893xCX58IANCh5Wvrwh+IgRCIIh8IgVCIIh8IgNCOIYgA0KA/gODQiiGhCADQoCA/AeDQhiGIANCgICA+A+DQgiGhIQgA0IIiEKAgID4D4MgA0IYiEKAgPwHg4QgA0IoiEKA/gODIANCOIiEhIQgBEL/////D4MgAUF/aq1CNoaEIAVCIIZ8hSIEQiCIIgVCz9bTvgJ+IgZC/////w+DIARC/////w+DIgRCvdzKlQx+fCAEQs/W074CfiIEQiCIfCIHQiCGIghCJYggCCAEQv////8Pg4SFQvnz3fGZ8pmrFn4iBEIgiCAEhTcDACAAIAVCvdzKlQx+IANCz9bTvtLHq9lCfnwgBkIgiHwgB0IgiHwiA0IliCADhUL5893xmfKZqxZ+IgNCIIggA4U3AwgPCwJAIAFBBEkNACAAIAIpAxggAikDEIUgA6ciAkEYdCACQYD+A3FBCHRyIAJBCHZBgP4DcSACQRh2cnKtQiCGIAOFfCABQfyLAWo1AgBCIIZBADUCgIwBhIUiA0IgiCIEIAFBAnRBh5Wvr3hqrSIFfiIGQiCIIARCsfPd8Ql+fCAGQv////8PgyADQv////8PgyIDQrHz3fEJfnwgAyAFfiIDQiCIfCIEQiCIfCAEQiCGIANC/////w+DhCIEQgGGfCIDQiWIIAOFQvnz3fGZ8pmrFn4iBUIgiCAFhTcDCCAAIANCA4ggBIUiA0IjiCADhUKlvuP00YyH2Z9/fiIDQhyIIAOFNwMADwsCQCABRQ0AIAAgAigCBCACKAIAc60gA3wiBEIhiEEALQCAjAFBEHQgAUEIdHIiCSABQQF2QYCMAWotAABBGHRyIgogAUH/iwFqLQAAIgFyIguthSAEhULP1tO+0ser2UJ+IgRCHYggBIVC+fPd8Zn2masWfiIEQiCIIASFNwMAIAAgAigCDCACKAIIc60gA30iA0IhiCABQRh0IAtBgP4DcUEIdHIgCUEIdkGA/gNxIApBGHZyckENd62FIAOFQs/W077Sx6vZQn4iA0IdiCADhUL5893xmfaZqxZ+IgNCIIggA4U3AwgPCyAAIAIpA1AgAikDWIUgA4UiBEIhiCAEhULP1tO+0ser2UJ+IgRCHYggBIVC+fPd8Zn2masWfiIEQiCIIASFNwMIIAAgAikDQCACKQNIhSADhSIDQiGIIAOFQs/W077Sx6vZQn4iA0IdiCADhUL5893xmfaZqxZ+IgNCIIggA4U3AwALwwoBCn4gAa0iBEKHla+vmLbem55/fiEFAkACQCABQSFPDQBCACEGDAELQgAhBwJAIAFBwQBJDQBCACEHAkAgAUHhAEkNACACQfgAaikDACADfSABQciLAWopAwAiCIUiB0L/////D4MiCSACKQNwIAN8IAFBwIsBaikDACIKhSILQiCIIgx+Ig1CIIggB0IgiCIHIAx+fCANQv////8PgyAHIAtC/////w+DIgt+fCAJIAt+IgdCIIh8IglCIIh8QQApA7iMASILQQApA7CMASIMfIUgCUIghiAHQv////8Pg4SFIQcgAkHoAGopAwAgA30gC4UiCUL/////D4MiCyACKQNgIAN8IAyFIgxCIIgiDX4iBkL/////D4MgCUIgiCIJIAxC/////w+DIgx+fCALIAx+IgtCIIh8IgxCIIYgC0L/////D4OEIAZCIIggCSANfnwgDEIgiHyFIAV8IAggCnyFIQULIAJB2ABqKQMAIAN9IAFB2IsBaikDACIIhSIJQv////8PgyIKIAIpA1AgA3wgAUHQiwFqKQMAIguFIgxCIIgiDX4iBkL/////D4MgCUIgiCIJIAxC/////w+DIgx+fCAKIAx+IgpCIIh8IgxCIIYgCkL/////D4OEIAZCIIggCSANfnwgDEIgiHyFIAd8QQApA6iMASIJQQApA6CMASIKfIUhByACQcgAaikDACADfSAJhSIJQv////8PgyIMIAIpA0AgA3wgCoUiCkIgiCINfiIGQv////8PgyAJQiCIIgkgCkL/////D4MiCn58IAwgCn4iCkIgiHwiDEIghiAKQv////8Pg4QgBkIgiCAJIA1+fCAMQiCIfIUgBXwgCCALfIUhBQsgAkE4aikDACADfSABQeiLAWopAwAiCIUiCUL/////D4MiCiACKQMwIAN8IAFB4IsBaikDACILhSIMQiCIIg1+IgZC/////w+DIAlCIIgiCSAMQv////8PgyIMfnwgCiAMfiIKQiCIfCIMQiCGIApC/////w+DhCAGQiCIIAkgDX58IAxCIIh8hSAHfEEAKQOYjAEiB0EAKQOQjAEiCXyFIQYgAkEoaikDACADfSAHhSIHQv////8PgyIKIAIpAyAgA3wgCYUiCUIgiCIMfiINQv////8PgyAHQiCIIgcgCUL/////D4MiCX58IAogCX4iCUIgiHwiCkIghiAJQv////8Pg4QgDUIgiCAHIAx+fCAKQiCIfIUgBXwgCCALfIUhBQsgACACQRhqKQMAIAN9IAFB+IsBaikDACIHhSIIQv////8PgyIJIAIpAxAgA3wgAUHwiwFqKQMAIgqFIgtCIIgiDH4iDUL/////D4MgCEIgiCIIIAtC/////w+DIgt+fCAJIAt+IglCIIh8IgtCIIYgCUL/////D4OEIA1CIIggCCAMfnwgC0IgiHyFIAZ8QQApA4iMASIIQQApA4CMASIJfIUiCyACQQhqKQMAIAN9IAiFIghC/////w+DIgwgAikDACADfCAJhSIJQiCIIg1+IgZC/////w+DIAhCIIgiCCAJQv////8PgyIJfnwgDCAJfiIJQiCIfCIMQiCGIAlC/////w+DhCAGQiCIIAggDX58IAxCIIh8hSAFfCAHIAp8hSIFfCIHQiWIIAeFQvnz3fGZ8pmrFn4iB0IgiCAHhTcDACAAQgAgBUKHla+vmLbem55/fiAEIAN9Qs/W077Sx6vZQn58IAtC49zKlfzO8vWFf358IgNCJYggA4VC+fPd8ZnymasWfiIDQiCIIAOFfTcDCAuhDwMBfxR+An9BACEEIAJB+ABqKQMAIAN9QQApA/iMASIFhSIGQv////8PgyIHIAIpA3AgA3xBACkD8IwBIgiFIglCIIgiCn4iC0L/////D4MgBkIgiCIGIAlC/////w+DIgl+fCAHIAl+IgdCIIh8IglCIIYgB0L/////D4OEIAtCIIggBiAKfnwgCUIgiHyFIAJB2ABqKQMAIAN9QQApA9iMASIHhSIGQv////8PgyIJIAIpA1AgA3xBACkD0IwBIgqFIgtCIIgiDH4iDUL/////D4MgBkIgiCIGIAtC/////w+DIgt+fCAJIAt+IglCIIh8IgtCIIYgCUL/////D4OEIA1CIIggBiAMfnwgC0IgiHyFIAJBOGopAwAgA31BACkDuIwBIgmFIgZC/////w+DIgsgAikDMCADfEEAKQOwjAEiDIUiDUIgiCIOfiIPQv////8PgyAGQiCIIgYgDUL/////D4MiDX58IAsgDX4iC0IgiHwiDUIghiALQv////8Pg4QgD0IgiCAGIA5+fCANQiCIfIUgAkEYaikDACADfUEAKQOYjAEiC4UiBkL/////D4MiDSACKQMQIAN8QQApA5CMASIOhSIPQiCIIhB+IhFC/////w+DIAZCIIgiBiAPQv////8PgyIPfnwgDSAPfiINQiCIfCIPQiCGIA1C/////w+DhCARQiCIIAYgEH58IA9CIIh8hUEAKQOIjAEiDUEAKQOAjAEiD3yFfEEAKQOojAEiEEEAKQOgjAEiEXyFfEEAKQPIjAEiEkEAKQPAjAEiE3yFfEEAKQPojAEiFEEAKQPgjAEiFXyFIgZCJYggBoVC+fPd8ZnymasWfiIGQiCIIAaFIQYgAkHoAGopAwAgA30gFIUiFEL/////D4MiFiACKQNgIAN8IBWFIhVCIIgiF34iGEL/////D4MgFEIgiCIUIBVC/////w+DIhV+fCAWIBV+IhVCIIh8IhZCIIYgFUL/////D4OEIBhCIIggFCAXfnwgFkIgiHyFIAJByABqKQMAIAN9IBKFIhJC/////w+DIhQgAikDQCADfCAThSITQiCIIhV+IhZC/////w+DIBJCIIgiEiATQv////8PgyITfnwgFCATfiITQiCIfCIUQiCGIBNC/////w+DhCAWQiCIIBIgFX58IBRCIIh8hSACQShqKQMAIAN9IBCFIhBC/////w+DIhIgAikDICADfCARhSIRQiCIIhN+IhRC/////w+DIBBCIIgiECARQv////8PgyIRfnwgEiARfiIRQiCIfCISQiCGIBFC/////w+DhCAUQiCIIBAgE358IBJCIIh8hSACQQhqKQMAIAN9IA2FIg1C/////w+DIhAgAikDACADfCAPhSIPQiCIIhF+IhJC/////w+DIA1CIIgiDSAPQv////8PgyIPfnwgECAPfiIPQiCIfCIQQiCGIA9C/////w+DhCASQiCIIA0gEX58IBBCIIh8hSABrSIPQoeVr6+Ytt6bnn9+fCALIA58hXwgCSAMfIV8IAcgCnyFfCAFIAh8hSIFQiWIIAWFQvnz3fGZ8pmrFn4iBUIgiCAFhSEFAkAgAUGgAUgNACABQQV2QXxqIRkDQCACIARqIhpBG2opAwAgA30gBEGYjQFqKQMAIgeFIghC/////w+DIgkgGkETaikDACADfCAEQZCNAWopAwAiCoUiC0IgiCIMfiINQv////8PgyAIQiCIIgggC0L/////D4MiC358IAkgC34iCUIgiHwiC0IghiAJQv////8Pg4QgDUIgiCAIIAx+fCALQiCIfIUgBnwgBEGIjQFqKQMAIgggBEGAjQFqKQMAIgl8hSEGIBpBC2opAwAgA30gCIUiCEL/////D4MiCyAaQQNqKQMAIAN8IAmFIglCIIgiDH4iDUL/////D4MgCEIgiCIIIAlC/////w+DIgl+fCALIAl+IglCIIh8IgtCIIYgCUL/////D4OEIA1CIIggCCAMfnwgC0IgiHyFIAV8IAcgCnyFIQUgBEEgaiEEIBlBf2oiGQ0ACwsgACACQf8AaikDACADfCABQeiLAWopAwAiB4UiCEL/////D4MiCSACKQN3IAN9IAFB4IsBaikDACIKhSILQiCIIgx+Ig1C/////w+DIAhCIIgiCCALQv////8PgyILfnwgCSALfiIJQiCIfCILQiCGIAlC/////w+DhCANQiCIIAggDH58IAtCIIh8hSAGfCABQfiLAWopAwAiBiABQfCLAWopAwAiCHyFIgkgAkHvAGopAwAgA3wgBoUiBkL/////D4MiCyACKQNnIAN9IAiFIghCIIgiDH4iDUL/////D4MgBkIgiCIGIAhC/////w+DIgh+fCALIAh+IghCIIh8IgtCIIYgCEL/////D4OEIA1CIIggBiAMfnwgC0IgiHyFIAV8IAcgCnyFIgZ8IgVCJYggBYVC+fPd8ZnymasWfiIFQiCIIAWFNwMAIABCACAGQoeVr6+Ytt6bnn9+IA8gA31Cz9bTvtLHq9lCfnwgCULj3MqV/M7y9YV/fnwiA0IliCADhUL5893xmfKZqxZ+IgNCIIggA4V9NwMIC98FAgF+AX8CQAJAQQApA4AKIgBQRQ0AQYAIIQFCACEADAELAkBBACkDoI4BIABSDQBBACEBDAELQQAhAUEAQq+v79e895Kg/gAgAH03A/iLAUEAIABCxZbr+djShYIofDcD8IsBQQBCj/Hjja2P9JhOIAB9NwPoiwFBACAAQqus+MXV79HQfHw3A+CLAUEAQtOt1LKShbW0nn8gAH03A9iLAUEAIABCl5r0jvWWvO3JAHw3A9CLAUEAQsWDgv2v/8SxayAAfTcDyIsBQQAgAELqi7OdyOb09UN8NwPAiwFBAELIv/rLnJveueQAIAB9NwO4iwFBACAAQoqjgd/Ume2sMXw3A7CLAUEAQvm57738+MKnHSAAfTcDqIsBQQAgAEKo9dv7s5ynmj98NwOgiwFBAEK4sry3lNW31lggAH03A5iLAUEAIABC8cihuqm0w/zOAHw3A5CLAUEAQoihl9u445SXo38gAH03A4iL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AkHAAGogDGohC0GAjAEhAAJAAkACQCAHQQhJDQACQCAHQThqQQN2QQFqQQdxIg0NAAwCCyANQQN0IQ5BgIwBIQADQCALIAApAwA3AwAgC0EIaiELIABBCGohACANQX9qIg0NAAsgByAOayEHCyAHRQ0BAkACQCAHQQdxIg4NACAHIQ0MAQsgB0F4cSENA0AgCyAALQAAOgAAIAtBAWohCyAAQQFqIQAgDkF/aiIODQALCyAHQQhJDQELA0AgCyAAKQAANwAAIAtBCGohCyAAQQhqIQAgDUF4aiINDQALCyACIAIpAwggAikDQCIIfCADQQAoApyOAWoiACkDASACKQNIIgmFIgpCIIggCkL/////D4N+fDcDCCACIAIpAxggAikDUCIKfCAAKQMRIAIpA1giEIUiEUIgiCARQv////8Pg358NwMYIAIgECAKIAApAwmFIgpCIIggCkL/////D4N+IAIpAxB8fDcDECACIAkgCCAAQXlqKQMAhSIIQiCIIAhC/////w+DfiACKQMAfHw3AwAgACkDGSEIIAIpAyAhCSACIAIpAyggAikDYCIKfCAAKQMhIAIpA2giEIUiEUIgiCARQv////8Pg358NwMoIAIgECAJIAggCoUiCEIgiCAIQv////8Pg358fDcDICACIAYgAikDcCIIfCAAKQMxIAIpA3giBoUiCUIgiCAJQv////8Pg358NwM4IAIgBiAIIAApAymFIghCIIggCEL/////D4N+IAV8fDcDMAsgAiACIANBC2ogBEKHla+vmLbem55/fhADNwNAIAIgAiADQQAoApyOAWpBdWogBELP1tO+0ser2UJ+Qn+FEAM3A0gMAQsgBKchAAJAQQApA6COASIEUA0AAkAgAEEQSw0AIAJBwABqIABBgAggBBAEDAILAkAgAEGAAUsNACACQcAAaiAAQYAIIAQQBQwCCyACQcAAaiAAQYAIIAQQBgwBCwJAIABBEEsNACACQcAAaiAAIANCABAEDAELAkAgAEGAAUsNACACQcAAaiAAIANCABAFDAELIAJBwABqIAAgA0IAEAYLQQAgAikDcDcDuApBACACKQNgNwOoCkEAIAIpA1A3A5gKQQAgAkH4AGopAwA3A8AKQQAgAkHoAGopAwA3A7AKQQAgAkHYAGopAwA3A6AKQQAgAikDSCIEQjiGIARCgP4Dg0IohoQgBEKAgPwHg0IYhiAEQoCAgPgPg0IIhoSEIARCCIhCgICA+A+DIARCGIhCgID8B4OEIARCKIhCgP4DgyAEQjiIhISEIgQ3A4AKQQAgBDcDkApBACACKQNAIgRCOIYgBEKA/gODQiiGhCAEQoCA/AeDQhiGIARCgICA+A+DQgiGhIQgBEIIiEKAgID4D4MgBEIYiEKAgPwHg4QgBEIoiEKA/gODIARCOIiEhIQ3A4gKIAEkAAsGAEGAigELAgALC8wBAQBBgAgLxAG4/mw5I6RLvnwBgSz3Ia0c3tRt6YOQl9tyQKSkt7NnH8t55k7MwOV4glrQfcz/ciG4CEZ090MkjuA1kOaBOiZMPChSu5HDAMuI0GWLG1Muo3FkSJeiDflOOBnvRqnerNio+nY/45w0P/ncu8fHC08dilHgS820WTHIn37J2XhzZOrFrIM00+vDxYGg//oTY+sXDd1Rt/DaSdMWVSYp1GieKxa+WH1HofyP+LjRetAxzkXLOo+VFgQor9f7yrtLQH5AAgAA";
+      var hash$5 = "b9ab74e2";
+      var wasmJson$5 = {
+        name: name$5,
+        data: data$5,
+        hash: hash$5
+      };
+      const mutex$3 = new Mutex();
+      let wasmCache$3 = null;
+      const seedBuffer = new Uint8Array(8);
+      function validateSeed(seed) {
+        if (!Number.isInteger(seed) || seed < 0 || seed > 4294967295) {
+          return new Error("Seed must be given as two valid 32-bit long unsigned integers (lo + high).");
+        }
+        return null;
+      }
+      function writeSeed(arr, low, high) {
+        const buffer = new DataView(arr);
+        buffer.setUint32(0, low, true);
+        buffer.setUint32(4, high, true);
+      }
+      function xxhash128(data2, seedLow = 0, seedHigh = 0) {
+        if (validateSeed(seedLow)) {
+          return Promise.reject(validateSeed(seedLow));
+        }
+        if (validateSeed(seedHigh)) {
+          return Promise.reject(validateSeed(seedHigh));
+        }
+        if (wasmCache$3 === null) {
+          return lockedCreate(mutex$3, wasmJson$5, 16).then((wasm) => {
+            wasmCache$3 = wasm;
+            writeSeed(seedBuffer.buffer, seedLow, seedHigh);
+            wasmCache$3.writeMemory(seedBuffer);
+            return wasmCache$3.calculate(data2);
+          });
+        }
+        try {
+          writeSeed(seedBuffer.buffer, seedLow, seedHigh);
+          wasmCache$3.writeMemory(seedBuffer);
+          const hash2 = wasmCache$3.calculate(data2);
+          return Promise.resolve(hash2);
+        } catch (err) {
+          return Promise.reject(err);
+        }
+      }
+      function createXXHash128(seedLow = 0, seedHigh = 0) {
+        if (validateSeed(seedLow)) {
+          return Promise.reject(validateSeed(seedLow));
+        }
+        if (validateSeed(seedHigh)) {
+          return Promise.reject(validateSeed(seedHigh));
+        }
+        return WASMInterface(wasmJson$5, 16).then((wasm) => {
+          const instanceBuffer = new Uint8Array(8);
+          writeSeed(instanceBuffer.buffer, seedLow, seedHigh);
+          wasm.writeMemory(instanceBuffer);
+          wasm.init();
+          const obj = {
+            init: () => {
+              wasm.writeMemory(instanceBuffer);
+              wasm.init();
+              return obj;
+            },
+            update: (data2) => {
+              wasm.update(data2);
+              return obj;
+            },
+            // biome-ignore lint/suspicious/noExplicitAny: Conflict with IHasher type
+            digest: (outputType) => wasm.digest(outputType),
+            save: () => wasm.save(),
+            load: (data2) => {
+              wasm.load(data2);
+              return obj;
+            },
+            blockSize: 512,
+            digestSize: 16
+          };
+          return obj;
+        });
+      }
+      var name$4 = "ripemd160";
+      var data$4 = "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";
+      var hash$4 = "6abbce74";
+      var wasmJson$4 = {
+        name: name$4,
+        data: data$4,
+        hash: hash$4
+      };
+      const mutex$2 = new Mutex();
+      let wasmCache$2 = null;
+      function ripemd160(data2) {
+        if (wasmCache$2 === null) {
+          return lockedCreate(mutex$2, wasmJson$4, 20).then((wasm) => {
+            wasmCache$2 = wasm;
+            return wasmCache$2.calculate(data2);
+          });
+        }
+        try {
+          const hash2 = wasmCache$2.calculate(data2);
+          return Promise.resolve(hash2);
+        } catch (err) {
+          return Promise.reject(err);
+        }
+      }
+      function createRIPEMD160() {
+        return WASMInterface(wasmJson$4, 20).then((wasm) => {
+          wasm.init();
+          const obj = {
+            init: () => {
+              wasm.init();
+              return obj;
+            },
+            update: (data2) => {
+              wasm.update(data2);
+              return obj;
+            },
+            // biome-ignore lint/suspicious/noExplicitAny: Conflict with IHasher type
+            digest: (outputType) => wasm.digest(outputType),
+            save: () => wasm.save(),
+            load: (data2) => {
+              wasm.load(data2);
+              return obj;
+            },
+            blockSize: 64,
+            digestSize: 20
+          };
+          return obj;
+        });
+      }
+      function calculateKeyBuffer(hasher, key) {
+        const { blockSize } = hasher;
+        const buf = getUInt8Buffer(key);
+        if (buf.length > blockSize) {
+          hasher.update(buf);
+          const uintArr = hasher.digest("binary");
+          hasher.init();
+          return uintArr;
+        }
+        return new Uint8Array(buf.buffer, buf.byteOffset, buf.length);
+      }
+      function calculateHmac(hasher, key) {
+        hasher.init();
+        const { blockSize } = hasher;
+        const keyBuf = calculateKeyBuffer(hasher, key);
+        const keyBuffer = new Uint8Array(blockSize);
+        keyBuffer.set(keyBuf);
+        const opad = new Uint8Array(blockSize);
+        for (let i = 0; i < blockSize; i++) {
+          const v = keyBuffer[i];
+          opad[i] = v ^ 92;
+          keyBuffer[i] = v ^ 54;
+        }
+        hasher.update(keyBuffer);
+        const obj = {
+          init: () => {
+            hasher.init();
+            hasher.update(keyBuffer);
+            return obj;
+          },
+          update: (data2) => {
+            hasher.update(data2);
+            return obj;
+          },
+          digest: ((outputType) => {
+            const uintArr = hasher.digest("binary");
+            hasher.init();
+            hasher.update(opad);
+            hasher.update(uintArr);
+            return hasher.digest(outputType);
+          }),
+          save: () => {
+            throw new Error("save() not supported");
+          },
+          load: () => {
+            throw new Error("load() not supported");
+          },
+          blockSize: hasher.blockSize,
+          digestSize: hasher.digestSize
+        };
+        return obj;
+      }
+      function createHMAC(hash2, key) {
+        if (!hash2 || !hash2.then) {
+          throw new Error('Invalid hash function is provided! Usage: createHMAC(createMD5(), "key").');
+        }
+        return hash2.then((hasher) => calculateHmac(hasher, key));
+      }
+      function calculatePBKDF2(digest, salt, iterations, hashLength, outputType) {
+        return __awaiter(this, void 0, void 0, function* () {
+          const DK = new Uint8Array(hashLength);
+          const block1 = new Uint8Array(salt.length + 4);
+          const block1View = new DataView(block1.buffer);
+          const saltBuffer = getUInt8Buffer(salt);
+          const saltUIntBuffer = new Uint8Array(saltBuffer.buffer, saltBuffer.byteOffset, saltBuffer.length);
+          block1.set(saltUIntBuffer);
+          let destPos = 0;
+          const hLen = digest.digestSize;
+          const l = Math.ceil(hashLength / hLen);
+          let T = null;
+          let U = null;
+          for (let i = 1; i <= l; i++) {
+            block1View.setUint32(salt.length, i);
+            digest.init();
+            digest.update(block1);
+            T = digest.digest("binary");
+            U = T.slice();
+            for (let j = 1; j < iterations; j++) {
+              digest.init();
+              digest.update(U);
+              U = digest.digest("binary");
+              for (let k = 0; k < hLen; k++) {
+                T[k] ^= U[k];
+              }
+            }
+            DK.set(T.subarray(0, hashLength - destPos), destPos);
+            destPos += hLen;
+          }
+          if (outputType === "binary") {
+            return DK;
+          }
+          const digestChars = new Uint8Array(hashLength * 2);
+          return getDigestHex(digestChars, DK, hashLength);
+        });
+      }
+      const validateOptions$2 = (options) => {
+        if (!options || typeof options !== "object") {
+          throw new Error("Invalid options parameter. It requires an object.");
+        }
+        if (!options.hashFunction || !options.hashFunction.then) {
+          throw new Error('Invalid hash function is provided! Usage: pbkdf2("password", "salt", 1000, 32, createSHA1()).');
+        }
+        if (!Number.isInteger(options.iterations) || options.iterations < 1) {
+          throw new Error("Iterations should be a positive number");
+        }
+        if (!Number.isInteger(options.hashLength) || options.hashLength < 1) {
+          throw new Error("Hash length should be a positive number");
+        }
+        if (options.outputType === void 0) {
+          options.outputType = "hex";
+        }
+        if (!["hex", "binary"].includes(options.outputType)) {
+          throw new Error(`Insupported output type ${options.outputType}. Valid values: ['hex', 'binary']`);
+        }
+      };
+      function pbkdf2(options) {
+        return __awaiter(this, void 0, void 0, function* () {
+          validateOptions$2(options);
+          const hmac = yield createHMAC(options.hashFunction, options.password);
+          return calculatePBKDF2(hmac, options.salt, options.iterations, options.hashLength, options.outputType);
+        });
+      }
+      var name$3 = "scrypt";
+      var data$3 = "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cyICajYCOCAAIAAoAjwgAiAKakESdyAGc2o2AjwLvxIDFX8Bfg5/AkAgAkUNACAAQQd0IgNBQGoiBEEAKAKACCIFIAMgAmwiBmogAyABbGoiByADaiIIaiEJIAAgAkEHdCIKIAFBB3RqIgtsIQwgACALQYABamwhDSAAQQV0IgtBASALQQFLGyILQWBxIQ4gC0EBcSEPIAdBeGohECAHQXBqIREgB0FoaiESIAdBYGohEyAHQVhqIRQgB0FQaiEVIAdBSGohFiAHQUBqIRcgAa1Cf3whGCAEIAdqIRkgByAAQQh0IhpqIRsgACAKQYABamwhHCALQQRJIR1BACEeQQAhHwNAQQAoAoAIIiAgAyAfbGohIQJAIABFDQBBACEiAkAgHQ0AICAgHmohI0EAIQtBACEiA0AgByALaiIEICMgC2oiJCgCADYCACAEQQRqICRBBGooAgA2AgAgBEEIaiAkQQhqKAIANgIAIARBDGogJEEMaigCADYCACALQRBqIQsgDiAiQQRqIiJHDQALCyAPRQ0AIAcgIkECdCILaiAhIAtqKAIANgIACwJAIAFFDQBBACElIBwhIyAGISYDQCAFISQgACEiAkACQCAADQAgGyAXKQMANwMAIBsgFikDADcDCCAbIBUpAwA3AxAgGyAUKQMANwMYIBsgEykDADcDICAbIBIpAwA3AyggGyARKQMANwMwIBsgECkDADcDOAwBCwNAICQgJmoiCyAkIAxqIgQpAwA3AwAgC0EIaiAEQQhqKQMANwMAIAtBEGogBEEQaikDADcDACALQRhqIARBGGopAwA3AwAgC0EgaiAEQSBqKQMANwMAIAtBKGogBEEoaikDADcDACALQTBqIARBMGopAwA3AwAgC0E4aiAEQThqKQMANwMAIAtBwABqIARBwABqKQMANwMAIAtByABqIARByABqKQMANwMAIAtB0ABqIARB0ABqKQMANwMAIAtB2ABqIARB2ABqKQMANwMAIAtB4ABqIARB4ABqKQMANwMAIAtB6ABqIARB6ABqKQMANwMAIAtB8ABqIARB8ABqKQMANwMAIAtB+ABqIARB+ABqKQMANwMAICRBgAFqISQgIkF/aiIiDQALIAcgCCAbIAAQAiAFISQgACEiA0AgJCAjaiILICQgDWoiBCkDADcDACALQQhqIARBCGopAwA3AwAgC0EQaiAEQRBqKQMANwMAIAtBGGogBEEYaikDADcDACALQSBqIARBIGopAwA3AwAgC0EoaiAEQShqKQMANwMAIAtBMGogBEEwaikDADcDACALQThqIARBOGopAwA3AwAgC0HAAGogBEHAAGopAwA3AwAgC0HIAGogBEHIAGopAwA3AwAgC0HQAGogBEHQAGopAwA3AwAgC0HYAGogBEHYAGopAwA3AwAgC0HgAGogBEHgAGopAwA3AwAgC0HoAGogBEHoAGopAwA3AwAgC0HwAGogBEHwAGopAwA3AwAgC0H4AGogBEH4AGopAwA3AwAgJEGAAWohJCAiQX9qIiINAAsLIAggByAbIAAQAiAjIBpqISMgJiAaaiEmICVBAmoiJSABSQ0AC0EAISUDQAJAAkAgAA0AIBsgFykDADcDACAbIBYpAwA3AwggGyAVKQMANwMQIBsgFCkDADcDGCAbIBMpAwA3AyAgGyASKQMANwMoIBsgESkDADcDMCAbIBApAwA3AzgMAQsgACAKIBkpAgAgGIOnQQd0amwhJiAFISQgACEiA0AgJCAMaiILIAspAwAgJCAmaiIEKQMAhTcDACALQQhqIiMgIykDACAEQQhqKQMAhTcDACALQRBqIiMgIykDACAEQRBqKQMAhTcDACALQRhqIiMgIykDACAEQRhqKQMAhTcDACALQSBqIiMgIykDACAEQSBqKQMAhTcDACALQShqIiMgIykDACAEQShqKQMAhTcDACALQTBqIiMgIykDACAEQTBqKQMAhTcDACALQThqIiMgIykDACAEQThqKQMAhTcDACALQcAAaiIjICMpAwAgBEHAAGopAwCFNwMAIAtByABqIiMgIykDACAEQcgAaikDAIU3AwAgC0HQAGoiIyAjKQMAIARB0ABqKQMAhTcDACALQdgAaiIjICMpAwAgBEHYAGopAwCFNwMAIAtB4ABqIiMgIykDACAEQeAAaikDAIU3AwAgC0HoAGoiIyAjKQMAIARB6ABqKQMAhTcDACALQfAAaiIjICMpAwAgBEHwAGopAwCFNwMAIAtB+ABqIgsgCykDACAEQfgAaikDAIU3AwAgJEGAAWohJCAiQX9qIiINAAsgByAIIBsgABACIAAgCiAJKQIAIBiDp0EHdGpsISYgBSEkIAAhIgNAICQgDWoiCyALKQMAICQgJmoiBCkDAIU3AwAgC0EIaiIjICMpAwAgBEEIaikDAIU3AwAgC0EQaiIjICMpAwAgBEEQaikDAIU3AwAgC0EYaiIjICMpAwAgBEEYaikDAIU3AwAgC0EgaiIjICMpAwAgBEEgaikDAIU3AwAgC0EoaiIjICMpAwAgBEEoaikDAIU3AwAgC0EwaiIjICMpAwAgBEEwaikDAIU3AwAgC0E4aiIjICMpAwAgBEE4aikDAIU3AwAgC0HAAGoiIyAjKQMAIARBwABqKQMAhTcDACALQcgAaiIjICMpAwAgBEHIAGopAwCFNwMAIAtB0ABqIiMgIykDACAEQdAAaikDAIU3AwAgC0HYAGoiIyAjKQMAIARB2ABqKQMAhTcDACALQeAAaiIjICMpAwAgBEHgAGopAwCFNwMAIAtB6ABqIiMgIykDACAEQegAaikDAIU3AwAgC0HwAGoiIyAjKQMAIARB8ABqKQMAhTcDACALQfgAaiILIAspAwAgBEH4AGopAwCFNwMAICRBgAFqISQgIkF/aiIiDQALCyAIIAcgGyAAEAIgJUECaiIlIAFJDQALCwJAIABFDQBBACEiAkAgHQ0AICAgHmohI0EAIQtBACEiA0AgIyALaiIEIAcgC2oiJCgCADYCACAEQQRqICRBBGooAgA2AgAgBEEIaiAkQQhqKAIANgIAIARBDGogJEEMaigCADYCACALQRBqIQsgDiAiQQRqIiJHDQALCyAPRQ0AICEgIkECdCILaiAHIAtqKAIANgIACyAeIANqIR4gH0EBaiIfIAJHDQALCws=";
+      var hash$3 = "b32721f8";
+      var wasmJson$3 = {
+        name: name$3,
+        data: data$3,
+        hash: hash$3
+      };
+      function scryptInternal(options) {
+        return __awaiter(this, void 0, void 0, function* () {
+          const { costFactor, blockSize, parallelism, hashLength } = options;
+          const SHA256Hasher = createSHA256();
+          const blockData = yield pbkdf2({
+            password: options.password,
+            salt: options.salt,
+            iterations: 1,
+            hashLength: 128 * blockSize * parallelism,
+            hashFunction: SHA256Hasher,
+            outputType: "binary"
+          });
+          const scryptInterface = yield WASMInterface(wasmJson$3, 0);
+          const VSize = 128 * blockSize * costFactor;
+          const XYSize = 256 * blockSize;
+          scryptInterface.setMemorySize(blockData.length + VSize + XYSize);
+          scryptInterface.writeMemory(blockData, 0);
+          scryptInterface.getExports().scrypt(blockSize, costFactor, parallelism);
+          const expensiveSalt = scryptInterface.getMemory().subarray(0, 128 * blockSize * parallelism);
+          const outputData = yield pbkdf2({
+            password: options.password,
+            salt: expensiveSalt,
+            iterations: 1,
+            hashLength,
+            hashFunction: SHA256Hasher,
+            outputType: "binary"
+          });
+          if (options.outputType === "hex") {
+            const digestChars = new Uint8Array(hashLength * 2);
+            return getDigestHex(digestChars, outputData, hashLength);
+          }
+          return outputData;
+        });
+      }
+      const isPowerOfTwo = (v) => v && !(v & v - 1);
+      const validateOptions$1 = (options) => {
+        if (!options || typeof options !== "object") {
+          throw new Error("Invalid options parameter. It requires an object.");
+        }
+        if (!Number.isInteger(options.blockSize) || options.blockSize < 1) {
+          throw new Error("Block size should be a positive number");
+        }
+        if (!Number.isInteger(options.costFactor) || options.costFactor < 2 || !isPowerOfTwo(options.costFactor)) {
+          throw new Error("Cost factor should be a power of 2, greater than 1");
+        }
+        if (!Number.isInteger(options.parallelism) || options.parallelism < 1) {
+          throw new Error("Parallelism should be a positive number");
+        }
+        if (!Number.isInteger(options.hashLength) || options.hashLength < 1) {
+          throw new Error("Hash length should be a positive number.");
+        }
+        if (options.outputType === void 0) {
+          options.outputType = "hex";
+        }
+        if (!["hex", "binary"].includes(options.outputType)) {
+          throw new Error(`Insupported output type ${options.outputType}. Valid values: ['hex', 'binary']`);
+        }
+      };
+      function scrypt(options) {
+        return __awaiter(this, void 0, void 0, function* () {
+          validateOptions$1(options);
+          return scryptInternal(options);
+        });
+      }
+      var name$2 = "bcrypt";
+      var data$2 = "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";
+      var hash$2 = "8bd8822d";
+      var wasmJson$2 = {
+        name: name$2,
+        data: data$2,
+        hash: hash$2
+      };
+      function bcryptInternal(options) {
+        return __awaiter(this, void 0, void 0, function* () {
+          const { costFactor, password, salt } = options;
+          const bcryptInterface = yield WASMInterface(wasmJson$2, 0);
+          bcryptInterface.writeMemory(getUInt8Buffer(salt), 0);
+          const passwordBuffer = getUInt8Buffer(password);
+          bcryptInterface.writeMemory(passwordBuffer, 16);
+          const shouldEncode = options.outputType === "encoded" ? 1 : 0;
+          bcryptInterface.getExports().bcrypt(passwordBuffer.length, costFactor, shouldEncode);
+          const memory = bcryptInterface.getMemory();
+          if (options.outputType === "encoded") {
+            return intArrayToString(memory, 60);
+          }
+          if (options.outputType === "hex") {
+            const digestChars = new Uint8Array(24 * 2);
+            return getDigestHex(digestChars, memory, 24);
+          }
+          return memory.slice(0, 24);
+        });
+      }
+      const validateOptions = (options) => {
+        if (!options || typeof options !== "object") {
+          throw new Error("Invalid options parameter. It requires an object.");
+        }
+        if (!Number.isInteger(options.costFactor) || options.costFactor < 4 || options.costFactor > 31) {
+          throw new Error("Cost factor should be a number between 4 and 31");
+        }
+        options.password = getUInt8Buffer(options.password);
+        if (options.password.length < 1) {
+          throw new Error("Password should be at least 1 byte long");
+        }
+        if (options.password.length > 72) {
+          throw new Error("Password should be at most 72 bytes long");
+        }
+        options.salt = getUInt8Buffer(options.salt);
+        if (options.salt.length !== 16) {
+          throw new Error("Salt should be 16 bytes long");
+        }
+        if (options.outputType === void 0) {
+          options.outputType = "encoded";
+        }
+        if (!["hex", "binary", "encoded"].includes(options.outputType)) {
+          throw new Error(`Insupported output type ${options.outputType}. Valid values: ['hex', 'binary', 'encoded']`);
+        }
+      };
+      function bcrypt(options) {
+        return __awaiter(this, void 0, void 0, function* () {
+          validateOptions(options);
+          return bcryptInternal(options);
+        });
+      }
+      const validateHashCharacters = (hash2) => {
+        if (!/^\$2[axyb]\$[0-3][0-9]\$[./A-Za-z0-9]{53}$/.test(hash2)) {
+          return false;
+        }
+        if (hash2[4] === "0" && Number(hash2[5]) < 4) {
+          return false;
+        }
+        if (hash2[4] === "3" && Number(hash2[5]) > 1) {
+          return false;
+        }
+        return true;
+      };
+      const validateVerifyOptions = (options) => {
+        if (!options || typeof options !== "object") {
+          throw new Error("Invalid options parameter. It requires an object.");
+        }
+        if (options.hash === void 0 || typeof options.hash !== "string") {
+          throw new Error("Hash should be specified");
+        }
+        if (options.hash.length !== 60) {
+          throw new Error("Hash should be 60 bytes long");
+        }
+        if (!validateHashCharacters(options.hash)) {
+          throw new Error("Invalid hash");
+        }
+        options.password = getUInt8Buffer(options.password);
+        if (options.password.length < 1) {
+          throw new Error("Password should be at least 1 byte long");
+        }
+        if (options.password.length > 72) {
+          throw new Error("Password should be at most 72 bytes long");
+        }
+      };
+      function bcryptVerify(options) {
+        return __awaiter(this, void 0, void 0, function* () {
+          validateVerifyOptions(options);
+          const { hash: hash2, password } = options;
+          const bcryptInterface = yield WASMInterface(wasmJson$2, 0);
+          bcryptInterface.writeMemory(getUInt8Buffer(hash2), 0);
+          const passwordBuffer = getUInt8Buffer(password);
+          bcryptInterface.writeMemory(passwordBuffer, 60);
+          return !!bcryptInterface.getExports().bcrypt_verify(passwordBuffer.length);
+        });
+      }
+      var name$1 = "whirlpool";
+      var data$1 = "AGFzbQEAAAABEQRgAAF/YAF/AGACf38AYAAAAwkIAAECAwEDAAEFBAEBAgIGDgJ/AUHQmwULfwBBgAgLB3AIBm1lbW9yeQIADkhhc2hfR2V0QnVmZmVyAAAJSGFzaF9Jbml0AAMLSGFzaF9VcGRhdGUABApIYXNoX0ZpbmFsAAUNSGFzaF9HZXRTdGF0ZQAGDkhhc2hfQ2FsY3VsYXRlAAcKU1RBVEVfU0laRQMBCu0bCAUAQYAZC8wGAQl+IAApAwAhAUEAQQApA4CbASICNwPAmQEgACkDGCEDIAApAxAhBCAAKQMIIQVBAEEAKQOYmwEiBjcD2JkBQQBBACkDkJsBIgc3A9CZAUEAQQApA4ibASIINwPImQFBACABIAKFNwOAmgFBACAFIAiFNwOImgFBACAEIAeFNwOQmgFBACADIAaFNwOYmgEgACkDICEDQQBBACkDoJsBIgE3A+CZAUEAIAMgAYU3A6CaASAAKQMoIQRBAEEAKQOomwEiAzcD6JkBQQAgBCADhTcDqJoBIAApAzAhBUEAQQApA7CbASIENwPwmQFBACAFIASFNwOwmgEgACkDOCEJQQBBACkDuJsBIgU3A/iZAUEAIAkgBYU3A7iaAUEAQpjGmMb+kO6AzwA3A4CZAUHAmQFBgJkBEAJBgJoBQcCZARACQQBCtszKrp/v28jSADcDgJkBQcCZAUGAmQEQAkGAmgFBwJkBEAJBAELg+O70uJTDvTU3A4CZAUHAmQFBgJkBEAJBgJoBQcCZARACQQBCncDfluzlkv/XADcDgJkBQcCZAUGAmQEQAkGAmgFBwJkBEAJBAEKV7t2p/pO8pVo3A4CZAUHAmQFBgJkBEAJBgJoBQcCZARACQQBC2JKn0ZCW6LWFfzcDgJkBQcCZAUGAmQEQAkGAmgFBwJkBEAJBAEK9u8Ggv9nPgucANwOAmQFBwJkBQYCZARACQYCaAUHAmQEQAkEAQuTPhNr4tN/KWDcDgJkBQcCZAUGAmQEQAkGAmgFBwJkBEAJBAEL73fOz1vvFo55/NwOAmQFBwJkBQYCZARACQYCaAUHAmQEQAkEAQsrb/L3Q1dbBMzcDgJkBQcCZAUGAmQEQAkGAmgFBwJkBEAJBACACQQApA4CaASAAKQMAhYU3A4CbAUEAIAhBACkDiJoBIAApAwiFhTcDiJsBQQAgB0EAKQOQmgEgACkDEIWFNwOQmwFBACAGQQApA5iaASAAKQMYhYU3A5ibAUEAIAFBACkDoJoBIAApAyCFhTcDoJsBQQAgA0EAKQOomgEgACkDKIWFNwOomwFBACAEQQApA7CaASAAKQMwhYU3A7CbAUEAIAVBACkDuJoBIAApAziFhTcDuJsBC4YMCgF+AX8BfgF/AX4BfwF+AX8EfgN/IAAgACkDACICpyIDQf8BcUEDdEGQCGopAwBCOIkgACkDOCIEpyIFQQV2QfgPcUGQCGopAwCFQjiJIAApAzAiBqciB0ENdkH4D3FBkAhqKQMAhUI4iSAAKQMoIginIglBFXZB+A9xQZAIaikDAIVCOIkgACkDICIKQiCIp0H/AXFBA3RBkAhqKQMAhUI4iSAAKQMYIgtCKIinQf8BcUEDdEGQCGopAwCFQjiJIAApAxAiDEIwiKdB/wFxQQN0QZAIaikDAIVCOIkgACkDCCINQjiIp0EDdEGQCGopAwCFQjiJIAEpAwCFNwMAIAAgDaciDkH/AXFBA3RBkAhqKQMAQjiJIANBBXZB+A9xQZAIaikDAIVCOIkgBUENdkH4D3FBkAhqKQMAhUI4iSAHQRV2QfgPcUGQCGopAwCFQjiJIAhCIIinQf8BcUEDdEGQCGopAwCFQjiJIApCKIinQf8BcUEDdEGQCGopAwCFQjiJIAtCMIinQf8BcUEDdEGQCGopAwCFQjiJIAxCOIinQQN0QZAIaikDAIVCOIkgASkDCIU3AwggACAMpyIPQf8BcUEDdEGQCGopAwBCOIkgDkEFdkH4D3FBkAhqKQMAhUI4iSADQQ12QfgPcUGQCGopAwCFQjiJIAVBFXZB+A9xQZAIaikDAIVCOIkgBkIgiKdB/wFxQQN0QZAIaikDAIVCOIkgCEIoiKdB/wFxQQN0QZAIaikDAIVCOIkgCkIwiKdB/wFxQQN0QZAIaikDAIVCOIkgC0I4iKdBA3RBkAhqKQMAhUI4iSABKQMQhTcDECAAIAunIhBB/wFxQQN0QZAIaikDAEI4iSAPQQV2QfgPcUGQCGopAwCFQjiJIA5BDXZB+A9xQZAIaikDAIVCOIkgA0EVdkH4D3FBkAhqKQMAhUI4iSAEQiCIp0H/AXFBA3RBkAhqKQMAhUI4iSAGQiiIp0H/AXFBA3RBkAhqKQMAhUI4iSAIQjCIp0H/AXFBA3RBkAhqKQMAhUI4iSAKQjiIp0EDdEGQCGopAwCFQjiJIAEpAxiFNwMYIAAgCqciA0H/AXFBA3RBkAhqKQMAQjiJIBBBBXZB+A9xQZAIaikDAIVCOIkgD0ENdkH4D3FBkAhqKQMAhUI4iSAOQRV2QfgPcUGQCGopAwCFQjiJIAJCIIinQf8BcUEDdEGQCGopAwCFQjiJIARCKIinQf8BcUEDdEGQCGopAwCFQjiJIAZCMIinQf8BcUEDdEGQCGopAwCFQjiJIAhCOIinQQN0QZAIaikDAIVCOIkgASkDIIU3AyAgACAJQf8BcUEDdEGQCGopAwBCOIkgA0EFdkH4D3FBkAhqKQMAhUI4iSAQQQ12QfgPcUGQCGopAwCFQjiJIA9BFXZB+A9xQZAIaikDAIVCOIkgDUIgiKdB/wFxQQN0QZAIaikDAIVCOIkgAkIoiKdB/wFxQQN0QZAIaikDAIVCOIkgBEIwiKdB/wFxQQN0QZAIaikDAIVCOIkgBkI4iKdBA3RBkAhqKQMAhUI4iSABKQMohTcDKCAAIAdB/wFxQQN0QZAIaikDAEI4iSAJQQV2QfgPcUGQCGopAwCFQjiJIANBDXZB+A9xQZAIaikDAIVCOIkgEEEVdkH4D3FBkAhqKQMAhUI4iSAMQiCIp0H/AXFBA3RBkAhqKQMAhUI4iSANQiiIp0H/AXFBA3RBkAhqKQMAhUI4iSACQjCIp0H/AXFBA3RBkAhqKQMAhUI4iSAEQjiIp0EDdEGQCGopAwCFQjiJIAEpAzCFNwMwIAAgBUH/AXFBA3RBkAhqKQMAQjiJIAdBBXZB+A9xQZAIaikDAIVCOIkgCUENdkH4D3FBkAhqKQMAhUI4iSADQRV2QfgPcUGQCGopAwCFQjiJIAtCIIinQf8BcUEDdEGQCGopAwCFQjiJIAxCKIinQf8BcUEDdEGQCGopAwCFQjiJIA1CMIinQf8BcUEDdEGQCGopAwCFQjiJIAJCOIinQQN0QZAIaikDAIVCOIkgASkDOIU3AzgLXABBAEIANwPImwFBAEIANwO4mwFBAEIANwOwmwFBAEIANwOomwFBAEIANwOgmwFBAEIANwOYmwFBAEIANwOQmwFBAEIANwOImwFBAEIANwOAmwFBAEEANgLAmwELxgMBB39BACEBQQBBACkDyJsBIACtfDcDyJsBAkBBACgCwJsBIgJFDQBBACEBAkAgAiAAaiIDQcAAIANBwABJGyIEIAJB/wFxIgVNDQAgBCAFayIBQQNxIQYCQAJAIAQgBUF/c2pBA08NAEEAIQEMAQsgAUF8cSEHQQAhAQNAIAUgAWoiAkHAmgFqIAFBgBlqLQAAOgAAIAJBwZoBaiABQYEZai0AADoAACACQcKaAWogAUGCGWotAAA6AAAgAkHDmgFqIAFBgxlqLQAAOgAAIAcgAUEEaiIBRw0ACyAFIAFqIgUhAgsgBkUNACACQf8BcUEBaiECA0AgBUHAmgFqIAFBgBlqLQAAOgAAIAIiBUEBaiECIAFBAWohASAFIQUgBkF/aiIGDQALCwJAIANBP00NAEHAmgEQAUEAIQQLQQAgBDYCwJsBCwJAIAAgAWsiAkHAAEkNAANAIAFBgBlqEAEgAUHAAGohASACQUBqIgJBP0sNAAsLAkAgASAARg0AQQAgAjYCwJsBIAJFDQBBACECQQAhBQNAIAJBwJoBaiACIAFqQYAZai0AADoAAEEAKALAmwEgBUEBaiIFQf8BcSICSw0ACwsL/wMCBH8BfiMAQcAAayIAJAAgAEE4akIANwMAIABBMGpCADcDACAAQShqQgA3AwAgAEEgakIANwMAIABBGGpCADcDACAAQRBqQgA3AwAgAEIANwMIIABCADcDAEEAIQECQAJAQQAoAsCbASICRQ0AQQAhAwNAIAAgAWogAUHAmgFqLQAAOgAAIAFBAWohASACIANBAWoiA0H/AXFLDQALQQAgAkEBajYCwJsBIAAgAmpBgAE6AAAgAkFgcUEgRw0BIAAQASAAQgA3AxggAEIANwMQIABCADcDCCAAQgA3AwAMAQtBAEEBNgLAmwEgAEGAAToAAAtBACkDyJsBIQRBAEIANwPImwEgAEEAOgA2IABBADYBMiAAQgA3ASogAEEAOgApIABCADcAISAAQQA6ACAgACAEQgWIPAA+IAAgBEINiDwAPSAAIARCFYg8ADwgACAEQh2IPAA7IAAgBEIliDwAOiAAIARCLYg8ADkgACAEQjWIPAA4IAAgBEI9iDwANyAAIASnQQN0OgA/IAAQAUEAQQApA4CbATcDgBlBAEEAKQOImwE3A4gZQQBBACkDkJsBNwOQGUEAQQApA5ibATcDmBlBAEEAKQOgmwE3A6AZQQBBACkDqJsBNwOoGUEAQQApA7CbATcDsBlBAEEAKQO4mwE3A7gZIABBwABqJAALBgBBwJoBC2IAQQBCADcDyJsBQQBCADcDuJsBQQBCADcDsJsBQQBCADcDqJsBQQBCADcDoJsBQQBCADcDmJsBQQBCADcDkJsBQQBCADcDiJsBQQBCADcDgJsBQQBBADYCwJsBIAAQBBAFCwuYEAEAQYAIC5AQkAAAAAAAAAAAAAAAAAAAABgYYBjAeDDYIyOMIwWvRibGxj/GfvmRuOjoh+gTb837h4cmh0yhE8u4uNq4qWJtEQEBBAEIBQIJT08hT0Jung02Ntg2re5sm6amoqZZBFH/0tJv0t69uQz19fP1+wb3Dnl5+XnvgPKWb2+hb1/O3jCRkX6R/O8/bVJSVVKqB6T4YGCdYCf9wEe8vMq8iXZlNZubVpuszSs3jo4CjgSMAYqjo7ajcRVb0gwMMAxgPBhse3vxe/+K9oQ1NdQ1teFqgB0ddB3oaTr14OCn4FNH3bPX13vX9qyzIcLCL8Je7ZmcLi64Lm2WXENLSzFLYnqWKf7+3/6jIeFdV1dBV4IWrtUVFVQVqEEqvXd3wXeftu7oNzfcN6XrbpLl5bPle1bXnp+fRp+M2SMT8PDn8NMX/SNKSjVKan+UINraT9qelalEWFh9WPolsKLJyQPJBsqPzykppClVjVJ8CgooClAiFFqxsf6x4U9/UKCguqBpGl3Ja2uxa3/a1hSFhS6FXKsX2b29zr2Bc2c8XV1pXdI0uo8QEEAQgFAgkPT09/TzA/UHy8sLyxbAi90+Pvg+7cZ80wUFFAUoEQotZ2eBZx/mznjk5Lfkc1PVlycnnCclu04CQUEZQTJYgnOLixaLLJ0Lp6enpqdRAVP2fX3pfc+U+rKVlW6V3Ps3SdjYR9iOn61W+/vL+4sw63Du7p/uI3HBzXx87XzHkfi7ZmaFZhfjzHHd3VPdpo6nexcXXBe4Sy6vR0cBRwJGjkWenkKehNwhGsrKD8oexYnULS20LXWZWli/v8a/kXljLgcHHAc4Gw4/ra2OrQEjR6xaWnVa6i+0sIODNoNstRvvMzPMM4X/ZrZjY5FjP/LGXAICCAIQCgQSqqqSqjk4SZNxcdlxr6ji3sjIB8gOz43GGRlkGch9MtFJSTlJcnCSO9nZQ9mGmq9f8vLv8sMd+THj46vjS0jbqFtbcVviKra5iIgaiDSSDbyamlKapMgpPiYmmCYtvkwLMjLIMo36ZL+wsPqw6Up9Wenpg+kbas/yDw88D3gzHnfV1XPV5qa3M4CAOoB0uh30vr7Cvpl8YSfNzRPNJt6H6zQ00DS95GiJSEg9SHp1kDL//9v/qyTjVHp69Xr3j/SNkJB6kPTqPWRfX2Ffwj6+nSAggCAdoEA9aGi9aGfV0A8aGmga0HI0yq6ugq4ZLEG3tLTqtMledX1UVE1UmhmozpOTdpPs5Tt/IiKIIg2qRC9kZI1kB+nIY/Hx4/HbEv8qc3PRc7+i5swSEkgSkFokgkBAHUA6XYB6CAggCEAoEEjDwyvDVuiblezsl+wze8Xf29tL25aQq02hob6hYR9fwI2NDo0cgweRPT30PfXJesiXl2aXzPEzWwAAAAAAAAAAz88bzzbUg/krK6wrRYdWbnZ2xXaXs+zhgoIygmSwGebW1n/W/qmxKBsbbBvYdzbDtbXutcFbd3Svr4avESlDvmpqtWp339QdUFBdULoNoOpFRQlFEkyKV/Pz6/PLGPs4MDDAMJ3wYK3v75vvK3TDxD8//D/lw37aVVVJVZIcqseiorKieRBZ2+rqj+oDZcnpZWWJZQ/symq6utK6uWhpAy8vvC9lk15KwMAnwE7nnY7e3l/evoGhYBwccBzgbDj8/f3T/bsu50ZNTSlNUmSaH5KScpLk4Dl2dXXJdY+86voGBhgGMB4MNoqKEookmAmusrLysvlAeUvm5r/mY1nRhQ4OOA5wNhx+Hx98H/hjPudiYpViN/fEVdTUd9Tuo7U6qKiaqCkyTYGWlmKWxPQxUvn5w/mbOu9ixcUzxWb2l6MlJZQlNbFKEFlZeVnyILKrhIQqhFSuFdByctVyt6fkxTk55DnV3XLsTEwtTFphmBZeXmVeyju8lHh4/XjnhfCfODjgON3YcOWMjAqMFIYFmNHRY9HGsr8XpaWupUELV+Ti4q/iQ03ZoWFhmWEv+MJOs7P2s/FFe0IhIYQhFaVCNJycSpyU1iUIHh54HvBmPO5DQxFDIlKGYcfHO8d2/JOx/PzX/LMr5U8EBBAEIBQIJFFRWVGyCKLjmZlembzHLyVtbaltT8TaIg0NNA1oORpl+vrP+oM16Xnf31vftoSjaX5+5X7Xm/ypJCSQJD20SBk7O+w7xdd2/qurlqsxPUuazs4fzj7RgfAREUQRiFUimY+PBo8MiQODTk4lTkprnAS3t+a30VFzZuvri+sLYMvgPDzwPP3MeMGBgT6BfL8f/ZSUapTU/jVA9/f79+sM8xy5ud65oWdvGBMTTBOYXyaLLCywLH2cWFHT02vT1ri7Befnu+drXNOMbm6lblfL3DnExDfEbvOVqgMDDAMYDwYbVlZFVooTrNxERA1EGkmIXn9/4X/fnv6gqameqSE3T4gqKqgqTYJUZ7u71ruxbWsKwcEjwUbin4dTU1FTogKm8dzcV9yui6VyCwssC1gnFlOdnU6dnNMnAWxsrWxHwdgrMTHEMZX1YqR0dM10h7no8/b2//bjCfEVRkYFRgpDjEysrIqsCSZFpYmJHok8lw+1FBRQFKBEKLTh4aPhW0LfuhYWWBawTiymOjroOs3SdPdpablpb9DSBgkJJAlILRJBcHDdcKet4Ne2tuK22VRxb9DQZ9DOt70e7e2T7Tt+x9bMzBfMLtuF4kJCFUIqV4RomJhamLTCLSykpKqkSQ5V7SgooChdiFB1XFxtXNoxuIb4+Mf4kz/ta4aGIoZEpBHC";
+      var hash$1 = "8d8f6035";
+      var wasmJson$1 = {
+        name: name$1,
+        data: data$1,
+        hash: hash$1
+      };
+      const mutex$1 = new Mutex();
+      let wasmCache$1 = null;
+      function whirlpool(data2) {
+        if (wasmCache$1 === null) {
+          return lockedCreate(mutex$1, wasmJson$1, 64).then((wasm) => {
+            wasmCache$1 = wasm;
+            return wasmCache$1.calculate(data2);
+          });
+        }
+        try {
+          const hash2 = wasmCache$1.calculate(data2);
+          return Promise.resolve(hash2);
+        } catch (err) {
+          return Promise.reject(err);
+        }
+      }
+      function createWhirlpool() {
+        return WASMInterface(wasmJson$1, 64).then((wasm) => {
+          wasm.init();
+          const obj = {
+            init: () => {
+              wasm.init();
+              return obj;
+            },
+            update: (data2) => {
+              wasm.update(data2);
+              return obj;
+            },
+            // biome-ignore lint/suspicious/noExplicitAny: Conflict with IHasher type
+            digest: (outputType) => wasm.digest(outputType),
+            save: () => wasm.save(),
+            load: (data2) => {
+              wasm.load(data2);
+              return obj;
+            },
+            blockSize: 64,
+            digestSize: 64
+          };
+          return obj;
+        });
+      }
+      var name = "sm3";
+      var data = "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";
+      var hash = "b6fb4b8e";
+      var wasmJson = {
+        name,
+        data,
+        hash
+      };
+      const mutex = new Mutex();
+      let wasmCache = null;
+      function sm3(data2) {
+        if (wasmCache === null) {
+          return lockedCreate(mutex, wasmJson, 32).then((wasm) => {
+            wasmCache = wasm;
+            return wasmCache.calculate(data2);
+          });
+        }
+        try {
+          const hash2 = wasmCache.calculate(data2);
+          return Promise.resolve(hash2);
+        } catch (err) {
+          return Promise.reject(err);
+        }
+      }
+      function createSM3() {
+        return WASMInterface(wasmJson, 32).then((wasm) => {
+          wasm.init();
+          const obj = {
+            init: () => {
+              wasm.init();
+              return obj;
+            },
+            update: (data2) => {
+              wasm.update(data2);
+              return obj;
+            },
+            // biome-ignore lint/suspicious/noExplicitAny: Conflict with IHasher type
+            digest: (outputType) => wasm.digest(outputType),
+            save: () => wasm.save(),
+            load: (data2) => {
+              wasm.load(data2);
+              return obj;
+            },
+            blockSize: 64,
+            digestSize: 32
+          };
+          return obj;
+        });
+      }
+      exports2.adler32 = adler32;
+      exports2.argon2Verify = argon2Verify2;
+      exports2.argon2d = argon2d;
+      exports2.argon2i = argon2i;
+      exports2.argon2id = argon2id2;
+      exports2.bcrypt = bcrypt;
+      exports2.bcryptVerify = bcryptVerify;
+      exports2.blake2b = blake2b;
+      exports2.blake2s = blake2s;
+      exports2.blake3 = blake3;
+      exports2.crc32 = crc32;
+      exports2.crc64 = crc64;
+      exports2.createAdler32 = createAdler32;
+      exports2.createBLAKE2b = createBLAKE2b;
+      exports2.createBLAKE2s = createBLAKE2s;
+      exports2.createBLAKE3 = createBLAKE3;
+      exports2.createCRC32 = createCRC32;
+      exports2.createCRC64 = createCRC64;
+      exports2.createHMAC = createHMAC;
+      exports2.createKeccak = createKeccak;
+      exports2.createMD4 = createMD4;
+      exports2.createMD5 = createMD5;
+      exports2.createRIPEMD160 = createRIPEMD160;
+      exports2.createSHA1 = createSHA1;
+      exports2.createSHA224 = createSHA224;
+      exports2.createSHA256 = createSHA256;
+      exports2.createSHA3 = createSHA3;
+      exports2.createSHA384 = createSHA384;
+      exports2.createSHA512 = createSHA512;
+      exports2.createSM3 = createSM3;
+      exports2.createWhirlpool = createWhirlpool;
+      exports2.createXXHash128 = createXXHash128;
+      exports2.createXXHash3 = createXXHash3;
+      exports2.createXXHash32 = createXXHash32;
+      exports2.createXXHash64 = createXXHash64;
+      exports2.keccak = keccak;
+      exports2.md4 = md4;
+      exports2.md5 = md5;
+      exports2.pbkdf2 = pbkdf2;
+      exports2.ripemd160 = ripemd160;
+      exports2.scrypt = scrypt;
+      exports2.sha1 = sha1;
+      exports2.sha224 = sha224;
+      exports2.sha256 = sha256;
+      exports2.sha3 = sha3;
+      exports2.sha384 = sha384;
+      exports2.sha512 = sha512;
+      exports2.sm3 = sm3;
+      exports2.whirlpool = whirlpool;
+      exports2.xxhash128 = xxhash128;
+      exports2.xxhash3 = xxhash3;
+      exports2.xxhash32 = xxhash32;
+      exports2.xxhash64 = xxhash64;
+    }));
+  }
+});
+
+// src/hub/edge/terminal-pin.ts
+var terminal_pin_exports = {};
+__export(terminal_pin_exports, {
+  TERMINAL_PIN_ARGON2: () => TERMINAL_PIN_ARGON2,
+  TERMINAL_PIN_FAILURE_LIMIT: () => TERMINAL_PIN_FAILURE_LIMIT,
+  TERMINAL_PIN_FAILURE_WINDOW_MINUTES: () => TERMINAL_PIN_FAILURE_WINDOW_MINUTES,
+  TERMINAL_PIN_LOCK_MINUTES: () => TERMINAL_PIN_LOCK_MINUTES,
+  TERMINAL_PIN_PATTERN: () => TERMINAL_PIN_PATTERN,
+  TERMINAL_PIN_SESSION_HOURS: () => TERMINAL_PIN_SESSION_HOURS,
+  changeTerminalPin: () => changeTerminalPin,
+  lockTerminalSession: () => lockTerminalSession,
+  readTerminalPinStatus: () => readTerminalPinStatus,
+  resetTerminalPin: () => resetTerminalPin,
+  setupTerminalPin: () => setupTerminalPin,
+  terminalPinVerifier: () => terminalPinVerifier,
+  unlockTerminalWithPin: () => unlockTerminalWithPin,
+  verifyTerminalPin: () => verifyTerminalPin
+});
+import { createHash as createHash6, randomBytes as randomBytes2, randomUUID as randomUUID6 } from "node:crypto";
+async function terminalPinVerifier(pin, salt = randomBytes2(TERMINAL_PIN_ARGON2.saltLength)) {
+  if (!TERMINAL_PIN_PATTERN.test(pin)) {
+    throw new Error("KLUY-TERMINAL-PIN-FORMAT: a Terminal PIN is exactly four digits");
+  }
+  return (0, import_hash_wasm.argon2id)({
+    password: pin,
+    salt,
+    parallelism: TERMINAL_PIN_ARGON2.parallelism,
+    iterations: TERMINAL_PIN_ARGON2.iterations,
+    memorySize: TERMINAL_PIN_ARGON2.memorySize,
+    hashLength: TERMINAL_PIN_ARGON2.hashLength,
+    outputType: "encoded"
+  });
+}
+async function verifyTerminalPin(pin, verifier) {
+  if (!TERMINAL_PIN_PATTERN.test(pin) || !VERIFIER_PATTERN.test(verifier)) return false;
+  try {
+    return await (0, import_hash_wasm.argon2Verify)({ password: pin, hash: verifier });
+  } catch {
+    return false;
+  }
+}
+async function lockTerminal(client, terminalDeviceId) {
+  const result = await client.query(
+    `select id, tenant_id, digital_store_id, location_id
+       from edge_identity.terminal_device where id = $1::uuid for update`,
+    [terminalDeviceId]
+  );
+  return result.rows[0] ?? null;
+}
+async function readPinRow(client, terminalDeviceId) {
+  const result = await client.query(
+    `select state, verifier, pin_version, set_at, failed_attempts, first_failed_at, locked_until
+       from edge_identity.terminal_pin where terminal_device_id = $1::uuid`,
+    [terminalDeviceId]
+  );
+  return result.rows[0] ?? null;
+}
+async function hubNow(client) {
+  const result = await client.query(`select now() as now`);
+  const row = result.rows[0];
+  if (row === void 0) throw new Error("the Hub database returned no transaction time");
+  return row.now;
+}
+function windowExpired(row, now) {
+  return row.first_failed_at !== null && now.getTime() - row.first_failed_at.getTime() >= WINDOW_MS;
+}
+function statusOf(row, now) {
+  if (row === null) {
+    return {
+      state: "setup_required",
+      pinVersion: 0,
+      setAt: null,
+      lockedUntil: null,
+      attemptsBeforeLock: TERMINAL_PIN_FAILURE_LIMIT
+    };
+  }
+  const locked = row.locked_until !== null && row.locked_until.getTime() > now.getTime();
+  const counted = windowExpired(row, now) ? 0 : row.failed_attempts;
+  return {
+    state: row.state,
+    pinVersion: row.pin_version,
+    setAt: row.set_at === null ? null : row.set_at.toISOString(),
+    lockedUntil: locked && row.locked_until !== null ? row.locked_until.toISOString() : null,
+    attemptsBeforeLock: locked ? 0 : Math.max(0, TERMINAL_PIN_FAILURE_LIMIT - counted)
+  };
+}
+async function hubDeviceId(client) {
+  const { rows } = await client.query(
+    `select hub_device_id from edge_identity.hub_assignment
+      where ended_at is null order by assignment_generation desc limit 1`
+  );
+  const row = rows[0];
+  if (row === void 0) throw new Error("the Store Hub has no live assignment to record against");
+  return row.hub_device_id;
+}
+async function audit(client, terminal, input) {
+  const payload = JSON.stringify(input.details);
+  await appendAuditEvent(client, {
+    id: randomUUID6(),
+    tenantId: terminal.tenant_id,
+    digitalStoreId: terminal.digital_store_id,
+    locationId: terminal.location_id,
+    eventCode: input.eventCode,
+    actorType: input.actorType,
+    actorId: input.actorType === "terminal_device" ? terminal.id : null,
+    requesterId: null,
+    approverId: null,
+    terminalDeviceId: terminal.id,
+    hubDeviceId: await hubDeviceId(client),
+    profileCode: T1_PROFILE_CODE,
+    resourceType: "terminal_pin",
+    resourceId: terminal.id,
+    reasonCode: input.reasonCode,
+    correlationId: input.correlationId,
+    payloadSha256: createHash6("sha256").update(payload, "utf8").digest("hex"),
+    details: input.details,
+    localSequence: await allocateHubSequence(client)
+  });
+}
+async function security(client, terminal, eventCode, severity, details) {
+  await recordSecurityEvent(client, {
+    id: randomUUID6(),
+    tenantId: terminal.tenant_id,
+    digitalStoreId: terminal.digital_store_id,
+    locationId: terminal.location_id,
+    eventCode,
+    severity,
+    deviceId: terminal.id,
+    certificateSerial: null,
+    details
+  });
+}
+async function openPinSession(client, terminal, now) {
+  const previous = await client.query(
+    `select coalesce(max(session_generation), 0)::int as generation
+       from edge_identity.terminal_session
+      where terminal_device_id = $1::uuid and profile_code = $2`,
+    [terminal.id, T1_PROFILE_CODE]
+  );
+  await client.query(
+    `update edge_identity.terminal_session
+        set closed_at = now(), status = 'superseded'
+      where terminal_device_id = $1::uuid and profile_code = $2 and closed_at is null`,
+    [terminal.id, T1_PROFILE_CODE]
+  );
+  const sessionId = randomUUID6();
+  const generation = (previous.rows[0]?.generation ?? 0) + 1;
+  const expiresAt = new Date(now.getTime() + TERMINAL_PIN_SESSION_HOURS * 36e5);
+  await client.query(
+    `insert into edge_identity.terminal_session
+       (id, tenant_id, digital_store_id, location_id, terminal_device_id, actor_id,
+        profile_code, opened_at, expires_at, closed_at, session_generation,
+        last_event_sequence, status, credential_kind)
+     values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $5::uuid,
+             $6, $7, $8, null, $9, 0, 'open', 'terminal_pin')`,
+    [
+      sessionId,
+      terminal.tenant_id,
+      terminal.digital_store_id,
+      terminal.location_id,
+      terminal.id,
+      T1_PROFILE_CODE,
+      now,
+      expiresAt,
+      generation
+    ]
+  );
+  return {
+    sessionId,
+    actorId: terminal.id,
+    displayName: "",
+    profileCode: T1_PROFILE_CODE,
+    openedAt: now.toISOString(),
+    expiresAt: expiresAt.toISOString(),
+    sessionGeneration: generation,
+    effectivePermissions: [...T1_TERMINAL_PIN_PERMISSIONS],
+    authorityTime: now.toISOString(),
+    credentialKind: "terminal_pin"
+  };
+}
+async function readTerminalPinStatus(pool, input) {
+  return withHubTransaction(
+    pool,
+    async (client) => {
+      const now = await hubNow(client);
+      const pin = statusOf(await readPinRow(client, input.terminalDeviceId), now);
+      let session = null;
+      if (input.sessionId !== null) {
+        const found = await client.query(
+          `select closed_at, expires_at, credential_kind from edge_identity.terminal_session
+            where id = $1::uuid and terminal_device_id = $2::uuid`,
+          [input.sessionId, input.terminalDeviceId]
+        );
+        const row = found.rows[0];
+        session = row === void 0 || row.credential_kind !== "terminal_pin" ? { state: "unknown", expiresAt: null } : row.closed_at !== null ? { state: "closed", expiresAt: row.expires_at.toISOString() } : row.expires_at.getTime() <= now.getTime() ? { state: "expired", expiresAt: row.expires_at.toISOString() } : { state: "open", expiresAt: row.expires_at.toISOString() };
+      }
+      return { pin, session, authorityTime: now.toISOString() };
+    },
+    HUB_RUNTIME_ROLE
+  );
+}
+function formatRefusal(detail) {
+  return { outcome: "refused", refusal: "PIN_FORMAT_INVALID", detail };
+}
+async function setupTerminalPin(pool, input) {
+  if (!TERMINAL_PIN_PATTERN.test(input.pin) || !TERMINAL_PIN_PATTERN.test(input.pinConfirmation)) {
+    return formatRefusal("a Terminal PIN is exactly four digits");
+  }
+  if (input.pin !== input.pinConfirmation) {
+    return {
+      outcome: "refused",
+      refusal: "PIN_CONFIRMATION_MISMATCH",
+      detail: "the two entries differ; enter the new PIN twice"
+    };
+  }
+  const verifier = await terminalPinVerifier(input.pin);
+  return withHubTransaction(
+    pool,
+    async (client) => {
+      const terminal = await lockTerminal(client, input.terminalDeviceId);
+      if (terminal === null) {
+        return { outcome: "refused", refusal: "TERMINAL_UNKNOWN", detail: "unknown terminal" };
+      }
+      const now = await hubNow(client);
+      const row = await readPinRow(client, terminal.id);
+      if (row !== null && row.state === "set") {
+        return {
+          outcome: "refused",
+          refusal: "PIN_ALREADY_SET",
+          detail: "this terminal already has a PIN; change it, or have it reset",
+          status: statusOf(row, now)
+        };
+      }
+      const version = (row?.pin_version ?? 0) + 1;
+      await client.query(
+        `insert into edge_identity.terminal_pin
+           (terminal_device_id, tenant_id, digital_store_id, location_id, state, verifier,
+            pin_version, set_at, failed_attempts, first_failed_at, locked_until,
+            last_unlocked_at, updated_at)
+         values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'set', $5, $6, now(), 0, null, null,
+                 now(), now())
+         on conflict (terminal_device_id) do update
+            set state = 'set', verifier = excluded.verifier, pin_version = excluded.pin_version,
+                set_at = now(), failed_attempts = 0, first_failed_at = null,
+                locked_until = null, last_unlocked_at = now(), updated_at = now()`,
+        [
+          terminal.id,
+          terminal.tenant_id,
+          terminal.digital_store_id,
+          terminal.location_id,
+          verifier,
+          version
+        ]
+      );
+      await audit(client, terminal, {
+        eventCode: "terminal_pin.established",
+        actorType: "terminal_device",
+        reasonCode: row === null ? "first_setup" : "after_reset",
+        correlationId: input.correlationId,
+        details: { pinVersion: version }
+      });
+      const session = await openPinSession(client, terminal, now);
+      const after = await readPinRow(client, terminal.id);
+      return {
+        outcome: "ok",
+        result: "PIN_ESTABLISHED",
+        value: { session, pin: statusOf(after, now) }
+      };
+    },
+    HUB_RUNTIME_ROLE
+  );
+}
+async function attempt(client, terminal, pin) {
+  const now = await hubNow(client);
+  const row = await readPinRow(client, terminal.id);
+  if (row === null || row.state !== "set" || row.verifier === null) {
+    return {
+      verified: false,
+      result: {
+        outcome: "refused",
+        refusal: "PIN_SETUP_REQUIRED",
+        detail: "this terminal has no PIN yet; create one",
+        status: statusOf(row, now)
+      }
+    };
+  }
+  if (row.locked_until !== null && row.locked_until.getTime() > now.getTime()) {
+    await security(client, terminal, "TERMINAL_PIN_ATTEMPT_WHILE_LOCKED", "medium", {
+      pinVersion: row.pin_version
+    });
+    return {
+      verified: false,
+      result: {
+        outcome: "refused",
+        refusal: "PIN_LOCKED",
+        detail: "too many incorrect PINs; wait until the lock ends",
+        status: statusOf(row, now)
+      }
+    };
+  }
+  if (await verifyTerminalPin(pin, row.verifier)) {
+    await client.query(
+      `update edge_identity.terminal_pin
+          set failed_attempts = 0, first_failed_at = null, locked_until = null,
+              last_unlocked_at = now(), updated_at = now()
+        where terminal_device_id = $1::uuid`,
+      [terminal.id]
+    );
+    const fresh = await readPinRow(client, terminal.id);
+    return { verified: true, row: fresh ?? row, now };
+  }
+  const counted = (windowExpired(row, now) || row.first_failed_at === null ? 0 : row.failed_attempts) + 1;
+  if (counted >= TERMINAL_PIN_FAILURE_LIMIT) {
+    await client.query(
+      `update edge_identity.terminal_pin
+          set failed_attempts = 0, first_failed_at = null,
+              locked_until = now() + make_interval(mins => $2::int), updated_at = now()
+        where terminal_device_id = $1::uuid`,
+      [terminal.id, TERMINAL_PIN_LOCK_MINUTES]
+    );
+    await security(client, terminal, "TERMINAL_PIN_LOCKED", "high", {
+      pinVersion: row.pin_version,
+      failures: counted,
+      lockMinutes: TERMINAL_PIN_LOCK_MINUTES
+    });
+  } else {
+    await client.query(
+      `update edge_identity.terminal_pin
+          set failed_attempts = $2::int,
+              first_failed_at = case when $2::int = 1 then now() else first_failed_at end,
+              locked_until = null, updated_at = now()
+        where terminal_device_id = $1::uuid`,
+      [terminal.id, counted]
+    );
+    await security(client, terminal, "TERMINAL_PIN_INCORRECT", "low", {
+      pinVersion: row.pin_version,
+      failures: counted
+    });
+  }
+  const after = await readPinRow(client, terminal.id);
+  const status = statusOf(after, now);
+  return {
+    verified: false,
+    result: status.lockedUntil !== null ? {
+      outcome: "refused",
+      refusal: "PIN_LOCKED",
+      detail: "too many incorrect PINs; the Terminal PIN is locked",
+      status
+    } : {
+      outcome: "refused",
+      refusal: "PIN_INCORRECT",
+      detail: "the PIN is not correct",
+      status
+    }
+  };
+}
+async function unlockTerminalWithPin(pool, input) {
+  if (!TERMINAL_PIN_PATTERN.test(input.pin)) {
+    return formatRefusal("a Terminal PIN is exactly four digits");
+  }
+  return withHubTransaction(
+    pool,
+    async (client) => {
+      const terminal = await lockTerminal(client, input.terminalDeviceId);
+      if (terminal === null) {
+        return { outcome: "refused", refusal: "TERMINAL_UNKNOWN", detail: "unknown terminal" };
+      }
+      const verdict = await attempt(client, terminal, input.pin);
+      if (!verdict.verified) return verdict.result;
+      await audit(client, terminal, {
+        eventCode: "terminal_pin.unlocked",
+        actorType: "terminal_device",
+        reasonCode: null,
+        correlationId: input.correlationId,
+        details: { pinVersion: verdict.row.pin_version }
+      });
+      const session = await openPinSession(client, terminal, verdict.now);
+      return {
+        outcome: "ok",
+        result: "TERMINAL_UNLOCKED",
+        value: { session, pin: statusOf(verdict.row, verdict.now) }
+      };
+    },
+    HUB_RUNTIME_ROLE
+  );
+}
+async function changeTerminalPin(pool, input) {
+  if (!TERMINAL_PIN_PATTERN.test(input.currentPin) || !TERMINAL_PIN_PATTERN.test(input.newPin) || !TERMINAL_PIN_PATTERN.test(input.newPinConfirmation)) {
+    return formatRefusal("a Terminal PIN is exactly four digits");
+  }
+  if (input.newPin !== input.newPinConfirmation) {
+    return {
+      outcome: "refused",
+      refusal: "PIN_CONFIRMATION_MISMATCH",
+      detail: "the two entries of the new PIN differ"
+    };
+  }
+  const verifier = await terminalPinVerifier(input.newPin);
+  return withHubTransaction(
+    pool,
+    async (client) => {
+      const terminal = await lockTerminal(client, input.terminalDeviceId);
+      if (terminal === null) {
+        return { outcome: "refused", refusal: "TERMINAL_UNKNOWN", detail: "unknown terminal" };
+      }
+      const verdict = await attempt(client, terminal, input.currentPin);
+      if (!verdict.verified) return verdict.result;
+      const version = verdict.row.pin_version + 1;
+      await client.query(
+        `update edge_identity.terminal_pin
+            set verifier = $2, pin_version = $3, set_at = now(), updated_at = now()
+          where terminal_device_id = $1::uuid`,
+        [terminal.id, verifier, version]
+      );
+      await audit(client, terminal, {
+        eventCode: "terminal_pin.changed",
+        actorType: "terminal_device",
+        reasonCode: null,
+        correlationId: input.correlationId,
+        details: { pinVersion: version }
+      });
+      const after = await readPinRow(client, terminal.id);
+      return { outcome: "ok", result: "PIN_CHANGED", value: { pin: statusOf(after, verdict.now) } };
+    },
+    HUB_RUNTIME_ROLE
+  );
+}
+async function lockTerminalSession(pool, input) {
+  return withHubTransaction(
+    pool,
+    async (client) => {
+      const found = await client.query(
+        `select closed_at, credential_kind from edge_identity.terminal_session
+          where id = $1::uuid and terminal_device_id = $2::uuid for update`,
+        [input.sessionId, input.terminalDeviceId]
+      );
+      const row = found.rows[0];
+      if (row === void 0 || row.credential_kind !== "terminal_pin") {
+        return { outcome: "refused", refusal: "SESSION_UNKNOWN", detail: "no such session" };
+      }
+      if (row.closed_at !== null) {
+        return { outcome: "refused", refusal: "SESSION_CLOSED", detail: "the session is closed" };
+      }
+      await client.query(
+        `update edge_identity.terminal_session set closed_at = now(), status = 'locked'
+          where id = $1::uuid`,
+        [input.sessionId]
+      );
+      return { outcome: "ok", result: "TERMINAL_LOCKED", value: { sessionId: input.sessionId } };
+    },
+    HUB_RUNTIME_ROLE
+  );
+}
+async function resetTerminalPin(pool, input) {
+  if (!/^[A-Za-z0-9_.:-]{3,64}$/u.test(input.actorRef) || !/^[a-z0-9_]{3,48}$/u.test(input.reasonCode)) {
+    return {
+      outcome: "refused",
+      refusal: "PIN_FORMAT_INVALID",
+      detail: "an operator reference and a snake_case reason code are required"
+    };
+  }
+  return withHubTransaction(
+    pool,
+    async (client) => {
+      const terminal = await lockTerminal(client, input.terminalDeviceId);
+      if (terminal === null) {
+        return { outcome: "refused", refusal: "TERMINAL_UNKNOWN", detail: "unknown terminal" };
+      }
+      const now = await hubNow(client);
+      const row = await readPinRow(client, terminal.id);
+      if (row === null || row.state !== "set") {
+        return {
+          outcome: "ok",
+          result: "PIN_SETUP_ALREADY_REQUIRED",
+          value: { pin: statusOf(row, now), sessionsClosed: 0 }
+        };
+      }
+      await client.query(
+        `update edge_identity.terminal_pin
+            set state = 'reset_required', verifier = null, set_at = null,
+                failed_attempts = 0, first_failed_at = null, locked_until = null,
+                updated_at = now()
+          where terminal_device_id = $1::uuid`,
+        [terminal.id]
+      );
+      const closed = await client.query(
+        `update edge_identity.terminal_session set closed_at = now(), status = 'reset'
+          where terminal_device_id = $1::uuid and credential_kind = 'terminal_pin'
+            and closed_at is null`,
+        [terminal.id]
+      );
+      await audit(client, terminal, {
+        eventCode: "terminal_pin.reset",
+        actorType: "operator",
+        reasonCode: input.reasonCode,
+        correlationId: input.correlationId,
+        details: { previousPinVersion: row.pin_version, operatorReference: input.actorRef }
+      });
+      const after = await readPinRow(client, terminal.id);
+      return {
+        outcome: "ok",
+        result: "PIN_RESET",
+        value: { pin: statusOf(after, now), sessionsClosed: closed.rowCount ?? 0 }
+      };
+    },
+    HUB_RUNTIME_ROLE
+  );
+}
+var import_hash_wasm, TERMINAL_PIN_PATTERN, TERMINAL_PIN_FAILURE_LIMIT, TERMINAL_PIN_FAILURE_WINDOW_MINUTES, TERMINAL_PIN_LOCK_MINUTES, TERMINAL_PIN_SESSION_HOURS, TERMINAL_PIN_ARGON2, VERIFIER_PATTERN, WINDOW_MS;
+var init_terminal_pin = __esm({
+  "src/hub/edge/terminal-pin.ts"() {
+    "use strict";
+    import_hash_wasm = __toESM(require_index_umd(), 1);
+    init_db();
+    init_audit();
+    init_sync();
+    init_runtime_bootstrap();
+    TERMINAL_PIN_PATTERN = /^[0-9]{4}$/u;
+    TERMINAL_PIN_FAILURE_LIMIT = 5;
+    TERMINAL_PIN_FAILURE_WINDOW_MINUTES = 15;
+    TERMINAL_PIN_LOCK_MINUTES = 15;
+    TERMINAL_PIN_SESSION_HOURS = 8;
+    TERMINAL_PIN_ARGON2 = {
+      memorySize: 19456,
+      iterations: 2,
+      parallelism: 1,
+      hashLength: 32,
+      saltLength: 16
+    };
+    VERIFIER_PATTERN = /^\$argon2id\$v=19\$m=[0-9]+,t=[0-9]+,p=[0-9]+\$[A-Za-z0-9+/]+\$[A-Za-z0-9+/]+$/u;
+    WINDOW_MS = TERMINAL_PIN_FAILURE_WINDOW_MINUTES * 6e4;
+  }
+});
+
 // src/hub/sync/errors.ts
 var SYNC_TRANSIENT_ERROR_CODES, SYNC_DURABLE_REJECTION_CODES, TRANSIENT, DURABLE, SyncDeliveryError;
-var init_errors2 = __esm({
+var init_errors3 = __esm({
   "src/hub/sync/errors.ts"() {
     "use strict";
     SYNC_TRANSIENT_ERROR_CODES = [
@@ -5457,7 +9986,7 @@ var init_errors2 = __esm({
 });
 
 // src/hub/sync/configuration.ts
-import { createHash as createHash8 } from "node:crypto";
+import { createHash as createHash9 } from "node:crypto";
 function snapshotManifest(snapshot) {
   return canonicalJson({
     snapshot_id: snapshot.snapshotId,
@@ -5479,10 +10008,10 @@ function snapshotManifest(snapshot) {
   });
 }
 function sectionDigest(section) {
-  return createHash8("sha256").update(canonicalJson(section.content), "utf8").digest("hex");
+  return createHash9("sha256").update(canonicalJson(section.content), "utf8").digest("hex");
 }
 function snapshotManifestSha256(snapshot) {
-  return createHash8("sha256").update(snapshotManifest(snapshot), "utf8").digest("hex");
+  return createHash9("sha256").update(snapshotManifest(snapshot), "utf8").digest("hex");
 }
 async function recordDownloadedSnapshot(client, snapshot) {
   await client.query(
@@ -5576,7 +10105,7 @@ var init_configuration = __esm({
   "src/hub/sync/configuration.ts"() {
     "use strict";
     init_hub_database();
-    init_errors2();
+    init_errors3();
   }
 });
 
@@ -5586,7 +10115,7 @@ var DEV_MIN_SIGNING_KEY_BYTES, DevelopmentHmacBatchSigner;
 var init_signing = __esm({
   "src/hub/sync/signing.ts"() {
     "use strict";
-    init_errors2();
+    init_errors3();
     DEV_MIN_SIGNING_KEY_BYTES = 32;
     DevelopmentHmacBatchSigner = class {
       constructor(keyId, secret) {
@@ -5633,7 +10162,7 @@ __export(dev_configuration_exports, {
   loadOrCreateDevelopmentSigner: () => loadOrCreateDevelopmentSigner,
   publishDevelopmentConfiguration: () => publishDevelopmentConfiguration
 });
-import { randomBytes as randomBytes2, randomUUID as randomUUID8 } from "node:crypto";
+import { randomBytes as randomBytes3, randomUUID as randomUUID9 } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync as readFileSync3, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 function loadOrCreateDevelopmentSigner(path = DEV_CONFIGURATION_KEY_PATH) {
@@ -5641,7 +10170,7 @@ function loadOrCreateDevelopmentSigner(path = DEV_CONFIGURATION_KEY_PATH) {
   try {
     secret = Buffer.from(readFileSync3(path, "utf8").trim(), "base64");
   } catch {
-    secret = randomBytes2(32);
+    secret = randomBytes3(32);
     mkdirSync(dirname(path), { recursive: true, mode: 448 });
     writeFileSync(path, `${secret.toString("base64")}
 `, { mode: 384 });
@@ -5685,7 +10214,7 @@ async function publishDevelopmentConfiguration(pool, input) {
         }
       };
       const unsigned = {
-        snapshotId: randomUUID8(),
+        snapshotId: randomUUID9(),
         tenantId: input.tenantId,
         digitalStoreId: input.digitalStoreId,
         locationId: input.locationId,
@@ -5720,7 +10249,7 @@ async function publishDevelopmentConfiguration(pool, input) {
         );
       }
       const activation = await activateSnapshot(client, {
-        activationId: randomUUID8(),
+        activationId: randomUUID9(),
         snapshotId: snapshot.snapshotId,
         actorType: "service",
         healthCheck: { source: "development-configuration-publisher" }
@@ -5991,204 +10520,14 @@ function errorEnvelope(code, message, extras) {
   };
 }
 
-// src/hub/repositories/audit.ts
-async function appendAuditEvent(client, input) {
-  await client.query(
-    `insert into edge_audit.audit_event
-       (id, tenant_id, digital_store_id, location_id, event_code, actor_type, actor_id,
-        requester_id, approver_id, terminal_device_id, hub_device_id, profile_code,
-        resource_type, resource_id, reason_code, correlation_id, occurred_at,
-        payload_sha256, details_json, local_sequence)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-             now(), $17, $18::jsonb, $19)`,
-    [
-      input.id,
-      input.tenantId,
-      input.digitalStoreId,
-      input.locationId,
-      input.eventCode,
-      input.actorType,
-      input.actorId,
-      input.requesterId,
-      input.approverId,
-      input.terminalDeviceId,
-      input.hubDeviceId,
-      input.profileCode,
-      input.resourceType,
-      input.resourceId,
-      input.reasonCode,
-      input.correlationId,
-      input.payloadSha256,
-      JSON.stringify(input.details),
-      input.localSequence.toString()
-    ]
-  );
-}
-async function recordSecurityEvent(client, input) {
-  await client.query(
-    `insert into edge_audit.security_event
-       (id, tenant_id, digital_store_id, location_id, event_code, severity, device_id,
-        certificate_serial, detected_at, details_json)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, now(), $9::jsonb)`,
-    [
-      input.id,
-      input.tenantId,
-      input.digitalStoreId,
-      input.locationId,
-      input.eventCode,
-      input.severity,
-      input.deviceId,
-      input.certificateSerial,
-      JSON.stringify(input.details)
-    ]
-  );
-}
+// src/hub/repositories/index.ts
+init_audit();
 
-// src/hub/errors.ts
-var HubCommandError = class extends Error {
-  constructor(code, message, details = {}) {
-    super(`${code}: ${message}`);
-    this.code = code;
-    this.details = details;
-    this.name = "HubCommandError";
-  }
-};
+// src/hub/repositories/files.ts
+init_errors();
 
-// src/hub/repositories/sync.ts
-var sync_exports = {};
-__export(sync_exports, {
-  WS09_DELIVERY_STATE: () => WS09_DELIVERY_STATE,
-  WS09_WIRE_SYNC_STATE: () => WS09_WIRE_SYNC_STATE,
-  allocateHubSequence: () => allocateHubSequence,
-  assertWs09DeliveryState: () => assertWs09DeliveryState,
-  countPendingOutbox: () => countPendingOutbox,
-  findOutboxEntry: () => findOutboxEntry,
-  findSyncCursor: () => findSyncCursor,
-  insertLocalEventWithOutbox: () => insertLocalEventWithOutbox,
-  listLocalEventsForAggregate: () => listLocalEventsForAggregate,
-  recordSequenceGap: () => recordSequenceGap
-});
-var WS09_DELIVERY_STATE = "pending";
-var WS09_WIRE_SYNC_STATE = "pending_cloud_sync";
-async function allocateHubSequence(client) {
-  const result = await client.query(
-    `select edge_sync.allocate_hub_sequence()`
-  );
-  const value = result.rows[0]?.allocate_hub_sequence;
-  if (value === void 0) {
-    throw new Error("edge_sync.allocate_hub_sequence() returned no row.");
-  }
-  return value;
-}
-async function insertLocalEventWithOutbox(client, input) {
-  await client.query(
-    `insert into edge_sync.local_event
-       (id, tenant_id, digital_store_id, location_id, hub_device_id, origin_device_id,
-        actor_id, aggregate_type, aggregate_id, aggregate_version, event_type,
-        schema_version, business_date, occurred_at, hub_sequence, origin_sequence,
-        assignment_generation, idempotency_key, payload_sha256, payload, created_at)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::date, now(),
-             $14, $15, $16, $17, $18, $19::jsonb, now())`,
-    [
-      input.id,
-      input.tenantId,
-      input.digitalStoreId,
-      input.locationId,
-      input.hubDeviceId,
-      input.originDeviceId,
-      input.actorId,
-      input.aggregateType,
-      input.aggregateId,
-      input.aggregateVersion.toString(),
-      input.eventType,
-      input.schemaVersion,
-      input.businessDate,
-      input.hubSequence.toString(),
-      input.originSequence.toString(),
-      input.assignmentGeneration,
-      input.idempotencyKey,
-      input.payloadSha256,
-      JSON.stringify(input.payload)
-    ]
-  );
-  await client.query(
-    `insert into edge_sync.outbox
-       (event_id, tenant_id, digital_store_id, location_id, hub_sequence,
-        assignment_generation, delivery_state, attempt_count, next_attempt_at)
-     values ($1, $2, $3, $4, $5, $6, $7::edge_sync.delivery_state, 0, now())`,
-    [
-      input.id,
-      input.tenantId,
-      input.digitalStoreId,
-      input.locationId,
-      input.hubSequence.toString(),
-      input.assignmentGeneration,
-      WS09_DELIVERY_STATE
-    ]
-  );
-}
-async function listLocalEventsForAggregate(client, aggregateId) {
-  const result = await client.query(
-    `select id, aggregate_type, aggregate_id, aggregate_version, event_type,
-            schema_version, hub_sequence, origin_sequence, assignment_generation,
-            idempotency_key, payload_sha256, payload
-       from edge_sync.local_event where aggregate_id = $1 order by hub_sequence`,
-    [aggregateId]
-  );
-  return result.rows;
-}
-async function findOutboxEntry(client, eventId) {
-  const result = await client.query(
-    `select event_id, hub_sequence, assignment_generation, delivery_state,
-            attempt_count, cloud_ack_id, acknowledged_at
-       from edge_sync.outbox where event_id = $1`,
-    [eventId]
-  );
-  return result.rows[0];
-}
-async function countPendingOutbox(client, locationId) {
-  const result = await client.query(
-    `select count(*)::text as count from edge_sync.outbox
-      where location_id = $1 and delivery_state = 'pending'`,
-    [locationId]
-  );
-  return Number(result.rows[0]?.count ?? "0");
-}
-function assertWs09DeliveryState(state) {
-  if (state !== WS09_DELIVERY_STATE) {
-    throw new HubCommandError(
-      "EDGE_COMMAND_INACTIVE",
-      `WS-09 may only write delivery_state '${WS09_DELIVERY_STATE}'; '${state}' belongs to WS-10 (amendment \xA72).`,
-      { deliveryState: state }
-    );
-  }
-}
-async function recordSequenceGap(client, input) {
-  await client.query(
-    `select edge_sync.record_sequence_gap($1::uuid, $2::uuid, $3::uuid, $4::uuid,
-              $5::integer, $6::bigint, $7::text, $8::text, $9::text)`,
-    [
-      input.id,
-      input.tenantId,
-      input.digitalStoreId,
-      input.locationId,
-      input.assignmentGeneration,
-      input.hubSequence.toString(),
-      input.gapReason,
-      input.recordedBy,
-      input.note
-    ]
-  );
-}
-async function findSyncCursor(client, locationId, streamCode) {
-  const result = await client.query(
-    `select location_id, stream_code, last_pushed_hub_sequence, last_acked_hub_sequence,
-            last_pulled_cloud_sequence, last_applied_cloud_sequence
-       from edge_sync.sync_cursor where location_id = $1 and stream_code = $2`,
-    [locationId, streamCode]
-  );
-  return result.rows[0];
-}
+// src/hub/repositories/index.ts
+init_sync();
 
 // src/hub/safety-mode.ts
 var HUB_OPERATION_KINDS = [
@@ -6421,14 +10760,14 @@ async function readAppliedMigrations(client) {
     checksumSha256: row.checksum_sha256
   }));
 }
-async function readReportedClockOffsetSeconds(client, hubDeviceId) {
+async function readReportedClockOffsetSeconds(client, hubDeviceId2) {
   const result = await client.query(
     `select details_json ->> 'ntp_offset_seconds' as offset_seconds
        from edge_hardware.device_heartbeat
       where device_id = $1 and details_json ? 'ntp_offset_seconds'
       order by observed_at desc
       limit 1`,
-    [hubDeviceId]
+    [hubDeviceId2]
   );
   const raw = result.rows[0]?.offset_seconds;
   if (raw === null || raw === void 0) return void 0;
@@ -6601,385 +10940,15 @@ function decideStartup(observations) {
 
 // src/hub/edge/development-listener.ts
 import { readFileSync as readFileSync2 } from "node:fs";
-import { createHash as createHash7, createPrivateKey as createPrivateKey2, createPublicKey as createPublicKey2, sign as cryptoSign } from "node:crypto";
+import { createHash as createHash8, createPrivateKey as createPrivateKey2, createPublicKey as createPublicKey2, sign as cryptoSign } from "node:crypto";
 import { hostname as osHostname } from "node:os";
 import { join } from "node:path";
 
 // src/hub/pairing.ts
-import { randomUUID as randomUUID2, randomBytes } from "node:crypto";
-
-// ../../packages/device-identity/dist/index.js
-init_environments();
-init_errors();
-init_errors();
-
-// ../../packages/device-identity/dist/trusted-time.js
-init_errors();
-var MAX_REVOCATION_SNAPSHOT_AGE_HOURS = {
-  development: 30 * 24,
-  pilot: 14 * 24,
-  production: 14 * 24
-};
-
-// ../../packages/device-identity/dist/certificate-validity.js
-init_dev_crypto();
-
-// ../../packages/device-identity/dist/certificate-renewal.js
-var MS_PER_DAY = 1e3 * 60 * 60 * 24;
-
-// ../../packages/device-identity/dist/revocation-snapshot.js
-var MS_PER_HOUR = 1e3 * 60 * 60;
-
-// ../../packages/device-identity/dist/index.js
-init_dev_crypto();
-
-// ../../packages/device-identity/dist/certificate-issuance.js
-init_errors();
-init_dev_crypto();
-
-// ../../packages/device-identity/dist/operational-recovery-identity.js
-init_dev_crypto();
-
-// ../../packages/device-identity/dist/issuance-adapter.js
-init_dev_crypto();
-
-// ../../packages/device-identity/dist/replacement-key-pop.js
-init_dev_crypto();
-
-// ../../packages/device-identity/dist/provisioning-pop.js
-init_dev_crypto();
-
-// ../../packages/device-identity/dist/activation-ack.js
-init_dev_crypto();
-
-// ../../packages/device-identity/dist/pairing.js
-init_dev_crypto();
-import { createHash as createHash3 } from "node:crypto";
-var PAIRING_PROTOCOL_VERSION = "1.0";
-var PAIRING_PURPOSE = "hub_terminal_pairing";
-var PAIRING_TERMINAL_PROOF_KIND = "kitluy.pairing-terminal-proof.v1";
-var PAIRING_HUB_PROOF_KIND = "kitluy.pairing-hub-proof.v1";
-var PAIRING_RECEIPT_KIND = "kitluy.pairing-receipt.v1";
-var PAIRING_TRANSCRIPT_KIND = "kitluy.pairing-transcript.v1";
-function transcriptFields(t) {
-  return [
-    t.pairingSessionId,
-    t.protocolVersion,
-    t.purpose,
-    t.tenantId,
-    t.digitalStoreId,
-    t.storeLocationId,
-    t.environment,
-    t.hubDeviceId,
-    String(t.hubAssignmentGeneration),
-    t.hubCertificateSerial,
-    t.hubCertificateFingerprint,
-    t.terminalDeviceId,
-    String(t.terminalAssignmentGeneration),
-    t.terminalProfileKey,
-    t.terminalCertificateSerial,
-    t.terminalCertificateFingerprint,
-    t.terminalNonce,
-    t.hubNonce,
-    t.issuedAt.toISOString(),
-    t.expiresAt.toISOString()
-  ];
-}
-function pairingTranscriptBytes(t) {
-  return Buffer.from([PAIRING_TRANSCRIPT_KIND, ...transcriptFields(t)].join("\n"), "utf8");
-}
-function pairingTranscriptHash(t) {
-  return createHash3("sha256").update(Buffer.from(pairingTranscriptBytes(t))).digest("hex");
-}
-function terminalPairingProofBytes(t) {
-  return Buffer.from([PAIRING_TERMINAL_PROOF_KIND, ...transcriptFields(t)].join("\n"), "utf8");
-}
-function hubPairingProofBytes(t) {
-  return Buffer.from([PAIRING_HUB_PROOF_KIND, ...transcriptFields(t)].join("\n"), "utf8");
-}
-function pairingReceiptBytes(r) {
-  return Buffer.from([
-    PAIRING_RECEIPT_KIND,
-    r.receiptId,
-    r.receiptVersion,
-    r.pairingSessionId,
-    r.transcriptHash,
-    r.hubDeviceId,
-    r.hubCertificateFingerprint,
-    r.terminalDeviceId,
-    r.terminalCertificateFingerprint,
-    r.tenantId,
-    r.digitalStoreId,
-    r.storeLocationId,
-    r.environment,
-    String(r.terminalAssignmentGeneration),
-    r.terminalProfileKey,
-    r.pairedAt.toISOString(),
-    r.validUntil === null ? "-" : r.validUntil.toISOString(),
-    r.correlationId
-  ].join("\n"), "utf8");
-}
-function checkBindings(t, e, now) {
-  const refuse = (refusalCode, detail) => ({
-    verified: false,
-    refusalCode,
-    detail
-  });
-  if (t.protocolVersion !== PAIRING_PROTOCOL_VERSION || e.protocolVersion !== PAIRING_PROTOCOL_VERSION) {
-    return refuse("PAIR_VERSION_INCOMPATIBLE", `protocol ${t.protocolVersion} is not ${PAIRING_PROTOCOL_VERSION}`);
-  }
-  if (t.purpose !== PAIRING_PURPOSE || e.purpose !== PAIRING_PURPOSE) {
-    return refuse("PAIR_SESSION_MISMATCH", `the transcript purpose is ${t.purpose}`);
-  }
-  if (t.pairingSessionId !== e.pairingSessionId) {
-    return refuse("PAIR_SESSION_MISMATCH", "the proof belongs to another pairing session");
-  }
-  if (t.tenantId !== e.tenantId || t.digitalStoreId !== e.digitalStoreId || t.storeLocationId !== e.storeLocationId) {
-    return refuse("PAIR_ASSIGNMENT_MISMATCH", "the proof belongs to another Tenant, Store or Location");
-  }
-  if (t.environment !== e.environment) {
-    return refuse("PAIR_ASSIGNMENT_MISMATCH", `the proof is for environment ${t.environment}`);
-  }
-  if (t.hubDeviceId !== e.hubDeviceId || t.hubAssignmentGeneration !== e.hubAssignmentGeneration || t.hubCertificateSerial !== e.hubCertificateSerial || t.hubCertificateFingerprint !== e.hubCertificateFingerprint) {
-    return refuse("PAIR_ASSIGNMENT_MISMATCH", "the proof names a different Store Hub identity");
-  }
-  if (t.terminalDeviceId !== e.terminalDeviceId || t.terminalAssignmentGeneration !== e.terminalAssignmentGeneration || t.terminalCertificateSerial !== e.terminalCertificateSerial || t.terminalCertificateFingerprint !== e.terminalCertificateFingerprint) {
-    return refuse("PAIR_ASSIGNMENT_MISMATCH", "the proof names a different terminal identity");
-  }
-  if (t.terminalProfileKey !== e.terminalProfileKey) {
-    return refuse("PAIR_PROFILE_FORBIDDEN", "the proof names a profile the assignment does not grant");
-  }
-  if (t.terminalNonce !== e.terminalNonce || t.hubNonce !== e.hubNonce) {
-    return refuse("PAIR_NONCE_MISMATCH", "a directional nonce is not the one this session bound");
-  }
-  if (now.getTime() < t.issuedAt.getTime()) {
-    return refuse("PAIR_CHALLENGE_NOT_YET_VALID", "the session is dated in the future");
-  }
-  if (now.getTime() >= t.expiresAt.getTime()) {
-    return refuse("PAIR_CHALLENGE_EXPIRED", "the pairing session expired");
-  }
-  return null;
-}
-function verifyTerminalPairingProof(transcript, signature, terminalPublicKeyPem, expectation, hubTime, computeFingerprint, verifySignature = verifyDetachedSignature) {
-  const bound = checkBindings(transcript, expectation, hubTime);
-  if (bound !== null)
-    return bound;
-  const actual = computeFingerprint(terminalPublicKeyPem);
-  if (actual !== expectation.signerKeyFingerprint || transcript.terminalCertificateFingerprint !== expectation.signerKeyFingerprint) {
-    return {
-      verified: false,
-      refusalCode: "PAIR_CERT_INVALID",
-      detail: "the presented key is not the terminal's credentialed key"
-    };
-  }
-  if (!verifySignature(terminalPublicKeyPem, terminalPairingProofBytes(transcript), signature)) {
-    return {
-      verified: false,
-      refusalCode: "PAIR_CHALLENGE_FAILED",
-      detail: "the terminal proof does not verify under the credentialed key"
-    };
-  }
-  return { verified: true, transcriptHash: pairingTranscriptHash(transcript) };
-}
-
-// ../../packages/device-identity/dist/same-key-renewal-preflight.js
-init_dev_crypto();
-
-// ../../packages/device-identity/dist/same-key-renewal-issuance.js
-init_dev_crypto();
-
-// ../../packages/device-identity/dist/replacement-key-provider.js
-init_errors();
-init_dev_crypto();
-
-// ../../packages/device-identity/dist/rotate-key-renewal-issuance.js
-init_dev_crypto();
-
-// ../../packages/device-identity/dist/credential-lifecycle-jobs.js
-var DEVICE_JOB_MAX_ATTEMPTS = 5;
-
-// ../../packages/device-identity/dist/credential-revocation.js
-var COMPROMISE_REASONS = [
-  "KEY_COMPROMISE",
-  "DEVICE_STOLEN",
-  "PROVIDER_COMPROMISE",
-  // DEVICE_LOST belongs here for the same reason DEVICE_STOLEN does. The
-  // distinction between lost and stolen is about intent, not about custody:
-  // either way a device holding a private key is somewhere the operator does
-  // not control. Leaving it out allowed a lost device to be revoked with
-  // NO_RECOVERY, which opens no case and schedules no replacement — the exact
-  // outcome this list exists to prevent.
-  "DEVICE_LOST"
-];
-var COMPROMISE_REASON_SET = new Set(COMPROMISE_REASONS);
-
-// ../../packages/device-identity/dist/key-destruction.js
-var MAX_DESTRUCTION_EXECUTION_ATTEMPTS = 5;
-
-// ../../packages/device-identity/dist/revocation-and-destruction-jobs.js
-init_environments();
-var DEVICE_DESTRUCTION_JOB_MAX_ATTEMPTS = Math.min(DEVICE_JOB_MAX_ATTEMPTS, MAX_DESTRUCTION_EXECUTION_ATTEMPTS);
-var DEVICE_REVOCATION_JOB_FAILURE_CODES = {
-  /** The payload carried no approval request id. Rule: a worker never approves. */
-  APPROVAL_REFERENCE_ABSENT: "REVOCATION_APPROVAL_REFERENCE_ABSENT",
-  /** The payload named no approver. Same rule, other half of the pair. */
-  APPROVER_ABSENT: "REVOCATION_APPROVER_ABSENT",
-  /** The payload named the WORKER as approver — a synthesised approval. */
-  WORKER_SELF_APPROVED: "REVOCATION_WORKER_SELF_APPROVED",
-  REVOCATION_REFUSED: "REVOCATION_REFUSED",
-  REVOCATION_MANUAL_REVIEW: "REVOCATION_MANUAL_REVIEW_REQUIRED",
-  RECOVERY_DOWNGRADED: "RECOVERY_DISPOSITION_DOWNGRADED",
-  RECOVERY_MANUAL_REVIEW: "RECOVERY_MANUAL_SECURITY_REVIEW",
-  RECOVERY_UNKNOWN_REASON: "RECOVERY_UNKNOWN_REVOCATION_REASON",
-  RECOVERY_UNKNOWN_DISPOSITION: "RECOVERY_UNKNOWN_DISPOSITION",
-  DESTRUCTION_REFUSED: "DESTRUCTION_REFUSED",
-  DESTRUCTION_MANUAL_REVIEW: "DESTRUCTION_MANUAL_REVIEW_REQUIRED",
-  /** The provider was asked and did not say. NOT a retry. See Rule 3 below. */
-  DESTRUCTION_RECONCILIATION_REQUIRED: "DESTRUCTION_RECONCILIATION_REQUIRED",
-  DESTRUCTION_ATTEMPTS_EXHAUSTED: "DESTRUCTION_ATTEMPTS_EXHAUSTED",
-  DESTRUCTION_REQUEST_NOT_FOUND: "DESTRUCTION_REQUEST_NOT_FOUND",
-  DESTRUCTION_UNKNOWN_REQUEST_STATE: "DESTRUCTION_UNKNOWN_REQUEST_STATE",
-  PAYLOAD_INCOMPLETE: "DEVICE_JOB_PAYLOAD_INCOMPLETE",
-  ENVIRONMENT_UNRECOGNISED: "DEVICE_JOB_ENVIRONMENT_UNRECOGNISED",
-  /** The job named a different device from its subject. Runtime-classified. */
-  SCOPE_MISMATCH: "AUTHORIZATION_FAILED"
-};
-function completed(resultCode) {
-  return { kind: "completed", resultCode };
-}
-function failed(failureCode) {
-  return { kind: "failed", failureCode };
-}
-var REVOCATION_OUTCOME_ROUTING = {
-  REVOKED: completed("REVOKED"),
-  // Not "REVOKED, again". The credential was already repudiated, this attempt
-  // added no second effect, and that is precisely what makes replaying a job
-  // with the same dedupe key safe. Recorded as a replay, not a fresh success.
-  ALREADY_REVOKED: completed("JOB_RESULT_REPLAYED"),
-  REVOCATION_REFUSED: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.REVOCATION_REFUSED),
-  // Group 0136 saying a DIFFERENT intent met an already-revoked credential.
-  // Flattening it into a success is how a conflict becomes a green tick.
-  MANUAL_REVIEW_REQUIRED: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.REVOCATION_MANUAL_REVIEW)
-};
-var REVOCATION_OUTCOME_INDEX = new Map(Object.entries(REVOCATION_OUTCOME_ROUTING));
-var REVOCATION_REFUSAL_ROUTING = {
-  REVOCATION_NO_REQUEST_ID: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.PAYLOAD_INCOMPLETE),
-  REVOCATION_NO_REQUESTER: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.PAYLOAD_INCOMPLETE),
-  REVOCATION_NO_SOURCE: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.PAYLOAD_INCOMPLETE),
-  REVOCATION_NO_REASON: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.PAYLOAD_INCOMPLETE),
-  REVOCATION_SELF_APPROVED: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.WORKER_SELF_APPROVED),
-  REVOCATION_RECOVERY_DOWNGRADED: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.RECOVERY_DOWNGRADED),
-  // The only retryable one, and only because nothing was decided.
-  REVOCATION_GATEWAY_FAILED: failed("DATABASE_UNAVAILABLE"),
-  // NOT retryable. A privilege denial is permanent: retrying it burns the
-  // attempt budget and then dead-letters an AUTHORIZATION failure as a database
-  // outage, which sends whoever reads it looking at the wrong thing.
-  REVOCATION_NOT_AUTHORIZED: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.REVOCATION_MANUAL_REVIEW),
-  REVOCATION_UNKNOWN_OUTCOME: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.REVOCATION_MANUAL_REVIEW)
-};
-var REVOCATION_REFUSAL_INDEX = new Map(Object.entries(REVOCATION_REFUSAL_ROUTING));
-var KEY_DESTRUCTION_OUTCOME_ROUTING = {
-  DESTROYED: completed("DESTROYED"),
-  // The provider had already erased it and said so with evidence. One key, one
-  // erasure: this is a replay, and recording it as a fresh destruction would
-  // make the attempt log claim two keys died.
-  ALREADY_DESTROYED: completed("JOB_RESULT_REPLAYED"),
-  ALREADY_CONFIRMED: completed("JOB_RESULT_REPLAYED"),
-  DESTRUCTION_REFUSED: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.DESTRUCTION_REFUSED),
-  // AMBIGUITY IS NOT A TRANSIENT FAULT. The provider was asked and did not say,
-  // so nobody knows whether a private key still exists. A retry would call the
-  // provider AGAIN on a request whose first call may have succeeded; this code
-  // is absent from `RETRYABLE_FAILURE_CODES` on purpose, so the runtime routes
-  // it to manual review, and the handler additionally proposes a reconcile job.
-  RECONCILIATION_REQUIRED: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.DESTRUCTION_RECONCILIATION_REQUIRED),
-  MANUAL_REVIEW_REQUIRED: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.DESTRUCTION_MANUAL_REVIEW)
-};
-var KEY_DESTRUCTION_OUTCOME_INDEX = new Map(Object.entries(KEY_DESTRUCTION_OUTCOME_ROUTING));
-var RECOVERY_DISPOSITION_ROUTING = {
-  NO_RECOVERY: completed("NO_ACTION_REQUIRED"),
-  RECOVERY_REQUIRED: completed("RECOVERY_REQUIRED"),
-  REPROVISION_REQUIRED: completed("REPROVISION_REQUIRED"),
-  REASSIGNMENT_REQUIRED: completed("REASSIGNMENT_REQUIRED"),
-  MANUAL_SECURITY_REVIEW: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.RECOVERY_MANUAL_REVIEW)
-};
-var RECOVERY_DISPOSITION_INDEX = new Map(Object.entries(RECOVERY_DISPOSITION_ROUTING));
-var DESTRUCTION_REQUEST_STATUS_ROUTING = {
-  executed: completed("JOB_RESULT_REPLAYED"),
-  requested: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.DESTRUCTION_RECONCILIATION_REQUIRED),
-  approved: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.DESTRUCTION_RECONCILIATION_REQUIRED),
-  pending_execution: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.DESTRUCTION_RECONCILIATION_REQUIRED),
-  failed: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.DESTRUCTION_RECONCILIATION_REQUIRED),
-  manual_review: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.DESTRUCTION_RECONCILIATION_REQUIRED),
-  cancelled: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.DESTRUCTION_RECONCILIATION_REQUIRED),
-  expired: failed(DEVICE_REVOCATION_JOB_FAILURE_CODES.DESTRUCTION_RECONCILIATION_REQUIRED)
-};
-var DESTRUCTION_REQUEST_STATUS_INDEX = new Map(Object.entries(DESTRUCTION_REQUEST_STATUS_ROUTING));
-
-// ../../packages/device-identity/dist/edge-discovery.js
-init_dev_crypto();
-var EDGE_DISCOVERY_KIND = "kitluy.edge-discovery.v1";
-var EDGE_DISCOVERY_SERVICE_TYPE = "_kitluy-edge._tcp.local";
-var EDGE_DISCOVERY_REFRESH_SECONDS = 30;
-var EDGE_DISCOVERY_VALIDITY_SECONDS = 90;
-var EDGE_LAN_PORT = 7443;
-function edgeDiscoveryRecordBytes(record) {
-  return Buffer.from([
-    EDGE_DISCOVERY_KIND,
-    record.protocolVersion,
-    record.recordId,
-    record.hubDeviceId,
-    record.hubCertificateFingerprint,
-    record.tenantId,
-    record.digitalStoreId,
-    record.storeLocationId,
-    record.environment,
-    record.hostname,
-    String(record.port),
-    record.issuedAt.toISOString(),
-    record.expiresAt.toISOString()
-  ].join("\n"), "utf8");
-}
-
-// ../../packages/device-identity/dist/manufacturing-enrollment-pop.js
-init_dev_crypto();
-
-// ../../packages/device-identity/dist/terminal-configuration-delivery.js
-init_dev_crypto();
-var TERMINAL_CONFIGURATION_DELIVERY_KIND = "kitluy.terminal-configuration-delivery.v1";
-function terminalConfigurationDeliveryBytes(d) {
-  return Buffer.from([
-    TERMINAL_CONFIGURATION_DELIVERY_KIND,
-    d.snapshotId,
-    String(d.configurationVersion),
-    String(d.schemaVersion),
-    d.tenantId,
-    d.digitalStoreId,
-    d.storeLocationId,
-    d.environment,
-    d.hubDeviceId,
-    d.terminalDeviceId,
-    String(d.assignmentGeneration),
-    d.terminalProfileCode,
-    d.minimumApplicationVersion,
-    d.maximumApplicationVersion === null ? "-" : d.maximumApplicationVersion,
-    d.issuedAt.toISOString(),
-    d.effectiveAt.toISOString(),
-    d.validUntil.toISOString(),
-    d.manifestSha256,
-    d.payloadSha256,
-    d.signingKeyId,
-    d.correlationId
-  ].join("\n"), "utf8");
-}
-
-// ../../packages/device-identity/dist/credential-package.js
-init_dev_crypto();
-
-// ../../packages/device-identity/dist/device-registration-request.js
-init_dev_crypto();
-
-// src/hub/pairing.ts
+init_dist();
 init_db();
+init_audit();
+import { randomUUID as randomUUID2, randomBytes } from "node:crypto";
 
 // ../../packages/event-contracts/dist/index.js
 var EVENT_NAME_PATTERN = /^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/;
@@ -7071,9 +11040,17 @@ var asId = {
   idempotencyKey: (v) => v
 };
 
+// src/hub/pairing-replication.ts
+init_errors();
+
 // src/hub/outbox.ts
 import { createHash as createHash4 } from "node:crypto";
 init_hub_database();
+
+// src/hub/effect-contract.ts
+init_errors();
+
+// src/hub/outbox.ts
 function sha256Hex2(input) {
   return createHash4("sha256").update(input, "utf8").digest("hex");
 }
@@ -7766,6 +11743,7 @@ var TerminalPairingComposition = class {
 };
 
 // src/hub/edge/discovery.ts
+init_dist();
 import { randomUUID as randomUUID3 } from "node:crypto";
 var NO_LOG2 = { info: () => void 0 };
 var EdgeDiscoveryAuthority = class {
@@ -7850,12 +11828,15 @@ var EdgeDiscoveryAuthority = class {
 };
 
 // src/hub/edge/routes.ts
-import { randomUUID as randomUUID7 } from "node:crypto";
+import { randomUUID as randomUUID8 } from "node:crypto";
+init_dist();
 init_db();
 
 // src/hub/terminal-health.ts
 import { randomUUID as randomUUID4 } from "node:crypto";
 init_db();
+init_errors();
+init_sync();
 var TERMINAL_HEALTH_EVENT_NAME = "device_fleet.health_projection_reported";
 var TERMINAL_HEALTH_SCHEMA_VERSION = 1;
 var TERMINAL_HEALTH_AGGREGATE_TYPE = "device_fleet_health";
@@ -8213,726 +12194,15 @@ async function acceptTerminalHeartbeat(pool, terminalDeviceId, body, environment
   );
 }
 
-// src/hub/edge/runtime-bootstrap.ts
-import { createHash as createHash5, randomUUID as randomUUID5, scryptSync, timingSafeEqual } from "node:crypto";
-init_db();
-init_hub_database();
-var RUNTIME_PROTOCOL_VERSION = "1.0";
-var AUTHORITY_TIME_MAX_CACHE_AGE_SECONDS = 30;
-var DEV_STAFF_SESSION_LIFETIME_MINUTES = 30;
-var T1_PROFILE_CODE = "laundry.t1.intake_cashier";
-var PERMISSION_STAFF_SESSIONS_OPEN = "staff.sessions.open";
-var PERMISSION_STAFF_SESSIONS_READ = "staff.sessions.read";
-var PERMISSION_STAFF_SESSIONS_REFRESH = "staff.sessions.refresh";
-var PERMISSION_STAFF_SESSIONS_CLOSE = "staff.sessions.close";
-var PERMISSION_POS_T1_USE = "pos.t1.use";
-var PERMISSION_CUSTOMERS_READ = "customers.read";
-var PERMISSION_CUSTOMERS_CREATE = "customers.create";
-var PERMISSION_CONSENT_RECORD = "customers.consent.record";
-var PERMISSION_BOOKINGS_READ = "laundry.bookings.read";
-var PERMISSION_BOOKINGS_CREATE = "laundry.bookings.create";
-async function readAuthorityTime(pool) {
-  const instant = await withHubTransaction(
-    pool,
-    async (client) => {
-      const result = await client.query(`select now() as now`);
-      const row = result.rows[0];
-      if (row === void 0) throw new Error("the Hub database returned no transaction time");
-      return row.now;
-    },
-    HUB_RUNTIME_ROLE
-  );
-  const iso = instant.toISOString();
-  return {
-    protocolVersion: RUNTIME_PROTOCOL_VERSION,
-    authorityTime: iso,
-    authoritySource: "hub_database",
-    responseId: randomUUID5(),
-    generatedAt: iso,
-    maxCacheAgeSeconds: AUTHORITY_TIME_MAX_CACHE_AGE_SECONDS
-  };
-}
-async function readRuntimeEligibility(pool, terminalDeviceId, certificateSerial, environment) {
-  return withHubTransaction(
-    pool,
-    async (client) => deriveEligibility(client, terminalDeviceId, certificateSerial, environment),
-    HUB_RUNTIME_ROLE
-  );
-}
-async function selectOperationalHubIdentity(client) {
-  const operational = await client.query(
-    `select id
-       from edge_identity.hub_device
-      where device_kind = 'store_hub'
-        and trust_status = 'trusted'
-        and lifecycle_status = 'deployed'
-      order by created_at
-      limit 1`
-  );
-  const row = operational.rows[0];
-  if (row !== void 0) {
-    return { kind: "operational", id: row.id };
-  }
-  const newest = await client.query(
-    `select lifecycle_status
-       from edge_identity.hub_device
-      where device_kind = 'store_hub'
-      order by created_at desc
-      limit 1`
-  );
-  const current = newest.rows[0];
-  if (current === void 0) {
-    return {
-      kind: "refused",
-      refusal: "HUB_NOT_OPERATIONAL",
-      detail: "no Store Hub device record exists"
-    };
-  }
-  if (current.lifecycle_status === "retired") {
-    return { kind: "refused", refusal: "HUB_RETIRED", detail: "this Store Hub is retired" };
-  }
-  return {
-    kind: "refused",
-    refusal: "HUB_NOT_OPERATIONAL",
-    detail: "this Store Hub has no trusted, deployed identity"
-  };
-}
-async function readContainmentDirective(client, terminalDeviceId) {
-  const containment = await client.query(
-    `select directive from edge_identity.effective_containment where device_uuid = $1::uuid`,
-    [terminalDeviceId]
-  );
-  return containment.rows[0]?.directive ?? "none";
-}
-function isBlockingContainment(directive) {
-  return directive === "operations_restricted" || directive === "suspended" || directive === "quarantined";
-}
-async function readBlockingContainment(client, terminalDeviceId) {
-  const directive = await readContainmentDirective(client, terminalDeviceId);
-  return isBlockingContainment(directive) ? directive : null;
-}
-async function deriveEligibility(client, terminalDeviceId, certificateSerial, environment) {
-  const refuse = (refusal2, detail) => ({
-    outcome: "refused",
-    refusal: refusal2,
-    detail
-  });
-  const identity = await selectOperationalHubIdentity(client);
-  if (identity.kind === "refused") {
-    return refuse(identity.refusal, identity.detail);
-  }
-  const hubRow = { id: identity.id };
-  const replacement = await client.query(
-    `select mode from edge_identity.hub_replacement_state where singleton = true`
-  );
-  const mode = replacement.rows[0]?.mode ?? "normal";
-  if (mode !== "normal") {
-    return mode === "retired_rejected" ? refuse("HUB_RETIRED", "this Store Hub is locally retired") : refuse("HUB_REPLACEMENT_BLOCKED", `hub replacement state is ${mode}`);
-  }
-  const hubAssignment = await client.query(
-    `select hub_device_id, tenant_id, digital_store_id, location_id, assignment_generation
-       from edge_identity.hub_assignment
-      where hub_device_id = $1 and ended_at is null
-      order by assignment_generation desc
-      limit 1`,
-    [hubRow.id]
-  );
-  const scope = hubAssignment.rows[0];
-  if (scope === void 0) {
-    return refuse("HUB_ASSIGNMENT_MISSING", "this Store Hub has no active assignment");
-  }
-  const terminal = await client.query(
-    `select tenant_id, digital_store_id, location_id, assignment_generation, lifecycle_status
-       from edge_identity.terminal_device
-      where id = $1::uuid`,
-    [terminalDeviceId]
-  );
-  const terminalRow = terminal.rows[0];
-  if (terminalRow === void 0) {
-    return refuse("CREDENTIAL_NOT_CURRENT", "the terminal projection is missing");
-  }
-  if (terminalRow.tenant_id !== scope.tenant_id || terminalRow.digital_store_id !== scope.digital_store_id || terminalRow.location_id !== scope.location_id) {
-    return refuse(
-      "ASSIGNMENT_SCOPE_MISMATCH",
-      "the terminal belongs to another Tenant, Store or Location"
-    );
-  }
-  const credential = await client.query(
-    `select id, rotation_generation, status
-       from edge_identity.device_credential
-      where certificate_serial = $1`,
-    [certificateSerial]
-  );
-  const credentialRow = credential.rows[0];
-  if (credentialRow === void 0 || credentialRow.status !== "active") {
-    return refuse("CREDENTIAL_NOT_CURRENT", "the presented credential is not current");
-  }
-  const receipt = await client.query(
-    `select terminal_assignment_generation, terminal_profile_code, paired_at
-       from edge_identity.pairing_receipt
-      where terminal_device_id = $1::uuid
-      order by terminal_assignment_generation desc, paired_at desc
-      limit 1`,
-    [terminalDeviceId]
-  );
-  const receiptRow = receipt.rows[0];
-  if (receiptRow === void 0) {
-    return refuse("PAIRING_REQUIRED", "no pairing receipt exists for this terminal");
-  }
-  if (receiptRow.terminal_assignment_generation > terminalRow.assignment_generation) {
-    return refuse(
-      "ASSIGNMENT_GENERATION_STALE",
-      "the terminal's assignment generation is behind one it has already paired at on this Hub"
-    );
-  }
-  if (receiptRow.terminal_assignment_generation < terminalRow.assignment_generation) {
-    const blocking = await readBlockingContainment(client, terminalDeviceId);
-    if (blocking !== null) {
-      return refuse("CONTAINMENT_PROHIBITS", `containment directive ${blocking} is in effect`);
-    }
-    return refuse(
-      "PAIRING_REQUIRED",
-      "the pairing receipt binds an earlier assignment generation; pair again at the current one"
-    );
-  }
-  const grant = await client.query(
-    `select tpa.id, tpa.profile_code
-       from edge_config.terminal_profile_assignment tpa
-       join edge_config.configuration_snapshot cs on cs.id = tpa.source_snapshot_id
-      where tpa.terminal_device_id = $1::uuid
-        and tpa.enabled
-        and tpa.effective_from <= now()
-        and (tpa.effective_until is null or tpa.effective_until > now())
-        and cs.state = 'active'
-      order by tpa.assignment_version desc
-      limit 1`,
-    [terminalDeviceId]
-  );
-  const grantRow = grant.rows[0];
-  if (grantRow === void 0) {
-    return refuse("PROFILE_NOT_GRANTED", "no enabled profile assignment exists");
-  }
-  if (grantRow.profile_code !== T1_PROFILE_CODE) {
-    return refuse("PROFILE_NOT_T1", `the assigned profile is ${grantRow.profile_code}`);
-  }
-  if (receiptRow.terminal_profile_code !== grantRow.profile_code) {
-    return refuse("ASSIGNMENT_GENERATION_STALE", "the pairing receipt binds another profile");
-  }
-  const directive = await readContainmentDirective(client, terminalDeviceId);
-  if (isBlockingContainment(directive)) {
-    return refuse("CONTAINMENT_PROHIBITS", `containment directive ${directive} is in effect`);
-  }
-  const containmentState = directive === "cleared" ? "none" : directive;
-  const snapshot = await client.query(
-    `select snapshot_version
-       from edge_config.configuration_snapshot
-      where location_id = $1::uuid and state = 'active'`,
-    [terminalRow.location_id]
-  );
-  const requiredVersion = snapshot.rows[0]?.snapshot_version;
-  const nowRow = await client.query(`select now() as now`);
-  const authorityTime = nowRow.rows[0]?.now ?? /* @__PURE__ */ new Date(0);
-  return {
-    outcome: "eligible",
-    payload: {
-      protocolVersion: RUNTIME_PROTOCOL_VERSION,
-      tenantId: terminalRow.tenant_id,
-      digitalStoreId: terminalRow.digital_store_id,
-      storeLocationId: terminalRow.location_id,
-      environment,
-      hubDeviceId: hubRow.id,
-      terminalDeviceId,
-      assignmentId: grantRow.id,
-      assignmentGeneration: terminalRow.assignment_generation,
-      terminalProfileCode: grantRow.profile_code,
-      credentialId: credentialRow.id,
-      credentialGeneration: credentialRow.rotation_generation,
-      credentialEligibility: "eligible",
-      activationEligibility: "activated",
-      pairingEligibility: "paired",
-      pairedAt: receiptRow.paired_at.toISOString(),
-      containmentState,
-      hubReplacementState: mode,
-      requiredConfigurationVersion: requiredVersion === void 0 ? null : Number(requiredVersion),
-      authorityTime: authorityTime.toISOString()
-    }
-  };
-}
-var DEV_DELIVERY_VALIDITY_HOURS = 24;
-async function readCurrentConfigurationDelivery(pool, terminalDeviceId, certificateSerial, environment, signer, correlationId) {
-  return withHubTransaction(
-    pool,
-    async (client) => {
-      const eligibility = await deriveEligibility(
-        client,
-        terminalDeviceId,
-        certificateSerial,
-        environment
-      );
-      if (eligibility.outcome === "refused") {
-        return {
-          outcome: "refused",
-          refusal: eligibility.refusal,
-          detail: eligibility.detail
-        };
-      }
-      const scope = eligibility.payload;
-      const snapshot = await client.query(
-        `select id, snapshot_version, schema_version, created_at, not_before,
-                expires_at, manifest_sha256, signing_key_id
-           from edge_config.configuration_snapshot
-          where location_id = $1::uuid and state = 'active'`,
-        [scope.storeLocationId]
-      );
-      const snapshotRow = snapshot.rows[0];
-      if (snapshotRow === void 0) {
-        return {
-          outcome: "refused",
-          refusal: "CONFIGURATION_MISSING",
-          detail: "no active configuration snapshot exists for this Location"
-        };
-      }
-      const sections = await client.query(
-        `select section_code, content_json
-           from edge_config.configuration_section
-          where snapshot_id = $1::uuid
-          order by section_code asc`,
-        [snapshotRow.id]
-      );
-      const payload = {};
-      for (const row of sections.rows) payload[row.section_code] = row.content_json;
-      const payloadJson = canonicalJson(payload);
-      const payloadSha256 = createHash5("sha256").update(Buffer.from(payloadJson, "utf8")).digest("hex");
-      const profilesSection = payload["terminal_profiles"];
-      const compatibility = profilesSection?.application_compatibility;
-      const minimumApplicationVersion = typeof compatibility?.["minimum_application_version"] === "string" ? compatibility["minimum_application_version"] : "0.0.0";
-      const maximumApplicationVersion = typeof compatibility?.["maximum_application_version"] === "string" ? compatibility["maximum_application_version"] : null;
-      const nowRow = await client.query(`select now() as now`);
-      const now = nowRow.rows[0] ?? { now: /* @__PURE__ */ new Date(0) };
-      const validUntil = snapshotRow.expires_at ?? new Date(now.now.getTime() + DEV_DELIVERY_VALIDITY_HOURS * 36e5);
-      const rollback = await client.query(
-        `select snapshot_version
-           from edge_config.configuration_snapshot
-          where location_id = $1::uuid and state = 'staged'
-          order by snapshot_version desc
-          limit 1`,
-        [scope.storeLocationId]
-      );
-      const rollbackRow = rollback.rows[0];
-      const delivery = {
-        snapshotId: snapshotRow.id,
-        configurationVersion: Number(snapshotRow.snapshot_version),
-        schemaVersion: snapshotRow.schema_version,
-        tenantId: scope.tenantId,
-        digitalStoreId: scope.digitalStoreId,
-        storeLocationId: scope.storeLocationId,
-        environment,
-        hubDeviceId: scope.hubDeviceId,
-        terminalDeviceId,
-        assignmentGeneration: scope.assignmentGeneration,
-        terminalProfileCode: scope.terminalProfileCode,
-        minimumApplicationVersion,
-        maximumApplicationVersion,
-        issuedAt: snapshotRow.created_at,
-        effectiveAt: snapshotRow.not_before,
-        validUntil,
-        manifestSha256: snapshotRow.manifest_sha256,
-        payloadSha256,
-        signingKeyId: snapshotRow.signing_key_id,
-        correlationId
-      };
-      const deliverySignature = Buffer.from(
-        signer.sign(terminalConfigurationDeliveryBytes(delivery))
-      ).toString("base64url");
-      return {
-        outcome: "delivery",
-        body: {
-          delivery: {
-            ...delivery,
-            issuedAt: delivery.issuedAt.toISOString(),
-            effectiveAt: delivery.effectiveAt.toISOString(),
-            validUntil: delivery.validUntil.toISOString()
-          },
-          payloadJson,
-          deliverySignature,
-          deliverySignerCertificateSerial: signer.certificateSerial,
-          deliverySignerPublicKeyFingerprint: publicKeyFingerprint(signer.publicKeyPem),
-          rollbackReference: rollbackRow === void 0 ? null : Number(rollbackRow.snapshot_version)
-        }
-      };
-    },
-    HUB_RUNTIME_ROLE
-  );
-}
-function staffCredentialVerifier(actorId, passcode) {
-  return scryptSync(passcode, `kitluy.staff.${actorId}`, 32, { N: 16384, r: 8, p: 1 });
-}
-function verifyStaffCredential(actorId, passcode, storedVerifier) {
-  if (storedVerifier.length !== 32) return false;
-  const presented = staffCredentialVerifier(actorId, passcode);
-  return timingSafeEqual(presented, storedVerifier);
-}
-async function resolveGrant(client, scope, actorId, permissionKey) {
-  const result = await client.query(
-    `select edge_config.resolve_permission_grant(
-              $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5,
-              'store_location', $3::uuid, true, now()) as verdict`,
-    [scope.tenantId, scope.digitalStoreId, scope.locationId, actorId, permissionKey]
-  );
-  return result.rows[0]?.verdict ?? "unknown";
-}
-async function effectivePermissions(client, scope, actorId) {
-  const keys = [
-    PERMISSION_STAFF_SESSIONS_OPEN,
-    PERMISSION_STAFF_SESSIONS_READ,
-    PERMISSION_STAFF_SESSIONS_REFRESH,
-    PERMISSION_STAFF_SESSIONS_CLOSE,
-    PERMISSION_POS_T1_USE,
-    PERMISSION_CUSTOMERS_READ,
-    PERMISSION_CUSTOMERS_CREATE,
-    PERMISSION_CONSENT_RECORD,
-    PERMISSION_BOOKINGS_READ,
-    PERMISSION_BOOKINGS_CREATE
-  ];
-  const held = [];
-  for (const key of keys) {
-    if (await resolveGrant(client, scope, actorId, key) === "allow") held.push(key);
-  }
-  return held;
-}
-function staffScope(row) {
-  return {
-    tenantId: row.tenant_id,
-    digitalStoreId: row.digital_store_id,
-    locationId: row.location_id
-  };
-}
-function sessionScope(row) {
-  return {
-    tenantId: row.tenant_id,
-    digitalStoreId: row.digital_store_id,
-    locationId: row.location_id
-  };
-}
-async function openStaffSession(pool, input) {
-  return withHubTransaction(
-    pool,
-    async (client) => {
-      const refuse = (refusal2, detail) => ({
-        outcome: "refused",
-        refusal: refusal2,
-        detail
-      });
-      const terminal = await client.query(
-        `select id, tenant_id, digital_store_id, location_id, assignment_generation, lifecycle_status
-           from edge_identity.terminal_device where id = $1::uuid`,
-        [input.terminalDeviceId]
-      );
-      const terminalRow = terminal.rows[0];
-      if (terminalRow === void 0) return refuse("SESSION_UNKNOWN", "unknown terminal");
-      const staff = await client.query(
-        `select actor_id, tenant_id, digital_store_id, location_id, display_name,
-                credential_verifier, profile_codes, offline_valid_until, disabled
-           from edge_identity.staff_cache where actor_id = $1::uuid`,
-        [input.actorId]
-      );
-      const staffRow = staff.rows[0];
-      if (staffRow === void 0) return refuse("STAFF_UNKNOWN", "no such staff member");
-      if (staffRow.disabled) return refuse("STAFF_DISABLED", "the staff member is disabled");
-      if (staffRow.tenant_id !== terminalRow.tenant_id || staffRow.digital_store_id !== terminalRow.digital_store_id || staffRow.location_id !== terminalRow.location_id) {
-        return refuse("STAFF_SCOPE_MISMATCH", "the staff member belongs to another Store");
-      }
-      if (!verifyStaffCredential(input.actorId, input.passcode, staffRow.credential_verifier)) {
-        return refuse("STAFF_CREDENTIAL_INVALID", "the presented credential does not verify");
-      }
-      if (!staffRow.profile_codes.includes(input.profileCode)) {
-        return refuse(
-          "STAFF_PROFILE_NOT_AUTHORIZED",
-          "the staff member is not authorized for this profile"
-        );
-      }
-      if (await resolveGrant(
-        client,
-        staffScope(staffRow),
-        input.actorId,
-        PERMISSION_STAFF_SESSIONS_OPEN
-      ) !== "allow") {
-        return refuse(
-          "SESSION_PERMISSION_DENIED",
-          `${PERMISSION_STAFF_SESSIONS_OPEN} is not granted`
-        );
-      }
-      const nowRow = await client.query(`select now() as now`);
-      const now = nowRow.rows[0]?.now ?? /* @__PURE__ */ new Date(0);
-      if (now.getTime() >= staffRow.offline_valid_until.getTime()) {
-        return refuse("STAFF_DISABLED", "the staff cache entry is beyond its governed validity");
-      }
-      const existing = await client.query(
-        `select id, actor_id, opened_at, expires_at, session_generation
-           from edge_identity.terminal_session
-          where terminal_device_id = $1::uuid and profile_code = $2 and closed_at is null`,
-        [input.terminalDeviceId, input.profileCode]
-      );
-      const open = existing.rows[0];
-      if (open !== void 0) {
-        if (open.expires_at.getTime() <= now.getTime()) {
-          await client.query(
-            `update edge_identity.terminal_session set closed_at = now(), status = 'expired' where id = $1::uuid`,
-            [open.id]
-          );
-        } else if (open.actor_id === input.actorId) {
-          const held2 = await effectivePermissions(client, staffScope(staffRow), input.actorId);
-          return {
-            outcome: "ok",
-            result: "SESSION_ALREADY_OPEN",
-            session: {
-              sessionId: open.id,
-              actorId: input.actorId,
-              displayName: staffRow.display_name,
-              profileCode: input.profileCode,
-              openedAt: open.opened_at.toISOString(),
-              expiresAt: open.expires_at.toISOString(),
-              sessionGeneration: open.session_generation,
-              effectivePermissions: held2,
-              authorityTime: now.toISOString()
-            }
-          };
-        } else {
-          return refuse("SESSION_OCCUPIED", "another staff member's session is open");
-        }
-      }
-      const lifetimeMs = DEV_STAFF_SESSION_LIFETIME_MINUTES * 6e4;
-      const expiresAt = new Date(
-        Math.min(now.getTime() + lifetimeMs, staffRow.offline_valid_until.getTime())
-      );
-      const sessionId = randomUUID5();
-      const generation = (open?.session_generation ?? 0) + 1;
-      await client.query(
-        `insert into edge_identity.terminal_session
-           (id, tenant_id, digital_store_id, location_id, terminal_device_id, actor_id,
-            profile_code, opened_at, expires_at, closed_at, session_generation,
-            last_event_sequence, status)
-         values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6::uuid,
-                 $7, $8, $9, null, $10, 0, 'open')`,
-        [
-          sessionId,
-          staffRow.tenant_id,
-          staffRow.digital_store_id,
-          staffRow.location_id,
-          input.terminalDeviceId,
-          input.actorId,
-          input.profileCode,
-          now,
-          expiresAt,
-          generation
-        ]
-      );
-      const held = await effectivePermissions(client, staffScope(staffRow), input.actorId);
-      return {
-        outcome: "ok",
-        result: "SESSION_OPENED",
-        session: {
-          sessionId,
-          actorId: input.actorId,
-          displayName: staffRow.display_name,
-          profileCode: input.profileCode,
-          openedAt: now.toISOString(),
-          expiresAt: expiresAt.toISOString(),
-          sessionGeneration: generation,
-          effectivePermissions: held,
-          authorityTime: now.toISOString()
-        }
-      };
-    },
-    HUB_RUNTIME_ROLE
-  );
-}
-async function loadOwnedOpenSession(client, sessionId, terminalDeviceId) {
-  const result = await client.query(
-    `select id, actor_id, tenant_id, digital_store_id, location_id, terminal_device_id, profile_code,
-            opened_at, expires_at, closed_at, session_generation
-       from edge_identity.terminal_session where id = $1::uuid`,
-    [sessionId]
-  );
-  const row = result.rows[0];
-  if (row === void 0)
-    return { ok: false, refusal: "SESSION_UNKNOWN", detail: "no such session" };
-  if (row.terminal_device_id !== terminalDeviceId) {
-    return { ok: false, refusal: "SESSION_UNKNOWN", detail: "no such session" };
-  }
-  if (row.closed_at !== null) {
-    return { ok: false, refusal: "SESSION_CLOSED", detail: "the session is closed" };
-  }
-  return { ok: true, row };
-}
-async function authorizeT1IntakeSession(client, input) {
-  const owned = await loadOwnedOpenSession(client, input.sessionId, input.terminalDeviceId);
-  if (!owned.ok) return { ok: false, refusal: owned.refusal, detail: owned.detail };
-  const row = owned.row;
-  const nowRow = await client.query(`select now() as now`);
-  const now = nowRow.rows[0];
-  if (now === void 0) {
-    return { ok: false, refusal: "SESSION_UNKNOWN", detail: "no transaction time" };
-  }
-  if (row.expires_at.getTime() <= now.now.getTime()) {
-    return { ok: false, refusal: "SESSION_EXPIRED", detail: "the session already expired" };
-  }
-  if (row.profile_code !== T1_PROFILE_CODE) {
-    return { ok: false, refusal: "T1_NOT_AUTHORIZED", detail: "the session is not a T1 session" };
-  }
-  const scope = sessionScope(row);
-  if (await resolveGrant(client, scope, row.actor_id, PERMISSION_POS_T1_USE) !== "allow") {
-    return {
-      ok: false,
-      refusal: "T1_NOT_AUTHORIZED",
-      detail: `${PERMISSION_POS_T1_USE} is not granted`
-    };
-  }
-  if (await resolveGrant(client, scope, row.actor_id, input.routePermission) !== "allow") {
-    return {
-      ok: false,
-      refusal: "SESSION_PERMISSION_DENIED",
-      detail: `${input.routePermission} is not granted`
-    };
-  }
-  return {
-    ok: true,
-    authority: {
-      sessionId: row.id,
-      actorId: row.actor_id,
-      tenantId: row.tenant_id,
-      digitalStoreId: row.digital_store_id,
-      locationId: row.location_id,
-      profileCode: row.profile_code
-    }
-  };
-}
-async function refreshStaffSession(pool, input) {
-  return withHubTransaction(
-    pool,
-    async (client) => {
-      const refuse = (refusal2, detail) => ({
-        outcome: "refused",
-        refusal: refusal2,
-        detail
-      });
-      const owned = await loadOwnedOpenSession(client, input.sessionId, input.terminalDeviceId);
-      if (!owned.ok) return refuse(owned.refusal, owned.detail);
-      const row = owned.row;
-      const nowRow = await client.query(`select now() as now`);
-      const now = nowRow.rows[0]?.now ?? /* @__PURE__ */ new Date(0);
-      if (row.expires_at.getTime() <= now.getTime()) {
-        await client.query(
-          `update edge_identity.terminal_session set closed_at = now(), status = 'expired' where id = $1::uuid`,
-          [row.id]
-        );
-        return refuse("SESSION_EXPIRED", "the session already expired");
-      }
-      if (await resolveGrant(
-        client,
-        sessionScope(row),
-        row.actor_id,
-        PERMISSION_STAFF_SESSIONS_REFRESH
-      ) !== "allow") {
-        return refuse(
-          "SESSION_PERMISSION_DENIED",
-          `${PERMISSION_STAFF_SESSIONS_REFRESH} is not granted`
-        );
-      }
-      const staff = await client.query(
-        `select actor_id, tenant_id, digital_store_id, location_id, display_name,
-                credential_verifier, profile_codes, offline_valid_until, disabled
-           from edge_identity.staff_cache where actor_id = $1::uuid`,
-        [row.actor_id]
-      );
-      const staffRow = staff.rows[0];
-      if (staffRow === void 0 || staffRow.disabled) {
-        return refuse("STAFF_DISABLED", "the staff member is no longer eligible");
-      }
-      const lifetimeMs = DEV_STAFF_SESSION_LIFETIME_MINUTES * 6e4;
-      const expiresAt = new Date(
-        Math.min(now.getTime() + lifetimeMs, staffRow.offline_valid_until.getTime())
-      );
-      if (expiresAt.getTime() <= now.getTime()) {
-        return refuse("STAFF_DISABLED", "the staff cache entry is beyond its governed validity");
-      }
-      await client.query(
-        `update edge_identity.terminal_session set expires_at = $2 where id = $1::uuid`,
-        [row.id, expiresAt]
-      );
-      const held = await effectivePermissions(client, sessionScope(row), row.actor_id);
-      return {
-        outcome: "ok",
-        result: "SESSION_REFRESHED",
-        session: {
-          sessionId: row.id,
-          actorId: row.actor_id,
-          displayName: staffRow.display_name,
-          profileCode: row.profile_code,
-          openedAt: row.opened_at.toISOString(),
-          expiresAt: expiresAt.toISOString(),
-          sessionGeneration: row.session_generation,
-          effectivePermissions: held,
-          authorityTime: now.toISOString()
-        }
-      };
-    },
-    HUB_RUNTIME_ROLE
-  );
-}
-async function closeStaffSession(pool, input) {
-  return withHubTransaction(
-    pool,
-    async (client) => {
-      const refuse = (refusal2, detail) => ({
-        outcome: "refused",
-        refusal: refusal2,
-        detail
-      });
-      const owned = await loadOwnedOpenSession(client, input.sessionId, input.terminalDeviceId);
-      if (!owned.ok) return refuse(owned.refusal, owned.detail);
-      const row = owned.row;
-      if (await resolveGrant(
-        client,
-        sessionScope(row),
-        row.actor_id,
-        PERMISSION_STAFF_SESSIONS_CLOSE
-      ) !== "allow") {
-        return refuse(
-          "SESSION_PERMISSION_DENIED",
-          `${PERMISSION_STAFF_SESSIONS_CLOSE} is not granted`
-        );
-      }
-      const nowRow = await client.query(`select now() as now`);
-      const now = nowRow.rows[0]?.now ?? /* @__PURE__ */ new Date(0);
-      await client.query(
-        `update edge_identity.terminal_session set closed_at = now(), status = 'closed' where id = $1::uuid`,
-        [row.id]
-      );
-      const held = await effectivePermissions(client, sessionScope(row), row.actor_id);
-      return {
-        outcome: "ok",
-        result: "SESSION_CLOSED",
-        session: {
-          sessionId: row.id,
-          actorId: row.actor_id,
-          displayName: "",
-          profileCode: row.profile_code,
-          openedAt: row.opened_at.toISOString(),
-          expiresAt: row.expires_at.toISOString(),
-          sessionGeneration: row.session_generation,
-          effectivePermissions: held,
-          authorityTime: now.toISOString()
-        }
-      };
-    },
-    HUB_RUNTIME_ROLE
-  );
-}
+// src/hub/edge/routes.ts
+init_runtime_bootstrap();
+init_terminal_pin();
 
 // src/hub/t1-intake.ts
-import { createHash as createHash6, randomUUID as randomUUID6 } from "node:crypto";
+import { createHash as createHash7, randomUUID as randomUUID7 } from "node:crypto";
 init_db();
+init_sync();
+init_runtime_bootstrap();
 var CUSTOMER_CREATED_EVENT_NAME = "customer.local_customer_created";
 var CONSENT_DECISION_EVENT_NAME = "customer.consent_decision_recorded";
 var BOOKING_DRAFT_EVENT_NAME = "laundry.booking_draft_recorded";
@@ -8951,7 +12221,7 @@ var DRAFT_CANCEL_REASONS = [
   "customer_declined"
 ];
 function sha256Hex3(value) {
-  return createHash6("sha256").update(Buffer.from(value, "utf8")).digest("hex");
+  return createHash7("sha256").update(Buffer.from(value, "utf8")).digest("hex");
 }
 function maskPhone(e164) {
   return `${e164.slice(0, 4)}\u2022\u2022\u2022\u2022${e164.slice(-4)}`;
@@ -9050,7 +12320,7 @@ async function emitIntakeFact(client, input) {
   const nowIso = (/* @__PURE__ */ new Date()).toISOString();
   const hubSequence = await allocateHubSequence(client);
   const envelope = {
-    event_id: randomUUID6(),
+    event_id: randomUUID7(),
     event_name: input.eventName,
     schema_version: T1_INTAKE_SCHEMA_VERSION,
     occurred_at: nowIso,
@@ -9105,7 +12375,7 @@ async function registerLocalCustomer(pool, input) {
   return withHubTransaction(
     pool,
     async (client) => {
-      const customerId = randomUUID6();
+      const customerId = randomUUID7();
       const before = await client.query(
         `select id from edge_core.customer where created_request_key = $1`,
         [input.requestKey]
@@ -9193,7 +12463,7 @@ async function recordConsentDecision(pool, input) {
              $9, $10, $11, $12::boolean, $13::uuid, $14::uuid, $15::uuid,
              $16, $17, $18::uuid)`,
           [
-            randomUUID6(),
+            randomUUID7(),
             input.authority.tenantId,
             input.authority.digitalStoreId,
             input.authority.locationId,
@@ -9279,7 +12549,7 @@ async function loadScopedDraft(client, authority, draftId) {
   return rows.rows[0] ?? null;
 }
 async function recordDraftEvent(client, input) {
-  const receiptId = randomUUID6();
+  const receiptId = randomUUID7();
   await client.query(
     `insert into edge_laundry.booking_draft_event
        (id, draft_id, event_type, request_key, request_hash, changes,
@@ -9388,7 +12658,7 @@ async function createBookingDraft(pool, input) {
           snapshotSyncState: customer.sync_state
         };
       }
-      const draftId = randomUUID6();
+      const draftId = randomUUID7();
       const inserted = await client.query(
         `insert into edge_laundry.booking_draft
            (id, tenant_id, digital_store_id, location_id, environment,
@@ -9597,6 +12867,11 @@ var EDGE_CONFIGURATION_CURRENT_PATH = "/edge/v1/configuration/current";
 var EDGE_SESSIONS_OPEN_PATH = "/edge/v1/sessions/open";
 var EDGE_SESSIONS_REFRESH_PATH = "/edge/v1/sessions/refresh";
 var EDGE_SESSIONS_CLOSE_PATH = "/edge/v1/sessions/close";
+var EDGE_TERMINAL_PIN_STATUS_PATH = "/edge/v1/terminal-pin/status";
+var EDGE_TERMINAL_PIN_SETUP_PATH = "/edge/v1/terminal-pin/setup";
+var EDGE_TERMINAL_PIN_UNLOCK_PATH = "/edge/v1/terminal-pin/unlock";
+var EDGE_TERMINAL_PIN_CHANGE_PATH = "/edge/v1/terminal-pin/change";
+var EDGE_TERMINAL_PIN_LOCK_PATH = "/edge/v1/terminal-pin/lock";
 var EDGE_CUSTOMERS_SEARCH_PATH = "/edge/v1/customers/search";
 var EDGE_CUSTOMERS_PATH = "/edge/v1/customers";
 var EDGE_BOOKING_DRAFTS_PATH = "/edge/v1/laundry/bookings/drafts";
@@ -9694,7 +12969,17 @@ var CANONICAL_ERROR = {
   SESSION_OCCUPIED: "RESOURCE_VERSION_CONFLICT",
   SESSION_UNKNOWN: "RESOURCE_NOT_FOUND",
   SESSION_EXPIRED: "AUTHENTICATION_REQUIRED",
-  SESSION_CLOSED: "RESOURCE_VERSION_CONFLICT"
+  SESSION_CLOSED: "RESOURCE_VERSION_CONFLICT",
+  // The Terminal PIN (closed vocabulary). A wrong PIN and a lock are distinct on
+  // purpose: the PIN is the terminal's own, so there is no one to protect from
+  // knowing how many tries are left, and the person at the counter must be told.
+  PIN_FORMAT_INVALID: "VALIDATION_FAILED",
+  PIN_CONFIRMATION_MISMATCH: "VALIDATION_FAILED",
+  PIN_ALREADY_SET: "RESOURCE_VERSION_CONFLICT",
+  PIN_SETUP_REQUIRED: "RESOURCE_VERSION_CONFLICT",
+  PIN_INCORRECT: "AUTHENTICATION_REQUIRED",
+  PIN_LOCKED: "RATE_LIMITED",
+  TERMINAL_UNKNOWN: "DEVICE_NOT_ASSIGNED"
 };
 var CANONICAL_MESSAGE = {
   VALIDATION_FAILED: "the request is invalid",
@@ -9707,6 +12992,7 @@ var CANONICAL_MESSAGE = {
   IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST: "the idempotency key was already used with a different request",
   DEPENDENCY_UNAVAILABLE: "a required authority is unavailable",
   HUB_UNREACHABLE: "the cloud activation authority is unreachable; retry later",
+  RATE_LIMITED: "too many attempts; wait until the lock ends",
   INTERNAL_ERROR: "the operation failed and the details are not disclosed"
 };
 function refusal(result, correlationId) {
@@ -9716,6 +13002,21 @@ function refusal(result, correlationId) {
     body: errorEnvelope(code, CANONICAL_MESSAGE[code] ?? "the request was refused", {
       correlationId,
       details: { result, retryable: isRetryable(code) }
+    })
+  };
+}
+function pinRefusal(outcome, correlationId) {
+  if (outcome.outcome !== "refused") return refusal("INTERNAL_ERROR", correlationId);
+  const code = CANONICAL_ERROR[outcome.refusal] ?? "INTERNAL_ERROR";
+  return {
+    status: httpStatusFor(code),
+    body: errorEnvelope(code, CANONICAL_MESSAGE[code] ?? "the request was refused", {
+      correlationId,
+      details: {
+        result: outcome.refusal,
+        retryable: isRetryable(code),
+        ...outcome.status === void 0 ? {} : { pin: outcome.status }
+      }
     })
   };
 }
@@ -9859,6 +13160,21 @@ function matchRoute(method, path) {
   if (clean === EDGE_SESSIONS_CLOSE_PATH) {
     return method === "POST" ? { route: "sessions-close" } : "METHOD_NOT_ALLOWED";
   }
+  if (clean === EDGE_TERMINAL_PIN_STATUS_PATH) {
+    return method === "GET" ? { route: "terminal-pin-status" } : "METHOD_NOT_ALLOWED";
+  }
+  if (clean === EDGE_TERMINAL_PIN_SETUP_PATH) {
+    return method === "POST" ? { route: "terminal-pin-setup" } : "METHOD_NOT_ALLOWED";
+  }
+  if (clean === EDGE_TERMINAL_PIN_UNLOCK_PATH) {
+    return method === "POST" ? { route: "terminal-pin-unlock" } : "METHOD_NOT_ALLOWED";
+  }
+  if (clean === EDGE_TERMINAL_PIN_CHANGE_PATH) {
+    return method === "POST" ? { route: "terminal-pin-change" } : "METHOD_NOT_ALLOWED";
+  }
+  if (clean === EDGE_TERMINAL_PIN_LOCK_PATH) {
+    return method === "POST" ? { route: "terminal-pin-lock" } : "METHOD_NOT_ALLOWED";
+  }
   if (clean === EDGE_CUSTOMERS_SEARCH_PATH) {
     return method === "GET" ? { route: "customers-search" } : "METHOD_NOT_ALLOWED";
   }
@@ -9912,7 +13228,7 @@ function createEdgeTerminalRouter(deps) {
   }
   return {
     async handle(request) {
-      const correlationId = randomUUID7();
+      const correlationId = randomUUID8();
       const finish = (operation2, response, result) => {
         log2(operation2, correlationId, response.status, result);
         return response;
@@ -9975,6 +13291,11 @@ function createEdgeTerminalRouter(deps) {
         "sessions-open",
         "sessions-refresh",
         "sessions-close",
+        "terminal-pin-status",
+        "terminal-pin-setup",
+        "terminal-pin-unlock",
+        "terminal-pin-change",
+        "terminal-pin-lock",
         // T002: every intake route refuses query strings EXCEPT the search
         // read, whose single bounded `phone` parameter is parsed explicitly.
         "customers-create",
@@ -10185,6 +13506,16 @@ function createEdgeTerminalRouter(deps) {
               outcome.result
             );
           }
+          case "terminal-pin-status":
+          case "terminal-pin-setup":
+          case "terminal-pin-unlock":
+          case "terminal-pin-change":
+          case "terminal-pin-lock":
+            return finish(
+              operation,
+              await handleTerminalPin(deps, terminal, matched.route, request, body, correlationId),
+              "HANDLED"
+            );
           case "customers-search":
           case "customers-read":
           case "customers-create":
@@ -10701,6 +14032,102 @@ var INTAKE_MUTATIONS = [
 ];
 var NOTES_MAX = 2e3;
 var NAME_MAX = 200;
+var PIN_BODY_FIELDS = {
+  "terminal-pin-setup": ["pin", "pinConfirmation"],
+  "terminal-pin-unlock": ["pin"],
+  "terminal-pin-change": ["currentPin", "newPin", "newPinConfirmation"],
+  "terminal-pin-lock": ["sessionId"]
+};
+async function handleTerminalPin(deps, terminal, route, request, body, correlationId) {
+  if (!terminal.activated) return refusal("ACTIVATION_REQUIRED", correlationId);
+  if (route === "terminal-pin-status") {
+    if (request.rawBody !== "") return invalid(correlationId, "a GET carries no body");
+    const header = request.headers[INTAKE_SESSION_HEADER];
+    const sessionId = typeof header === "string" && header !== "" ? header : null;
+    if (sessionId !== null && !UUID2.test(sessionId)) {
+      return invalid(correlationId, `${INTAKE_SESSION_HEADER} must be a session id`);
+    }
+    const status = await readTerminalPinStatus(deps.pool, {
+      terminalDeviceId: terminal.terminalDeviceId,
+      sessionId
+    });
+    return { status: 200, body: { result: "TERMINAL_PIN_STATUS", correlationId, ...status } };
+  }
+  if (idempotencyKeyFrom(request.headers) === null) {
+    return invalid(correlationId, "an Idempotency-Key header is required");
+  }
+  const allowed = PIN_BODY_FIELDS[route] ?? [];
+  const unknown = unknownFields(body, allowed);
+  if (unknown.length > 0) return invalid(correlationId, "unknown fields", unknown);
+  const text = (key) => typeof body[key] === "string" ? body[key] : null;
+  const missing = allowed.filter((key) => text(key) === null);
+  if (missing.length > 0) return invalid(correlationId, "required fields are missing", missing);
+  if (route === "terminal-pin-lock") {
+    const sessionId = text("sessionId") ?? "";
+    if (!UUID2.test(sessionId)) return invalid(correlationId, "sessionId must be a session id");
+    const locked = await lockTerminalSession(deps.pool, {
+      terminalDeviceId: terminal.terminalDeviceId,
+      sessionId
+    });
+    if (locked.outcome !== "ok")
+      return pinRefusal(locked, correlationId);
+    return { status: 200, body: { result: locked.result, correlationId } };
+  }
+  const eligibility = await readRuntimeEligibility(
+    deps.pool,
+    terminal.terminalDeviceId,
+    terminal.certificateSerial,
+    deps.environment ?? "development"
+  );
+  if (eligibility.outcome === "refused") return refusal(eligibility.refusal, correlationId);
+  if (route === "terminal-pin-setup") {
+    const outcome = await setupTerminalPin(deps.pool, {
+      terminalDeviceId: terminal.terminalDeviceId,
+      pin: text("pin") ?? "",
+      pinConfirmation: text("pinConfirmation") ?? "",
+      correlationId
+    });
+    if (outcome.outcome !== "ok")
+      return pinRefusal(outcome, correlationId);
+    return {
+      status: 200,
+      body: {
+        result: outcome.result,
+        correlationId,
+        session: outcome.value.session,
+        pin: outcome.value.pin
+      }
+    };
+  }
+  if (route === "terminal-pin-unlock") {
+    const outcome = await unlockTerminalWithPin(deps.pool, {
+      terminalDeviceId: terminal.terminalDeviceId,
+      pin: text("pin") ?? "",
+      correlationId
+    });
+    if (outcome.outcome !== "ok")
+      return pinRefusal(outcome, correlationId);
+    return {
+      status: 200,
+      body: {
+        result: outcome.result,
+        correlationId,
+        session: outcome.value.session,
+        pin: outcome.value.pin
+      }
+    };
+  }
+  const changed = await changeTerminalPin(deps.pool, {
+    terminalDeviceId: terminal.terminalDeviceId,
+    currentPin: text("currentPin") ?? "",
+    newPin: text("newPin") ?? "",
+    newPinConfirmation: text("newPinConfirmation") ?? "",
+    correlationId
+  });
+  if (changed.outcome !== "ok")
+    return pinRefusal(changed, correlationId);
+  return { status: 200, body: { result: changed.result, correlationId, pin: changed.value.pin } };
+}
 async function handleT1Intake(deps, terminal, matched, request, body, queryString, correlationId) {
   if (!terminal.activated) return refusal("ACTIVATION_REQUIRED", correlationId);
   if (Buffer.byteLength(request.rawBody ?? "", "utf8") > MAX_INTAKE_BODY_BYTES) {
@@ -11118,13 +14545,13 @@ function composeDevelopmentListener(inputs) {
     };
   }
   const certificateSerial = stringField(credential, "certificateSerial");
-  const hubDeviceId = stringField(credential, "deviceRecordId");
+  const hubDeviceId2 = stringField(credential, "deviceRecordId");
   const tenantId = stringField(pairing, "tenantId");
   const digitalStoreId = stringField(pairing, "digitalStoreId");
   const storeLocationId = stringField(pairing, "storeLocationId");
   const missing = [];
   if (certificateSerial === void 0) missing.push("certificateSerial");
-  if (hubDeviceId === void 0) missing.push("deviceRecordId");
+  if (hubDeviceId2 === void 0) missing.push("deviceRecordId");
   if (tenantId === void 0) missing.push("tenantId");
   if (digitalStoreId === void 0) missing.push("digitalStoreId");
   if (storeLocationId === void 0) missing.push("storeLocationId");
@@ -11139,7 +14566,7 @@ function composeDevelopmentListener(inputs) {
   try {
     const privateKey = createPrivateKey2(read(inputs.identityKeyPath ?? DEVICE_IDENTITY_KEY_PATH));
     const publicKeyPem = createPublicKey2(privateKey).export({ type: "spki", format: "pem" }).toString();
-    const signingCredentialSerial = createHash7("sha256").update(createPublicKey2(publicKeyPem).export({ type: "spki", format: "der" })).digest("hex");
+    const signingCredentialSerial = createHash8("sha256").update(createPublicKey2(publicKeyPem).export({ type: "spki", format: "der" })).digest("hex");
     signer = {
       certificateSerial: signingCredentialSerial,
       publicKeyPem,
@@ -11156,7 +14583,7 @@ function composeDevelopmentListener(inputs) {
     kind: "composed",
     signer,
     identity: {
-      hubDeviceId,
+      hubDeviceId: hubDeviceId2,
       hubTlsCertificateFingerprint: inputs.tlsCertificateFingerprint,
       tenantId,
       digitalStoreId,
@@ -11260,15 +14687,15 @@ async function readStoragePosture() {
 async function main() {
   const reachable = await isHubDatabaseReachable();
   const pool = reachable ? createHubPool() : null;
-  const hubDeviceId = process.env.HUB_DEVICE_ID ?? "";
+  const hubDeviceId2 = process.env.HUB_DEVICE_ID ?? "";
   let applied = [];
   let clockOffsetSeconds;
   if (pool !== null) {
     const client = await pool.connect();
     try {
       applied = await readAppliedMigrations(client);
-      if (hubDeviceId !== "") {
-        clockOffsetSeconds = await readReportedClockOffsetSeconds(client, hubDeviceId);
+      if (hubDeviceId2 !== "") {
+        clockOffsetSeconds = await readReportedClockOffsetSeconds(client, hubDeviceId2);
       }
     } finally {
       client.release();
@@ -11401,8 +14828,53 @@ async function publishDevelopmentConfigurationCommand(path) {
     await pool.end().catch(() => void 0);
   }
 }
+async function resetTerminalPinCommand(args) {
+  const environment = process.env.KITLUY_ENVIRONMENT ?? "unknown";
+  if (environment !== "development") {
+    throw new Error(
+      `this Hub is '${environment}': a Terminal PIN reset outside development is the Partner Portal's governed action, which needs the cloud-to-Hub delivery (BLK-006)`
+    );
+  }
+  const option = (name) => {
+    const index = args.indexOf(name);
+    return index === -1 ? void 0 : args[index + 1];
+  };
+  const terminalDeviceId = option("--terminal");
+  const operator = option("--operator");
+  const reason = option("--reason");
+  if (terminalDeviceId === void 0 || operator === void 0 || reason === void 0) {
+    throw new Error("usage: reset-terminal-pin --terminal <uuid> --operator <ref> --reason <code>");
+  }
+  const { randomUUID: randomUUID10 } = await import("node:crypto");
+  const { resetTerminalPin: resetTerminalPin2 } = await Promise.resolve().then(() => (init_terminal_pin(), terminal_pin_exports));
+  const pool = createHubPool();
+  try {
+    const outcome = await resetTerminalPin2(pool, {
+      terminalDeviceId,
+      actorRef: operator,
+      reasonCode: reason,
+      correlationId: randomUUID10()
+    });
+    if (outcome.outcome !== "ok") throw new Error(`${outcome.refusal}: ${outcome.detail}`);
+    log.info("Terminal PIN reset", {
+      result: outcome.result,
+      terminalDeviceId,
+      state: outcome.value.pin.state,
+      sessionsClosed: outcome.value.sessionsClosed
+    });
+  } finally {
+    await pool.end().catch(() => void 0);
+  }
+}
 var subcommand = process.argv[2];
-if (subcommand === "publish-development-configuration") {
+if (subcommand === "reset-terminal-pin") {
+  resetTerminalPinCommand(process.argv.slice(3)).catch((error) => {
+    log.error("Terminal PIN reset was REFUSED", {
+      error: error instanceof Error ? error.message : String(error)
+    });
+    process.exit(1);
+  });
+} else if (subcommand === "publish-development-configuration") {
   const path = process.argv[3];
   if (path === void 0) {
     log.error("publish-development-configuration needs the delivery file path");
@@ -11422,3 +14894,12 @@ if (subcommand === "publish-development-configuration") {
     process.exit(1);
   });
 }
+/*! Bundled license information:
+
+hash-wasm/dist/index.umd.js:
+  (*!
+   * hash-wasm (https://www.npmjs.com/package/hash-wasm)
+   * (c) Dani Biro
+   * @license MIT
+   *)
+*/

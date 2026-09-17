@@ -40,6 +40,12 @@ export const WELL_KNOWN_DISCOVERY_PATH = "/.well-known/kitluy-edge-discovery/v1"
 export const AUTHORITY_TIME_PATH = "/edge/v1/runtime/authority-time";
 export const ELIGIBILITY_PATH = "/edge/v1/runtime/eligibility";
 export const CONFIGURATION_PATH = "/edge/v1/configuration/current";
+/**
+ * The Terminal PIN's state as the Store Hub holds it (hub migration 0043). Read
+ * so the runtime report can carry "PIN set" as the Hub's answer; it never
+ * decides the link phase — an older Hub that does not serve it is still SERVING.
+ */
+export const TERMINAL_PIN_STATUS_PATH = "/edge/v1/terminal-pin/status";
 
 /** The Device Shell reads this; it runs as `kitluy-terminal` and cannot see /var/lib/kitluy/operational. */
 export const EDGE_STATUS_PATH = "/var/lib/kitluy/terminal/edge-status.json";
@@ -88,6 +94,28 @@ export interface EdgeStatus {
     readonly attempted: boolean;
     readonly result: string;
     readonly profileCode?: string;
+  };
+  /** The Store Hub's answer about this terminal's PIN. Never a PIN. */
+  readonly terminalPin?: {
+    readonly state: "setup_required" | "set" | "reset_required";
+    readonly setAt: string | null;
+    readonly lockedUntil: string | null;
+  };
+}
+
+function terminalPinFrom(body: unknown): EdgeStatus["terminalPin"] {
+  const pin = (body as { readonly pin?: Record<string, unknown> } | null)?.pin;
+  if (pin === undefined || pin === null) return undefined;
+  const state = pin["state"];
+  if (state !== "setup_required" && state !== "set" && state !== "reset_required") return undefined;
+  const instantOrNull = (value: unknown): string | null =>
+    typeof value === "string" && value.length <= 40 && !Number.isNaN(Date.parse(value))
+      ? value
+      : null;
+  return {
+    state,
+    setAt: instantOrNull(pin["setAt"]),
+    lockedUntil: instantOrNull(pin["lockedUntil"]),
   };
 }
 
@@ -399,6 +427,14 @@ async function attemptCandidate(
 
   reads.configuration = await read("configuration", CONFIGURATION_PATH);
 
+  let terminalPin: EdgeStatus["terminalPin"];
+  try {
+    const response = await call({ ...pinned, method: "GET", path: TERMINAL_PIN_STATUS_PATH });
+    if (response.status === 200) terminalPin = terminalPinFrom(response.body);
+  } catch {
+    // The PIN read reports; it never decides whether the link serves.
+  }
+
   if (notRecognized) {
     return {
       phase: "NOT_RECOGNIZED",
@@ -439,5 +475,6 @@ async function attemptCandidate(
     hub,
     reads: finalReads,
     ...(pairing === undefined ? {} : { pairing }),
+    ...(terminalPin === undefined ? {} : { terminalPin }),
   };
 }

@@ -41,8 +41,14 @@ import {
   EDGE_SESSIONS_OPEN_PATH,
   EDGE_SESSIONS_REFRESH_PATH,
   EDGE_SESSIONS_CLOSE_PATH,
+  EDGE_TERMINAL_PIN_STATUS_PATH,
+  EDGE_TERMINAL_PIN_SETUP_PATH,
+  EDGE_TERMINAL_PIN_UNLOCK_PATH,
+  EDGE_TERMINAL_PIN_CHANGE_PATH,
+  EDGE_TERMINAL_PIN_LOCK_PATH,
 } from "../src/hub/edge/routes.js";
 import { staffCredentialVerifier } from "../src/hub/edge/runtime-bootstrap.js";
+import { resetTerminalPin, verifyTerminalPin } from "../src/hub/edge/terminal-pin.js";
 
 const RUN = randomUUID().slice(0, 8);
 const TENANT = "e0000000-0000-4000-8000-000000000001";
@@ -1892,6 +1898,481 @@ describe.skipIf(!live)("T1 bootstrap routes and staff sessions (WS-12-T001-P02)"
       `t002-unknown-${RUN}`,
     );
     expect(unknownField.status).toBe(422);
+  });
+
+  // -------------------------------------------------------------------------
+  // The Terminal PIN (KLD-2026-09-03-TERMINAL-PROVISIONING-001 §10-§15;
+  // KLD-2026-09-17-TERMINAL-PIN-DEVICE-CREDENTIAL-001): one shared PIN per
+  // device, PIN alone, the device credential checked first.
+  // -------------------------------------------------------------------------
+
+  const pinKey = (label: string): Record<string, string> => ({
+    "idempotency-key": `pin-${label}-${RUN}-${randomUUID().slice(0, 8)}`,
+  });
+
+  async function setupPin(t: LanTerminal, pin: string): Promise<TerminalHttpResponse> {
+    censusSecrets.push(`"${pin}"`);
+    return call(
+      t,
+      "POST",
+      EDGE_TERMINAL_PIN_SETUP_PATH,
+      { pin, pinConfirmation: pin },
+      pinKey("setup"),
+    );
+  }
+
+  function unlock(t: LanTerminal, pin: string, onPort = port): Promise<TerminalHttpResponse> {
+    return terminalRequest({
+      port: onPort,
+      method: "POST",
+      path: EDGE_TERMINAL_PIN_UNLOCK_PATH,
+      body: { pin },
+      identity: { certPem: t.tls.certPem, keyPem: t.tls.keyPem },
+      caPem: deviceCa.certPem,
+      headers: pinKey("unlock"),
+    });
+  }
+
+  function pinOf(response: TerminalHttpResponse): Record<string, unknown> {
+    const direct = response.body["pin"] as Record<string, unknown> | undefined;
+    return direct ?? (detailsOf(response)["pin"] as Record<string, unknown> | undefined) ?? {};
+  }
+
+  async function pinRow(t: LanTerminal): Promise<Record<string, unknown> | undefined> {
+    const { rows } = await pool.query<Record<string, unknown>>(
+      `select * from edge_identity.terminal_pin where terminal_device_id = $1`,
+      [t.deviceId],
+    );
+    return rows[0];
+  }
+
+  it("Terminal PIN: set up twice on a trusted terminal, stored only as an Argon2id verifier", async () => {
+    // An untrusted terminal is refused before any PIN is read.
+    const revoked = await newLanTerminal("pin-revoked", { credentialStatus: "revoked" });
+    const refusedDevice = await call(
+      revoked,
+      "POST",
+      EDGE_TERMINAL_PIN_SETUP_PATH,
+      { pin: "4826", pinConfirmation: "4826" },
+      pinKey("revoked"),
+    );
+    expect(refusedDevice.status).toBe(403);
+    expect(detailsOf(refusedDevice)["result"]).toBe("CREDENTIAL_NOT_CURRENT");
+    // A trusted but unpaired terminal may not operate, so it may not set a PIN.
+    const unpaired = await newLanTerminal("pin-unpaired");
+    const refusedUnpaired = await call(
+      unpaired,
+      "POST",
+      EDGE_TERMINAL_PIN_SETUP_PATH,
+      { pin: "4826", pinConfirmation: "4826" },
+      pinKey("unpaired"),
+    );
+    expect(detailsOf(refusedUnpaired)["result"]).toBe("PAIRING_REQUIRED");
+    expect(await pinRow(unpaired)).toBeUndefined();
+
+    const t = await readyTerminal("pin-setup");
+    const before = await call(t, "GET", EDGE_TERMINAL_PIN_STATUS_PATH);
+    expect(before.status, JSON.stringify(before.body)).toBe(200);
+    expect(pinOf(before)).toMatchObject({ state: "setup_required", attemptsBeforeLock: 5 });
+
+    const noKey = await call(t, "POST", EDGE_TERMINAL_PIN_SETUP_PATH, {
+      pin: "4826",
+      pinConfirmation: "4826",
+    });
+    expect(noKey.status).toBe(422);
+    const mismatch = await call(
+      t,
+      "POST",
+      EDGE_TERMINAL_PIN_SETUP_PATH,
+      { pin: "4826", pinConfirmation: "4862" },
+      pinKey("mismatch"),
+    );
+    expect(mismatch.status).toBe(422);
+    expect(detailsOf(mismatch)["result"]).toBe("PIN_CONFIRMATION_MISMATCH");
+    for (const bad of ["48a6", "48260", "482", " 4826"]) {
+      const malformed = await call(
+        t,
+        "POST",
+        EDGE_TERMINAL_PIN_SETUP_PATH,
+        { pin: bad, pinConfirmation: bad },
+        pinKey("format"),
+      );
+      expect(malformed.status).toBe(422);
+    }
+    expect(await pinRow(t)).toBeUndefined();
+
+    const established = await setupPin(t, "4826");
+    expect(established.status, JSON.stringify(established.body)).toBe(200);
+    expect(established.body["result"]).toBe("PIN_ESTABLISHED");
+    const session = established.body["session"] as Record<string, unknown>;
+    expect(session["credentialKind"]).toBe("terminal_pin");
+    expect(session["actorId"]).toBe(t.deviceId);
+    expect(session["profileCode"]).toBe(T1);
+    expect(session["effectivePermissions"]).toContain("pos.t1.use");
+    const hours =
+      (Date.parse(String(session["expiresAt"])) - Date.parse(String(session["openedAt"]))) /
+      3_600_000;
+    expect(hours).toBe(8);
+    expect(pinOf(established)).toMatchObject({ state: "set", pinVersion: 1, lockedUntil: null });
+
+    const row = await pinRow(t);
+    const verifier = String(row?.["verifier"]);
+    expect(verifier).toMatch(/^\$argon2id\$v=19\$m=19456,t=2,p=1\$[A-Za-z0-9+/]+\$[A-Za-z0-9+/]+$/);
+    expect(JSON.stringify(row)).not.toContain('"4826"');
+    expect(await verifyTerminalPin("4826", verifier)).toBe(true);
+    expect(await verifyTerminalPin("4827", verifier)).toBe(false);
+    censusSecrets.push(verifier);
+
+    const again = await setupPin(t, "1111");
+    expect(again.status).toBe(409);
+    expect(detailsOf(again)["result"]).toBe("PIN_ALREADY_SET");
+
+    const { rows: audits } = await pool.query<{ event_code: string; details_json: unknown }>(
+      `select event_code, details_json from edge_audit.audit_event
+        where terminal_device_id = $1 and event_code like 'terminal_pin.%'`,
+      [t.deviceId],
+    );
+    expect(audits.map((a) => a.event_code)).toContain("terminal_pin.established");
+    expect(JSON.stringify(audits)).not.toContain("4826");
+    expect(JSON.stringify(audits)).not.toContain(verifier);
+  });
+
+  it("Terminal PIN: failures are counted on the Hub; five in fifteen minutes lock it for fifteen, across router instances", async () => {
+    const t = await readyTerminal("pin-lock");
+    expect((await setupPin(t, "2580")).status).toBe(200);
+
+    for (const left of [4, 3, 2, 1]) {
+      const wrong = await unlock(t, "0000");
+      expect(wrong.status, JSON.stringify(wrong.body)).toBe(401);
+      expect(detailsOf(wrong)["result"]).toBe("PIN_INCORRECT");
+      expect(pinOf(wrong)["attemptsBeforeLock"]).toBe(left);
+    }
+    const locking = await unlock(t, "0001");
+    expect(locking.status).toBe(429);
+    expect(detailsOf(locking)["result"]).toBe("PIN_LOCKED");
+    const { rows: clock } = await pool.query<{ now: Date }>(`select now() as now`);
+    const lockedFor =
+      Date.parse(String(pinOf(locking)["lockedUntil"])) - (clock[0]?.now.getTime() ?? 0);
+    expect(lockedFor).toBeGreaterThan(14 * 60_000);
+    expect(lockedFor).toBeLessThanOrEqual(15 * 60_000);
+
+    // The correct PIN is not even verified while locked — and a second, fresh
+    // router instance over the same database (a restart) sees the same lock.
+    const sessionsBefore = await pool.query(
+      `select 1 from edge_identity.terminal_session where terminal_device_id = $1 and credential_kind = 'terminal_pin'`,
+      [t.deviceId],
+    );
+    for (const onPort of [port, unsignedPort]) {
+      const whileLocked = await unlock(t, "2580", onPort);
+      expect(whileLocked.status).toBe(429);
+      expect(detailsOf(whileLocked)["result"]).toBe("PIN_LOCKED");
+    }
+    const sessionsAfter = await pool.query(
+      `select 1 from edge_identity.terminal_session where terminal_device_id = $1 and credential_kind = 'terminal_pin'`,
+      [t.deviceId],
+    );
+    expect(sessionsAfter.rowCount).toBe(sessionsBefore.rowCount);
+
+    const { rows: events } = await pool.query<{ event_code: string; details_json: unknown }>(
+      `select event_code, details_json from edge_audit.security_event where device_id = $1`,
+      [t.deviceId],
+    );
+    const codes = events.map((e) => e.event_code);
+    expect(codes.filter((c) => c === "TERMINAL_PIN_INCORRECT")).toHaveLength(4);
+    expect(codes.filter((c) => c === "TERMINAL_PIN_LOCKED")).toHaveLength(1);
+    expect(codes).toContain("TERMINAL_PIN_ATTEMPT_WHILE_LOCKED");
+    expect(JSON.stringify(events)).not.toContain("2580");
+
+    // The lock ends; the correct PIN unlocks and the count starts over.
+    await pool.query(
+      `update edge_identity.terminal_pin set locked_until = now() - interval '1 second' where terminal_device_id = $1`,
+      [t.deviceId],
+    );
+    const unlocked = await unlock(t, "2580");
+    expect(unlocked.status, JSON.stringify(unlocked.body)).toBe(200);
+    expect(pinOf(unlocked)).toMatchObject({ attemptsBeforeLock: 5, lockedUntil: null });
+
+    // The window: failures older than fifteen minutes no longer count.
+    for (let i = 0; i < 3; i += 1) expect((await unlock(t, "9999")).status).toBe(401);
+    await pool.query(
+      `update edge_identity.terminal_pin set first_failed_at = now() - interval '16 minutes' where terminal_device_id = $1`,
+      [t.deviceId],
+    );
+    const fresh = await unlock(t, "9999");
+    expect(pinOf(fresh)["attemptsBeforeLock"]).toBe(4);
+  });
+
+  it("Terminal PIN: an unlock opens T1 for THIS terminal only — no staff login, no other terminal, gone once locked", async () => {
+    const t = await readyTerminal("pin-intake");
+    const other = await readyTerminal("pin-intake-other");
+    expect((await setupPin(t, "1357")).status).toBe(200);
+    expect((await setupPin(other, "2468")).status).toBe(200);
+
+    // A PIN is per device: another terminal's PIN is simply wrong here.
+    expect((await unlock(t, "2468")).status).toBe(401);
+    const opened = await unlock(t, "1357");
+    expect(opened.status, JSON.stringify(opened.body)).toBe(200);
+    const sessionId = String((opened.body["session"] as Record<string, unknown>)["sessionId"]);
+
+    // No staff member, no grant row: the device's T1 profile is the authority.
+    const created = await intakeCall(
+      t,
+      sessionId,
+      "POST",
+      "/edge/v1/customers",
+      { displayName: "PIN Intake", phone: "012 555 811", preferredLanguage: "en-US" },
+      `pin-intake-cust-${RUN}`,
+    );
+    expect(created.status, JSON.stringify(created.body)).toBe(200);
+    const searched = await intakeCall(
+      t,
+      sessionId,
+      "GET",
+      "/edge/v1/customers/search?phone=012555811",
+    );
+    expect(searched.status, JSON.stringify(searched.body)).toBe(200);
+    const draft = await intakeCall(
+      t,
+      sessionId,
+      "POST",
+      "/edge/v1/laundry/bookings/drafts",
+      {
+        customerId: String((created.body["customer"] as Record<string, unknown>)["customerId"]),
+        walkIn: false,
+        preferredLanguage: "en-US",
+        customerNotes: "",
+        staffNotes: "",
+      },
+      `pin-intake-draft-${RUN}`,
+    );
+    expect(draft.status, JSON.stringify(draft.body)).toBe(200);
+
+    // The session belongs to its terminal.
+    const foreign = await intakeCall(
+      other,
+      sessionId,
+      "GET",
+      "/edge/v1/customers/search?phone=012555811",
+    );
+    expect(foreign.status).toBe(404);
+    expect(detailsOf(foreign)["result"]).toBe("SESSION_UNKNOWN");
+    // It is not a staff session: the staff routes do not touch it.
+    const staffRefresh = await call(
+      t,
+      "POST",
+      EDGE_SESSIONS_REFRESH_PATH,
+      { sessionId },
+      pinKey("staff-refresh"),
+    );
+    expect(detailsOf(staffRefresh)["result"]).toBe("SESSION_UNKNOWN");
+
+    const status = await call(t, "GET", EDGE_TERMINAL_PIN_STATUS_PATH, undefined, {
+      "x-kitluy-session-id": sessionId,
+    });
+    expect(status.body["session"]).toMatchObject({ state: "open" });
+
+    const locked = await call(
+      t,
+      "POST",
+      EDGE_TERMINAL_PIN_LOCK_PATH,
+      { sessionId },
+      pinKey("lock"),
+    );
+    expect(locked.status, JSON.stringify(locked.body)).toBe(200);
+    expect(locked.body["result"]).toBe("TERMINAL_LOCKED");
+    const afterLock = await intakeCall(
+      t,
+      sessionId,
+      "GET",
+      "/edge/v1/customers/search?phone=012555811",
+    );
+    expect(afterLock.status).toBe(409);
+    expect(detailsOf(afterLock)["result"]).toBe("SESSION_CLOSED");
+    const lockedStatus = await call(t, "GET", EDGE_TERMINAL_PIN_STATUS_PATH, undefined, {
+      "x-kitluy-session-id": sessionId,
+    });
+    expect(lockedStatus.body["session"]).toMatchObject({ state: "closed" });
+    const foreignLock = await call(
+      other,
+      "POST",
+      EDGE_TERMINAL_PIN_LOCK_PATH,
+      { sessionId },
+      pinKey("lock-other"),
+    );
+    expect(detailsOf(foreignLock)["result"]).toBe("SESSION_UNKNOWN");
+
+    // A second unlock supersedes the first open session rather than stacking.
+    const first = await unlock(t, "1357");
+    const second = await unlock(t, "1357");
+    const firstId = String((first.body["session"] as Record<string, unknown>)["sessionId"]);
+    const superseded = await intakeCall(
+      t,
+      firstId,
+      "GET",
+      "/edge/v1/customers/search?phone=012555811",
+    );
+    expect(detailsOf(superseded)["result"]).toBe("SESSION_CLOSED");
+    expect(second.status).toBe(200);
+  });
+
+  it("Terminal PIN: the device credential is checked before the PIN — contained, ungranted or revoked terminals get nothing", async () => {
+    const t = await readyTerminal("pin-device");
+    expect((await setupPin(t, "3690")).status).toBe(200);
+    const opened = await unlock(t, "3690");
+    const sessionId = String((opened.body["session"] as Record<string, unknown>)["sessionId"]);
+
+    await pool.query(
+      `insert into edge_identity.containment_directive
+         (id, device_uuid, tenant_id, digital_store_id, location_id, directive,
+          directive_sequence, reason, source_ref, received_via, received_at)
+       values ($1, $2, $3, $4, $5, 'suspended', 1, 'pin containment probe',
+               $6, 'operator_repair', now())`,
+      [randomUUID(), t.deviceId, TENANT, STORE, LOCATION, `pin-probe-${RUN}`],
+    );
+    const contained = await unlock(t, "3690");
+    expect(contained.status).toBe(403);
+    expect(detailsOf(contained)["result"]).toBe("CONTAINMENT_PROHIBITS");
+    const containedIntake = await intakeCall(
+      t,
+      sessionId,
+      "GET",
+      "/edge/v1/customers/search?phone=012555811",
+    );
+    expect(containedIntake.status).toBe(403);
+    expect(detailsOf(containedIntake)["result"]).toBe("T1_NOT_AUTHORIZED");
+    await pool.query(
+      `insert into edge_identity.containment_directive
+         (id, device_uuid, tenant_id, digital_store_id, location_id, directive,
+          directive_sequence, reason, source_ref, received_via, received_at)
+       values ($1, $2, $3, $4, $5, 'cleared', 2, 'pin containment cleared',
+               $6, 'operator_repair', now())`,
+      [randomUUID(), t.deviceId, TENANT, STORE, LOCATION, `pin-probe-${RUN}`],
+    );
+    expect(
+      (await intakeCall(t, sessionId, "GET", "/edge/v1/customers/search?phone=012555811")).status,
+    ).toBe(200);
+
+    // The T1 profile grant ends: the PIN session stops authorizing at once.
+    await pool.query(
+      `update edge_config.terminal_profile_assignment set effective_until = now() - interval '1 second'
+        where terminal_device_id = $1`,
+      [t.deviceId],
+    );
+    const ungranted = await intakeCall(
+      t,
+      sessionId,
+      "GET",
+      "/edge/v1/customers/search?phone=012555811",
+    );
+    expect(ungranted.status).toBe(403);
+    expect(detailsOf(ungranted)["result"]).toBe("T1_NOT_AUTHORIZED");
+    const ungrantedUnlock = await unlock(t, "3690");
+    expect(detailsOf(ungrantedUnlock)["result"]).toBe("PROFILE_NOT_GRANTED");
+
+    // A revoked credential: the correct PIN reaches nothing, not even the status.
+    await pool.query(
+      `update edge_identity.device_credential set status = 'revoked', revoked_at = now(),
+              revocation_reason = 'pin_probe' where device_id = $1`,
+      [t.deviceId],
+    );
+    const revokedUnlock = await unlock(t, "3690");
+    expect(revokedUnlock.status).toBe(403);
+    expect(detailsOf(revokedUnlock)["result"]).toBe("CREDENTIAL_NOT_CURRENT");
+    const revokedStatus = await call(t, "GET", EDGE_TERMINAL_PIN_STATUS_PATH);
+    expect(detailsOf(revokedStatus)["result"]).toBe("CREDENTIAL_NOT_CURRENT");
+  });
+
+  it("Terminal PIN: change needs the current PIN; a governed reset clears the verifier, closes sessions and asks again", async () => {
+    const t = await readyTerminal("pin-change");
+    expect((await setupPin(t, "1470")).status).toBe(200);
+
+    const wrongCurrent = await call(
+      t,
+      "POST",
+      EDGE_TERMINAL_PIN_CHANGE_PATH,
+      { currentPin: "0000", newPin: "8642", newPinConfirmation: "8642" },
+      pinKey("change-wrong"),
+    );
+    expect(wrongCurrent.status).toBe(401);
+    expect(pinOf(wrongCurrent)["attemptsBeforeLock"]).toBe(4);
+    const mismatch = await call(
+      t,
+      "POST",
+      EDGE_TERMINAL_PIN_CHANGE_PATH,
+      { currentPin: "1470", newPin: "8642", newPinConfirmation: "8624" },
+      pinKey("change-mismatch"),
+    );
+    expect(detailsOf(mismatch)["result"]).toBe("PIN_CONFIRMATION_MISMATCH");
+    censusSecrets.push('"8642"');
+    const changed = await call(
+      t,
+      "POST",
+      EDGE_TERMINAL_PIN_CHANGE_PATH,
+      { currentPin: "1470", newPin: "8642", newPinConfirmation: "8642" },
+      pinKey("change"),
+    );
+    expect(changed.status, JSON.stringify(changed.body)).toBe(200);
+    expect(pinOf(changed)).toMatchObject({ state: "set", pinVersion: 2, attemptsBeforeLock: 5 });
+    expect((await unlock(t, "1470")).status).toBe(401);
+    const opened = await unlock(t, "8642");
+    expect(opened.status).toBe(200);
+
+    expect(
+      await resetTerminalPin(pool, {
+        terminalDeviceId: t.deviceId,
+        actorRef: "x",
+        reasonCode: "forgotten_pin",
+        correlationId: randomUUID(),
+      }),
+    ).toMatchObject({ outcome: "refused", refusal: "PIN_FORMAT_INVALID" });
+    const reset = await resetTerminalPin(pool, {
+      terminalDeviceId: t.deviceId,
+      actorRef: `OP-PIN-${RUN}`,
+      reasonCode: "forgotten_pin",
+      correlationId: randomUUID(),
+    });
+    expect(reset).toMatchObject({ outcome: "ok", result: "PIN_RESET" });
+    if (reset.outcome === "ok") {
+      expect(reset.value.sessionsClosed).toBe(1);
+      expect(reset.value.pin.state).toBe("reset_required");
+    }
+    const row = await pinRow(t);
+    expect(row?.["verifier"]).toBeNull();
+    const afterReset = await unlock(t, "8642");
+    expect(afterReset.status).toBe(409);
+    expect(detailsOf(afterReset)["result"]).toBe("PIN_SETUP_REQUIRED");
+    expect(pinOf(afterReset)["state"]).toBe("reset_required");
+
+    const reestablished = await setupPin(t, "5791");
+    expect(reestablished.status).toBe(200);
+    expect(pinOf(reestablished)).toMatchObject({ state: "set", pinVersion: 3 });
+
+    const { rows: audits } = await pool.query<{
+      event_code: string;
+      reason_code: string | null;
+      details_json: Record<string, unknown>;
+    }>(
+      `select event_code, reason_code, details_json from edge_audit.audit_event
+        where terminal_device_id = $1 and event_code like 'terminal_pin.%' order by local_sequence`,
+      [t.deviceId],
+    );
+    expect(audits.map((a) => a.event_code)).toEqual([
+      "terminal_pin.established",
+      "terminal_pin.changed",
+      "terminal_pin.unlocked",
+      "terminal_pin.reset",
+      "terminal_pin.established",
+    ]);
+    const resetEvent = audits.find((a) => a.event_code === "terminal_pin.reset");
+    expect(resetEvent?.reason_code).toBe("forgotten_pin");
+    expect(resetEvent?.details_json["operatorReference"]).toBe(`OP-PIN-${RUN}`);
+
+    // No role removes a PIN record — not even the superuser this suite runs as.
+    await expect(
+      pool.query(`delete from edge_identity.terminal_pin where terminal_device_id = $1`, [
+        t.deviceId,
+      ]),
+    ).rejects.toThrow(/KLUY-EDGE-TERMINAL-PIN-KEPT/);
   });
 
   // -------------------------------------------------------------------------

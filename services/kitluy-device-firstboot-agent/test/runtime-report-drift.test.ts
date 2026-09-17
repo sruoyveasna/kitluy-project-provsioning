@@ -80,12 +80,13 @@ describe("device copy == authoritative contract", () => {
         checkedAt: "2026-09-17T03:00:00.000Z",
         hub: { hubDeviceId: "549a41c6-21e9-4838-8b48-34a3878ba290", host: "h", port: 7443 },
         reads: { authorityTime: "ok", eligibility: "ok", configuration: "ok" },
+        terminalPin: { state: "set", setAt: "2026-09-17T02:58:00.000Z", lockedUntil: null },
       }),
     );
     writeFileSync(
       join(dir, "pos-runtime.json"),
       JSON.stringify({
-        schema: "kitluy.pos-runtime-status.v1",
+        schema: "kitluy.pos-runtime-status.v2",
         product: "kitluy-terminal",
         applicationVersion: "0.1.0",
         state: "ready",
@@ -96,7 +97,7 @@ describe("device copy == authoritative contract", () => {
           freshness: "current",
           validUntil: "2026-09-18T00:00:00Z",
         },
-        staffSignedIn: true,
+        terminalUnlocked: true,
         link: "edge_bridge",
         observedAt: "2026-09-17T03:00:01.000Z",
       }),

@@ -10,9 +10,14 @@
  *
  *   bridge -> authority time -> eligibility (bound to device, Hub, generation)
  *   -> T1 -> configuration (bound, digest, Hub-time window)
- *   -> STAFF AUTHENTICATION REQUIRED -> staff sign-in (T1) -> READY
+ *   -> LOCKED (PIN setup required) -> Terminal PIN created twice -> READY
  *   -> customer created locally -> Laundry Booking Draft created, edited,
  *      reopened -> rows in the Hub database -> sync facts in the Hub outbox
+ *   -> locked -> wrong PIN refused -> unlocked
+ *
+ * No staff record, no grant row and no passcode exist anywhere in this run: the
+ * device credential plus the Terminal PIN is the whole credential
+ * (KLD-2026-09-17-TERMINAL-PIN-DEVICE-CREDENTIAL-001).
  *
  * and the refusals that must still hold on this path: a seat generation the
  * Hub does not serve, a revoked credential, a pairing route asked of the bridge.
@@ -57,7 +62,6 @@ import {
   createEdgeTerminalRouter,
   unavailableActivationGateway,
 } from "@kitluy-services/kitluy-hub-agent/dist/hub/edge/routes.js";
-import { staffCredentialVerifier } from "@kitluy-services/kitluy-hub-agent/dist/hub/edge/runtime-bootstrap.js";
 
 import { bridgeCall } from "../electron/edge-bridge-client.js";
 import { PiTerminalRuntime } from "../electron/pi-runtime.js";
@@ -200,7 +204,7 @@ describe.skipIf(!live)(
       rmSync(work, { recursive: true, force: true });
     }, 120_000);
 
-    it("pairs, serves, signs a staff member into T1, and commits a Booking Draft on the Hub with its outbox facts", async () => {
+    it("pairs, serves, sets up and unlocks the Terminal PIN into T1, and commits a Booking Draft on the Hub with its outbox facts", async () => {
       // ----------------------------------------------------------------- Hub
       const hubKeyRef = `piedge-hub-${RUN}` as DeviceRecordId;
       const hubPem = keys.publicKeyPem(hubKeyRef) ?? "";
@@ -293,44 +297,6 @@ describe.skipIf(!live)(
        values ($1, $2, $3, $4, $5, $6, 1, true, now() - interval '1 hour', null, $7)`,
         [randomUUID(), TENANT, STORE, LOCATION, deviceId, T1, ACTIVE_SNAPSHOT],
       );
-      const actorId = randomUUID();
-      const passcode = `pc-${randomBytes(8).toString("hex")}`;
-      await pool.query(
-        `insert into edge_identity.staff_cache
-         (actor_id, tenant_id, digital_store_id, location_id, display_name,
-          credential_verifier, permission_snapshot_version, profile_codes,
-          offline_valid_until, disabled, last_synced_at)
-       values ($1, $2, $3, $4, 'Pi Edge Cashier', $5, 1, $6, now() + interval '4 hours', false, now())`,
-        [actorId, TENANT, STORE, LOCATION, staffCredentialVerifier(actorId, passcode), [T1]],
-      );
-      for (const key of [
-        "staff.sessions.open",
-        "staff.sessions.read",
-        "staff.sessions.refresh",
-        "staff.sessions.close",
-        "pos.t1.use",
-        "customers.read",
-        "customers.create",
-        "laundry.bookings.read",
-        "laundry.bookings.create",
-      ]) {
-        await pool.query(
-          `insert into edge_config.permission_grant_projection
-           (id, tenant_id, digital_store_id, location_id, source_snapshot_id,
-            projection_version, actor_id, permission_key, effect, resource_type,
-            scope_type, scope_id, environment, requires_reauthentication,
-            requires_approval, requires_reason, granted_at, not_before,
-            expires_at, revoked_at, offline_validity_seconds,
-            offline_policy_reference, signature, signature_algorithm,
-            signing_key_id, received_at)
-         values ($1, $2, $3, $4, $5, 1, $6, $7, 'allow', 'terminal_session',
-                 'store_location', $4, 'development', false, false, false,
-                 now() - interval '1 hour', now() - interval '1 hour',
-                 null, null, 3600, 'dev-offline-policy', decode('c0ffee00','hex'),
-                 'ed25519', 'demo-signing-key-1', now())`,
-          [randomUUID(), TENANT, STORE, LOCATION, ACTIVE_SNAPSHOT, actorId, key],
-        );
-      }
 
       // ------------------------------- the board: files terminal-edge reads
       const operationalDir = join(work, "operational");
@@ -424,28 +390,51 @@ describe.skipIf(!live)(
       expect(waiting.link?.hubSignatures).toBe("not_verified_hub_key_not_provisioned");
       expect(pos.intakeOperations()).toBeNull();
 
+      expect(waiting.pin).toMatchObject({ state: "setup_required", lockedUntil: null });
       const published = JSON.parse(readFileSync(statusPath, "utf8")) as Record<string, unknown>;
       expect(published).toMatchObject({
-        schema: "kitluy.pos-runtime-status.v1",
+        schema: "kitluy.pos-runtime-status.v2",
         product: "kitluy-terminal",
         state: "staff_authentication_required",
         hubDeviceId: HUB_DEVICE,
-        staffSignedIn: false,
+        terminalUnlocked: false,
         link: "edge_bridge",
       });
 
-      const wrong = await pos.signIn({ actorId, passcode: "0000-not-it" });
-      expect(wrong.ok).toBe(false);
+      // No PIN yet: nothing unlocks, and a mismatched setup is refused by the Hub.
+      expect(await pos.unlock({ pin: "4826" })).toMatchObject({
+        ok: false,
+        code: "PIN_SETUP_REQUIRED",
+      });
+      expect(await pos.setupPin({ pin: "4826", pinConfirmation: "4862" })).toMatchObject({
+        ok: false,
+        code: "PIN_CONFIRMATION_MISMATCH",
+      });
       expect(pos.intakeOperations()).toBeNull();
 
-      const signedIn = await pos.signIn({ actorId, passcode });
-      expect(signedIn.ok, JSON.stringify(signedIn)).toBe(true);
+      // §10: created twice on the trusted terminal; the Hub keeps a verifier.
+      const established = await pos.setupPin({ pin: "4826", pinConfirmation: "4826" });
+      expect(established.ok, JSON.stringify(established)).toBe(true);
       expect(pos.report?.state).toBe("ready");
-      expect(pos.report?.staff?.displayName).toBe("Pi Edge Cashier");
-      const afterSignIn = readFileSync(statusPath, "utf8");
-      expect(afterSignIn).toContain('"state": "ready"');
-      expect(afterSignIn).not.toContain(passcode);
-      expect(afterSignIn).not.toContain(actorId);
+      expect(pos.report?.pin).toMatchObject({ state: "set", lockedUntil: null });
+      expect(pos.report?.staff?.actorId).toBe(deviceId);
+      const afterSetup = readFileSync(statusPath, "utf8");
+      expect(afterSetup).toContain('"state": "ready"');
+      expect(afterSetup).toContain('"terminalUnlocked": true');
+      expect(afterSetup).not.toContain("4826");
+      const { rows: pinRows } = await pool.query<{ verifier: string; state: string }>(
+        `select verifier, state from edge_identity.terminal_pin where terminal_device_id = $1`,
+        [deviceId],
+      );
+      expect(pinRows[0]?.state).toBe("set");
+      expect(pinRows[0]?.verifier).toMatch(/^\$argon2id\$/);
+      expect(pinRows[0]?.verifier).not.toContain("4826");
+      // Nothing about a person exists on the Hub for this run.
+      const { rows: staff } = await pool.query(
+        `select 1 from edge_identity.terminal_session where terminal_device_id = $1 and credential_kind <> 'terminal_pin'`,
+        [deviceId],
+      );
+      expect(staff).toEqual([]);
 
       // ------------------------------------------- THE STORE OPERATION
       const ops = pos.intakeOperations();
@@ -511,7 +500,39 @@ describe.skipIf(!live)(
         { event_type: "laundry.booking_draft_recorded", delivery_state: "pending" },
       ]);
 
+      // ------------------------------ lock, wrong PIN, unlock again
+      await pos.lock();
+      expect(pos.report?.state).toBe("staff_authentication_required");
+      expect(pos.intakeOperations()).toBeNull();
+      const lockedWrite = await ops.createDraft({
+        customerId: null,
+        walkIn: true,
+        preferredLanguage: "km-KH",
+        customerNotes: "",
+        staffNotes: "must not land while locked",
+      });
+      expect(lockedWrite.ok).toBe(false);
+      const wrong = await pos.unlock({ pin: "0000" });
+      expect(wrong).toMatchObject({
+        ok: false,
+        code: "PIN_INCORRECT",
+        pin: { attemptsBeforeLock: 4 },
+      });
+      const unlocked = await pos.unlock({ pin: "4826" });
+      expect(unlocked.ok, JSON.stringify(unlocked)).toBe(true);
+      expect(pos.report?.state).toBe("ready");
+      const ops2 = pos.intakeOperations();
+      expect(ops2).not.toBeNull();
+      const reread = await ops2?.readDraft(draft.value.draftId);
+      expect(reread?.ok && reread.value.version).toBe(2);
+
       // --------------------------- the bridge is still a narrow door
+      const staffDoor = await bridgeCall(socketPath)("POST", "/edge/v1/sessions/open", {
+        actorId: randomUUID(),
+        passcode: "anything",
+        profileCode: T1,
+      });
+      expect(staffDoor.status).toBe(404);
       const pairingAsked = await bridgeCall(socketPath)(
         "POST",
         "/edge/v1/terminal-pairing/sessions",
