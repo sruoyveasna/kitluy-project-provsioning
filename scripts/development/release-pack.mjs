@@ -3,15 +3,20 @@
  * Pack and sign a DEVELOPMENT release artifact.
  *
  *   node scripts/development/release-pack.mjs --product device-shell --version 0.4.12
+ *   node scripts/development/release-pack.mjs --product kitluy-terminal --version 0.1.0
  *
  * ===========================================================================
  * WHAT THIS PRODUCES, AND WHAT IT REFUSES
  * ===========================================================================
- * Three files in `build/releases/<releaseId>/`:
+ * `release-publish.mjs` writes three files in `build/releases/<releaseId>/`:
  *
  *   artifact.tar.gz   the payload, root-owned, no symlinks, no setuid
  *   manifest.json     the signed release manifest body (v1)
  *   envelope.json     keyId, keyVersion, algorithm, detached Ed25519 signature
+ *
+ * Run on its own, this file PACKS and describes — it does not sign, because the
+ * release id a manifest must carry is minted by the database at publish time
+ * (see `packRelease`). It used to try, and crashed on a manifest it never built.
  *
  * It signs with the DEVELOPMENT release-signing key from the persistent dev PKI
  * (`pnpm pki:bootstrap-dev`), which lives OUTSIDE this repository. It refuses to
@@ -44,8 +49,13 @@ import { gzipSync } from "node:zlib";
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const BLOCK = 512;
 
-/** The one product U1 may publish (owner ruling OD-U1-2 = C). */
-const PERMITTED_PRODUCTS = new Set(["device-shell"]);
+/**
+ * The products a release may carry — the device's own `PERMITTED_PRODUCTS`
+ * (`release-store.ts`), and nothing wider: the Device Shell payload (OD-U1-2 =
+ * C) and the POS application under its governed key `kitluy-terminal`
+ * (KLD-2026-08-11-DEVICE-BOOTSTRAP-RUNTIME-001; T1-STORE-OPERATIONS-001).
+ */
+const PERMITTED_PRODUCTS = new Set(["device-shell", "kitluy-terminal"]);
 
 /** Where each product's built payload comes from. */
 const PRODUCT_SOURCES = {
@@ -53,6 +63,15 @@ const PRODUCT_SOURCES = {
     workspace: "@kitluy-apps/kitluy-device-shell",
     /** Built output, relative to the app directory. */
     directory: "apps/kitluy-device-shell",
+    include: ["package.json", "dist", "dist-electron"],
+  },
+  // NOT the app directory itself: the POS main process imports workspace
+  // packages, and the device has no node_modules. `pnpm --filter
+  // @kitluy-apps/kitluy-pos-desktop-app build:release-payload` bundles it into a
+  // directory that runs under the image's pinned Electron with nothing else.
+  "kitluy-terminal": {
+    workspace: "@kitluy-apps/kitluy-pos-desktop-app",
+    directory: "apps/kitluy-pos-desktop-app/release-payload",
     include: ["package.json", "dist", "dist-electron"],
   },
 };
@@ -86,7 +105,7 @@ function parseArgs(argv) {
   }
   if (!PERMITTED_PRODUCTS.has(args.product)) {
     die(
-      `${args.product} is not publishable in U1. Owner ruling OD-U1-2 = C classifies the Device Shell payload alone; the broader bootstrap/runtime boundary returns to the owner at U3.`,
+      `${args.product} is not a release product. Releases carry the Device Shell payload (OD-U1-2 = C) and the POS application kitluy-terminal; the bootstrap/runtime set stays image-only.`,
     );
   }
   if (args.version.trim() === "") die("--version is required and is never defaulted");
@@ -330,26 +349,27 @@ export function signManifest(manifest, privateKey, record) {
 
 function main() {
   const args = parseArgs(process.argv.slice(2));
-  const { privateKey, record } = loadSigningKey(resolve(args.pkiDir));
-  const { archive, manifest } = packRelease(args);
-  const envelope = signManifest(manifest, privateKey, record);
+  // The key is still LOADED, so a pack run refuses exactly where a publish would
+  // (wrong purpose, wrong environment) — it is just not used: see the header.
+  loadSigningKey(resolve(args.pkiDir));
+  const packed = packRelease(args);
+  const { archive, ...description } = packed;
 
-  const outDir = args.out ?? join(REPO_ROOT, "build", "releases", manifest.releaseId);
+  const outDir =
+    args.out ??
+    join(REPO_ROOT, "build", "releases", `packed-${packed.productKey}-${packed.version}`);
   mkdirSync(outDir, { recursive: true });
   writeFileSync(join(outDir, "artifact.tar.gz"), archive);
-  writeFileSync(join(outDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
-  writeFileSync(join(outDir, "envelope.json"), `${JSON.stringify(envelope, null, 2)}\n`);
+  writeFileSync(join(outDir, "packed.json"), `${JSON.stringify(description, null, 2)}\n`);
 
-  console.log(`[release-pack] ${manifest.releaseId}`);
-  console.log(`[release-pack]   product   ${manifest.productKey} ${manifest.version}`);
-  console.log(`[release-pack]   build     ${manifest.buildId}`);
-  console.log(`[release-pack]   digest    ${manifest.artifactDigestSha256}`);
-  console.log(`[release-pack]   size      ${manifest.artifactSizeBytes} bytes`);
+  console.log(`[release-pack]   product   ${packed.productKey} ${packed.version}`);
+  console.log(`[release-pack]   build     ${packed.buildId}`);
+  console.log(`[release-pack]   digest    ${packed.artifactDigestSha256}`);
+  console.log(`[release-pack]   size      ${packed.artifactSizeBytes} bytes`);
   console.log(
-    `[release-pack]   signed by ${envelope.keyId} v${envelope.keyVersion} (release_signing, development)`,
+    `[release-pack]   out       ${relative(REPO_ROOT, outDir)} (UNSIGNED — publish signs)`,
   );
-  console.log(`[release-pack]   out       ${relative(REPO_ROOT, outDir)}`);
-  if (manifest.buildId.endsWith("-dirty")) {
+  if (packed.buildId.endsWith("-dirty")) {
     console.log(
       "[release-pack] NOTE: the working tree is dirty, so this artifact is not reproducible from a commit.",
     );

@@ -5,6 +5,7 @@
  *   KITLUY_DEV_FLEET_DSN=postgresql://postgres:postgres@127.0.0.1:54372/postgres \
  *   KITLUY_DEV_PKI_DIR=../../local-config/het-kitluy-project/dev-pki \
  *   pnpm release:publish --version 0.4.12 --target KL-1054DD1CCC8E
+ *   pnpm release:publish --product kitluy-terminal --version 0.1.0 --target KL-1CB3577C26A7
  *
  * ===========================================================================
  * THE ORDER IS FORCED BY WHO MINTS THE RELEASE ID
@@ -251,9 +252,10 @@ try {
   );
 
   // ---- what the device will actually be told, read back through the governed door
+  // Per product (group 0228): the device asks about the product it installs.
   const current = await client.query(
-    `select kitluy_releases.current_device_assignment_v1($1::uuid) as a`,
-    [device.id],
+    `select kitluy_releases.current_device_product_assignment_v1($1::uuid, $2) as a`,
+    [device.id, manifest.productKey],
   );
   const assignment = current.rows[0].a;
   if (assignment === null) {

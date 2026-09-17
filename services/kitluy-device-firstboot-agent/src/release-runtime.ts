@@ -32,12 +32,49 @@ import { readImageEnv } from "./image-env.js";
 import { createHttpReleaseSource } from "./adapters/http-release-source.js";
 import { readRegistrationState } from "./registration-state.js";
 import { loadReleaseTrustRegistry } from "./release-trust.js";
-import { storePaths, U1_PERMITTED_PRODUCT } from "./release-store.js";
+import {
+  activeReleaseId,
+  storePaths,
+  TERMINAL_CLIENT_PRODUCT,
+  U1_PERMITTED_PRODUCT,
+  type PermittedProduct,
+  type StorePaths,
+} from "./release-store.js";
 import type { HealthProbe, InstallDependencies, UnitControl } from "./release-install.js";
 import type { ReleaseAcceptanceContext } from "./release-verify.js";
 
-/** The unit that runs the one product U1 may update. */
+/** The unit that runs the Device Shell. */
 export const DEVICE_SHELL_UNIT = "kitluy-device-shell.service";
+
+/** The unit that runs the POS application (image component `terminal-client`). */
+export const TERMINAL_CLIENT_UNIT = "kitluy-terminal-client.service";
+
+/**
+ * What the agent needs to know about each product it may install: the unit that
+ * runs it (restarted on install, probed by the owner's health gate) and where
+ * that unit's launcher writes its witness of what it actually exec'd.
+ *
+ * One table, so a product is never half-added: a key in `PERMITTED_PRODUCTS`
+ * without a row here does not compile.
+ */
+export interface ReleaseProductDescriptor {
+  readonly productKey: PermittedProduct;
+  readonly unit: string;
+  readonly runningSourcePath: string;
+}
+
+export const RELEASE_PRODUCTS: Readonly<Record<PermittedProduct, ReleaseProductDescriptor>> = {
+  [U1_PERMITTED_PRODUCT]: {
+    productKey: U1_PERMITTED_PRODUCT,
+    unit: DEVICE_SHELL_UNIT,
+    runningSourcePath: "/var/lib/kitluy/terminal/running-source.json",
+  },
+  [TERMINAL_CLIENT_PRODUCT]: {
+    productKey: TERMINAL_CLIENT_PRODUCT,
+    unit: TERMINAL_CLIENT_UNIT,
+    runningSourcePath: "/var/lib/kitluy/terminal/terminal-client-running.json",
+  },
+};
 
 export type CompositionRefusal =
   | "NO_TRUST_ANCHOR"
@@ -77,12 +114,47 @@ function run(command: string, args: readonly string[]): string | null {
  */
 export function createUnitControl(unit = DEVICE_SHELL_UNIT): UnitControl {
   return {
+    unit,
     restart(): Promise<void> {
       const out = run("systemctl", ["restart", unit]);
       if (out === null) {
         return Promise.reject(new Error(`systemctl restart ${unit} failed`));
       }
       return Promise.resolve();
+    },
+  };
+}
+
+/**
+ * The POS unit control — a restart that can never leave the display empty.
+ *
+ * `kitluy-terminal-client.service` declares `Conflicts=kitluy-device-shell.service`,
+ * so STARTING it stops the Device Shell before systemd even runs the launcher.
+ * That is right while a POS release is installed. It is wrong on the one path
+ * where none is: a health-gate rollback with no previous release removes
+ * `current`, and "restart the POS" would then stop the shell and start a
+ * launcher that refuses — a blank counter until the start limit fires
+ * `OnFailure=`.
+ *
+ * So the restart looks at the store first. A usable release: restart the POS.
+ * None: stop the POS and start the Device Shell, which is the floor.
+ */
+export function createTerminalClientUnitControl(
+  paths: StorePaths,
+  runCommand: (command: string, args: readonly string[]) => string | null = run,
+): UnitControl {
+  return {
+    unit: TERMINAL_CLIENT_UNIT,
+    restart(): Promise<void> {
+      if (activeReleaseId(paths) !== null) {
+        return runCommand("systemctl", ["restart", TERMINAL_CLIENT_UNIT]) === null
+          ? Promise.reject(new Error(`systemctl restart ${TERMINAL_CLIENT_UNIT} failed`))
+          : Promise.resolve();
+      }
+      runCommand("systemctl", ["stop", TERMINAL_CLIENT_UNIT]);
+      return runCommand("systemctl", ["start", DEVICE_SHELL_UNIT]) === null
+        ? Promise.reject(new Error(`systemctl start ${DEVICE_SHELL_UNIT} failed`))
+        : Promise.resolve();
     },
   };
 }
@@ -115,15 +187,24 @@ export function createUnitHealthProbe(unit = DEVICE_SHELL_UNIT): HealthProbe {
   };
 }
 
-/** The acceptance context, entirely from the image the builder produced. */
-export function acceptanceFromImage(etcRoot?: string): ReleaseAcceptanceContext | null {
+/**
+ * The acceptance context, entirely from the image the builder produced.
+ *
+ * The product key is the one the CALLER is installing for, never one read from
+ * the release: a POS release offered to the Device Shell pass is refused
+ * `RELEASE_WRONG_PRODUCT` here rather than restarting the wrong unit.
+ */
+export function acceptanceFromImage(
+  etcRoot?: string,
+  product: PermittedProduct = U1_PERMITTED_PRODUCT,
+): ReleaseAcceptanceContext | null {
   const environment = readImageEnv("KITLUY_ENVIRONMENT", etcRoot);
   const hardwareProfile = readImageEnv("KITLUY_HARDWARE_PROFILE_KEY", etcRoot);
   if (environment === undefined || hardwareProfile === undefined) return null;
   const channel = readImageEnv("KITLUY_RELEASE_CHANNEL", etcRoot) ?? "internal";
   const schema = Number.parseInt(readImageEnv("KITLUY_IMAGE_SCHEMA_VERSION", etcRoot) ?? "1", 10);
   return {
-    productKey: U1_PERMITTED_PRODUCT,
+    productKey: product,
     architecture: "arm64",
     hardwareProfile,
     environment,
@@ -137,6 +218,8 @@ export function acceptanceFromImage(etcRoot?: string): ReleaseAcceptanceContext 
 
 export interface CompositionOptions {
   readonly baseUrl: string;
+  /** Which product this pass installs. Defaults to the Device Shell (U1). */
+  readonly product?: PermittedProduct;
   readonly etcRoot?: string;
   readonly trustDir?: string;
   readonly storeRoot?: string;
@@ -190,7 +273,9 @@ export function composeInstallDependencies(options: CompositionOptions): Composi
     };
   }
 
-  const acceptance = acceptanceFromImage(options.etcRoot);
+  const product = options.product ?? U1_PERMITTED_PRODUCT;
+  const descriptor = RELEASE_PRODUCTS[product];
+  const acceptance = acceptanceFromImage(options.etcRoot, product);
   if (acceptance === null) {
     return {
       ok: false,
@@ -222,22 +307,29 @@ export function composeInstallDependencies(options: CompositionOptions): Composi
   // `deviceId` is written by the cloud into the registration state and is what
   // the cloud keys on. It is local state exactly as the fingerprint was, so
   // the property that mattered is unchanged.
+  //
+  // And it names the PRODUCT it is asking about (group 0228): a device-wide
+  // "newest assignment" would let a POS assignment hide the Device Shell's.
   const source = createHttpReleaseSource({
     baseUrl: options.baseUrl,
     deviceRef: deviceId,
+    product,
   });
 
   return {
     ok: true,
     deps: {
-      paths: storePaths(U1_PERMITTED_PRODUCT, options.storeRoot),
+      paths: storePaths(product, options.storeRoot),
       assignments: source,
       artifacts: source,
       trustedKeys: registry.keys,
       deviceId,
       acceptance,
-      unit: createUnitControl(options.unit),
-      health: createUnitHealthProbe(options.unit),
+      unit:
+        product === TERMINAL_CLIENT_PRODUCT && options.unit === undefined
+          ? createTerminalClientUnitControl(storePaths(product, options.storeRoot))
+          : createUnitControl(options.unit ?? descriptor.unit),
+      health: createUnitHealthProbe(options.unit ?? descriptor.unit),
     },
   };
 }

@@ -21,6 +21,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   ProductNotPermittedError,
+  PERMITTED_PRODUCTS,
   U1_PERMITTED_PRODUCT,
   activate,
   activeReleaseId,
@@ -61,15 +62,29 @@ function placeRelease(releaseId: string, main = "index.js"): void {
   writeFileSync(join(dir, main), "// payload");
 }
 
-describe("the U1 scope fence (owner ruling OD-U1-2 = C)", () => {
+describe("the release-store scope fence (OD-U1-2 = C; KLD-2026-08-11-DEVICE-BOOTSTRAP-RUNTIME-001)", () => {
   it("permits the Device Shell payload", () => {
     expect(() => {
       assertProductPermitted("device-shell");
     }).not.toThrow();
   });
 
+  it("permits the POS application under its governed product key, kitluy-terminal", () => {
+    expect(() => {
+      assertProductPermitted("kitluy-terminal");
+    }).not.toThrow();
+    expect(storePaths("kitluy-terminal", root).productRoot).toBe(join(root, "kitluy-terminal"));
+  });
+
+  it("permits exactly two products, both applications", () => {
+    expect([...PERMITTED_PRODUCTS].sort()).toEqual(["device-shell", "kitluy-terminal"]);
+  });
+
   // The ruling is explicit that it must NOT be used to reclassify the
-  // bootstrap/runtime set. This is that sentence, enforced.
+  // bootstrap/runtime set. This is that sentence, enforced. `terminal-client`
+  // stays refused as a KEY: it is the image's component id for the POS, not the
+  // release product key, and a second spelling of one product would give it two
+  // journals and two high-water marks.
   it.each([
     "terminal-edge",
     "firstboot-identity",
@@ -79,7 +94,8 @@ describe("the U1 scope fence (owner ruling OD-U1-2 = C)", () => {
     "operational-tls",
     "hub-agent",
     "terminal-client",
-  ])("refuses %s, which stays image-only until the owner rules at U3", (product) => {
+    "kitluy-hub-agent",
+  ])("refuses %s, which stays image-only (or is not a release product key)", (product) => {
     expect(() => {
       assertProductPermitted(product);
     }).toThrow(ProductNotPermittedError);

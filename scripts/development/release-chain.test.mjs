@@ -26,7 +26,15 @@
  * Release rows are governed and append-only — `enforce_release_governed` refuses
  * removal, and revocation is a new fact rather than a rewrite. So this leaves
  * its releases behind by design, marked with a `u1-chain-check` actor so they
- * are identifiable. It creates no device and changes no device state.
+ * are identifiable. It creates no device.
+ *
+ * It DOES assign, and an assigned synthetic Device Shell payload on a live board
+ * would be installed by that board's agent (it happened: 2026-09-14 displaced a
+ * real acceptance release). So every release this run created is REVOKED at the
+ * end — revocation withdraws the assignment (group 0223: the newest row fails
+ * the installability test and the answer is NULL, never an older row). Still:
+ * point `KITLUY_DEV_TERMINAL_ASSET_TAG` at a device record that is not in
+ * acceptance.
  */
 import { createPrivateKey, randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
@@ -107,6 +115,8 @@ await client.connect();
 
 let server;
 const work = mkdtempSync(join(tmpdir(), "kitluy-chain-"));
+/** Every release this run created, for the revocation at the end. */
+const created = [];
 try {
   await assertReleaseCapable(client, target.label);
   const device = await resolveDeviceByAssetTag(client, assetTag);
@@ -174,6 +184,7 @@ try {
   const releaseId = raw.release_id ?? raw.releaseId ?? raw.id;
   check("the database minted a release id", typeof releaseId === "string", JSON.stringify(raw));
   if (typeof releaseId !== "string") throw new Error("no release id");
+  created.push(releaseId);
 
   // =====================================================================
   console.log("3. sign the manifest around THAT id");
@@ -325,9 +336,13 @@ try {
   }
   if (!serverOut.includes("listening")) die(`the release service did not start:\n${serverOut}`);
 
+  // By the cloud-issued device id, exactly as a device on hardware names itself
+  // (the option was `assetTag` before the 2026-09-14 Defect 5 fix; this check
+  // kept passing the old name, so the client asked for `device=undefined`).
   const source = deviceSource.createHttpReleaseSource({
     baseUrl: `http://127.0.0.1:${String(port)}`,
-    assetTag,
+    deviceRef: device.id,
+    product: "device-shell",
   });
   const fetched = await source.fetchAssignment();
   check(
@@ -436,6 +451,7 @@ try {
   );
   const raw2 = draft2.rows[0].r;
   const releaseId2 = raw2.release_id ?? raw2.releaseId ?? raw2.id;
+  created.push(releaseId2);
   const manifest2 = buildManifest({ ...packed, version: `${packed.version}-older` }, releaseId2);
   const envelope2 = signManifest(manifest2, privateKey, record);
   await client.query(`select kitluy_releases.sign_release_v1($1::uuid,$2,$3,$4,$5)`, [
@@ -535,6 +551,7 @@ try {
   );
   const raw3 = draft3.rows[0].r;
   const releaseId3 = raw3.release_id ?? raw3.releaseId ?? raw3.id;
+  created.push(releaseId3);
   const manifest3 = buildManifest({ ...packed, version: `${packed.version}-unsigned` }, releaseId3);
   const envelope3 = signManifest(manifest3, privateKey, record);
   await client.query(`select kitluy_releases.sign_release_v1($1::uuid,$2,$3,$4,$5)`, [
@@ -609,11 +626,174 @@ try {
     misdirected.kind === "REFUSED" && misdirected.code === "ASSIGNMENT_NOT_FOR_THIS_DEVICE",
     JSON.stringify(misdirected),
   );
+
+  // =====================================================================
+  console.log("14. two PRODUCTS never hide each other (group 0228)");
+  //
+  // Synthetic product keys, deliberately: no device's acceptance gate accepts
+  // them, so nothing this step assigns can ever be installed anywhere.
+  const productA = "chain-check-product-a";
+  const productB = "chain-check-product-b";
+  const publishFor = async (productKey, version, { signAssignmentToo = true } = {}) => {
+    const d = await client.query(
+      `select kitluy_releases.create_release_draft_v1($1,$2,$3,$4,$5,$6,$7,$8,$9::bigint,$10,$11,$12::bigint,$13,$14,$15::uuid) as r`,
+      [
+        productKey,
+        version,
+        packed.buildId,
+        packed.architecture,
+        packed.hardwareProfile,
+        packed.environment,
+        `local://chain-check-${productKey}`,
+        packed.artifactDigestSha256,
+        String(packed.artifactSizeBytes),
+        packed.minSchemaVersion,
+        packed.maxSchemaVersion,
+        String(packed.configPrerequisiteVersion),
+        null,
+        ACTOR,
+        randomUUID(),
+      ],
+    );
+    const r = d.rows[0].r;
+    const id = r.release_id ?? r.releaseId ?? r.id;
+    created.push(id);
+    const m = buildManifest({ ...packed, productKey, version }, id);
+    const e = signManifest(m, privateKey, record);
+    await client.query(`select kitluy_releases.sign_release_v1($1::uuid,$2,$3,$4,$5)`, [
+      id,
+      e.keyId,
+      e.keyVersion,
+      e.signature,
+      ACTOR,
+    ]);
+    await client.query(`select kitluy_releases.promote_release_v1($1::uuid,'internal',$2,null)`, [
+      id,
+      ACTOR,
+    ]);
+    await client.query(
+      `select kitluy_releases.assign_release_v1($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5,$6::uuid,$7,$8)`,
+      [
+        id,
+        scope.tenant_id,
+        scope.digital_store_id,
+        scope.store_location_id,
+        packed.environment,
+        device.id,
+        `u2-chain-${id}-${device.id}`,
+        ACTOR,
+      ],
+    );
+    if (signAssignmentToo) await signOne(id);
+    return id;
+  };
+  const productReader = async (productKey) =>
+    (
+      await client.query(
+        `select kitluy_releases.current_device_product_assignment_v1($1::uuid, $2) as a`,
+        [device.id, productKey],
+      )
+    ).rows[0].a;
+
+  const version = `0.0.0-chain-${Date.now().toString(36)}`;
+  const releaseA = await publishFor(productA, version);
+  const releaseB = await publishFor(productB, version); // assigned AFTER A: higher sequence
+  const readA = await productReader(productA);
+  const readB = await productReader(productB);
+  check(
+    "a newer assignment of product B does NOT hide product A",
+    readA?.releaseId === releaseA,
+    String(readA?.releaseId),
+  );
+  check(
+    "product B reads its own assignment",
+    readB?.releaseId === releaseB,
+    String(readB?.releaseId),
+  );
+  check(
+    "B really is newer, so the property above has teeth",
+    readB?.assignmentSequence > readA?.assignmentSequence,
+    `${String(readB?.assignmentSequence)} > ${String(readA?.assignmentSequence)}`,
+  );
+  const deviceWide = (
+    await client.query(`select kitluy_releases.current_device_assignment_v1($1::uuid) as a`, [
+      device.id,
+    ])
+  ).rows[0].a;
+  check(
+    "the device-wide reader (0223) would have answered B for everything — the defect 0228 fixes",
+    deviceWide?.releaseId === releaseB,
+    String(deviceWide?.releaseId),
+  );
+  check(
+    "a product nobody assigned reads as NULL",
+    (await productReader("chain-check-product-never")) === null,
+  );
+
+  const sourceA = deviceSource.createHttpReleaseSource({
+    baseUrl: `http://127.0.0.1:${String(port)}`,
+    deviceRef: device.id,
+    product: productA,
+  });
+  const fetchedA = await sourceA.fetchAssignment();
+  check(
+    "the device client, naming product A, is served A over HTTP",
+    fetchedA?.releaseId === releaseA,
+    String(fetchedA?.releaseId),
+  );
+  const posAcceptance = deviceVerify.findReleaseAcceptanceRefusal(fetchedA.manifest, {
+    productKey: "kitluy-terminal",
+    architecture: "arm64",
+    hardwareProfile: "KL-PI5-TERMINAL-DEV",
+    environment: "development",
+    eligibleChannels: ["internal"],
+    schemaVersion: 1,
+    configurationVersion: 0,
+  });
+  check(
+    "a POS pass refuses a release of another product",
+    posAcceptance === "RELEASE_WRONG_PRODUCT",
+    String(posAcceptance),
+  );
+
+  // 0223's rule WITHIN one product: an unsigned newest A hides older signed A,
+  // and leaves B untouched.
+  await publishFor(productA, `${version}-unsigned`, { signAssignmentToo: false });
+  check(
+    "an unsigned newer A reads as NULL for A (no fallback within a product)",
+    (await productReader(productA)) === null,
+  );
+  check("...and B is unaffected", (await productReader(productB))?.releaseId === releaseB);
+  const badProduct = await fetch(
+    `http://127.0.0.1:${String(port)}/release/v1/assignment?device=${device.id}&product=..%2Fetc`,
+  );
+  check("the service refuses a malformed product key", badProduct.status === 400);
 } catch (error) {
   if (error instanceof ReleaseTargetRefusal) die(error.message);
   console.error("\nUNEXPECTED:", String(error.message ?? error));
   failures.push("unexpected error");
 } finally {
+  // Withdraw every assignment this run made (see the header).
+  let revoked = 0;
+  for (const id of created) {
+    try {
+      await client.query(`select kitluy_releases.revoke_release_v1($1::uuid,$2,$3,$4)`, [
+        id,
+        ACTOR,
+        `${ACTOR}-approver`,
+        "release chain check: synthetic release, withdrawn at the end of the run",
+      ]);
+      revoked += 1;
+    } catch (error) {
+      console.error(
+        `  cleanup: could not revoke ${id}: ${String(error.message ?? error).split("\n")[0]}`,
+      );
+    }
+  }
+  if (created.length > 0)
+    console.log(
+      `\n[chain] revoked ${String(revoked)} of ${String(created.length)} synthetic releases`,
+    );
   if (server !== undefined) server.kill("SIGTERM");
   rmSync(work, { recursive: true, force: true });
   await client.end();

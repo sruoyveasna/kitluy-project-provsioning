@@ -33,6 +33,8 @@ import { resolveDevTarget } from "./dev-target.mjs";
 
 /** The cloud migration group that introduced the release-assignment sequence. */
 export const REQUIRED_RELEASE_GROUP = "0221";
+/** The cloud migration group that answers assignments per product. */
+export const REQUIRED_PRODUCT_GROUP = "0228";
 
 export class ReleaseTargetRefusal extends Error {
   constructor(message) {
@@ -65,7 +67,11 @@ export async function assertReleaseCapable(client, label) {
       exists (
         select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
          where n.nspname = 'kitluy_releases' and p.proname = 'current_device_assignment_v1'
-      ) as has_reader
+      ) as has_reader,
+      exists (
+        select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+         where n.nspname = 'kitluy_releases' and p.proname = 'current_device_product_assignment_v1'
+      ) as has_product_reader
   `);
   const state = rows[0] ?? {};
   const missing = [];
@@ -78,11 +84,16 @@ export async function assertReleaseCapable(client, label) {
   if (state.has_reader !== true) {
     missing.push(`kitluy_releases.current_device_assignment_v1 (group ${REQUIRED_RELEASE_GROUP})`);
   }
+  if (state.has_product_reader !== true) {
+    missing.push(
+      `kitluy_releases.current_device_product_assignment_v1 (group ${REQUIRED_PRODUCT_GROUP})`,
+    );
+  }
   if (missing.length > 0) {
     throw new ReleaseTargetRefusal(
       `${label} cannot serve releases. Missing:\n` +
         missing.map((m) => `  - ${m}`).join("\n") +
-        `\n\nPoint KITLUY_DEV_FLEET_DSN at a stack carrying group ${REQUIRED_RELEASE_GROUP}, or apply it there first.`,
+        `\n\nPoint KITLUY_DEV_FLEET_DSN at a stack carrying groups ${REQUIRED_RELEASE_GROUP} and ${REQUIRED_PRODUCT_GROUP}, or apply them there first.`,
     );
   }
 }

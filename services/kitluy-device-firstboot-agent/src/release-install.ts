@@ -76,6 +76,8 @@ export interface HealthProbe {
 }
 
 export interface UnitControl {
+  /** The unit this control restarts, when it is a real systemd unit. */
+  readonly unit?: string;
   /** Restart the unit that runs the product. Throws on failure. */
   restart(): Promise<void>;
 }

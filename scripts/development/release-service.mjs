@@ -8,8 +8,8 @@
  * ===========================================================================
  * TWO ROUTES, TWO DIFFERENT KINDS OF THING
  * ===========================================================================
- *   GET /release/v1/assignment?device=<asset-tag>   AUTHORITY
- *   GET /release/v1/artifact/<releaseId>            BYTES
+ *   GET /release/v1/assignment?device=<id|asset-tag>&product=<key>   AUTHORITY
+ *   GET /release/v1/artifact/<releaseId>                              BYTES
  *
  * The split is the owner's ruling: assignment determines what a Terminal may
  * install; artifact storage transports bytes only and is not deployment
@@ -18,8 +18,9 @@
  * It is worth being precise about what makes that true, because running both
  * routes in one process could easily be mistaken for collapsing the two.
  *
- *   - the ASSIGNMENT route answers ONLY from `current_device_assignment_v1`,
- *     a governed database function. This service decides nothing: it does not
+ *   - the ASSIGNMENT route answers ONLY from
+ *     `current_device_product_assignment_v1` (group 0228), a governed database
+ *     function, for the product the device names. This service decides nothing: it does not
  *     choose a release, does not rank versions, and has no path that could
  *     offer a release the database did not name.
  *   - the ARTIFACT route serves bytes for ONE release id the caller already
@@ -63,6 +64,17 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const RELEASES_DIR = join(REPO_ROOT, "build", "releases");
 /** A release id is a uuid from the database. Nothing else is ever a path. */
 const RELEASE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+/** A product key's SHAPE. Which keys a device installs is the device's decision. */
+const PRODUCT_KEY = /^[a-z0-9][a-z0-9-]{0,63}$/u;
+/**
+ * What a device that names NO product is asking about.
+ *
+ * Every image built before group 0228 asks `?device=` alone, and the only
+ * product those images can install is the Device Shell. Answering them from the
+ * device-wide reader would hand them a POS assignment the moment one exists,
+ * which they would refuse `RELEASE_WRONG_PRODUCT` and log against the shell.
+ */
+const UNNAMED_PRODUCT = "device-shell";
 
 function die(message) {
   console.error(`\nREFUSED: ${message}\n`);
@@ -136,6 +148,10 @@ async function handleAssignment(url, response) {
   if (deviceRef === null || deviceRef.trim() === "") {
     return json(response, 400, { error: "a device reference is required" });
   }
+  const product = url.searchParams.get("product") ?? UNNAMED_PRODUCT;
+  if (!PRODUCT_KEY.test(product)) {
+    return json(response, 400, { error: "malformed product key" });
+  }
   const client = await pool.connect();
   try {
     let device;
@@ -156,8 +172,8 @@ async function handleAssignment(url, response) {
       return json(response, 404, { error: "unknown device on this target" });
     }
     const { rows } = await client.query(
-      `select kitluy_releases.current_device_assignment_v1($1::uuid) as a`,
-      [device.id],
+      `select kitluy_releases.current_device_product_assignment_v1($1::uuid, $2) as a`,
+      [device.id, product],
     );
     const assignment = rows[0]?.a ?? null;
     if (assignment === null) {
@@ -166,7 +182,7 @@ async function handleAssignment(url, response) {
       return json(response, 200, { assignment: null });
     }
     console.log(
-      `[release-serve] assignment ${device.asset_tag} -> ${assignment.releaseId} seq=${String(assignment.assignmentSequence)}`,
+      `[release-serve] assignment ${device.asset_tag} ${product} -> ${assignment.releaseId} seq=${String(assignment.assignmentSequence)}`,
     );
     return json(response, 200, { assignment });
   } finally {

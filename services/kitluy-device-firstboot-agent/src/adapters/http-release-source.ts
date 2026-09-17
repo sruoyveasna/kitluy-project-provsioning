@@ -52,6 +52,13 @@ export interface HttpReleaseSourceOptions {
    * first re-flash, and the authority then answers 404 for ever.
    */
   readonly deviceRef: string;
+  /**
+   * The product this client asks about (cloud group 0228). Absent only for the
+   * U1 shape, which the development source answers as `device-shell`. A device
+   * that installs more than one product MUST name it, or a newer assignment of
+   * one product hides the other's.
+   */
+  readonly product?: string;
   readonly timeoutMs?: number;
 }
 
@@ -253,7 +260,9 @@ export function createHttpReleaseSource(
     describe: () => base,
 
     async fetchAssignment(): Promise<ReleaseAssignment | null> {
-      const url = `${base}/release/v1/assignment?device=${encodeURIComponent(options.deviceRef)}`;
+      const productQuery =
+        options.product === undefined ? "" : `&product=${encodeURIComponent(options.product)}`;
+      const url = `${base}/release/v1/assignment?device=${encodeURIComponent(options.deviceRef)}${productQuery}`;
       const response = await fetchRaw(url, { timeoutMs, maxBytes: MAX_JSON_BYTES });
       // 404 is "this stack does not know me" — a freshly flashed terminal polls
       // before it is approved, and that is not a fault to report as one.

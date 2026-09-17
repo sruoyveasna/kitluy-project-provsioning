@@ -21,7 +21,11 @@ import {
   acceptanceFromImage,
   composeInstallDependencies,
   DEVICE_SHELL_UNIT,
+  createTerminalClientUnitControl,
+  RELEASE_PRODUCTS,
+  TERMINAL_CLIENT_UNIT,
 } from "../src/release-runtime.js";
+import { activate, PERMITTED_PRODUCTS, releaseDir, storePaths } from "../src/release-store.js";
 
 let root: string;
 let etcRoot: string;
@@ -189,6 +193,108 @@ describe("the composition an installing agent needs", () => {
 
   it("targets the Device Shell unit and nothing else", () => {
     expect(DEVICE_SHELL_UNIT).toBe("kitluy-device-shell.service");
+    imageEnv();
+    anchor();
+    registered();
+    const result = compose();
+    if (!result.ok) throw new Error(`expected ok, got ${result.refusal}`);
+    expect(result.deps.unit.unit).toBe(DEVICE_SHELL_UNIT);
+  });
+});
+
+/**
+ * THE SECOND PRODUCT (T1-STORE-OPERATIONS-001).
+ *
+ * A POS pass must differ from a Device Shell pass in exactly three places — the
+ * product it NAMES to the authority, the product its acceptance gate DEMANDS,
+ * and the unit it RESTARTS — and in nothing else. Each is asserted from the
+ * outside: the request actually sent, the context actually built, the unit
+ * actually targeted.
+ */
+describe("a POS pass is the same pass for a different product", () => {
+  async function askedFor(product?: "device-shell" | "kitluy-terminal"): Promise<string> {
+    const asked: string[] = [];
+    const server = createServer((request, response) => {
+      asked.push(request.url ?? "");
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ assignment: null }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as AddressInfo).port;
+    try {
+      const result = composeInstallDependencies({
+        baseUrl: `http://127.0.0.1:${String(port)}`,
+        ...(product === undefined ? {} : { product }),
+        etcRoot,
+        trustDir,
+        storeRoot: join(root, "releases"),
+        registrationStatePath: statePath,
+      });
+      if (!result.ok) throw new Error(`expected ok, got ${result.refusal}`);
+      await result.deps.assignments.fetchAssignment();
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+    expect(asked).toHaveLength(1);
+    return asked[0] ?? "";
+  }
+
+  it("names kitluy-terminal to the authority, so a POS assignment never hides the shell's", async () => {
+    imageEnv();
+    anchor();
+    registered();
+    const url = new URL(await askedFor("kitluy-terminal"), "http://x");
+    expect(url.searchParams.get("device")).toBe(DEVICE_ID);
+    expect(url.searchParams.get("product")).toBe("kitluy-terminal");
+  });
+
+  it("a Device Shell pass names device-shell, explicitly", async () => {
+    imageEnv();
+    anchor();
+    registered();
+    const url = new URL(await askedFor(), "http://x");
+    expect(url.searchParams.get("product")).toBe("device-shell");
+  });
+
+  it("demands a kitluy-terminal manifest, keeps its own store, and restarts the POS unit", () => {
+    imageEnv();
+    anchor();
+    registered();
+    const result = composeInstallDependencies({
+      baseUrl: "http://172.16.21.17:8791",
+      product: "kitluy-terminal",
+      etcRoot,
+      trustDir,
+      storeRoot: join(root, "releases"),
+      registrationStatePath: statePath,
+    });
+    if (!result.ok) throw new Error(`expected ok, got ${result.refusal}`);
+    expect(result.deps.acceptance.productKey).toBe("kitluy-terminal");
+    expect(result.deps.paths.productRoot).toBe(join(root, "releases", "kitluy-terminal"));
+    expect(result.deps.unit.unit).toBe(TERMINAL_CLIENT_UNIT);
+    expect(TERMINAL_CLIENT_UNIT).toBe("kitluy-terminal-client.service");
+    // Everything that is not product-specific is identical to the shell's pass.
+    expect(result.deps.deviceId).toBe(DEVICE_ID);
+    expect(result.deps.acceptance.hardwareProfile).toBe("KL-PI5-TERMINAL-DEV");
+  });
+
+  it("every permitted product has exactly one runtime row, and no row names a bootstrap unit", () => {
+    expect(Object.keys(RELEASE_PRODUCTS).sort()).toEqual([...PERMITTED_PRODUCTS].sort());
+    const units = Object.values(RELEASE_PRODUCTS).map((d) => d.unit);
+    expect(new Set(units).size).toBe(units.length);
+    for (const bootstrap of [
+      "kitluy-terminal-edge.service",
+      "kitluy-update-agent.service",
+      "kitluy-firstboot.service",
+      "kitluy-cloud-registration.service",
+      "kitluy-health-reporter.service",
+      "kitluy-operational-tls.service",
+    ]) {
+      expect(units).not.toContain(bootstrap);
+    }
+    // Two launchers, two witnesses: the POS must never overwrite the shell's.
+    const witnesses = Object.values(RELEASE_PRODUCTS).map((d) => d.runningSourcePath);
+    expect(new Set(witnesses).size).toBe(witnesses.length);
   });
 });
 
@@ -290,5 +396,64 @@ describe("the entrypoint reaches the installer", () => {
     );
     expect(body).toContain("composeInstallDependencies(");
     expect(body).toContain("await runInstallPass(");
+  });
+});
+
+describe("the POS restart never leaves the display empty", () => {
+  function storeWith(releaseId: string | null) {
+    const paths = storePaths("kitluy-terminal", join(root, "releases"));
+    if (releaseId !== null) {
+      const payload = join(releaseDir(paths, releaseId), "payload");
+      mkdirSync(payload, { recursive: true });
+      writeFileSync(join(payload, "package.json"), JSON.stringify({ main: "main.js" }));
+      activate(paths, releaseId);
+    }
+    return paths;
+  }
+
+  it("restarts the POS while a usable release is installed", async () => {
+    const calls: string[][] = [];
+    const control = createTerminalClientUnitControl(storeWith("rel-1"), (_c, args) => {
+      calls.push([...args]);
+      return "";
+    });
+    await control.restart();
+    expect(calls).toEqual([["restart", "kitluy-terminal-client.service"]]);
+  });
+
+  it("with NO release (a rollback that had nothing to return to), gives the display to the Device Shell", async () => {
+    const calls: string[][] = [];
+    const control = createTerminalClientUnitControl(storeWith(null), (_c, args) => {
+      calls.push([...args]);
+      return "";
+    });
+    await control.restart();
+    expect(calls).toEqual([
+      ["stop", "kitluy-terminal-client.service"],
+      ["start", "kitluy-device-shell.service"],
+    ]);
+  });
+
+  it("a failed restart is a rejection, so the install pass rolls back rather than claiming success", async () => {
+    const control = createTerminalClientUnitControl(storeWith("rel-1"), () => null);
+    await expect(control.restart()).rejects.toThrow(
+      /restart kitluy-terminal-client.service failed/u,
+    );
+  });
+
+  it("the composition wires this control for a POS pass", () => {
+    imageEnv();
+    anchor();
+    registered();
+    const result = composeInstallDependencies({
+      baseUrl: "http://172.16.21.17:8791",
+      product: "kitluy-terminal",
+      etcRoot,
+      trustDir,
+      storeRoot: join(root, "releases"),
+      registrationStatePath: statePath,
+    });
+    if (!result.ok) throw new Error(`expected ok, got ${result.refusal}`);
+    expect(result.deps.unit.unit).toBe("kitluy-terminal-client.service");
   });
 });
