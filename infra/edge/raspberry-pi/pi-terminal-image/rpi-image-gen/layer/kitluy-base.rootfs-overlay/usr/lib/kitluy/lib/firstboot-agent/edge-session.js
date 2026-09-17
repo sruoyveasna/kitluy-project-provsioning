@@ -89,6 +89,7 @@ export async function runEdgeAttempt(options) {
     };
     const credentials = readTransportCredentials(options.operationalDir);
     if (!credentials.available) {
+        options.onPinnedEndpoint?.(null);
         return publish({
             phase: "NOT_ACTIVATED",
             detail: `no operational certificate yet (${credentials.detail})`,
@@ -109,6 +110,7 @@ export async function runEdgeAttempt(options) {
         }
     }
     if (candidates.length === 0) {
+        options.onPinnedEndpoint?.(null);
         return publish({
             phase: "NO_HUB_FOUND",
             detail: "no Store Hub answered on this network",
@@ -116,8 +118,17 @@ export async function runEdgeAttempt(options) {
         });
     }
     let lastRefusal = null;
+    let pinnedThisAttempt = false;
+    const tracked = {
+        ...options,
+        onPinnedEndpoint: (endpoint) => {
+            if (endpoint !== null)
+                pinnedThisAttempt = true;
+            options.onPinnedEndpoint?.(endpoint);
+        },
+    };
     for (const candidate of candidates) {
-        const attempted = await attemptCandidate(candidate, credentials.credentials, options, call, now);
+        const attempted = await attemptCandidate(candidate, credentials.credentials, tracked, call, now);
         // DEGRADED counts as reached: the endpoint is the right one and worth
         // remembering, and the thing that is wrong is on the Hub, not the address.
         if (attempted.phase === "SERVING" || attempted.phase === "DEGRADED") {
@@ -134,6 +145,10 @@ export async function runEdgeAttempt(options) {
         if (lastRefusal === null || attempted.phase !== "NO_HUB_FOUND")
             lastRefusal = attempted;
     }
+    // No candidate produced a verified endpoint: the bridge must not keep
+    // forwarding to one that an earlier attempt verified and this one could not.
+    if (!pinnedThisAttempt)
+        options.onPinnedEndpoint?.(null);
     return publish(lastRefusal ?? {
         phase: "NO_HUB_FOUND",
         detail: "no Store Hub answered on this network",
@@ -191,6 +206,12 @@ async function attemptCandidate(candidate, credentials, options, call, now) {
         ...base,
         pinnedCertificateFingerprint: discovery.peerCertificateFingerprint,
     };
+    options.onPinnedEndpoint?.({
+        host: candidate.host,
+        port: candidate.port,
+        certificateFingerprint: discovery.peerCertificateFingerprint,
+        hubDeviceId: discovery.body.record.hubDeviceId,
+    });
     const reads = {};
     let pairing;
     let notRecognized = false;

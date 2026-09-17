@@ -31,9 +31,23 @@ import { readImageEnv } from "./image-env.js";
 import { createHttpReleaseSource } from "./adapters/http-release-source.js";
 import { readRegistrationState } from "./registration-state.js";
 import { loadReleaseTrustRegistry } from "./release-trust.js";
-import { storePaths, U1_PERMITTED_PRODUCT } from "./release-store.js";
-/** The unit that runs the one product U1 may update. */
+import { activeReleaseId, storePaths, TERMINAL_CLIENT_PRODUCT, U1_PERMITTED_PRODUCT, } from "./release-store.js";
+/** The unit that runs the Device Shell. */
 export const DEVICE_SHELL_UNIT = "kitluy-device-shell.service";
+/** The unit that runs the POS application (image component `terminal-client`). */
+export const TERMINAL_CLIENT_UNIT = "kitluy-terminal-client.service";
+export const RELEASE_PRODUCTS = {
+    [U1_PERMITTED_PRODUCT]: {
+        productKey: U1_PERMITTED_PRODUCT,
+        unit: DEVICE_SHELL_UNIT,
+        runningSourcePath: "/var/lib/kitluy/terminal/running-source.json",
+    },
+    [TERMINAL_CLIENT_PRODUCT]: {
+        productKey: TERMINAL_CLIENT_PRODUCT,
+        unit: TERMINAL_CLIENT_UNIT,
+        runningSourcePath: "/var/lib/kitluy/terminal/terminal-client-running.json",
+    },
+};
 /**
  * Run a command and return its trimmed output, or null if it failed.
  *
@@ -60,12 +74,43 @@ function run(command, args) {
  */
 export function createUnitControl(unit = DEVICE_SHELL_UNIT) {
     return {
+        unit,
         restart() {
             const out = run("systemctl", ["restart", unit]);
             if (out === null) {
                 return Promise.reject(new Error(`systemctl restart ${unit} failed`));
             }
             return Promise.resolve();
+        },
+    };
+}
+/**
+ * The POS unit control — a restart that can never leave the display empty.
+ *
+ * `kitluy-terminal-client.service` declares `Conflicts=kitluy-device-shell.service`,
+ * so STARTING it stops the Device Shell before systemd even runs the launcher.
+ * That is right while a POS release is installed. It is wrong on the one path
+ * where none is: a health-gate rollback with no previous release removes
+ * `current`, and "restart the POS" would then stop the shell and start a
+ * launcher that refuses — a blank counter until the start limit fires
+ * `OnFailure=`.
+ *
+ * So the restart looks at the store first. A usable release: restart the POS.
+ * None: stop the POS and start the Device Shell, which is the floor.
+ */
+export function createTerminalClientUnitControl(paths, runCommand = run) {
+    return {
+        unit: TERMINAL_CLIENT_UNIT,
+        restart() {
+            if (activeReleaseId(paths) !== null) {
+                return runCommand("systemctl", ["restart", TERMINAL_CLIENT_UNIT]) === null
+                    ? Promise.reject(new Error(`systemctl restart ${TERMINAL_CLIENT_UNIT} failed`))
+                    : Promise.resolve();
+            }
+            runCommand("systemctl", ["stop", TERMINAL_CLIENT_UNIT]);
+            return runCommand("systemctl", ["start", DEVICE_SHELL_UNIT]) === null
+                ? Promise.reject(new Error(`systemctl start ${DEVICE_SHELL_UNIT} failed`))
+                : Promise.resolve();
         },
     };
 }
@@ -94,8 +139,14 @@ export function createUnitHealthProbe(unit = DEVICE_SHELL_UNIT) {
         },
     };
 }
-/** The acceptance context, entirely from the image the builder produced. */
-export function acceptanceFromImage(etcRoot) {
+/**
+ * The acceptance context, entirely from the image the builder produced.
+ *
+ * The product key is the one the CALLER is installing for, never one read from
+ * the release: a POS release offered to the Device Shell pass is refused
+ * `RELEASE_WRONG_PRODUCT` here rather than restarting the wrong unit.
+ */
+export function acceptanceFromImage(etcRoot, product = U1_PERMITTED_PRODUCT) {
     const environment = readImageEnv("KITLUY_ENVIRONMENT", etcRoot);
     const hardwareProfile = readImageEnv("KITLUY_HARDWARE_PROFILE_KEY", etcRoot);
     if (environment === undefined || hardwareProfile === undefined)
@@ -103,7 +154,7 @@ export function acceptanceFromImage(etcRoot) {
     const channel = readImageEnv("KITLUY_RELEASE_CHANNEL", etcRoot) ?? "internal";
     const schema = Number.parseInt(readImageEnv("KITLUY_IMAGE_SCHEMA_VERSION", etcRoot) ?? "1", 10);
     return {
-        productKey: U1_PERMITTED_PRODUCT,
+        productKey: product,
         architecture: "arm64",
         hardwareProfile,
         environment,
@@ -156,7 +207,9 @@ export function composeInstallDependencies(options) {
             detail: "registration state carries no device id or key fingerprint yet",
         };
     }
-    const acceptance = acceptanceFromImage(options.etcRoot);
+    const product = options.product ?? U1_PERMITTED_PRODUCT;
+    const descriptor = RELEASE_PRODUCTS[product];
+    const acceptance = acceptanceFromImage(options.etcRoot, product);
     if (acceptance === null) {
         return {
             ok: false,
@@ -187,21 +240,27 @@ export function composeInstallDependencies(options) {
     // `deviceId` is written by the cloud into the registration state and is what
     // the cloud keys on. It is local state exactly as the fingerprint was, so
     // the property that mattered is unchanged.
+    //
+    // And it names the PRODUCT it is asking about (group 0228): a device-wide
+    // "newest assignment" would let a POS assignment hide the Device Shell's.
     const source = createHttpReleaseSource({
         baseUrl: options.baseUrl,
         deviceRef: deviceId,
+        product,
     });
     return {
         ok: true,
         deps: {
-            paths: storePaths(U1_PERMITTED_PRODUCT, options.storeRoot),
+            paths: storePaths(product, options.storeRoot),
             assignments: source,
             artifacts: source,
             trustedKeys: registry.keys,
             deviceId,
             acceptance,
-            unit: createUnitControl(options.unit),
-            health: createUnitHealthProbe(options.unit),
+            unit: product === TERMINAL_CLIENT_PRODUCT && options.unit === undefined
+                ? createTerminalClientUnitControl(storePaths(product, options.storeRoot))
+                : createUnitControl(options.unit ?? descriptor.unit),
+            health: createUnitHealthProbe(options.unit ?? descriptor.unit),
         },
     };
 }

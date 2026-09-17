@@ -1,0 +1,71 @@
+#!/bin/sh
+# The KitLuy POS on a Pi Terminal: the governed release `kitluy-terminal`, full
+# screen under cage.
+#
+# ===========================================================================
+# THIS FILE IS THE STABLE PART; THE APPLICATION IS NOT IN THE IMAGE
+# ===========================================================================
+# The POS is a governed application release (KLD-2026-08-11-DEVICE-BOOTSTRAP-
+# RUNTIME-001), so the read-only image carries this launcher and never the
+# application. The unit used to name `/usr/lib/kitluy/terminal-client` as the
+# application itself and expected "the release package" to install it there —
+# on an EROFS root that nothing may write, so no release could ever have run.
+#
+# The application lives in the release store on the persistent partition,
+# installed by the update agent after signature, digest and extraction checks:
+#
+#   /persistent/shared/kitluy/releases/kitluy-terminal/current/payload
+#
+# ===========================================================================
+# NO IMAGE FALLBACK — AND WHY THAT IS SAFE
+# ===========================================================================
+# The Device Shell launcher falls back to a copy in the image. This one cannot:
+# a business application is never image content. When no complete payload is
+# installed this exits non-zero, the unit fails, and its `OnFailure=` gives the
+# display back to the Device Shell. The floor is the same working screen.
+#
+# `-f .../package.json`, never `-d .../payload`: the update runtime applies the
+# same predicate (`isUsableRelease`), so a half-unpacked release is never run.
+set -eu
+
+ELECTRON=/usr/lib/kitluy/electron/electron
+STORE=/persistent/shared/kitluy/releases/kitluy-terminal
+APP="$STORE/current/payload"
+
+# ===========================================================================
+# SAY WHAT IS ACTUALLY STARTED, BEFORE HANDING OVER
+# ===========================================================================
+# The journal says what is INSTALLED; only this script knows what it exec'd.
+# `current` is resolved to its rel-<id> directory NOW, so a release that lands
+# after this process started is reported as installed-but-not-running instead of
+# being mistaken for the running one. Best-effort: a failure to record must never
+# stop the application coming up.
+WITNESS=/var/lib/kitluy/terminal/terminal-client-running.json
+RESOLVED="$(readlink -f "$STORE/current" 2>/dev/null || echo "")"
+
+if [ ! -x "$ELECTRON" ]; then
+  echo "no Electron runtime at $ELECTRON" >&2
+  exit 1
+fi
+if [ -z "$RESOLVED" ] || [ ! -f "$RESOLVED/payload/package.json" ]; then
+  echo "kitluy: no complete kitluy-terminal release is installed; the Device Shell keeps the display" >&2
+  exit 3
+fi
+
+if [ -d /var/lib/kitluy/terminal ]; then
+  printf '{"source":"RELEASE","product":"kitluy-terminal","app":"%s","at":"%s"}\n' \
+    "$RESOLVED/payload" "$(date -Is 2>/dev/null || echo unknown)" \
+    > "$WITNESS.tmp" 2>/dev/null \
+    && mv -f "$WITNESS.tmp" "$WITNESS" 2>/dev/null \
+    || rm -f "$WITNESS.tmp" 2>/dev/null || :
+fi
+
+echo "kitluy: starting the POS from RELEASE ($RESOLVED/payload)" >&2
+
+# Handed the RESOLVED directory, not the `current` symlink: an activation that
+# swaps `current` underneath a running application must not change which files
+# a later lazy load reads.
+#
+# The Chromium renderer sandbox is NOT disabled (see the Device Shell launcher
+# for the reasoning; the unit leaves user namespaces available for it).
+exec /usr/bin/cage -- "$ELECTRON" --ozone-platform=wayland "$RESOLVED/payload"

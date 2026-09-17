@@ -163,12 +163,20 @@ DEVICE_MODULES=(
   # @kitluy/device-identity — the same zero-runtime-dependency reason as
   # `hub-claim-bytes` and `device-registration-bytes`.
   edge-discovery-record edge-mdns edge-transport edge-pairing edge-session
+  # The edge bridge: the POS's only path to the Hub, served by this same root
+  # process on /run/kitluy-terminal-edge/bridge.sock (T1-STORE-OPERATIONS-001).
+  edge-bridge
   bin/terminal-edge
   # BOOT CLASSIFICATION (BOOT-RECOVERY-CLASSIFICATION-001). The contract is the
   # package `@kitluy/device-boot-classification`, shipped as a byte-identical
   # copy because the image carries no node_modules; the firstboot agent's drift
   # test fails if the copy differs by one byte.
   boot-classification-contract boot-classification bin/boot-classification
+  # THE RUNTIME REPORT (T1-STORE-OPERATIONS-001). The health reporter signs and
+  # sends this board's Hub link, POS release and POS runtime state (cloud group
+  # 0229); `runtime-report-bytes` is the device copy of the signed preimage,
+  # kept honest by test/runtime-report-drift.test.ts.
+  runtime-report runtime-report-bytes
 )
 rm -rf "$LIB_DIR"
 mkdir -p "$LIB_DIR"

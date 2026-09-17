@@ -1,35 +1,72 @@
+# The KitLuy POS on a Pi Terminal — governed release `kitluy-terminal` (image
+# component `terminal-client`), full screen under cage.
+#
+# WHAT CHANGED, AND WHY THE OLD DEFINITION COULD NEVER HAVE RUN
+# -------------------------------------------------------------
+# The previous definition expected "the governed release package" to install
+# the application at /usr/lib/kitluy/terminal-client and `systemctl enable` this
+# unit. Both are writes to the read-only EROFS root (A/B system slots, verity):
+# no release could ever have landed there, and nothing could have enabled it. It
+# also required `kitluy-terminal-session.service`, the labwc session that showed
+# a blank display on the first terminal (2026-08-13).
+#
+# Now (T1-STORE-OPERATIONS-001):
+#   - /usr/lib/kitluy/terminal-client is a STABLE LAUNCHER in the image that
+#     resolves the installed release from the persistent release store;
+#   - the application runs under cage, the kiosk compositor the Device Shell
+#     already proved on this hardware;
+#   - the unit is wanted by NO target. The update agent starts it — as the
+#     install pass's restart, and once after a reboot when a release is
+#     installed — because the image cannot know whether a POS exists.
+#
+# THE DISPLAY HAS ONE OWNER AT A TIME
+# -----------------------------------
+# `Conflicts=` makes starting the POS stop the Device Shell; `OnFailure=` gives
+# the display back to the Device Shell when the POS cannot run (no release, a
+# crash loop). The shell is never left stopped with nothing in its place.
 [Unit]
-Description=KitLuy POS desktop client (Electron) — GOVERNED APPLICATION RELEASE
-# ===========================================================================
-# THIS UNIT IS INTENTIONALLY NOT ENABLED IN THE GOLDEN IMAGE.
-# ===========================================================================
-# The KitLuy POS Desktop application is a governed application release, not a
-# component of the golden OS image (owner decision DEC-1, bootstrap-hybrid).
-# The golden image therefore carries the unit DEFINITION so the release package
-# does not have to invent one, but creates no multi-user.target.wants symlink.
-#
-# Enabling it here would boot-loop a terminal every 10 seconds against an
-# executable the image deliberately does not contain — which is exactly the
-# defect image v2.7.0 shipped.
-#
-# The governed release package installs /usr/lib/kitluy/terminal-client and
-# runs `systemctl enable --now kitluy-terminal-client.service`. Until then this
-# unit is inert, and ConditionPathExists makes that explicit even if something
-# starts it by hand.
-After=kitluy-terminal-session.service
-Requires=kitluy-terminal-session.service
+Description=KitLuy POS application (governed release kitluy-terminal; cage + Electron)
+After=kitluy-firstboot.service kitluy-terminal-edge.service seatd.service systemd-user-sessions.service
+Wants=seatd.service
+Conflicts=kitluy-device-shell.service
+Conflicts=kitluy-bootstrap-screen.service
+Conflicts=getty@tty1.service
+OnFailure=kitluy-device-shell.service
+# The release store is on the persistent partition: order after its mount, and
+# never evaluate the payload condition against an unmounted mountpoint.
+RequiresMountsFor=/persistent/shared
 ConditionPathExists=/usr/lib/kitluy/terminal-client
+ConditionPathExists=/usr/lib/kitluy/electron/electron
+# A crash loop must END as `failed` — which is what fires OnFailure= and gives
+# the display back — rather than cycle through `activating` for ever.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
+# A REAL system user, never root: this process renders a browser engine. The
+# same user as the Device Shell, so the display seat and the terminal state
+# directory need no second grant.
 User=kitluy-terminal
 Group=kitluy-terminal
 EnvironmentFile=/etc/kitluy/image.env
 EnvironmentFile=/etc/kitluy/terminal.env
-Environment=XDG_RUNTIME_DIR=/run/user/%U
+# Wayland runtime directory from systemd, not /run/user (ProtectHome hides it);
+# see kitluy-device-shell.service for the full reasoning.
+RuntimeDirectory=kitluy-terminal-client
+RuntimeDirectoryMode=0700
+Environment=XDG_RUNTIME_DIR=/run/kitluy-terminal-client
+Environment=XDG_SESSION_TYPE=wayland
+Environment=HOME=/var/lib/kitluy/terminal
+# The kiosk user must own its own home (Chromium cache and config).
+ExecStartPre=+/usr/bin/chown kitluy-terminal:kitluy-terminal /var/lib/kitluy/terminal
 ExecStart=/usr/lib/kitluy/terminal-client
-Restart=always
-RestartSec=10s
+# on-failure, not always: the launcher exits non-zero when no release is
+# installed, and that must reach StartLimitBurst and OnFailure= rather than be
+# retried silently for ever.
+Restart=on-failure
+RestartSec=5s
+
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
@@ -39,8 +76,17 @@ ProtectKernelModules=yes
 ProtectControlGroups=yes
 RestrictSUIDSGID=yes
 LockPersonality=yes
+# RestrictRealtime and RestrictNamespaces deliberately NOT set: the compositor
+# paces frames with realtime scheduling, and Chromium's renderer sandbox needs
+# unprivileged user namespaces (same recorded exceptions as the Device Shell).
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
 CapabilityBoundingSet=
+DeviceAllow=char-drm rw
+DeviceAllow=char-input rw
+SupplementaryGroups=video input render
+# Writes only its own directory. The Store Hub is reached through the edge
+# bridge socket, which is connect-only: the operational private key stays with
+# the root kitluy-terminal-edge.service and never enters this process.
 ReadWritePaths=/var/lib/kitluy/terminal
 
-[Install]
-WantedBy=graphical.target
+# No [Install] section: nothing may enable this unit. See the header.

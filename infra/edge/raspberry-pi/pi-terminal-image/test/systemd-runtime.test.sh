@@ -219,6 +219,50 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 2c. THE POS HAS THE DISPLAY ONLY WHILE IT CAN USE IT (T1-STORE-OPERATIONS-001).
+#     Starting the POS stops the Device Shell (Conflicts=); a POS that cannot run
+#     gives the display back (OnFailure=); nothing enables it at boot.
+# ---------------------------------------------------------------------------
+POS_UNIT="${TERMINAL_OVERLAY}/etc/systemd/system/kitluy-terminal-client.service"
+if [[ -f "$POS_UNIT" ]]; then
+  if grep -q '^Conflicts=kitluy-device-shell.service$' "$POS_UNIT" \
+     && grep -q '^Conflicts=getty@tty1.service$' "$POS_UNIT"; then
+    ok "pos: takes the display from the Device Shell and getty, never shares it"
+  else
+    bad "pos: takes the display from the Device Shell and getty, never shares it" \
+        "two compositors on one DRM device, or a login prompt drawn over the POS"
+  fi
+  if grep -q '^OnFailure=kitluy-device-shell.service$' "$POS_UNIT" \
+     && grep -q '^StartLimitBurst=' "$POS_UNIT" \
+     && grep -q '^Restart=on-failure$' "$POS_UNIT"; then
+    ok "pos: a POS that cannot run ends failed and hands the display back"
+  else
+    bad "pos: a POS that cannot run ends failed and hands the display back" \
+        "a crash loop would hold a blank screen for ever"
+  fi
+  if grep -q '^RequiresMountsFor=/persistent/shared$' "$POS_UNIT"; then
+    ok "pos: ordered after the persistent partition that holds the release"
+  else
+    bad "pos: ordered after the persistent partition that holds the release" \
+        "the launcher could look at an unmounted store and refuse a healthy release"
+  fi
+  if grep -q '^User=kitluy-terminal$' "$POS_UNIT" && grep -q '^CapabilityBoundingSet=$' "$POS_UNIT" \
+     && ! grep -qE '^ReadWritePaths=.*(/var/lib/kitluy/operational|/var/lib/kitluy/identity|/persistent)' "$POS_UNIT"; then
+    ok "pos: unprivileged, and cannot write keys or the release store"
+  else
+    bad "pos: unprivileged, and cannot write keys or the release store" \
+        "the application could reach the operational key or rewrite its own release"
+  fi
+  if grep -q '^\[Install\]' "$POS_UNIT"; then
+    bad "pos: has no [Install] section, so nothing can enable it" "an enabled POS would take the display on a board with no release"
+  else
+    ok "pos: has no [Install] section, so nothing can enable it"
+  fi
+else
+  bad "pos: kitluy-terminal-client.service is defined" "absent from the terminal overlay"
+fi
+
+# ---------------------------------------------------------------------------
 # 3. `%i` is meaningless outside a template unit.
 # ---------------------------------------------------------------------------
 for profile in pi-terminal; do
@@ -885,6 +929,15 @@ else
   bad "terminal edge: enabled, not merely defined" "no multi-user.target.wants symlink"
 fi
 
+if grep -q '^RuntimeDirectory=kitluy-terminal-edge$' "$EDGE_UNIT" \
+   && grep -q '^RuntimeDirectoryMode=0750$' "$EDGE_UNIT" \
+   && grep -q '^RestrictAddressFamilies=.*AF_UNIX' "$EDGE_UNIT"; then
+  ok "terminal edge: owns the bridge socket directory, 0750, and may bind AF_UNIX"
+else
+  bad "terminal edge: owns the bridge socket directory, 0750, and may bind AF_UNIX" \
+      "the POS would have no path to the Store Hub"
+fi
+
 if [[ -x "$EDGE_WRAPPER" ]] && grep -q 'bin/terminal-edge.js' "$EDGE_WRAPPER"; then
   ok "terminal edge: the wrapper execs a packaged bin"
 else
@@ -894,7 +947,7 @@ fi
 # The closure list is what actually puts the modules on the card.
 PKG="${ROOT}/scripts/package-bootstrap-runtime.sh"
 EDGE_MISSING=""
-for m in edge-transport edge-mdns edge-discovery-record edge-pairing edge-session bin/terminal-edge; do
+for m in edge-transport edge-mdns edge-discovery-record edge-pairing edge-session edge-bridge bin/terminal-edge; do
   grep -qE "(^|[[:space:]])${m}([[:space:]]|$)" "$PKG" || EDGE_MISSING="${EDGE_MISSING} ${m}"
 done
 if [[ -z "$EDGE_MISSING" ]]; then

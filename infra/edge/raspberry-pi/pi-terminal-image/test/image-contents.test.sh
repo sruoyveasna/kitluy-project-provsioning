@@ -521,6 +521,25 @@ else
   bad "the built launcher records what it started" "the image fallback would be invisible"
 fi
 
+# The POS launcher, as built: the image-owned half of the governed POS release.
+if [[ -x "${ROOTFS}/usr/lib/kitluy/terminal-client" ]] \
+   && grep -qs '^STORE=/persistent/shared/kitluy/releases/kitluy-terminal$' "${ROOTFS}/usr/lib/kitluy/terminal-client"; then
+  ok "the built POS launcher reads the kitluy-terminal release store"
+else
+  bad "the built POS launcher reads the kitluy-terminal release store" "no POS release could ever run"
+fi
+if [[ ! -e "${ROOTFS}/usr/lib/kitluy/lib/terminal-client" ]] \
+   && ! find "${ROOTFS}/usr/lib/kitluy" -maxdepth 3 -path '*kitluy-pos-desktop*' -print -quit 2>/dev/null | grep -q .; then
+  ok "the built image carries no POS application"
+else
+  bad "the built image carries no POS application" "a business application is in the golden image"
+fi
+if grep -qs '^OnFailure=kitluy-device-shell.service$' "${ROOTFS}/etc/systemd/system/kitluy-terminal-client.service"; then
+  ok "the built POS unit hands the display back when it cannot run"
+else
+  bad "the built POS unit hands the display back when it cannot run" "stale unit definition in the image"
+fi
+
 # The release runtime modules must be in the shipped closure.
 REL_MISSING=""
 for m in durable-write release-store release-verify release-trust release-archive \

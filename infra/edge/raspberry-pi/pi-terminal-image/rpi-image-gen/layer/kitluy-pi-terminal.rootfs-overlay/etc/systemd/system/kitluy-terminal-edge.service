@@ -31,6 +31,13 @@ RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
 ReadWritePaths=/var/lib/kitluy
 StateDirectory=kitluy
 StateDirectoryMode=0751
+# THE EDGE BRIDGE (T1-STORE-OPERATIONS-001). The POS reaches the Store Hub
+# through this process on a unix socket, so the operational key never leaves
+# root. systemd creates the directory 0750 root:root; the service then gives
+# its GROUP to kitluy-terminal and makes the socket 0660 — owner and mode are
+# set before the mode widens, so nobody else can connect in between.
+RuntimeDirectory=kitluy-terminal-edge
+RuntimeDirectoryMode=0750
 
 [Install]
 WantedBy=multi-user.target

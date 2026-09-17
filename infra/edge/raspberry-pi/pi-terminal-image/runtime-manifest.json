@@ -23,11 +23,16 @@
     "store, location, staff record, machine-id or SSH host key is declared here.",
     "",
     "U1 RELEASE DELIVERY. The Device Shell payload is a governed updatable",
-    "application (owner ruling OD-U1-2 = C, for U1 ONLY). The image still carries",
-    "a complete copy of it, and that copy is the FLOOR the launcher falls back to",
-    "-- a release is preferred, never required. Everything else in this manifest",
-    "stays image-only: `releaseStore.updatableProducts` is the whole permitted",
-    "list, and the tests assert the bootstrap/runtime set is absent from it."
+    "application (owner ruling OD-U1-2 = C). The image still carries a complete",
+    "copy of it, and that copy is the FLOOR the launcher falls back to -- a release",
+    "is preferred, never required.",
+    "",
+    "THE POS IS THE SECOND RELEASE PRODUCT (T1-STORE-OPERATIONS-001). Product key",
+    "`kitluy-terminal` (cloud group 0180's seeded key), component `terminal-client`.",
+    "The image carries only its STABLE LAUNCHER and its unit -- never the",
+    "application (KLD-2026-08-11-DEVICE-BOOTSTRAP-RUNTIME-001). Everything else in",
+    "this manifest stays image-only: `releaseStore.updatableProducts` is the whole",
+    "permitted list, and the tests assert the bootstrap/runtime set is absent from it."
   ],
   "schemaVersion": 1,
   "profiles": ["pi-terminal"],
@@ -233,14 +238,44 @@
       "id": "terminal-client",
       "$comment": [
         "GOVERNED APPLICATION RELEASE (KLD-2026-08-11-DEVICE-BOOTSTRAP-RUNTIME-001).",
-        "The unit is defined so the release need not invent one, and carries no",
-        "executable here: the business application is never part of the image."
+        "The KitLuy POS (apps/kitluy-pos-desktop-app), delivered by the update agent",
+        "as release product `kitluy-terminal` into the persistent release store. The",
+        "image carries NO executable for it: `launcher` below is the stable, image-owned",
+        "program the unit runs, declared as its own component. The unit is wanted by no",
+        "target; the update agent starts it (install restart, and once after a reboot",
+        "when a release is installed). Conflicts= with the Device Shell, OnFailure= gives",
+        "the display back to it. There is no image fallback: no release means no POS."
       ],
       "profiles": ["pi-terminal"],
       "unit": "kitluy-terminal-client.service",
       "enabled": false,
       "source": {
-        "kind": "governed-release"
+        "kind": "governed-release",
+        "productKey": "kitluy-terminal",
+        "app": "apps/kitluy-pos-desktop-app"
+      },
+      "launcher": "/usr/lib/kitluy/terminal-client",
+      "environmentFiles": ["/etc/kitluy/image.env", "/etc/kitluy/terminal.env"],
+      "appRoots": {
+        "release": "/persistent/shared/kitluy/releases/kitluy-terminal/current/payload",
+        "preference": "release",
+        "fallback": "none"
+      },
+      "witness": "/var/lib/kitluy/terminal/terminal-client-running.json",
+      "startedBy": "kitluy-update-agent.service"
+    },
+    {
+      "id": "terminal-client-launcher",
+      "$comment": [
+        "The image-owned half of `terminal-client`: resolves the installed kitluy-terminal",
+        "release from the persistent store, writes the running witness, and execs it",
+        "under cage. Refuses (non-zero) when no complete payload is installed."
+      ],
+      "profiles": ["pi-terminal"],
+      "executable": "/usr/lib/kitluy/terminal-client",
+      "enabled": false,
+      "source": {
+        "kind": "overlay"
       }
     }
   ],
@@ -279,7 +314,7 @@
       "the image on the next boot."
     ],
     "root": "/persistent/shared/kitluy/releases",
-    "updatableProducts": ["device-shell"],
+    "updatableProducts": ["device-shell", "kitluy-terminal"],
     "imageMustNotShip": true
   },
   "releaseTrust": {

@@ -70,6 +70,10 @@ DEVICE_MODULES=(
   durable-write release-store release-verify release-trust
   release-archive release-artifact release-assignment release-install release-status
   adapters/http-release-source release-runtime
+  # The health reporter imports the Pi Terminal runtime report (T1-STORE-
+  # OPERATIONS-001). INERT on a Hub: it returns before collecting anything when
+  # the image's device class is not `terminal`.
+  runtime-report runtime-report-bytes
   # bin/bootstrap-ui is the PI TERMINAL's status screen — it titles itself
   # "KitLuy Terminal" and hardcodes `Store assignment .. Unassigned`, which is
   # wrong on a Hub and a lie once the Hub pairs. It was shipped here with no

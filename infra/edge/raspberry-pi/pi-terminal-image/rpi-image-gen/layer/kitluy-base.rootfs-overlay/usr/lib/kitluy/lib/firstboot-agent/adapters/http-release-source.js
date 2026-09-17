@@ -199,7 +199,8 @@ export function createHttpReleaseSource(options) {
     return {
         describe: () => base,
         async fetchAssignment() {
-            const url = `${base}/release/v1/assignment?device=${encodeURIComponent(options.deviceRef)}`;
+            const productQuery = options.product === undefined ? "" : `&product=${encodeURIComponent(options.product)}`;
+            const url = `${base}/release/v1/assignment?device=${encodeURIComponent(options.deviceRef)}${productQuery}`;
             const response = await fetchRaw(url, { timeoutMs, maxBytes: MAX_JSON_BYTES });
             // 404 is "this stack does not know me" — a freshly flashed terminal polls
             // before it is approved, and that is not a fault to report as one.

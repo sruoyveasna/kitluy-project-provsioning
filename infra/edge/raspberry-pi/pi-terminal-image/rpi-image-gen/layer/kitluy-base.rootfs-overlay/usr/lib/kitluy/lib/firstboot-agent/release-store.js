@@ -5,8 +5,10 @@
  * ===========================================================================
  * WHERE THIS LIVES AND WHY IT IS NOT UNDER /var
  * ===========================================================================
- * The store is SLOT-SHARED, under `/persistent/shared/...`, declared through
- * `/etc/rpi-image-gen/slot-shared.d`. It must not live under `/var`, which the
+ * The store is SLOT-SHARED, under `/persistent/shared/...` — directly on the
+ * persistent partition, which is shared across A/B slots by construction (it is
+ * NOT declared in `/etc/rpi-image-gen/slot-shared.d`; see the `releaseStore`
+ * note in the image's runtime-manifest.json). It must not live under `/var`, which the
  * A/B layout bind-mounts per slot from `/persistent/slots/system_{a,b}/var`:
  * a release store under `/var` would silently vanish the first time a system
  * slot switched, taking every installed application with it.
@@ -24,6 +26,12 @@
  * shell it was flashed with" — visible (see `release-status.ts`), never silent,
  * and never a blank screen.
  *
+ * The POS (`kitluy-terminal`) has NO image copy — a business application is
+ * never image content — so for that product "fall back to the image" means "no
+ * POS": its launcher refuses to start, `kitluy-terminal-client.service` fails,
+ * and its `OnFailure=` hands the display back to the image's Device Shell. The
+ * floor is the same working screen, reached one unit over.
+ *
  * ===========================================================================
  * THE JOURNAL IS THE ONLY SOURCE OF TRUTH ACROSS A POWER CUT
  * ===========================================================================
@@ -39,26 +47,51 @@ import { fsyncDir, fsyncTree, isDirectory, isFile, renameDurable, swapSymlinkDur
 /** The slot-shared root. Never `/var` — see the header. */
 export const RELEASE_STORE_ROOT = "/persistent/shared/kitluy/releases";
 /**
- * The ONE product U1 may install (owner ruling OD-U1-2 = C).
- *
- * The ruling classifies the graphical Device Shell payload as a governed
- * updatable application FOR U1 ONLY, and says in terms that it must not be used
- * to reclassify `terminal-edge`, firstboot identity, cloud registration, the
- * update agent or any other bootstrap/runtime component. This constant is that
- * fence in code: `assertProductPermitted` refuses every other product key, and a
- * test asserts the bootstrap set is refused by name.
+ * The Device Shell payload — the product U1 made updatable (owner ruling
+ * OD-U1-2 = C).
  */
 export const U1_PERMITTED_PRODUCT = "device-shell";
+/**
+ * The KitLuy POS business application for a Pi Terminal.
+ *
+ * `kitluy-terminal` is not a new name: it is the product key cloud group 0180
+ * seeded release channels for ("the two Phase 1 products"). The image calls the
+ * same thing component `terminal-client` and unit
+ * `kitluy-terminal-client.service`; the release key is the governed one.
+ *
+ * Authority: KLD-2026-08-11-DEVICE-BOOTSTRAP-RUNTIME-001 (LOCKED) — full POS
+ * business applications ARE governed release artifacts, never image content;
+ * owner mission T1-STORE-OPERATIONS-001 (2026-09-17) §10 opens the second
+ * product (the plan's "U2") for this application alone.
+ */
+export const TERMINAL_CLIENT_PRODUCT = "kitluy-terminal";
+/**
+ * EVERY product the release store may hold, and nothing else.
+ *
+ * Both entries are APPLICATIONS. OD-U1-2 says in terms that the release store
+ * must not be used to reclassify `terminal-edge`, firstboot identity, cloud
+ * registration, the update agent or any other bootstrap/runtime component, and
+ * adding the POS does not touch that sentence: the POS was never bootstrap. This
+ * list is that fence in code — `assertProductPermitted` refuses every other key,
+ * and a test still refuses the bootstrap set by name.
+ */
+export const PERMITTED_PRODUCTS = [
+    U1_PERMITTED_PRODUCT,
+    TERMINAL_CLIENT_PRODUCT,
+];
+export function isPermittedProduct(product) {
+    return PERMITTED_PRODUCTS.includes(product);
+}
 export class ProductNotPermittedError extends Error {
     product;
     constructor(product) {
-        super(`PRODUCT_NOT_PERMITTED: ${product} is not updatable in U1. Owner ruling OD-U1-2 = C classifies the Device Shell payload alone; the broader bootstrap/runtime boundary returns to the owner at U3.`);
+        super(`PRODUCT_NOT_PERMITTED: ${product} is not an updatable product. The release store holds the Device Shell payload (OD-U1-2 = C) and the POS application ${TERMINAL_CLIENT_PRODUCT} (KLD-2026-08-11-DEVICE-BOOTSTRAP-RUNTIME-001); the bootstrap/runtime set stays image-only until the owner rules otherwise.`);
         this.product = product;
         this.name = "ProductNotPermittedError";
     }
 }
 export function assertProductPermitted(product) {
-    if (product !== U1_PERMITTED_PRODUCT)
+    if (!isPermittedProduct(product))
         throw new ProductNotPermittedError(product);
 }
 export function storePaths(product, root = RELEASE_STORE_ROOT) {

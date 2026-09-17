@@ -17,9 +17,14 @@
  *
  * It is still BAKED INTO THE IMAGE and still not itself updatable
  * (KLD-2026-08-11-DEVICE-BOOTSTRAP-RUNTIME-001): an updater cannot be delivered
- * by the thing it delivers. Owner ruling OD-U1-2 = C classifies the Device Shell
- * PAYLOAD as updatable and nothing else, and `assertProductPermitted` enforces
- * that boundary in code.
+ * by the thing it delivers. The release store holds APPLICATIONS only — the
+ * Device Shell payload (OD-U1-2 = C) and the POS `kitluy-terminal` (the same
+ * locked decision: POS business applications are governed releases) — and
+ * `assertProductPermitted` enforces that boundary in code.
+ *
+ * ONE PASS PER PRODUCT THIS IMAGE CAN RUN. A product is installed only when the
+ * image defines the unit that runs it; the Store Hub image defines neither, so
+ * its agent reports and installs nothing, as before.
  *
  * ===========================================================================
  * IT STILL HOLDS NO SIGNING KEY
@@ -28,13 +33,15 @@
  * before use. Nothing here can sign a release, and nothing here is trusted to
  * decide what to install — that is the governed assignment's job.
  */
-import { readFileSync, readdirSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { SERVICE_VERSION } from "../version.js";
 import { readImageEnv } from "../image-env.js";
 import { loadReleaseTrustRegistry } from "../release-trust.js";
 import { describeReleaseStatus, formatReleaseStatusLine } from "../release-status.js";
-import { storePaths, U1_PERMITTED_PRODUCT } from "../release-store.js";
-import { composeInstallDependencies } from "../release-runtime.js";
+import { activeReleaseId, PERMITTED_PRODUCTS, isPermittedProduct, readJournal, storePaths, TERMINAL_CLIENT_PRODUCT, } from "../release-store.js";
+import { composeInstallDependencies, RELEASE_PRODUCTS } from "../release-runtime.js";
 import { runInstallPass } from "../release-install.js";
 export const TRUST_ANCHOR_DIR = "/etc/kitluy/trust";
 /**
@@ -72,6 +79,23 @@ export const RELEASE_CONFIG_PATH = "/etc/kitluy/release.env";
  */
 export const RELEASE_SOURCE_OVERRIDE_PATH = "/persistent/shared/kitluy/release-source.env";
 export const POLL_SECONDS = 300;
+/** Where an image defines its units. The overlay writes /etc; packages write /usr/lib. */
+export const UNIT_DIRECTORIES = [
+    "/etc/systemd/system",
+    "/usr/lib/systemd/system",
+    "/lib/systemd/system",
+];
+/**
+ * The products THIS image can run, in `PERMITTED_PRODUCTS` order.
+ *
+ * Decided by the unit definition, not by a flag: an agent that installed a
+ * product whose unit the image does not define would restart nothing and pass
+ * nothing, and the health gate would roll back a release that was never the
+ * problem.
+ */
+export function productsOnThisImage(unitDirectories = UNIT_DIRECTORIES) {
+    return PERMITTED_PRODUCTS.filter(isPermittedProduct).filter((product) => unitDirectories.some((dir) => existsSync(join(dir, RELEASE_PRODUCTS[product].unit))));
+}
 /**
  * Trust is a PRECONDITION, not a step. An update agent with no public trust
  * material cannot distinguish a genuine release from an attacker's, so it
@@ -170,15 +194,32 @@ export function reportOnce(options = {}) {
         });
         return { kind: "no_trust_anchor", detail: "every trust record was refused" };
     }
-    const paths = storePaths(U1_PERMITTED_PRODUCT, options.storeRoot);
-    const status = describeReleaseStatus(paths, { runningSourcePath: options.runningSourcePath });
-    emit("kitluy.update.status", {
-        imageVersion: state.imageVersion,
-        source: state.source,
-        sourceFrom: state.sourceFrom,
-        trustedKeys: registry.keys.length,
-        status: formatReleaseStatusLine(status),
-    });
+    const products = productsOnThisImage(options.unitDirectories);
+    if (products.length === 0) {
+        emit("kitluy.update.status", {
+            imageVersion: state.imageVersion,
+            source: state.source,
+            sourceFrom: state.sourceFrom,
+            trustedKeys: registry.keys.length,
+            products: "none",
+            status: "this image defines no updatable application unit",
+        });
+        return state;
+    }
+    for (const product of products) {
+        const paths = storePaths(product, options.storeRoot);
+        const status = describeReleaseStatus(paths, {
+            runningSourcePath: options.runningSourcePath ?? RELEASE_PRODUCTS[product].runningSourcePath,
+        });
+        emit("kitluy.update.status", {
+            product,
+            imageVersion: state.imageVersion,
+            source: state.source,
+            sourceFrom: state.sourceFrom,
+            trustedKeys: registry.keys.length,
+            status: formatReleaseStatusLine(status),
+        });
+    }
     return state;
 }
 /**
@@ -193,23 +234,97 @@ export async function runOnce(options = {}) {
     const state = reportOnce(options);
     if (state.kind !== "ready")
         return;
-    const composed = composeInstallDependencies({
-        baseUrl: state.source,
-        etcRoot: options.etcRoot,
-        trustDir: options.trustDir,
-        storeRoot: options.storeRoot,
-        registrationStatePath: options.registrationStatePath,
-    });
-    if (!composed.ok) {
-        // A board that is not yet registered, or carries no usable anchor, is a
-        // NORMAL resting state early in a device's life — not an error to shout
-        // about every five minutes. It is still named, because "not updating" with
-        // no reason given is what costs an afternoon.
-        emit("kitluy.update.waiting", { reason: composed.refusal, detail: composed.detail });
-        return;
+    // One product at a time, Device Shell first: a POS pass holds the health gate
+    // for up to five minutes, and the screen that recovers a board must not wait
+    // behind the application it would recover.
+    for (const product of productsOnThisImage(options.unitDirectories)) {
+        const composed = composeInstallDependencies({
+            baseUrl: state.source,
+            product,
+            etcRoot: options.etcRoot,
+            trustDir: options.trustDir,
+            storeRoot: options.storeRoot,
+            registrationStatePath: options.registrationStatePath,
+        });
+        if (!composed.ok) {
+            // A board that is not yet registered, or carries no usable anchor, is a
+            // NORMAL resting state early in a device's life — not an error to shout
+            // about every five minutes. It is still named, because "not updating" with
+            // no reason given is what costs an afternoon. The refusal is the same for
+            // every product, so it is said once.
+            emit("kitluy.update.waiting", { reason: composed.refusal, detail: composed.detail });
+            return;
+        }
+        const result = await runInstallPass(composed.deps);
+        emit("kitluy.update.pass", { product, outcome: result.outcome, ...describeOutcome(result) });
     }
-    const result = await runInstallPass(composed.deps);
-    emit("kitluy.update.pass", { outcome: result.outcome, ...describeOutcome(result) });
+    if (productsOnThisImage(options.unitDirectories).includes(TERMINAL_CLIENT_PRODUCT)) {
+        const started = startInstalledTerminalClientOnce({ storeRoot: options.storeRoot });
+        if (started.action !== "NOT_NEEDED")
+            emit("kitluy.update.terminal-client", { ...started });
+    }
+}
+const runSystemctl = (args) => {
+    try {
+        return {
+            ok: true,
+            output: execFileSync("systemctl", [...args], { encoding: "utf8", timeout: 20_000 }).trim(),
+        };
+    }
+    catch (error) {
+        const out = error.stdout;
+        return { ok: false, output: typeof out === "string" ? out.trim() : "" };
+    }
+};
+let terminalClientStartAttempted = false;
+/** Tests only: forget that this process already tried. */
+export function resetTerminalClientStartForTests() {
+    terminalClientStartAttempted = false;
+}
+/**
+ * BRING AN INSTALLED POS UP AT BOOT — ONCE.
+ *
+ * `kitluy-terminal-client.service` is deliberately NOT wanted by any target:
+ * the image cannot know whether a POS is installed, and a unit that started on
+ * every boot would take the display from the Device Shell on a board that has
+ * nothing to show. The install pass starts it (restart, then the health gate);
+ * after a reboot, this does — and only when the store holds a usable release
+ * that is not in the middle of an activation.
+ *
+ * ONCE PER AGENT PROCESS. The unit's `OnFailure=` hands the display back to the
+ * Device Shell when the POS cannot run. Trying again on every poll would take it
+ * straight back, every five minutes, from the one screen that can explain the
+ * problem. A new release (the install pass) or a reboot is what tries again.
+ */
+export function startInstalledTerminalClientOnce(options = {}) {
+    if (terminalClientStartAttempted) {
+        return { action: "NOT_NEEDED", detail: "already attempted by this agent process" };
+    }
+    const paths = storePaths(TERMINAL_CLIENT_PRODUCT, options.storeRoot);
+    const releaseId = activeReleaseId(paths);
+    if (releaseId === null)
+        return { action: "NOT_NEEDED", detail: "no POS release is installed" };
+    const phase = readJournal(paths).phase;
+    if (phase === "ACTIVATING" || phase === "HEALTH_PENDING") {
+        return { action: "NOT_NEEDED", detail: `an activation owns the unit (${phase})` };
+    }
+    terminalClientStartAttempted = true;
+    const systemctl = options.systemctl ?? runSystemctl;
+    const unit = RELEASE_PRODUCTS[TERMINAL_CLIENT_PRODUCT].unit;
+    const state = systemctl(["is-active", unit]).output;
+    if (state === "active" || state === "activating") {
+        return { action: "NOT_NEEDED", detail: `${unit} is already ${state}` };
+    }
+    // --no-block: the unit takes the display from the Device Shell (Conflicts=),
+    // and waiting on that here would stall the next poll behind a compositor.
+    const started = systemctl(["start", "--no-block", unit]);
+    return started.ok
+        ? { action: "STARTED", releaseId }
+        : {
+            action: "START_FAILED",
+            releaseId,
+            detail: started.output || `systemctl start ${unit} failed`,
+        };
 }
 function describeOutcome(result) {
     if (result.outcome === "INSTALLED")

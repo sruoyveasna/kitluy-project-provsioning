@@ -296,15 +296,16 @@ LAUNCHER="${ROOT}/rpi-image-gen/layer/kitluy-pi-terminal.rootfs-overlay/usr/lib/
 BASE_LAYER="${ROOT}/rpi-image-gen/layer/kitluy-base.yaml"
 AGENT_UNIT="${ROOT}/rpi-image-gen/layer/kitluy-base.rootfs-overlay/etc/systemd/system/kitluy-update-agent.service"
 
-# --- the scope fence (owner ruling OD-U1-2 = C) -----------------------------
-# The manifest names the ONE product a release may replace. Anything else must
-# stay image-only until the owner rules at U3, and a fence that is only a
-# sentence in a document is not a fence.
+# --- the scope fence (OD-U1-2 = C; KLD-2026-08-11-DEVICE-BOOTSTRAP-RUNTIME-001)
+# The manifest names the products a release may replace: the Device Shell
+# payload and the POS application `kitluy-terminal` — both APPLICATIONS.
+# Anything else stays image-only, and a fence that is only a sentence in a
+# document is not a fence.
 UPDATABLE="$(node -e 'const m=require(process.argv[1]);process.stdout.write((m.releaseStore?.updatableProducts??[]).join(","))' "$MANIFEST")"
-if [[ "$UPDATABLE" == "device-shell" ]]; then
-  ok "exactly ONE product is updatable, and it is the Device Shell"
+if [[ "$UPDATABLE" == "device-shell,kitluy-terminal" ]]; then
+  ok "exactly the two application products are updatable: device-shell, kitluy-terminal"
 else
-  bad "exactly ONE product is updatable, and it is the Device Shell" "manifest says '${UPDATABLE}'"
+  bad "exactly the two application products are updatable: device-shell, kitluy-terminal" "manifest says '${UPDATABLE}'"
 fi
 FENCE_BREACH=""
 for forbidden in terminal-edge firstboot-identity cloud-registration update-agent health-reporter operational-tls hub-agent terminal-client; do
@@ -337,6 +338,46 @@ if grep -q 'running-source.json' "$LAUNCHER"; then
 else
   bad "the launcher records which app it actually started" \
       "a board on the image fallback would be indistinguishable from one running the release"
+fi
+
+# --- the POS launcher: the store, and ONLY the store (T1-STORE-OPERATIONS-001)
+POS_LAUNCHER="${ROOT}/rpi-image-gen/layer/kitluy-pi-terminal.rootfs-overlay/usr/lib/kitluy/terminal-client"
+POS_UNIT="${ROOT}/rpi-image-gen/layer/kitluy-pi-terminal.rootfs-overlay/etc/systemd/system/kitluy-terminal-client.service"
+if [[ -x "$POS_LAUNCHER" ]] \
+   && grep -q '^STORE=/persistent/shared/kitluy/releases/kitluy-terminal$' "$POS_LAUNCHER"; then
+  ok "the POS launcher is an executable in the image that reads the kitluy-terminal store"
+else
+  bad "the POS launcher is an executable in the image that reads the kitluy-terminal store" \
+      "the unit would run nothing, or read another product's release"
+fi
+if grep -q '/payload/package.json' "$POS_LAUNCHER" && ! grep -q -- '-d "\$RESOLVED/payload"' "$POS_LAUNCHER"; then
+  ok "the POS launcher tests for a COMPLETE payload"
+else
+  bad "the POS launcher tests for a COMPLETE payload" "a half-unpacked POS would be started"
+fi
+# A business application is never image content, so there is no image copy to
+# fall back to — the launcher must refuse, not look for one.
+if ! grep -qE '/usr/lib/kitluy/lib/(terminal-client|pos)' "$POS_LAUNCHER" \
+   && [[ ! -e "${ROOT}/rpi-image-gen/layer/kitluy-pi-terminal.rootfs-overlay/usr/lib/kitluy/lib/terminal-client" ]]; then
+  ok "the image carries no POS application and the launcher looks for none"
+else
+  bad "the image carries no POS application and the launcher looks for none" \
+      "a business application reached the golden image (KLD-2026-08-11-DEVICE-BOOTSTRAP-RUNTIME-001)"
+fi
+if grep -q 'terminal-client-running.json' "$POS_LAUNCHER" \
+   && ! grep -q 'running-source.json' "$POS_LAUNCHER"; then
+  ok "the POS launcher writes its OWN witness, never the Device Shell's"
+else
+  bad "the POS launcher writes its OWN witness, never the Device Shell's" \
+      "one launcher would report what the other started"
+fi
+if grep -q '^ExecStart=/usr/lib/kitluy/terminal-client$' "$POS_UNIT" \
+   && ! grep -qE '^(Requires|After)=.*kitluy-terminal-session' "$POS_UNIT" \
+   && ! grep -q '^\[Install\]' "$POS_UNIT"; then
+  ok "the POS unit runs the launcher, needs no labwc session, and cannot be enabled"
+else
+  bad "the POS unit runs the launcher, needs no labwc session, and cannot be enabled" \
+      "the pre-2026-09-17 definition could never have run a release on a read-only root"
 fi
 
 # --- trust and source injection --------------------------------------------

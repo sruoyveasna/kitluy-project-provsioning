@@ -17,7 +17,9 @@
 import { readFileSync } from "node:fs";
 import { readImageEnv } from "../image-env.js";
 import { runEdgeAttempt } from "../edge-session.js";
+import { startEdgeBridge, } from "../edge-bridge.js";
 import { TERMINAL_ASSIGNMENT_PATH } from "../paired-identity.js";
+import { readRegistrationState } from "../registration-state.js";
 const IDLE_SECONDS = 30;
 const log = (message) => {
     console.log(`[terminal-edge] ${message}`);
@@ -49,23 +51,64 @@ export function readSeat(path = TERMINAL_ASSIGNMENT_PATH) {
         return { profileCodes: [] };
     }
 }
+/** Public facts about this board for the POS, read fresh on every status call. */
+export function readTerminalFacts(assignmentPath = TERMINAL_ASSIGNMENT_PATH, registrationStatePath) {
+    const seat = readSeat(assignmentPath);
+    let generation = null;
+    try {
+        const parsed = JSON.parse(readFileSync(assignmentPath, "utf8"));
+        if (typeof parsed.assignmentGeneration === "number")
+            generation = parsed.assignmentGeneration;
+    }
+    catch {
+        // No seat yet.
+    }
+    return {
+        deviceId: readRegistrationState(registrationStatePath)?.deviceId ?? null,
+        assignmentGeneration: generation,
+        profileCodes: seat.profileCodes,
+    };
+}
 let lastLine = "";
 function report(status) {
     // One line per CHANGE, not per attempt: at one attempt every 30 seconds a
     // per-attempt log buries every other message on the device within a day.
     const line = `${status.phase}: ${status.detail}`;
-    if (line === lastLine)
-        return;
-    lastLine = line;
-    log(line);
+    if (line !== lastLine) {
+        lastLine = line;
+        log(line);
+    }
+    return status;
 }
 async function main() {
     const environment = readImageEnv("KITLUY_ENVIRONMENT") ?? "development";
     log(`starting; environment '${environment}'`);
+    // The bridge shares this process's view of the Hub: what the last attempt
+    // verified and pinned, and nothing an earlier attempt knew that this one
+    // could not confirm.
+    let pinned = null;
+    let latest = null;
+    try {
+        await startEdgeBridge({
+            environment,
+            pinnedEndpoint: () => pinned,
+            latestStatus: () => latest,
+            terminalFacts: () => readTerminalFacts(),
+            log,
+        });
+    }
+    catch (error) {
+        // The link to the Hub is still worth running without the bridge: the
+        // Device Shell reads the status file, and the POS reports the bridge down.
+        log(`bridge could not start: ${error instanceof Error ? error.message : "unknown"}`);
+    }
     for (;;) {
         try {
             const seat = readSeat();
-            report(await runEdgeAttempt({
+            latest = report(await runEdgeAttempt({
+                onPinnedEndpoint: (endpoint) => {
+                    pinned = endpoint;
+                },
                 environment,
                 expectation: {
                     ...(seat.digitalStoreId === undefined ? {} : { digitalStoreId: seat.digitalStoreId }),
