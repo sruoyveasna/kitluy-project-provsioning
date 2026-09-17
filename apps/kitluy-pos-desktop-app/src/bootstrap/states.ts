@@ -79,4 +79,24 @@ export interface T1BootstrapReport {
   readonly hub?: ResolvedHubSummary;
   readonly configuration?: ActiveConfigurationSummary;
   readonly staff?: StaffSessionSummary;
+  /**
+   * How the Store Hub was reached and what could be proven on the way. Present
+   * on the Pi Terminal composition (T1-STORE-OPERATIONS-001), where the POS
+   * reaches the Hub through the root edge bridge and does not hold the Hub's
+   * signing key; absent on the WS-12-T001 composition, which verifies every
+   * Hub signature itself. Never a key, a signature or a fingerprint.
+   */
+  readonly link?: HubLinkSummary;
+}
+
+export interface HubLinkSummary {
+  readonly transport: "edge_bridge";
+  /** The bridge forwards only over mutual TLS pinned to the verified Hub certificate. */
+  readonly hubAuthentication: "terminal_edge_mtls_pinned";
+  /**
+   * The Hub's signatures over discovery, receipts and configuration delivery
+   * are NOT verified on this path: the Hub's public key is not provisioned to
+   * terminals (BLK-006). Said, never implied.
+   */
+  readonly hubSignatures: "not_verified_hub_key_not_provisioned";
 }

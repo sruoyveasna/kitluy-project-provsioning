@@ -46,6 +46,9 @@ supabase/.temp/
 playwright-report/
 test-results/
 dist-electron/
+# The POS release payload: a build intermediate like dist/, packed and signed by
+# `pnpm release:publish --product kitluy-terminal` (T1-STORE-OPERATIONS-001).
+apps/kitluy-pos-desktop-app/release-payload/
 
 # ...EXCEPT the Device Shell as the IMAGE ships it.
 #

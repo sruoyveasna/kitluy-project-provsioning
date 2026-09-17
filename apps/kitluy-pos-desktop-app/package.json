@@ -10,7 +10,8 @@
     "build": "vite build && tsc -p tsconfig.electron.json",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json --noEmit",
     "test": "vitest run",
-    "clean": "rm -rf dist dist-electron"
+    "build:release-payload": "node scripts/build-release-payload.mjs",
+    "clean": "rm -rf dist dist-electron release-payload"
   },
   "dependencies": {
     "@kitluy-verticals/phase1-laundry": "workspace:*",
@@ -33,12 +34,14 @@
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react": "catalog:",
-    "electron": "catalog:",
+    "esbuild": "catalog:",
+    "electron": "38.8.6",
     "node-forge": "catalog:",
     "pg": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vitest": "catalog:",
-    "@kitluy-services/kitluy-device-registry-service": "workspace:*"
+    "@kitluy-services/kitluy-device-registry-service": "workspace:*",
+    "@kitluy-services/kitluy-device-firstboot-agent": "workspace:*"
   }
 }

@@ -16,3 +16,20 @@ export interface T1RuntimeBridge {
   getReport(): Promise<T1BootstrapReport | null>;
   onReport(listener: (report: T1BootstrapReport) => void): () => void;
 }
+
+/**
+ * T1-STORE-OPERATIONS-001 — the two named staff operations. A staff id and a
+ * passcode go in; only a verdict comes back (never a session id).
+ */
+export const T1_STAFF_BRIDGE_KEY = "kitluyT1Staff" as const;
+
+export type StaffVerdict =
+  { readonly ok: true } | { readonly ok: false; readonly code: string; readonly detail: string };
+
+export interface T1StaffBridge {
+  signIn(input: { readonly actorId: string; readonly passcode: string }): Promise<StaffVerdict>;
+  signOut(): Promise<{ readonly ok: true }>;
+}
+
+/** WS-12-T002-P02 §5 — the eight named intake operations, as the renderer sees them. */
+export const T1_INTAKE_BRIDGE_KEY = "kitluyT1Intake" as const;

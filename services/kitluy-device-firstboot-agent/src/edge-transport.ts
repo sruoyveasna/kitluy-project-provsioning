@@ -143,7 +143,7 @@ export class EdgeTransportError extends Error {
 export function edgeRequest(input: {
   readonly host: string;
   readonly port: number;
-  readonly method: "GET" | "POST";
+  readonly method: "GET" | "POST" | "PATCH";
   readonly path: string;
   readonly credentials: TransportCredentials;
   readonly environment: string;

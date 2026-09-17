@@ -45,3 +45,12 @@ contextBridge.exposeInMainWorld("kitluyT1Intake", {
   cancelDraft: (payload: unknown): Promise<unknown> =>
     ipcRenderer.invoke("kitluy:t1:intake:cancel-draft", payload),
 });
+
+// T1-STORE-OPERATIONS-001: exactly two NAMED staff operations. The renderer
+// supplies a staff id and a passcode; the profile is always T1, chosen by the
+// main process, and the Hub is the verifier (electron/staff-ipc.ts).
+contextBridge.exposeInMainWorld("kitluyT1Staff", {
+  signIn: (payload: unknown): Promise<unknown> =>
+    ipcRenderer.invoke("kitluy:t1:staff:sign-in", payload),
+  signOut: (): Promise<unknown> => ipcRenderer.invoke("kitluy:t1:staff:sign-out"),
+});

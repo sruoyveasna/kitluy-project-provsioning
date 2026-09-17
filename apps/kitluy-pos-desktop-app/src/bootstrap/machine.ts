@@ -164,8 +164,9 @@ const OPERATIONAL_REFUSAL_STATES: Record<string, T1RuntimeState> = {
   PAIR_RECEIPT_SUPERSEDED: "recovery_required",
 };
 
-/** Route refusal results (the Hub's closed vocabulary) → §5 states. */
-const ROUTE_REFUSAL_STATES: Record<string, T1RuntimeState> = {
+/** Route refusal results (the Hub's closed vocabulary) → §5 states. Exported
+ * so every composition classifies a Hub refusal with this ONE table. */
+export const ROUTE_REFUSAL_STATES: Readonly<Record<string, T1RuntimeState>> = {
   TERMINAL_NOT_RECOGNIZED: "credential_invalid",
   CREDENTIAL_NOT_CURRENT: "credential_invalid",
   ACTIVATION_REQUIRED: "recovery_required",

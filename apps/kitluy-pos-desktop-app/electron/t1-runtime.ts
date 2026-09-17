@@ -15,25 +15,19 @@
  *   FAIL-CLOSED  staff acquisition (no durable session exists; a restart
  *                always re-authenticates interactively)
  */
-import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
 
 import type { OsEncryptionFacility } from "@kitluy/terminal-local-store";
 
 import { bootstrapT1 } from "../src/bootstrap/machine.js";
-import type { AuthorityTimeResponse } from "../src/bootstrap/hub-time.js";
 import type {
-  ConfigurationDeliveryWire,
   EdgeOperationsSession,
-  EdgeReadRefusal,
   EdgeSessionResult,
   EndpointResolution,
   EndpointSource,
   ProtectedTerminalIdentity,
-  RuntimeEligibilityWire,
   SignedDiscoveryWirePayload,
-  StaffSessionWire,
   T1BootstrapPorts,
   VerifiedHubEndpoint,
 } from "../src/bootstrap/ports.js";
@@ -44,16 +38,11 @@ import {
   type TransportCredentialProvider,
 } from "./lan-client.js";
 import { discoverKitluyHubCandidates, multicastSocket, type MulticastSocketPort } from "./mdns.js";
+import { createEdgeOperationsSession } from "./edge-operations-session.js";
 import { openTerminalPairingStore } from "./terminal-store.js";
 import { protectedTerminalIdentityPort } from "./terminal-identity.js";
 
 const WELL_KNOWN_DISCOVERY_PATH = "/.well-known/kitluy-edge-discovery/v1";
-const AUTHORITY_TIME_PATH = "/edge/v1/runtime/authority-time";
-const ELIGIBILITY_PATH = "/edge/v1/runtime/eligibility";
-const CONFIGURATION_PATH = "/edge/v1/configuration/current";
-const SESSIONS_OPEN_PATH = "/edge/v1/sessions/open";
-const SESSIONS_REFRESH_PATH = "/edge/v1/sessions/refresh";
-const SESSIONS_CLOSE_PATH = "/edge/v1/sessions/close";
 
 const LAST_VERIFIED_ENDPOINT_FILE = "last-verified-hub-endpoint.json";
 
@@ -77,21 +66,6 @@ function readLastVerifiedEndpoint(userDataPath: string): StoredEndpoint | null {
 export function recordLastVerifiedEndpoint(userDataPath: string, endpoint: StoredEndpoint): void {
   const file = path.join(userDataPath, "terminal-state", LAST_VERIFIED_ENDPOINT_FILE);
   writeFileSync(file, JSON.stringify(endpoint), { mode: 0o600 });
-}
-
-function refusalFrom(status: number, body: unknown): EdgeReadRefusal {
-  const envelope = body as {
-    readonly error?: {
-      readonly message?: string;
-      readonly details?: { readonly result?: string; readonly retryable?: boolean };
-    };
-  } | null;
-  return {
-    outcome: "refused",
-    result: envelope?.error?.details?.result ?? `HTTP_${status}`,
-    retryable: envelope?.error?.details?.retryable ?? false,
-    detail: envelope?.error?.message ?? `the Hub answered ${status}`,
-  };
 }
 
 export interface T1RuntimeOptions {
@@ -264,7 +238,7 @@ export async function runT1Bootstrap(
     edgeSession: {
       async establish(endpoint: VerifiedHubEndpoint): Promise<EdgeSessionResult> {
         const call = async (
-          method: "GET" | "POST",
+          method: "GET" | "POST" | "PATCH",
           requestPath: string,
           body?: unknown,
           headers?: Record<string, string>,
@@ -279,64 +253,7 @@ export async function runT1Bootstrap(
             ...(body === undefined ? {} : { body }),
             ...(headers === undefined ? {} : { headers }),
           });
-        const session: EdgeOperationsSession = {
-          async fetchAuthorityTime() {
-            const response = await call("GET", AUTHORITY_TIME_PATH);
-            if (response.status !== 200) return refusalFrom(response.status, response.body);
-            return response.body as AuthorityTimeResponse;
-          },
-          async fetchEligibility() {
-            const response = await call("GET", ELIGIBILITY_PATH);
-            if (response.status !== 200) return refusalFrom(response.status, response.body);
-            const body = response.body as { readonly eligibility: RuntimeEligibilityWire };
-            return { outcome: "eligible" as const, eligibility: body.eligibility };
-          },
-          async fetchConfigurationDelivery() {
-            const response = await call("GET", CONFIGURATION_PATH);
-            if (response.status !== 200) return refusalFrom(response.status, response.body);
-            return {
-              outcome: "delivery" as const,
-              wire: response.body as ConfigurationDeliveryWire,
-            };
-          },
-          async openStaffSession(input) {
-            // One key per LOGICAL open attempt, minted once so a transport
-            // retry replays the same request. Never the wall clock — the
-            // runtime reads no wall clock (owner decision §1).
-            const response = await call("POST", SESSIONS_OPEN_PATH, input, {
-              "idempotency-key": `t1-open-${input.actorId}-${randomUUID()}`,
-            });
-            if (response.status !== 200) return refusalFrom(response.status, response.body);
-            const body = response.body as { readonly session: StaffSessionWire };
-            return { outcome: "ok" as const, session: body.session };
-          },
-          async refreshStaffSession(sessionId) {
-            const response = await call(
-              "POST",
-              SESSIONS_REFRESH_PATH,
-              { sessionId },
-              {
-                "idempotency-key": `t1-refresh-${sessionId}`,
-              },
-            );
-            if (response.status !== 200) return refusalFrom(response.status, response.body);
-            const body = response.body as { readonly session: StaffSessionWire };
-            return { outcome: "ok" as const, session: body.session };
-          },
-          async closeStaffSession(sessionId) {
-            const response = await call(
-              "POST",
-              SESSIONS_CLOSE_PATH,
-              { sessionId },
-              {
-                "idempotency-key": `t1-close-${sessionId}`,
-              },
-            );
-            if (response.status !== 200) return refusalFrom(response.status, response.body);
-            const body = response.body as { readonly session: StaffSessionWire };
-            return { outcome: "ok" as const, session: body.session };
-          },
-        };
+        const session: EdgeOperationsSession = createEdgeOperationsSession(call);
         // Prove the mTLS boundary once; classification of governed refusals
         // happens per-read.
         try {

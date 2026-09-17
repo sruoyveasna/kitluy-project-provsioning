@@ -34,6 +34,7 @@ import {
   readTransportCredentials,
   type TransportCredentials,
 } from "./edge-transport.js";
+import type { PinnedHubEndpoint } from "./edge-bridge.js";
 
 export const WELL_KNOWN_DISCOVERY_PATH = "/.well-known/kitluy-edge-discovery/v1";
 export const AUTHORITY_TIME_PATH = "/edge/v1/runtime/authority-time";
@@ -108,6 +109,12 @@ export interface EdgeAttemptOptions {
    */
   readonly profileCodes?: readonly string[];
   readonly identityKeyPath?: string;
+  /**
+   * Told the Hub endpoint this attempt VERIFIED and PINNED (its discovery record
+   * accepted, its certificate fingerprint bound), or `null` when the attempt
+   * ended with no such endpoint. The edge bridge forwards only to this.
+   */
+  readonly onPinnedEndpoint?: (endpoint: PinnedHubEndpoint | null) => void;
   readonly now?: () => Date;
   /** Seams. Tests supply these; the service does not. */
   readonly discover?: () => Promise<readonly EdgeCandidate[]>;
@@ -174,6 +181,7 @@ export async function runEdgeAttempt(options: EdgeAttemptOptions): Promise<EdgeS
 
   const credentials = readTransportCredentials(options.operationalDir);
   if (!credentials.available) {
+    options.onPinnedEndpoint?.(null);
     return publish({
       phase: "NOT_ACTIVATED",
       detail: `no operational certificate yet (${credentials.detail})`,
@@ -198,6 +206,7 @@ export async function runEdgeAttempt(options: EdgeAttemptOptions): Promise<EdgeS
   }
 
   if (candidates.length === 0) {
+    options.onPinnedEndpoint?.(null);
     return publish({
       phase: "NO_HUB_FOUND",
       detail: "no Store Hub answered on this network",
@@ -206,11 +215,19 @@ export async function runEdgeAttempt(options: EdgeAttemptOptions): Promise<EdgeS
   }
 
   let lastRefusal: EdgeStatus | null = null;
+  let pinnedThisAttempt = false;
+  const tracked: EdgeAttemptOptions = {
+    ...options,
+    onPinnedEndpoint: (endpoint) => {
+      if (endpoint !== null) pinnedThisAttempt = true;
+      options.onPinnedEndpoint?.(endpoint);
+    },
+  };
   for (const candidate of candidates) {
     const attempted = await attemptCandidate(
       candidate,
       credentials.credentials,
-      options,
+      tracked,
       call,
       now,
     );
@@ -228,6 +245,9 @@ export async function runEdgeAttempt(options: EdgeAttemptOptions): Promise<EdgeS
     // never answered, so it wins when several candidates fail.
     if (lastRefusal === null || attempted.phase !== "NO_HUB_FOUND") lastRefusal = attempted;
   }
+  // No candidate produced a verified endpoint: the bridge must not keep
+  // forwarding to one that an earlier attempt verified and this one could not.
+  if (!pinnedThisAttempt) options.onPinnedEndpoint?.(null);
   return publish(
     lastRefusal ?? {
       phase: "NO_HUB_FOUND",
@@ -303,6 +323,12 @@ async function attemptCandidate(
     ...base,
     pinnedCertificateFingerprint: discovery.peerCertificateFingerprint,
   };
+  options.onPinnedEndpoint?.({
+    host: candidate.host,
+    port: candidate.port,
+    certificateFingerprint: discovery.peerCertificateFingerprint,
+    hubDeviceId: discovery.body.record.hubDeviceId,
+  });
   const reads: Record<string, string> = {};
   let pairing: EdgeStatus["pairing"];
   let notRecognized = false;

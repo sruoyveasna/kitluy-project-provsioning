@@ -23,6 +23,7 @@ import type {
   IntakeOperations,
   IntakeResult,
 } from "../src/intake/ports.js";
+import type { HubCall } from "./edge-operations-session.js";
 import { pinnedHubRequest, type TransportCredentials } from "./lan-client.js";
 
 const CUSTOMERS_PATH = "/edge/v1/customers";
@@ -77,6 +78,32 @@ export function createIntakeOperations(input: {
   readonly credentials: TransportCredentials;
   readonly sessionId: string;
 }): IntakeOperations {
+  return createIntakeOperationsWithCall({
+    sessionId: input.sessionId,
+    call: (method, path, body, headers) =>
+      pinnedHubRequest({
+        hostname: input.endpoint.hostname,
+        port: input.endpoint.port,
+        method,
+        path,
+        pinnedCertificateFingerprint: input.endpoint.pinnedCertificateFingerprint,
+        credentials: input.credentials,
+        ...(body === undefined ? {} : { body }),
+        ...(headers === undefined ? {} : { headers }),
+      }),
+  });
+}
+
+/**
+ * The same eight adapters over ANY Hub call — the Pi Terminal composition
+ * passes a call through the root edge bridge (T1-STORE-OPERATIONS-001), so
+ * the route set, the session header and the idempotency discipline are this
+ * one implementation for both.
+ */
+export function createIntakeOperationsWithCall(input: {
+  readonly call: HubCall;
+  readonly sessionId: string;
+}): IntakeOperations {
   async function call<T>(
     method: "GET" | "POST" | "PATCH",
     path: string,
@@ -86,18 +113,9 @@ export function createIntakeOperations(input: {
   ): Promise<IntakeResult<T>> {
     let response: { status: number; body: unknown };
     try {
-      response = await pinnedHubRequest({
-        hostname: input.endpoint.hostname,
-        port: input.endpoint.port,
-        method,
-        path,
-        pinnedCertificateFingerprint: input.endpoint.pinnedCertificateFingerprint,
-        credentials: input.credentials,
-        ...(body === undefined ? {} : { body }),
-        headers: {
-          [SESSION_HEADER]: input.sessionId,
-          ...(withIdempotency ? { "idempotency-key": `t1i-${randomUUID()}` } : {}),
-        },
+      response = await input.call(method, path, body, {
+        [SESSION_HEADER]: input.sessionId,
+        ...(withIdempotency ? { "idempotency-key": `t1i-${randomUUID()}` } : {}),
       });
     } catch (error) {
       return {

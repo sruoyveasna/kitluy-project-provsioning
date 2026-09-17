@@ -44,3 +44,18 @@ export * from "./operational-certificate-verification.js";
 export * from "./operational-tls-client.js";
 export * from "./operational-recovery-identity-bytes.js";
 export * from "./adapters/http-operational-certificate-client.js";
+
+// The Pi Terminal's link to its Store Hub and the edge bridge the POS reaches it
+// through (T1-STORE-OPERATIONS-001). Exported so the POS end-to-end suite drives
+// the REAL terminal-edge attempt and the REAL bridge against a real Hub, rather
+// than a re-implementation of either.
+export { runEdgeAttempt, type EdgeAttemptOptions, type EdgeStatus } from "./edge-session.js";
+export {
+  BRIDGE_ROUTES,
+  EDGE_BRIDGE_SOCKET,
+  handleBridgeRequest,
+  startEdgeBridge,
+  type BridgeDependencies,
+  type BridgeTerminalFacts,
+  type PinnedHubEndpoint,
+} from "./edge-bridge.js";
