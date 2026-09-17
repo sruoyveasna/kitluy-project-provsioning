@@ -5171,3 +5171,24 @@ The software path is built and proven on real parts in development (handoff 48 �
 4. **Consent evidence.** Recording the privacy-notice acknowledgement needs `[REQUIRED: privacy notice policy reference and version]`. The POS shows consent capture as unavailable; the Booking Draft flow does not require it (T1 consent decision: acknowledgement is not required for draft work).
 
 No agent action resolves any of these by default.
+
+**Resolved 2026-09-17, items 1 and 2** by KLD-2026-09-17-TERMINAL-PIN-DEVICE-CREDENTIAL-001 (below): the Terminal PIN is built, and on a Pi Terminal the device credential plus the PIN unlock IS the T1 credential, so no staff record or grant stand-in is needed for the Booking Draft milestone. Items 3 (D1/S42) and 4 (consent) stay open.
+
+## KLD-2026-09-17-TERMINAL-PIN-DEVICE-CREDENTIAL-001 — the Pi Terminal credential model: device credential + one shared Terminal PIN, no staff login (OWNER-DECIDED 2026-09-17)
+
+`docs/decisions/kitluy-terminal-pin-device-credential-owner-decision-v1.0.0.md`. Owner mission TERMINAL-PIN-AND-REAL-POS-AUTH-001; the owner's four answers of 2026-09-17.
+
+**Conflict found.** KLD-2026-09-03-TERMINAL-PROVISIONING-001 §11/§15 (LOCKED) lay a per-device Terminal PIN UNDER a separate staff login; the POS desktop spec v4 §4.1 and Partner Portal spec v2 §12.2 describe a per-employee POS PIN; the standalone Laundry POS used email + password and then a personal PIN; handoff 48 built a Staff ID + passcode with no lockout and no route onto a real Hub. The owner's clarification wanted PIN-only human authentication over the device credential, with no email/password on the Pi.
+
+**Owner ruling (verbatim answers):** "One shared Terminal PIN only" · "PIN alone" · "Just pin no logout login use the device as credentials" · "5 failures, 15-minute lock".
+
+**Resolution applied.** ONE 4-digit Terminal PIN per device, created twice after the application installs, stored on the Store Hub only as an Argon2id verifier (hub 0043), counted and locked on the Hub (5 within 15 min → 15 min), reset by a governed audited action; an unlock is a T1 session whose actor IS the terminal device, carrying the T1 intake surface only and authorized by the terminal's own T1 profile grant re-read per request. No staff login, email, password, staff ID or logout exists on a Pi Terminal; the staff session routes are not reachable from the board. §10, §12, §13, §14, §20 of KLD-2026-09-03 stand; §11/§15's second (staff) layer is amended out of the Pi path. §11's attribution rule for financial/custody/refund/override actions STANDS and those actions are not in the PIN session's surface — a human-attributed layer above the PIN remains a later decision (BLK-006).
+
+**Required values recorded:** Argon2id cost profile (m=19456, t=2, p=1 provisional); PIN session length (8 h provisional, no idle lock); the PIN across fresh-SD recovery and hardware replacement (as built: keyed by the Hub's terminal device row; not ruled).
+
+## KLREC-2026-09-17-RUNTIME-REPORT-V2-PIN-EVIDENCE-001 — "PIN set" is the Store Hub's answer carried by the Terminal, never inferred (IMPLEMENTED · TESTED · INTEGRATED)
+
+Owner mission TERMINAL-PIN-AND-REAL-POS-AUTH-001 §11; cloud group 0230.
+
+**Resolution applied.** The device runtime report gains a v2 kind: `hubLink.terminalPin` (state, set-at, locked-until — the Hub's status answer as terminal-edge recorded it) and `pos.terminalUnlocked` (replacing `staffSignedIn`). v1 reports from terminals in the field are still accepted (0230 widens the kind check; the parser accepts both; the signature binds whichever kind is declared). The Management API carries `terminalPin` and the Partner ladder's **PIN set** rung is done only from `terminalPin.state = set`; **Operational** is done only when connected, installed, running, configuration loaded and PIN set are all done from the same fresh report and the PIN is not locked. No rung is "unbuilt" any more.
+

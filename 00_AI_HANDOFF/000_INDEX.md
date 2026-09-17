@@ -4,6 +4,19 @@ Read the newest relevant handoff before starting work. Naming:
 `YYYY-MM-DD__<AREA>__<TASK-ID>__<SLUG>__AI-HANDOFF.md` under the matching
 subfolder (repository/ shared/ apps/ services/ data/ infrastructure/ reviews/).
 
+## TERMINAL-PIN-AND-REAL-POS-AUTH-001 — the Terminal PIN is built; a Pi Terminal's credential is its device certificate plus one PIN, with no staff login (2026-09-17)
+
+Record: [`edge-platform/49_TERMINAL_PIN_AND_REAL_POS_AUTH.md`](edge-platform/49_TERMINAL_PIN_AND_REAL_POS_AUTH.md)
+· **IMPLEMENTED · TESTED · INTEGRATED (real-parts e2e under a PIN; real Hub DB; 0230 on both local stacks) · overlays re-packaged, NO IMAGE BUILT · PORTAL NOT BROWSER-VERIFIED · HARDWARE NOT VERIFIED · END-TO-END NOT VERIFIED** · from `a0662d6`
+
+**Owner ruling** (KLD-2026-09-17-TERMINAL-PIN-DEVICE-CREDENTIAL-001, verbatim answers): "One shared Terminal PIN only" · "PIN alone" · "Just pin no logout login use the device as credentials" · "5 failures, 15-minute lock". Amends KLD-2026-09-03 §11/§15's staff layer out of the Pi path; §10, §12–§14, §20 stand.
+
+**What exists now.** Hub 0043 (`edge_identity.terminal_pin`: Argon2id verifier, durable attempt window and lock, never removed); five `/edge/v1/terminal-pin/*` routes behind the mTLS gate and runtime eligibility; a PIN unlock is a T1 session whose actor IS the terminal, authorized by the terminal's own T1 grant re-read per request; `hub-agent reset-terminal-pin` (development Hubs, audited). The bridge forwards the PIN routes and no longer the staff routes. The POS: create twice → unlock → lock → change, a touch keypad, no staff ID, email or password anywhere on the Pi path. Runtime report v2 carries the Hub's PIN answer; cloud 0230 accepts v1 and v2; the Partner ladder's **PIN set** is real and **Operational** is the conjunction of reported facts.
+
+**Proof.** Real-parts e2e: pair → SERVING → PIN setup twice → READY → Booking Draft on the Hub with outbox facts → lock → wrong PIN (4 left) → unlock. Hub e2e over live mTLS: verifier shape, no PIN in any row or log, 5-in-15 lock surviving a router restart, device checked before the PIN (revoked, unpaired, contained, ungranted), change, reset. Hub bundle and Argon2id run under the Hub image's Node 18 arm64.
+
+**Next:** rebuild BOTH images (the h47 Hub and h48 Terminal images predate the PIN), read them back, then the hardware ladder of handoff 48 §11 with "PIN setup → PIN unlock" in place of "staff sign-in". Required values: Argon2id profile, session policy, PIN across reflash/replacement (decision §4).
+
 ## T1-STORE-OPERATIONS-001 — the POS becomes a governed release, reaches its Store Hub through terminal-edge, and reports what it is doing (2026-09-17)
 
 Record: [`edge-platform/48_T1_STORE_OPERATIONS_TERMINAL_CLIENT.md`](edge-platform/48_T1_STORE_OPERATIONS_TERMINAL_CLIENT.md)
