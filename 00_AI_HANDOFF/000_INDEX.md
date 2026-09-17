@@ -4,6 +4,25 @@ Read the newest relevant handoff before starting work. Naming:
 `YYYY-MM-DD__<AREA>__<TASK-ID>__<SLUG>__AI-HANDOFF.md` under the matching
 subfolder (repository/ shared/ apps/ services/ data/ infrastructure/ reviews/).
 
+## Defect G and the Store Hub clock loop — fixed in source, Hub image rebuilt, hardware pending (2026-09-16)
+
+Record: [`edge-platform/47_DEFECT_G_REPAIR_ON_GENERATION_AND_THE_HUB_CLOCK_LOOP.md`](edge-platform/47_DEFECT_G_REPAIR_ON_GENERATION_AND_THE_HUB_CLOCK_LOOP.md)
+· **IMPLEMENTED · TESTED · STORE HUB IMAGE VERIFIED (not boot-tested) · HARDWARE NOT VERIFIED · END-TO-END NOT VERIFIED** · commit `fe97e56` (from `86a44b0`; plan `5b79eba`)
+
+**Defect G.** The Hub asked a re-assigned Terminal nothing; it just refused. Hub eligibility now answers:
+
+- receipt behind the Terminal's generation → `PAIRING_REQUIRED`, after a containment check;
+- equal → unchanged;
+- ahead → refused.
+
+It consults the **highest-generation** receipt. The old newest-by-clock choice let a lower-generation handshake restore eligibility, a pre-existing downgrade gap caught by the new tests. 5 new real-handshake DB tests plus 2 Terminal tests; 5 mutations caught. Receipts stay append-only.
+
+**Clock loop.** A systemd ordering cycle, not time logic. `var-lib-kitluy-hub.mount` was implicitly before `local-fs.target` but after the storage service, so systemd dropped `systemd-timesyncd`, `systemd-tmpfiles-setup` and `local-fs.target` at every Hub boot. Fixed with `DefaultDependencies=no`. `systemd-analyze verify`: 6 cycle lines → 0.
+
+**Images:** Store Hub rebuilt from `infra/edge/raspberry-pi/store-hub-image` at `fe97e56`: `kitluy-storehub-os-arm64.img.zst` `cd1c77ca…c94e1a`. Its `system_a` was read back 118/118 against the commit, and `image-contents` passed 57/0, including no ordering cycle. The first image with boot classification. The Pi Terminal image was not rebuilt, because nothing it runs changed.
+
+**Next physical action:** write the new Store Hub image to a spare SD card (handoff 47 §5 step 1). The Terminal is not re-flashed for the Defect G proof.
+
 ## DEVICE-RECOVERY-E2E-CONTINUATION-001 — current control plan for Device Recovery (2026-09-16)
 
 Record: [`edge-platform/46_DEVICE_RECOVERY_E2E_CONTINUATION_PLAN.md`](edge-platform/46_DEVICE_RECOVERY_E2E_CONTINUATION_PLAN.md)
