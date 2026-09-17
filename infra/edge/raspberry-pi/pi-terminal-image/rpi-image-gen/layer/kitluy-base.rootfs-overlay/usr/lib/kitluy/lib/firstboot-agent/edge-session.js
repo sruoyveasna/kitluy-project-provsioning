@@ -49,7 +49,11 @@ function terminalPinFrom(body) {
     const instantOrNull = (value) => typeof value === "string" && value.length <= 40 && !Number.isNaN(Date.parse(value))
         ? value
         : null;
-    return { state, setAt: instantOrNull(pin["setAt"]), lockedUntil: instantOrNull(pin["lockedUntil"]) };
+    return {
+        state,
+        setAt: instantOrNull(pin["setAt"]),
+        lockedUntil: instantOrNull(pin["lockedUntil"]),
+    };
 }
 function atomicWriteJson(path, value, mode) {
     mkdirSync(dirname(path), { recursive: true, mode: 0o750 });

@@ -9,7 +9,10 @@
 import { createHash } from "node:crypto";
 /** The kind this agent signs (v2: Terminal PIN evidence). */
 export const DEVICE_RUNTIME_REPORT_KIND = "kitluy.device-runtime-report.v2";
-const KNOWN_KINDS = ["kitluy.device-runtime-report.v1", DEVICE_RUNTIME_REPORT_KIND];
+const KNOWN_KINDS = [
+    "kitluy.device-runtime-report.v1",
+    DEVICE_RUNTIME_REPORT_KIND,
+];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const HEX64 = /^[0-9a-f]{64}$/u;
 function hasControlCharacter(value) {
