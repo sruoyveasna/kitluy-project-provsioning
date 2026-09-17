@@ -142,6 +142,18 @@ export class PiTerminalRuntime {
     return this.#running;
   }
 
+  /**
+   * A run that STARTS after now. Sharing an in-flight run is right for the
+   * 30-second cadence, and wrong after a sign-in or sign-out: a run that began
+   * before the session changed reports the terminal as it was, and the person at
+   * the counter would be told their correct passcode did not work.
+   */
+  async #refreshFromNow(): Promise<T1BootstrapReport> {
+    const inFlight = this.#running;
+    if (inFlight !== null) await inFlight.catch(() => undefined);
+    return this.refresh();
+  }
+
   async #run(): Promise<T1BootstrapReport> {
     const logger = this.#options.logger ?? {
       log: (event: string, fields: Record<string, string | number | boolean>) => {
@@ -243,7 +255,7 @@ export class PiTerminalRuntime {
     if (opened.outcome !== "ok") return { ok: false, code: opened.result, detail: opened.detail };
     this.#hold(opened.session);
 
-    const report = await this.refresh();
+    const report = await this.#refreshFromNow();
     if (report.state === "ready" || report.state === "offline_ready") return { ok: true, report };
     return {
       ok: false,
@@ -262,7 +274,7 @@ export class PiTerminalRuntime {
         // The Hub expires the session on its own; the terminal has let go.
       }
     }
-    return this.refresh();
+    return this.#refreshFromNow();
   }
 
   /** Intake only while READY with a staff session — otherwise null (fail closed). */
