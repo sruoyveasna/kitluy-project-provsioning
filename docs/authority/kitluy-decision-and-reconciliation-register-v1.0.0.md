@@ -5116,3 +5116,58 @@ same kind of root. That entry is historical and not rewritten. Its
 
 - `systemd-timesyncd` starts at boot;
 - tmpfiles rules are applied at boot.
+
+## KLREC-2026-09-17-TERMINAL-CLIENT-RELEASE-PRODUCT-001 — the POS is the second governed release product, `kitluy-terminal` (IMPLEMENTED · TESTED · INTEGRATED on the local stacks — IMAGE AND HARDWARE VERIFICATION PENDING)
+
+Owner mission T1-STORE-OPERATIONS-001 (2026-09-17) §9–§11; handoff 48.
+
+**Authority reconciled, not overridden.**
+
+- KLD-2026-08-11-DEVICE-BOOTSTRAP-RUNTIME-001 (LOCKED): full POS business applications are governed release artifacts, never image content. The mission implements that sentence.
+- OD-U1-2 = C made the Device Shell payload updatable "for U1 only" and forbade reclassifying `terminal-edge`, firstboot identity, cloud registration, the update agent or any other bootstrap/runtime component; the U1 plan fenced "any second product (U2)" out of U1. The mission is the owner instruction that opens U2 for the POS alone. **No bootstrap/runtime component is reclassified**; the fence is still enforced in code and tested by name (`release-store.test.ts`, `build-gates.test.sh`).
+- **Product key.** `kitluy-terminal`, the key cloud group 0180 already seeded release channels for ("the two Phase 1 products"). The image keeps its component id `terminal-client` and unit `kitluy-terminal-client.service`. No new product name.
+
+**Defects found and corrected in the path.**
+
+1. `current_device_assignment_v1` (0223) answers the newest assignment per DEVICE; a second product would silently hide the first. Group 0228 adds `current_device_product_assignment_v1`; 0223 is unchanged for images in the field, and the development release source answers an unnamed product as `device-shell`.
+2. The image's `kitluy-terminal-client.service` expected "the release package" to install `/usr/lib/kitluy/terminal-client` on the read-only EROFS root and to enable itself. Neither was ever possible. The path is now a stable launcher that resolves the persistent release store; the unit is started by the update agent, `Conflicts=` the Device Shell and gives the display back through `OnFailure=`.
+3. `release:chain:check` passed the pre-Defect-5 option `assetTag` to a client that takes `deviceRef`; standalone `release:pack` crashed on a manifest it never built. Both corrected.
+
+**Recorded, not changed.** `current_device_assignment_v1` is executable by PUBLIC on `kitluy-fresh` (it returns signed public statements). The new product reader revokes PUBLIC explicitly.
+
+## KLREC-2026-09-17-EDGE-BRIDGE-POS-HUB-LINK-001 — on a Pi Terminal the POS reaches the Store Hub through terminal-edge, and does not verify Hub signatures (IMPLEMENTED · TESTED · INTEGRATED — HARDWARE VERIFICATION PENDING; Hub-key provisioning OPEN)
+
+Owner mission T1-STORE-OPERATIONS-001 §12–§13, §19; handoff 48.
+
+**Conflict found.** The WS-12-T001 POS composition (KLD-2026-08-06-WS12-T001-EDGE-BOOTSTRAP-001) holds the terminal's mTLS key itself (its shipped key provider refuses, BLK-005), stores a protected identity and pairing receipt under `safeStorage`, and verifies the discovery record, receipt and configuration delivery under a provisioned Hub operational public key. On a Pi Terminal: the operational key is 0700 root and the POS runs as `kitluy-terminal` with no capabilities (the higher, locked custody rule); nothing provisions that identity, receipt or Hub key; and `cage` has no keyring for `safeStorage`.
+
+**Resolution applied (no authority relaxed).**
+
+- `kitluy-terminal-edge.service` — which already discovers, verifies the record's bindings, pins the Hub certificate and pairs — serves a closed-allowlist unix-socket bridge (0660, group `kitluy-terminal`). The key never leaves root; the Hub authorizes exactly as before.
+- The POS Pi composition (`bootstrapT1ThroughEdge`) applies the WS-12 rules it can prove and binds eligibility and configuration explicitly (device, pinned Hub, generation, scope, T1, payload digest, Hub-time window).
+- **The Hub's signatures over discovery, receipt and configuration delivery are NOT verified on this path**, and the POS report says so (`link.hubSignatures = not_verified_hub_key_not_provisioned`). Trust in the Hub rests on terminal-edge's mTLS: chain to the development device CA, `kitluy-device://` and environment SANs, and the pinned certificate the discovery record names.
+
+**Open.** Provisioning the Hub's signing key to terminals (the same BLK-006 producer terminal-edge's "signature: unverified" already records). The WS-12-T001 composition is unchanged and remains the workstation path.
+
+## KLREC-2026-09-17-DEVICE-RUNTIME-STATUS-INTERIM-001 — Partner-visible Terminal runtime status is DEVICE-ATTESTED until the Hub-observed contract has a transport (IMPLEMENTED · TESTED · INTEGRATED on the local stacks — HARDWARE AND PORTAL-BROWSER VERIFICATION PENDING)
+
+Owner mission T1-STORE-OPERATIONS-001 §15–§17; group 0229; handoff 48.
+
+**Conflict found.** The health reporter's own header names the canonical contract: the Store Hub's observation of a terminal (`device_fleet.health_projection_reported` → `ingest_device_health_report_v1`, group 0177). Its Hub→cloud transport is BLK-006 and unbuilt, so nothing reaches it from a real Store, and the Partner ladder could only say "not available in this build".
+
+**Resolution applied.** A Pi Terminal signs a closed v1 runtime report (Hub link phase, `kitluy-terminal` journal and launcher witness, POS runtime state) with its device identity key; the registry verifies the signature; group 0229's door binds the key to the device's current sealed enrollment and moves forward-only. The Management API and Partner Portal label it "reported by the Terminal" and trust it only while fresh (≤ 180 s by the cloud clock). It does not write 0177's tables and does not claim to be a Hub observation.
+
+**When BLK-006 lands** the Hub observation becomes the authority for "connected to the Store Hub"; this report remains the witness for the application runtime.
+
+## KLREC-2026-09-17-T1-HARDWARE-STORE-OPERATION-DECISIONS-001 — a real T1 Store operation on hardware needs four owner decisions (CONFLICT / OWNER DECISION REQUIRED)
+
+Owner mission T1-STORE-OPERATIONS-001 §7, §14, §18, §23; handoff 48.
+
+The software path is built and proven on real parts in development (handoff 48 §5). Carrying it onto the physical boards meets four points that are the owner's, not an agent's:
+
+1. **Terminal PIN versus "operational".** KLD-2026-09-03-TERMINAL-PROVISIONING-001 §10 (LOCKED): "The Terminal must not become fully operational until this required PIN setup succeeds, unless an explicit future owner-approved exception applies to a specific terminal class." The PIN (§10–§14) is SPECIFIED — NOT BUILT. The mission asks for a real Store operation now and says not to invent a PIN scheme. The Partner ladder therefore never shows **Operational** as done. **Decide:** build the PIN slice first, or approve a development exception for this Pi Terminal.
+2. **Staff on a real Store Hub.** A staff session needs `edge_identity.staff_cache` and `edge_config.permission_grant_projection` rows, which only the cloud projection (BLK-006) may deliver; KLREQ-025 says the Hub never authors a grant, and the Hub enforces it with an immutability trigger. The 2026-09-10 owner decision permitted a development signer for TERMINAL PROFILE grants only. **Decide:** authorize a development-only staff and permission-grant stand-in on the Hub (online-only grants, operator-supplied `offline_valid_until`), or wait for BLK-006.
+3. **The real seat holds T1–T4.** `KL-1CB3577C26A7` ("Pi HEllo", assignment generation 3) holds `laundry.t1…`, `t2…`, `t3…`, `t4…`; terminal-edge pairs into the first listed and the Hub picks among same-version grants with no tie-breaker (D1/S42, TOPOLOGY-001). The mission forbids silently choosing T1. **Decide:** re-seat the board as T1-only through the Partner Portal (a new assignment, a re-pair), or rule on D1/S42.
+4. **Consent evidence.** Recording the privacy-notice acknowledgement needs `[REQUIRED: privacy notice policy reference and version]`. The POS shows consent capture as unavailable; the Booking Draft flow does not require it (T1 consent decision: acknowledgement is not required for draft work).
+
+No agent action resolves any of these by default.

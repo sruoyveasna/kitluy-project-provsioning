@@ -4,6 +4,28 @@ Read the newest relevant handoff before starting work. Naming:
 `YYYY-MM-DD__<AREA>__<TASK-ID>__<SLUG>__AI-HANDOFF.md` under the matching
 subfolder (repository/ shared/ apps/ services/ data/ infrastructure/ reviews/).
 
+## T1-STORE-OPERATIONS-001 — the POS becomes a governed release, reaches its Store Hub through terminal-edge, and reports what it is doing (2026-09-17)
+
+Record: [`edge-platform/48_T1_STORE_OPERATIONS_TERMINAL_CLIENT.md`](edge-platform/48_T1_STORE_OPERATIONS_TERMINAL_CLIENT.md)
+· **IMPLEMENTED · TESTED · INTEGRATED (real-parts e2e, real release chain) · IMAGE VERIFIED (Pi Terminal `ef4594e7…`, not boot-tested; Store Hub image `cd1c77ca…` unchanged) · PORTAL NOT BROWSER-VERIFIED · HARDWARE NOT VERIFIED · END-TO-END NOT VERIFIED** · commits `940e61a` `589a666` `aa66762` `80d70cf` `91c2ba0` `7c51ab5` (from `058ad88`)
+
+**What exists now.**
+
+- **Release product `kitluy-terminal`** (the key 0180 already seeded): cloud 0228 answers assignments per product; the update agent installs the POS into the persistent store and starts it; the image's POS unit runs a stable launcher (the old unit expected a write to the read-only root).
+- **Edge bridge:** `terminal-edge` (root) forwards a closed list of Hub routes from a `kitluy-terminal` unix socket over its pinned mTLS; the POS never holds the key.
+- **POS on a Pi:** `bootstrapT1ThroughEdge` → staff sign-in into T1 → READY → customer + **Laundry Booking Draft** create/edit/reopen/cancel. Hub signatures are reported not verified (Hub key not provisioned, BLK-006).
+- **Runtime report:** the Terminal signs its Hub link, POS release and POS state; cloud 0229 binds it to the current enrollment key; Management API and Partner ladder show _Connected / Installed (version) / Running / Configuration loaded_ only from a fresh report, labelled device-reported. **Operational is never done while the Terminal PIN (§10, LOCKED) is unbuilt.**
+
+**Proof.** Real-parts e2e: Hub DB + Hub mTLS router + real terminal-edge pairing (PAIRING_REQUIRED → SERVING) + real bridge + POS runtime → Booking Draft v2 on the Hub with 3 pending outbox facts; refusals for generation mismatch, revoked credential, bridged pairing. Real POS payload published and installed by the device's own install pass from the real release service; a one-byte-tampered artifact refused. Chain check 41/41.
+
+**Pi Terminal image** (from `80d70cf`): card `kitluy-pos-terminal-wayland-arm64.img.zst` sha256 `ef4594e7ca945e5f116acacffe9f3ef3d633bcc6d17f061053c0b27b799c8bfe`. All 111 committed overlay entries are byte-identical in the final `system_a`; image-contents 117/0/0; the card carries no release store, key or Store data. **Not boot-tested**; an off-board QEMU run of Electron is inconclusive (the Device Shell dies there too).
+
+**Boards:** unchanged (read-only checks). Hub still on the handoff 43 image; Terminal still `ASSIGNMENT_GENERATION_STALE`. **Handoff 47's hardware gate has not been performed.**
+
+**Owner decisions before a real Store operation** (KLREC-2026-09-17-T1-HARDWARE-STORE-OPERATION-DECISIONS-001): PIN §10 (build or development exception) · staff and grant stand-in on the Hub (KLREQ-025) · the real seat holds T1–T4 (D1/S42) · consent policy reference.
+
+**Next physical action:** write the h47 Store Hub image (`cd1c77ca…`) to a spare SD card (handoff 47 §5 step 1).
+
 ## Defect G and the Store Hub clock loop — fixed in source, Hub image rebuilt, hardware pending (2026-09-16)
 
 Record: [`edge-platform/47_DEFECT_G_REPAIR_ON_GENERATION_AND_THE_HUB_CLOCK_LOOP.md`](edge-platform/47_DEFECT_G_REPAIR_ON_GENERATION_AND_THE_HUB_CLOCK_LOOP.md)

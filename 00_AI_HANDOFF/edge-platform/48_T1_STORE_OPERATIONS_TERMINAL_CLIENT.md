@@ -1,0 +1,261 @@
+# T1-STORE-OPERATIONS-001 — the POS becomes a governed release, reaches its Store Hub through terminal-edge, and reports what it is doing
+
+**Date:** 2026-09-17 · Asia/Phnom_Penh
+
+| Item                                                            | IMPLEMENTED | TESTED                 | INTEGRATED                                  | PORTAL VERIFIED           | IMAGE VERIFIED                                                                                    | HARDWARE VERIFIED      | END-TO-END VERIFIED |
+| --------------------------------------------------------------- | ----------- | ---------------------- | ------------------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------- | ---------------------- | ------------------- |
+| `kitluy-terminal` release product (cloud 0228, agent, tooling)  | yes         | yes                    | yes (`kitluy-fresh`: chain check 41/41)     | n/a                       | yes — Pi Terminal image `ef4594e7…` (§3d)                                                         | **no**                 | **no**              |
+| POS launcher + unit on the read-only image                      | yes         | yes (gates)            | n/a                                         | n/a                       | yes — Pi Terminal image `ef4594e7…` (§3d)                                                         | **no**                 | **no**              |
+| terminal-edge bridge                                            | yes         | yes (40, real sockets) | yes (real-parts e2e)                        | n/a                       | yes — Pi Terminal image `ef4594e7…` (§3d)                                                         | **no**                 | **no**              |
+| POS T1 on the Pi path (bootstrap, staff sign-in, Booking Draft) | yes         | yes                    | yes (real-parts e2e)                        | n/a                       | n/a (release payload, not image)                                                                  | **no**                 | **no**              |
+| Runtime report → cloud 0229 → Management API                    | yes         | yes                    | yes (repo17 8/8; API SQL on `kitluy-fresh`) | n/a                       | yes, Terminal side — image `ef4594e7…` (§3d); Store Hub not rebuilt (the reporter is inert there) | **no**                 | **no**              |
+| Partner Portal ladder                                           | yes         | yes (65/65)            | n/a                                         | **no** (no browser check) | n/a                                                                                               | **no**                 | **no**              |
+| Handoff 47 hardware gate (Defect G, Hub clock)                  | —           | —                      | —                                           | —                         | yes (h47, unchanged)                                                                              | **no — not performed** | **no**              |
+
+**The milestone is NOT reached on hardware.** Every software piece of "one Pi
+Terminal operating as a Store workstation served by its Store Hub" now exists and
+is proven end to end on real parts in development (§5). No board has run any of
+it, and four owner decisions stand between the software and a real Store
+operation on the physical boards (§8).
+
+| Fact                   | Value                                                                                                                                                                                                                       |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Starting commit        | `058ad881c2ab26df2340dcd705befd0b907ef96d` (`provisioning/dev`, fetched and verified; no newer commits)                                                                                                                     |
+| Implementation commits | `940e61a` release product · `589a666` edge bridge + POS · `aa66762` runtime report + ladder · `80d70cf` images · `91c2ba0` portal test typing · `7c51ab5` POS sign-in refresh                                               |
+| Ending commit          | this handoff's commit (§12)                                                                                                                                                                                                 |
+| Previous edge handoff  | 47 (Defect G, Hub clock loop, Store Hub image `cd1c77ca…`)                                                                                                                                                                  |
+| Register               | `KLREC-2026-09-17-TERMINAL-CLIENT-RELEASE-PRODUCT-001`, `KLREC-2026-09-17-EDGE-BRIDGE-POS-HUB-LINK-001`, `KLREC-2026-09-17-DEVICE-RUNTIME-STATUS-INTERIM-001`, `KLREC-2026-09-17-T1-HARDWARE-STORE-OPERATION-DECISIONS-001` |
+| Uncommitted, preserved | `scripts/development/issue-dev-pairing-code.mjs` (pre-existing; not this task)                                                                                                                                              |
+
+## 1. Where the boards are (read-only checks, 09:03 +07:00)
+
+| Board                    | State                                                                                                                                                                                                                                                               |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Store Hub 172.16.13.205  | still the **handoff 43 image** (`hub-agent/main.mjs` `da3e2088…`, mount unit `89204174…`, not h47's `ad10e9db…`); `kitluy-hub-agent` active                                                                                                                         |
+| Pi Terminal 172.16.29.73 | handoff 43 image; `edge-status.json` **`HUB_REFUSED` — `409 ASSIGNMENT_GENERATION_STALE`** (Defect G's live state); no release store; Device Shell from `IMAGE_FALLBACK`; update agent polling `:8791` (`ECONNREFUSED`, no release source running), `trustedKeys=1` |
+
+**Handoff 47 hardware gate: not performed.** The h47 Store Hub image (`cd1c77ca45f890e2906acd7b52c1d9f730f58f286854641eb07347e7c2c94e1a`) has not been written to a card. It is not rebuilt or relabelled here; its evidence stands as recorded.
+
+The real Terminal's newest Device Shell assignment is a revoked chain-check release, so the governed reader answers nothing for it; no POS release is assigned to any real board.
+
+## 2. The governed release chain, audited (before editing)
+
+| Question                 | Answer in current code                                                                                                                                                                                  |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Artifact                 | `artifact.tar.gz`: gzip'd ustar of root-owned regular files and directories only, fixed mtime (`release-pack.mjs`)                                                                                      |
+| Manifest                 | 15-field v1, signed Ed25519 over canonical bytes (`packages/device-identity/src/release-manifest.ts`, device mirror `release-verify.ts`, drift-tested)                                                  |
+| Assignment               | `assign_release_v1` → signed separately (`record_assignment_signature_v1`, 0222) → `current_device_assignment_v1` newest-or-nothing (0223)                                                              |
+| Sequencing               | `device_installations.assignment_sequence` identity column (0221); the device refuses a lower one                                                                                                       |
+| Source                   | development `release-service.mjs` (`:8791`): assignment route answers only from the governed reader; artifact route serves bytes by release id; the device knows id, digest and size before any byte    |
+| Store                    | `/persistent/shared/kitluy/releases/<product>/{rel-<id>, current, previous, journal.json}`; slot-shared by construction                                                                                 |
+| Activation               | `.incoming` sibling → fsync tree → rename; journal ACTIVATING → symlink swap (durable) → HEALTH_PENDING                                                                                                 |
+| Health gate / rollback   | owner-locked 20 s × 3 within 5 min; one rollback to `previous`, else `current` removed                                                                                                                  |
+| Witness                  | the launcher writes what it exec'd; `release-status.ts` compares it with the store                                                                                                                      |
+| Trust                    | `/etc/kitluy/trust/release-signing.json`, purpose- and environment-checked; no anchor = refuse                                                                                                          |
+| What was single-product  | `U1_PERMITTED_PRODUCT`, `DEVICE_SHELL_UNIT`, `acceptance.productKey`, one pass per poll, the newest-per-DEVICE reader, the manifest's `updatableProducts`, the pack/publish allowlists, the image gates |
+| What the image got wrong | `kitluy-terminal-client.service` expected an installer to write `/usr/lib/kitluy/terminal-client` on EROFS and `systemctl enable` itself; neither is possible                                           |
+| Status to cloud          | none (journal lines only)                                                                                                                                                                               |
+
+## 3. What was built
+
+### 3a. `kitluy-terminal`, a second governed release product (`940e61a`)
+
+- **Product key reused, not minted:** `kitluy-terminal` (cloud 0180 seeded its channels). Component id `terminal-client`, unit `kitluy-terminal-client.service`.
+- **Cloud 0228** `current_device_product_assignment_v1(device, product)`: 0223's rule within one product. A newer POS assignment can no longer hide the Device Shell's (proven: the device-wide reader would have, chain check step 14).
+- **Agent:** permitted products `device-shell` + `kitluy-terminal` (bootstrap set still refused by name); one pass per product whose unit the image defines (a Store Hub defines neither); the POS pass names its product, demands a `kitluy-terminal` manifest and restarts the POS unit; a POS rollback with no previous release **stops the POS and starts the Device Shell** instead of restarting a unit whose `Conflicts=` would blank the screen; an installed POS is started once per agent process after a reboot.
+- **Tooling:** product-scoped release source (unnamed = `device-shell`, for images in the field); 0228 capability check; pack/publish for `kitluy-terminal`; `release:pack` fixed; chain check fixed (`deviceRef`), extended (two products, synthetic keys no device accepts) and self-cleaning (revokes what it created).
+
+### 3b. The edge bridge and the POS on a Pi (`589a666`)
+
+- **Bridge** in `kitluy-terminal-edge.service`: `/run/kitluy-terminal-edge/bridge.sock`, 0660 in 0750, group `kitluy-terminal`. Forwards ONLY authority time, eligibility, configuration, staff sessions and the eight T1 intake routes, over terminal-edge's pinned mTLS client, to the endpoint its last attempt verified (cleared when an attempt verifies none). Refuses pairing, activation, heartbeats, discovery, unknown query strings/headers, non-JSON and > 64 KiB bodies. Logs route and status only.
+- **POS Pi composition** (`KITLUY_DEVICE_CLASS=terminal`): `bootstrapT1ThroughEdge` reuses the machine's vocabulary and rules and adds the bindings §5 lists; Hub signatures are reported `not_verified_hub_key_not_provisioned`. `PiTerminalRuntime`: re-proves every 30 s, one staff session always into T1, intake only while READY, `pos-runtime.json` (0644; no staff identity, no passcode). Kiosk window, navigation and new windows refused.
+- **Renderer:** staff sign-in; T1 intake — search by phone, create a local customer, **Laundry Booking Draft** create / edit notes / reopen / cancel. Consent capture shown unavailable (`[REQUIRED: privacy notice policy reference and version]`).
+- **Payload:** the POS now pins Electron **38.8.6** (the image's). `pnpm --filter @kitluy-apps/kitluy-pos-desktop-app build:release-payload` → `release-payload/` (renderer by Vite; main ESM and preload CJS bundled by esbuild; refuses a pin mismatch, symlinks, long names, key material). Local build: 5 files, 359 207 bytes; main imports only `electron` + Node built-ins.
+
+### 3c. Runtime status: device → cloud → Management API → Partner Portal (`aa66762`)
+
+- **Contract** `@kitluy/device-identity/device-runtime-report`: closed v1 shape, canonical JSON, preimage `kind \n fingerprint \n deviceId \n sequence \n observedAt \n sha256(report)`, Ed25519-only verification; device copy drift-tested.
+- **Device:** the health reporter (terminals only, once registered) copies `edge-status.json`, the `kitluy-terminal` journal + launcher witness + `is-active`, and `pos-runtime.json`; drops anything outside the vocabulary; signs; posts every 60 s; logs on change. Sequence `max(last+1, epoch ms)`.
+- **Cloud 0229:** `device_runtime_status` (door-only, forward-only per key, no delete), `record_device_runtime_report_v1` (current sealed enrollment key, live terminal, v1 shape) executable only by `kitluy_device_runtime_service`, `device_runtime_status_read` with a cloud-clock `report_age_seconds`.
+- **Registry:** `POST /v1/device-runtime/report` (raw body to the limiter, rate limited, signature verified in the route, one 403 for all refusals).
+- **Management API:** `runtime` on each Partner terminal (bound device only; facts copied; no reason text).
+- **Partner Portal ladder:** Store Hub active · Code issued · Code used · Activated · **Connected to the Store Hub** · **Application installed (version)** · **Application running** · **Configuration loaded (vN)** · PIN set (_not available in this build_) · **Operational**. Runtime rungs are done only from a report ≤ 180 s old, else **No recent report**, and say "reported by the Terminal". _Application running_ requires the launcher's witness to name the installed release AND the unit active. **Operational is never done** while the PIN is unbuilt (§8).
+
+### 3d. Images (`80d70cf`)
+
+- Pi Terminal: POS launcher + unit + manifest (`terminal-client` governed release, `terminal-client-launcher` overlay; `updatableProducts` = both), bridge runtime directory, closure + `edge-bridge`, `runtime-report`, `runtime-report-bytes`; gates extended.
+- Store Hub: closure + `runtime-report`, `runtime-report-bytes` (inert: not a terminal); Hub agent bundle byte-identical; **not rebuilt**.
+
+**Pi Terminal image — IMAGE VERIFIED, NOT BOOT-TESTED.** Built 10:10–10:32 +07:00 from `80d70cf` (`rpi-image-gen` v2.7.0, builder commit `a7b6d480`), `--profile pi-terminal --environment development`, enrollment `http://172.16.21.17:8787`, registration `http://172.16.21.17:54371/functions/v1/device-registration`, release source `http://172.16.21.17:8791`, profile `KL-PI5-TERMINAL-DEV`, development PKI root pin, `KITLUY_DEV_SSH_PUBKEY`, `KITLUY_DEV_SUDO=1`. Classification: **DEVELOPMENT / UNSIGNED / NOT RELEASE-ELIGIBLE / NOT BOOT-TESTED**.
+
+| Artifact                                                                                         | Bytes                                       | SHA-256                                                            |
+| ------------------------------------------------------------------------------------------------ | ------------------------------------------- | ------------------------------------------------------------------ |
+| `build/work/deploy-v2.7.0/kitluy-pos-terminal-wayland-arm64.img.zst` (**the card**)              | 998 873 087                                 | `ef4594e7ca945e5f116acacffe9f3ef3d633bcc6d17f061053c0b27b799c8bfe` |
+| `build/work/image-kitluy-pos-terminal-wayland-arm64/kitluy-pos-terminal-wayland-arm64.img` (raw) | 8 900 333 568                               | `65dc625804a3db1ba484e38f88056e88e4c539ff2532e26b156104c230298d74` |
+| `…-v2.7.0.tar.zst` · `.img.sparse.zst` · `.img.sparse`                                           | 1 501 272 619 · 999 631 715 · 1 144 589 872 | `9187dec7…` · `0730b229…` · `cdaaf493…`                            |
+
+Paths are under `infra/edge/raspberry-pi/pi-terminal-image/`. The build manifest lists exactly these five, all written by this build; the two card hashes were recomputed independently with `sha256sum` and match it.
+
+Read-back from the FINAL image, not the build tree: `system_a` cut out of the raw `.img` by its GPT offsets and read with the builder's own `dump.erofs` (erofs-utils 1.9):
+
+- **All 111 overlay entries committed at `80d70cf`** under `kitluy-base.rootfs-overlay` and `kitluy-pi-terminal.rootfs-overlay` — 99 files, 12 symlinks — are **byte-identical** in the image (0 differ). This includes the POS launcher `/usr/lib/kitluy/terminal-client`, `kitluy-terminal-client.service`, `kitluy-terminal-edge.service`, and the packaged `firstboot-agent/edge-bridge.js`, `runtime-report.js`, `runtime-report-bytes.js`.
+- `kitluy-terminal-client.service` is in no `*.wants` directory (it starts only from the update agent, §3a); `kitluy-terminal-edge.service` is wanted by `multi-user.target`.
+- `/usr/lib/kitluy/electron/version` reads `38.8.6`, the pin the POS payload builder checks.
+- `/etc/kitluy/image.env`: device class `terminal`, environment `development`; `/etc/kitluy/release.env`: `KITLUY_RELEASE_SOURCE=http://172.16.21.17:8791`.
+- The `persistent` partition (ext4, read with `debugfs`) holds only empty `var/lib/kitluy/{identity,health,update,terminal}` directories in both slots, and no `shared/` tree: **no release store, no POS payload, no identity or transport key, no receipt, no Store data** on the card. The only credential-like file is the development `pi` user's `authorized_keys` (public key, by design of `KITLUY_DEV_SSH_PUBKEY`).
+- `image-contents.test.sh` against this build's rootfs: **117 passed, 0 failed, 0 skipped**, including _a governed release declares no executable in the image_, _kitluy-terminal-client.service stays disabled_, _the built POS launcher reads the kitluy-terminal release store_, _the image ships no release store_.
+
+Build warnings (all read): the known development cross-build notices (QEMU, `KITLUY_DEV_SUDO`), apt's `o+x` note about the build tree, `/proc` bind-mount fallback, and the Pi 5 kernel's 16 KiB block size flagged by the x86 host (`mke2fs`, `veritysetup`) — set by the pinned builder's `linux-image-2712` layer, not by KitLuy configuration, and unchanged by this task.
+
+Source after the image: `91c2ba0` (portal test) and `7c51ab5` (POS `pi-runtime.ts`) change nothing the image contains; the POS reaches the board as a release payload, built at publish time. **Store Hub image not rebuilt**: its closure change is inert (not a terminal), and handoff 47's image `cd1c77ca…` stays the Hub card, unrelabelled.
+
+Off-board boot probe, **inconclusive**: the image's arm64 Electron under QEMU user emulation (privileged container, headless Ozone) segfaulted on the POS payload about 16 s in, before writing `pos-runtime.json` — and the image's own Device Shell, which boots on this board, died the same way (_GPU process isn't usable_). Emulation cannot run this Electron, so it proves nothing either way; the payload's first boot stays a hardware step (§11 step 8).
+
+## 4. Security properties (all tested)
+
+- the operational private key never leaves root; the POS (and its renderer) cannot read it — bridge test, boundary test, unit gate (`ReadWritePaths` excludes keys and the store);
+- discovery ≠ trust: the bridge forwards only after a verified, pinned endpoint; a Hub presenting a different valid certificate is refused (real TLS);
+- current assignment generation, credential currency, containment, replacement and T1 are enforced on the Pi path (edge bootstrap 29 cases; e2e revoked credential and generation mismatch);
+- releases: tampered bytes, wrong product, wrong device, unsigned and replayed assignments refused; activation durable; rollback preserved; an interrupted install never removes the last good release (existing U1 suites, still green, + product cases);
+- the POS has no Supabase or cloud path (static boundary test); normal Store writes go to the Hub (e2e rows + outbox);
+- runtime report: only the enrolled key of the current sealed enrollment writes a device's status; replay is STALE; the report shape is closed; no staff identity or reason text reaches Partners;
+- no secret in any image or payload (payload builder refuses key material; image gates; `pnpm secret:scan` passed on 2342 tracked files).
+
+## 5. The real-parts end-to-end (development)
+
+`apps/kitluy-pos-desktop-app/test/t1-pi-edge.e2e.integration.test.ts`, against `kitluy_hub_local`:
+
+```text
+REAL Hub edge router + TLS 1.3 mTLS listener (hub-agent build)
+REAL terminal-edge attempt → eligibility PAIRING_REQUIRED → its own Ed25519 pairing → SERVING
+REAL edge bridge (unix socket)
+POS PiTerminalRuntime → STAFF_AUTHENTICATION_REQUIRED (config v7, current)
+  wrong passcode refused → sign-in into T1 → READY
+  search (none) → create customer (pending_sync) → create Booking Draft v1
+  → edit v2 → stale edit refused (stale_version) → reopen v2
+Hub DB: booking_draft (v2, open); outbox: customer.local_customer_created,
+  laundry.booking_draft_recorded ×2, all pending
+bridge: a pairing request → 404, never reaches the Hub
+seat generation 2 vs Hub 1 → assignment_invalid (ASSIGNMENT_GENERATION_MISMATCH)
+credential revoked → credential_invalid; intake closed; a write refused
+```
+
+**1 passed.** Hub-side fixture rows (terminal projection, staff, grants) are arranged by the harness exactly as the WS-12-T001 e2e and the hub-agent suites do; the POS side touches only the socket.
+
+### 5b. The real POS payload through the real release chain (off-board)
+
+Against `kitluy-fresh`, on the dormant record `KL-C2B02C760E41` (last seen 2026-09-14), never a live board:
+
+| Step                                                                                                                | Result                                                                                                                                                                                                                                                        |
+| ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `build:release-payload`                                                                                             | 5 files, 359 510 bytes; Electron 38.8.6 = image pin                                                                                                                                                                                                           |
+| `release:publish --product kitluy-terminal --version 0.0.0-offboard-1789614998`                                     | release `de1333f9-3a2a-4589-9806-eb8a2405b3a6`, 94 269 bytes, sha256 `2c4a15502466370a…`, signed, promoted internal, assigned, assignment signed (sequence 11). Build id `git-91c2ba0e5e20-dirty` (uncommitted handoff drafts and the preserved local change) |
+| device `runInstallPass` (firstboot build) via the real `release-service.mjs`, product-scoped, real dev trust record | **INSTALLED**; `current → rel-de1333f9…`; payload `package.json` main `dist-electron/electron/main.js` present, `preload.cjs` and `dist/index.html` present; journal `COMMITTED`, `lastAssignmentSequence 11`; one unit restart                               |
+| second pass                                                                                                         | `NOTHING_TO_DO` (already running)                                                                                                                                                                                                                             |
+| the same release id served with ONE byte flipped                                                                    | **REFUSED `ARTIFACT_DIGEST_MISMATCH`**; no `current`, no restart                                                                                                                                                                                              |
+| cleanup                                                                                                             | release revoked (`revoke_release_v1`, distinct approver); the record's POS assignment reads NULL again                                                                                                                                                        |
+
+Not proven here: the payload BOOTING under Electron. No x64 Electron or display on this workstation, and the arm64 probe under QEMU is inconclusive (§3d). That is the first hardware step.
+
+## 6. Tests
+
+| Suite                                               | Result                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| firstboot agent (full)                              | **883 passed, 2 failed, 9 skipped** — both failures pre-existing, see §7                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| device-identity (full)                              | **924 passed, 23 skipped**; 2 suites fail at setup — pre-existing baseline                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| POS desktop (full, Hub DB live)                     | **119 passed, 1 failed** — pre-existing accumulation, §7                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Device Shell                                        | 147/147                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Management API                                      | 181/181                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Partner Portal                                      | 65/65 (typecheck including tests clean after `91c2ba0`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| POS `pi-runtime.test.ts`                            | 2/2 (`7c51ab5`; the race it fixes is not reproducible by an I/O gate — stated in the test)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| repository `pnpm typecheck`                         | 103/103 tasks                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| registry `device-runtime-report.integration`        | 8/8 (`kitluy-repo17`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `release:chain:check`                               | **41/41** (`kitluy-fresh`, dormant record `KL-C2B02C760E41`; 6 synthetic releases revoked)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `release:pack:check`                                | 14/14                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Pi Terminal image suites                            | build-gates 67/0 · environment-gating 20/0 · rpi-image-gen 23/0 (1 skip) · systemd-runtime 244/0 · image-contents 117/0/0 (this build, `80d70cf`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Store Hub image suites                              | build-gates 34/0 · environment-gating 19/0 · image-contents 57/0 (h47 rootfs) · rpi-image-gen 22/0 · storage-posture 33/0 · systemd-runtime 183/0                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `pnpm verify` (at `7c51ab5`)                        | **exit 1, baseline failures only.** PASS: Lint, Typecheck (103/103), Contract tests, Offline harness, Build, OpenAPI, Migration validation, Hub migration validation, Secret scan, Clock usage. FAIL: Format check (`EACCES` inside the old `infra/kitluy-os-image/build/work` rootfs, memory-recorded baseline); Unit tests (device-identity concurrency suites, §7 — turbo stops there at 42/66 tasks, so the packages after it were run one by one above); Docs link check (the same 4 broken links in a 2026-07-30 shared handoff). The run at `80d70cf` also failed Typecheck (portal test fixtures), fixed by `91c2ba0`. |
+| ESLint / Prettier / typecheck on every changed file | clean                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+
+## 7. Pre-existing failures (evidence, not excuses)
+
+| Failure                                                           | Why it is not this change                                                                                                                                                                                                                                                     |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| firstboot `hub-provisioning-e2e.db`                               | handoffs 39–47 baseline                                                                                                                                                                                                                                                       |
+| firstboot `device-registration-continuity.db` "MAC address alone" | seeds `02:XX:00:00:00:01` (256 values); `kitluy-repo17` already holds **120** distinct such MACs from earlier runs → ≈47 % collision per run; this change's suites use random 6-byte MACs                                                                                     |
+| device-identity concurrency suites                                | `kitluy_credential_issuer is ALREADY granted` — handoffs 44–47 baseline                                                                                                                                                                                                       |
+| POS `t1-startup.e2e`                                              | lists pending T002 facts oldest-first with `limit 100`; `kitluy-hub-local` holds **145** pending (44 consent, 43 customer, 58 draft) from earlier runs, so the run's facts fall past the limit. Every step through the refactored intake client passed before that assertion. |
+
+## 8. Owner decisions required before a real Store operation (KLREC-2026-09-17-T1-HARDWARE-STORE-OPERATION-DECISIONS-001)
+
+1. **PIN (§10 LOCKED)** — build the Terminal PIN slice, or approve a development exception for this Pi Terminal.
+2. **Staff on the real Hub (KLREQ-025)** — authorize a development-only staff + permission-grant stand-in (online-only grants, operator-supplied `offline_valid_until`), or wait for BLK-006. Not built: the Hub's grant table is immutability-guarded and the 2026-09-10 exception covers terminal profile grants only.
+3. **The real seat holds T1–T4 (D1/S42)** — re-seat `KL-1CB3577C26A7` as T1-only through the Partner Portal, or rule on D1/S42.
+4. **Consent** — `[REQUIRED: privacy notice policy reference and version]` (not needed for the Booking Draft proof).
+
+What hardware CAN prove without those decisions: the POS delivered as a governed release, verified, installed, running, connected through the Hub, configuration loaded, and the Partner ladder showing those facts — with the POS stopping honestly at _staff authentication required_ (if the seat's Hub grant resolves to T1) or _profile not authorized_ (if it does not).
+
+## 9. Manual and environment operations this session
+
+- Local development databases only: groups **0228** and **0229** applied with `psql` to `kitluy-fresh` and `kitluy-repo17`, ledger rows recorded. **One error, corrected:** on `kitluy-repo17` 0229 first failed (`must be able to SET ROLE "kitluy_fleet_governor"` — PG 17 membership with `SET = false`), and the apply command gated the ledger on `grep` instead of psql's exit code, writing a false ledger row; it was removed at once (nothing of 0229 existed), the migration's role borrow was changed to probe the SET ability, and 0229 was then applied with exit-code gating. Both migrations re-run cleanly on both stacks; role memberships unchanged.
+- `release:chain:check` wrote and revoked 6 synthetic releases on the dormant record `KL-C2B02C760E41`.
+- Boards: **read-only SSH only**. Nothing flashed, installed, restarted or written.
+- Pi Terminal image built from `80d70cf` in the source tree's `build/work` (no earlier artifacts there; the card on the board is untouched and remains the rollback). The copies of `system_a` and `persistent` used for the read-back sit in the session scratchpad, outside the repository (deleting them was not approved in-session). The POS payload was rebuilt locally (git-ignored) for the QEMU probe; nothing was published.
+- Local services NOT restarted: the fleet/registry service `:8787` and Management API `:8790` still run the previous builds (no runtime route/field yet); no release source runs on `:8791`.
+
+## 10. Remaining open items (audited, not redesigned)
+
+| Item                                                                                      | State                                                                                                                           |
+| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| D, E, E2, F, D1/S42, S43, Hub agent not started on late certificate, device release route | unchanged from handoff 47 §6                                                                                                    |
+| Hub signing key to terminals (discovery/receipt/delivery signatures)                      | open, BLK-006 (KLREC-2026-09-17-EDGE-BRIDGE-POS-HUB-LINK-001)                                                                   |
+| Hub-observed terminal health (0177) transport                                             | open, BLK-006; interim device report in place                                                                                   |
+| `offline_ready` across a POS restart                                                      | no disk custody on the Pi path (no keyring under cage); cached configuration is per process                                     |
+| POS → Device Shell hand-back for recovery (e.g. re-pairing)                               | not built; the Device Shell returns only when the POS unit fails                                                                |
+| Staff roster / touch keyboard                                                             | sign-in takes a Staff ID and passcode; a USB keyboard is needed on the board                                                    |
+| POS payload boot off-board                                                                | not proven: QEMU cannot run the image's Electron (the Device Shell dies too, §3d); first boot of the payload is a hardware step |
+| `device-shell` broker runtime directory 0750 root:root                                    | noticed while designing the bridge; Settings reachability on hardware not re-verified here                                      |
+
+## 11. Next
+
+One physical action at a time. Steps marked **(decision)** need §8 first.
+
+**A. Handoff 47's hardware gate (unchanged, still first).**
+
+1. **(owner)** Write `kitluy-storehub-os-arm64.img.zst` (SHA-256 `cd1c77ca45f890e2906acd7b52c1d9f730f58f286854641eb07347e7c2c94e1a`) to a spare SD card. Do not touch the Hub yet.
+2. Continue handoff 47 §5 steps 2–6 (Hub card swap, clock/boot checks, development recovery steps with approval, Terminal re-pairs by itself on `PAIRING_REQUIRED`, new generation-3 receipt beside the untouched generation-2 one, `SERVING`).
+
+**B. Workstation services for the Terminal slice (agent, no board change).**
+
+3. Rebuild and restart the fleet/registry service `:8787` (it must serve `POST /v1/device-runtime/report`) with its exact environment (memory: restart procedure), and the Management API `:8790` (`runtime` on terminals). Start `pnpm release:serve --port 8791` with `KITLUY_DEV_FLEET_DSN=…:54372`.
+
+**C. The Pi Terminal image with the POS path.**
+
+4. **(owner)** Write the new Pi Terminal image (§3d, built from `80d70cf`) to a spare SD card.
+5. **(owner)** Power the Terminal off, swap in that card (keep the current card untouched — it is the rollback), power on. A re-flashed Terminal recovered its credentials with no workaround in handoff 42.
+6. **(agent, read-only)** Confirm on the board: `/run/kitluy-terminal-edge/bridge.sock` 0660 `root:kitluy-terminal`; `edge-status.json` SERVING; health-reporter `runtime-report status=200 outcome=ACCEPTED`; Partner ladder _Connected to the Store Hub — Done (reported by the Terminal)_.
+
+**D. The POS as a governed release on the board.**
+
+7. **(agent)** `pnpm --filter @kitluy-apps/kitluy-pos-desktop-app build:release-payload`, then `pnpm release:publish --product kitluy-terminal --version <v> --target KL-1CB3577C26A7` (`KITLUY_DEV_FLEET_DSN=…:54372`).
+8. **(agent, read-only)** Watch: `kitluy.update.pass product="kitluy-terminal" outcome="INSTALLED"`; `terminal-client-running.json` names the release; the Device Shell stops and the POS takes the display; ladder _Application installed — Done (version)_, _Application running — Done_.
+9. **(owner, visual)** One look at the Terminal screen: the POS shows its state (expected _Staff authentication required_ with configuration loaded if the Hub's grant resolves to T1; _profile not authorized_ if it resolves to another profile — D1/S42).
+
+**E. The Store operation — (decision) §8.1–§8.3.**
+
+10. After the owner rules on PIN, staff stand-in and the seat's profiles: provision the approved staff member, plug a USB keyboard into the Terminal, sign in, create a customer and a Laundry Booking Draft, then read the Booking Draft row and its `pending` outbox facts on the Hub database (read-only), and the ladder.
+11. Offline check, only as far as approved behaviour goes: disconnect the Hub's WAN (not the LAN) and repeat a Booking Draft edit; record exactly what continued.
+
+## 12. Git
+
+| Commit      | What                                                                                                                                     |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `940e61a`   | `kitluy-terminal` release product: cloud 0228, agent, tooling, tests                                                                     |
+| `589a666`   | edge bridge; POS Pi composition, staff sign-in, intake screen, payload builder, Electron 38.8.6                                          |
+| `aa66762`   | runtime report contract, device reporter, cloud 0229, registry route, Management API, Partner ladder                                     |
+| `80d70cf`   | Pi Terminal launcher/unit/manifest/gates; both overlays re-packaged                                                                      |
+| `91c2ba0`   | Partner Portal ladder test fixtures typed (the portal `typecheck`, which includes tests, failed inside `pnpm verify`; vitest had passed) |
+| `7c51ab5`   | POS: sign-in/sign-out judged by a refresh that starts after them                                                                         |
+| this commit | handoff 48, index, registers                                                                                                             |
+
+`80d70cf` was pushed before the image build; `91c2ba0`, `7c51ab5` and this commit are pushed together to `provisioning` `dev` (fast-forward, no force). `main` untouched. `scripts/development/issue-dev-pairing-code.mjs` stays uncommitted.
