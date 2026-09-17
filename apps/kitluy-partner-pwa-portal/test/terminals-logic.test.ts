@@ -205,29 +205,32 @@ describe("the ladder reports, never infers", () => {
   };
   const RELEASE = "0b6f3f58-8d5a-4f52-9f59-6d2f8d7f0a11";
   const OTHER_RELEASE = "1c7e4f69-9e6b-4a63-8a6a-7e3a9e8a1b22";
-  function runtime(over: Partial<NonNullable<PhysicalTerminal["runtime"]>> = {}) {
+  type Runtime = NonNullable<PhysicalTerminal["runtime"]>;
+  const APPLICATION: NonNullable<Runtime["application"]> = {
+    product: "kitluy-terminal",
+    installedReleaseId: RELEASE,
+    installedVersion: "0.1.0-t1a",
+    journalPhase: "COMMITTED",
+    lastOutcome: "INSTALLED",
+    runningReleaseId: RELEASE,
+    unitActive: true,
+  };
+  const POS: NonNullable<Runtime["pos"]> = {
+    state: "ready",
+    refusalCode: null,
+    applicationVersion: "0.1.0",
+    configurationVersion: 7,
+    configurationFreshness: "current",
+    staffSignedIn: true,
+  };
+  function runtime(over: Partial<Runtime> = {}): Runtime {
     return {
-      source: "device_reported" as const,
+      source: "device_reported",
       receivedAt: "2026-09-04T09:59:30Z",
       ageSeconds: 30,
       hubLink: { phase: "SERVING", hubDeviceId: "h", checkedAt: "2026-09-04T09:59:20Z" },
-      application: {
-        product: "kitluy-terminal",
-        installedReleaseId: RELEASE,
-        installedVersion: "0.1.0-t1a",
-        journalPhase: "COMMITTED",
-        lastOutcome: "INSTALLED",
-        runningReleaseId: RELEASE,
-        unitActive: true,
-      },
-      pos: {
-        state: "ready",
-        refusalCode: null,
-        applicationVersion: "0.1.0",
-        configurationVersion: 7,
-        configurationFreshness: "current",
-        staffSignedIn: true,
-      },
+      application: APPLICATION,
+      pos: POS,
       ...over,
     };
   }
@@ -359,7 +362,7 @@ describe("the ladder reports, never infers", () => {
 
   it("installed is not running: a committed release the unit is not running", () => {
     const r = runtime({
-      application: { ...runtime().application, unitActive: false, runningReleaseId: null },
+      application: { ...APPLICATION, unitActive: false, runningReleaseId: null },
     });
     const s = state(
       deriveLadder(
@@ -376,7 +379,7 @@ describe("the ladder reports, never infers", () => {
 
   it("the launcher running ANOTHER release is not this release running", () => {
     const r = runtime({
-      application: { ...runtime().application, runningReleaseId: OTHER_RELEASE },
+      application: { ...APPLICATION, runningReleaseId: OTHER_RELEASE },
     });
     const s = state(
       deriveLadder(
@@ -394,7 +397,7 @@ describe("the ladder reports, never infers", () => {
   it("a paired but refused link is not connected; a POS that never loaded a configuration has not loaded one", () => {
     const r = runtime({
       hubLink: { phase: "HUB_REFUSED", hubDeviceId: "h", checkedAt: "2026-09-04T09:59:20Z" },
-      pos: { ...runtime().pos, state: "hub_unavailable", configurationVersion: null },
+      pos: { ...POS, state: "hub_unavailable", configurationVersion: null },
     });
     const s = state(
       deriveLadder(
