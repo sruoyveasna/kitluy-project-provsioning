@@ -12,7 +12,7 @@
 | Partner ladder: **PIN set** real, **Operational** the conjunction          | yes         | yes (68/68)                            | n/a                                              | **no** (no browser run) | n/a                                                                                    | **no**            | **no**              |
 | Decision record KLD-2026-09-17-TERMINAL-PIN-DEVICE-CREDENTIAL-001          | yes         | —                                      | —                                                | —                       | —                                                                                      | —                 | —                   |
 
-**Not reached:** hardware. No board was changed, no image was built this session (both overlays are re-packaged and every image suite passes, so the next build carries this). The handoff 47 Store Hub image `cd1c77ca…` and the handoff 48 Pi Terminal image `ef4594e7…` do NOT contain the PIN; both must be rebuilt before the hardware run (§8).
+**Not reached:** hardware. No board was changed. **Both images were then built from `4a8bdc6` and read back (§11): IMAGE VERIFIED, NOT BOOT-TESTED.** The handoff 47 Store Hub image `cd1c77ca…` and the handoff 48 Pi Terminal image `ef4594e7…` do NOT contain the PIN and are superseded for this milestone (preserved under `build/preserved-20260917-h47-image/` and `build/preserved-20260917-h48-image/`).
 
 | Fact                   | Value                                                                                                                                                                                    |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -140,8 +140,65 @@ Hub: `hub/migrations/0043_terminal_pin.sql`, `services/kitluy-hub-agent/src/hub/
 
 ## 10. Git
 
-| Commit      | What                                                                                                                                                 |
-| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| this commit | the Terminal PIN end to end (Hub, bridge, POS, report v2, cloud 0230, Management API, Partner ladder), decision record, registers, handoff 49, index |
+| Commit    | What                                                                                                                                            |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `5d4a522` | the Terminal PIN end to end (Hub, bridge, POS, report v2, cloud 0230, Management API, Partner ladder)                                           |
+| `fbb8d5d` | decision record, registers, handoff 49, index, handoff 48 §13                                                                                   |
+| `4a8bdc6` | both overlays re-packaged from the committed sources (line wrapping only; minified forms identical) — the overlay drift the image build exposed |
+| this      | §11 image evidence                                                                                                                              |
 
 Pushed to `provisioning` `dev` (no force); `main` untouched. `scripts/development/issue-dev-pairing-code.mjs` stays uncommitted.
+
+## 11. Both PIN-enabled images — built from `4a8bdc668cbb28d62aabcb12fce5ac5e0bfe598c`, read back (2026-09-17, 14:14–15:00 +07:00)
+
+**Why `4a8bdc6`, not `fbb8d5d`.** Re-running packaging from the committed source before building showed three compiled overlay files (`edge-session.js`, `runtime-report-bytes.js` in both trees) differing from the committed overlay — by line wrapping only (their minified forms are byte-identical): they had been packaged before the last formatting pass. An image build re-runs packaging, so the committed overlay must be the bytes it ships. The re-packaged overlay was committed as `4a8bdc6` and pushed, and both images were built from it. After each build `git status` showed no change under `infra/`: the in-build packaging reproduced the committed overlay exactly.
+
+Both builds: rpi-image-gen `v2.7.0` (`a7b6d480`, checkout clean, mirror `deb.debian.org` at 16 MB/s, nothing `-dirty`), `--environment development`, registration `http://172.16.21.17:54371/functions/v1/device-registration`, enrollment `http://172.16.21.17:8787`, dev PKI root pin `b115609ad754dacf…`, `KITLUY_DEV_SSH_PUBKEY`, `KITLUY_DEV_SUDO=1`. Classification **DEVELOPMENT / UNSIGNED / NOT RELEASE-ELIGIBLE / NOT BOOT-TESTED**. The known development warnings only (QEMU cross-build, dev sudo, `o+x`, `/proc` bind-mount, 16 KiB block size on the x86 host); the `REFUSE` strings in the logs are hook source text (the trust anchor and root pin ARE present, below). Every SHA-256 was recomputed with `sha256sum` and equals the manifest; each manifest lists exactly its own five artifacts (the earlier h47/h48 artifacts were moved to `build/preserved-20260917-h47-image/` and `build/preserved-20260917-h48-image/` before building; their hashes `cd1c77ca…` / `ef4594e7…` re-verified after the move).
+
+### 11a. Store Hub — `infra/edge/raspberry-pi/store-hub-image/` — 14:14:24 → 14:36:20, exit 0
+
+| Artifact                                                                       | Bytes                                   | SHA-256                                                            |
+| ------------------------------------------------------------------------------ | --------------------------------------- | ------------------------------------------------------------------ |
+| `build/work/deploy-v2.7.0/kitluy-storehub-os-arm64.img.zst` (**the card**)     | 660 332 939                             | `aac000e9077943aa030fb392f6a60b63bab6f6feaca8512e16bdd7dcade6cc76` |
+| `build/work/image-kitluy-storehub-os-arm64/kitluy-storehub-os-arm64.img` (raw) | 17 490 268 160                          | `c81fabf2c2329d66f80447af53b70149e2d8702abdeb6b3769cee7f8fe467d8d` |
+| `…-v2.7.0.tar.zst` · `.img.sparse.zst` · `.img.sparse`                         | 996 890 432 · 660 314 424 · 837 595 672 | `112ec81a…` · `79a7c960…` · `6086aeac…`                            |
+
+Suites on this build's rootfs: build-gates 34/0 · environment-gating 19/0 · rpi-image-gen 22/0 (1 skip) · systemd-runtime 183/0 · image-contents 57/0 · storage-posture 33/0 · `scan-image-secrets` 17/0 PASS.
+
+Read back from the FINAL raw image (`system_a` read in place at its GPT offset with the builder's `dump.erofs --offset`; `persistent` copied sparse and read with `debugfs`):
+
+- **All 138 overlay entries committed at `4a8bdc6`** (124 files, 14 links) are **byte-identical** in the image; 0 differ.
+- `/usr/lib/kitluy/hub-migrations/`: **44** files ending `0043_terminal_pin.sql`, whose bytes equal the commit (`86875d32…`) and carry the Argon2id verifier CHECK, the never-removed trigger and `credential_kind`; `hub-migration-manifest.json` lists 0043.
+- `/usr/lib/kitluy/lib/hub-agent/main.mjs` in the image = committed = freshly bundled from source: **`b1d77c646f38c106…`**. It contains the five `/edge/v1/terminal-pin/*` routes, `argon2id`, `TERMINAL_PIN_FAILURE_LIMIT = 5`, `TERMINAL_PIN_LOCK_MINUTES = 15`, the PIN-session branch (`credential_kind === "terminal_pin"`, `terminalHoldsCurrentT1Grant`), `reset-terminal-pin`, the audit codes, and handoff 47's Defect G ordering (`order by terminal_assignment_generation desc, paired_at desc`) and `hub_replacement_state`.
+- Handoff 47's fixes: `var-lib-kitluy-hub.mount` = `ad10e9db0e11786c…` with `DefaultDependencies=no`; `kitluy-boot-classification.service` present and wanted by `multi-user.target`; the boot-classification, runtime-report and edge-bridge modules in the closure.
+- `/etc/kitluy/image.env`: `store_hub`, `development`, the two URLs, `KL-PI5-STORE-HUB-DEV`; `development-root.sha256` = `b115609ad754dacf…`.
+- **Forbidden state: none.** Persistent partition: 4 750 files, all Debian package state; under `var/lib/kitluy/` only empty `identity`, `operational`, `enrollment`, `hub/{postgresql,outbox}`, `update`, `terminal`, `health` directories in both slots; no file anywhere mentions `kitluy` or `172.16.`; the only credential-like file is the development `pi` user's `authorized_keys` (public key, by `KITLUY_DEV_SSH_PUBKEY`). Root filesystem: no private key, no SSH host key, `/var/lib/kitluy` empty, no Store/Tenant identity in `/etc/kitluy`, no PIN. (The literal `-----BEGIN PRIVATE KEY-----probe` in migration 0038 is that migration's self-test proving the schema REFUSES key material.)
+- The image's bundle under the image's own Node 18.20.4 arm64 (QEMU): loads; `reset-terminal-pin` refuses on a non-development Hub; Argon2id verifies (1.0 s under emulation).
+
+**IMAGE VERIFIED: yes. NOT BOOT-TESTED.**
+
+### 11b. Pi Terminal — `infra/edge/raspberry-pi/pi-terminal-image/` — 14:36:41 → 14:57:32, exit 0
+
+Additional inputs: `--release-source http://172.16.21.17:8791`, `--hardware-profile-key KL-PI5-TERMINAL-DEV`.
+
+| Artifact                                                                                         | Bytes                                       | SHA-256                                                            |
+| ------------------------------------------------------------------------------------------------ | ------------------------------------------- | ------------------------------------------------------------------ |
+| `build/work/deploy-v2.7.0/kitluy-pos-terminal-wayland-arm64.img.zst` (**the card**)              | 998 872 466                                 | `2e7daa35485389f2fda6dcc8a16cb28d9f1673fabf91ecaf92e8192bc547f255` |
+| `build/work/image-kitluy-pos-terminal-wayland-arm64/kitluy-pos-terminal-wayland-arm64.img` (raw) | 8 900 333 568                               | `7c3ac42b45a93a19ae755255baa1b97f4d1ae3acfb15a9e804e086ba12e782b4` |
+| `…-v2.7.0.tar.zst` · `.img.sparse.zst` · `.img.sparse`                                           | 1 501 298 924 · 999 641 944 · 1 144 606 288 | `3082f9df…` · `c2238945…` · `4024aea2…`                            |
+
+Suites on this build's rootfs: build-gates 67/0 · environment-gating 20/0 · rpi-image-gen 23/0 (1 skip) · systemd-runtime 244/0 · image-contents 117/0 · `scan-image-secrets` 17/0 PASS.
+
+Read back from the FINAL raw image:
+
+- **All 111 overlay entries committed at `4a8bdc6`** (99 files, 12 links) are **byte-identical** in the image; 0 differ.
+- PIN-capable runtime, read from the image's own files: `edge-bridge.js` forwards `pin.status/setup/unlock/change/lock` and **no** `sessions.open/refresh/close`; `edge-session.js` reads `/edge/v1/terminal-pin/status` and records `terminalPin`; `runtime-report-bytes.js` signs `kitluy.device-runtime-report.v2`; `runtime-report.js` carries `terminalUnlocked` and `terminalPinOf`; the update agent's `startInstalledTerminalClientOnce`, the `kitluy-terminal` release store, boot classification — all present.
+- Governed POS delivery: `/usr/lib/kitluy/terminal-client` (STORE `/persistent/shared/kitluy/releases/kitluy-terminal`, `readlink -f current`, witness, `exit 3` with no release), `kitluy-terminal-client.service` (`User=kitluy-terminal`, `Conflicts=` shell/bootstrap/getty, `OnFailure=` Device Shell, `RequiresMountsFor=/persistent/shared`), wanted by no target; `/etc/kitluy/trust/release-signing.json` present; `release.env` = `http://172.16.21.17:8791`.
+- **No POS baked:** `/usr/lib/kitluy/lib` holds only `device-shell` and `firstboot-agent`; Electron `38.8.6`; no `/persistent/shared` in the image.
+- `image.env`: `terminal`, `development`, the two URLs, `KL-PI5-TERMINAL-DEV`; root pin `b115609ad754dacf…`.
+- **Forbidden state: none.** Persistent partition: 4 204 files of Debian package state; under `var/lib/kitluy/` only empty `update`, `terminal`, `health`, `identity` directories in both slots — no release store, no POS payload, no device key, no operational certificate, no Terminal PIN, no Store configuration or data; `authorized_keys` as above. Root filesystem: no private key, no SSH host key, `/var/lib/kitluy` empty.
+- The image's agent under the image's own Node 18.20.4 arm64 (QEMU): **53/53 modules load**; the image's edge bridge on a real socket (0660, gid 991 `kitluy-terminal`) forwards eligibility and a draft `PATCH` and refuses a non-allowlisted route.
+
+**IMAGE VERIFIED: yes. NOT BOOT-TESTED.**
+
+**HARDWARE VERIFIED = NO. END-TO-END VERIFIED = NO.** No board was touched; no card was written.

@@ -7,7 +7,7 @@ subfolder (repository/ shared/ apps/ services/ data/ infrastructure/ reviews/).
 ## TERMINAL-PIN-AND-REAL-POS-AUTH-001 — the Terminal PIN is built; a Pi Terminal's credential is its device certificate plus one PIN, with no staff login (2026-09-17)
 
 Record: [`edge-platform/49_TERMINAL_PIN_AND_REAL_POS_AUTH.md`](edge-platform/49_TERMINAL_PIN_AND_REAL_POS_AUTH.md)
-· **IMPLEMENTED · TESTED · INTEGRATED (real-parts e2e under a PIN; real Hub DB; 0230 on both local stacks) · overlays re-packaged, NO IMAGE BUILT · PORTAL NOT BROWSER-VERIFIED · HARDWARE NOT VERIFIED · END-TO-END NOT VERIFIED** · from `a0662d6`
+· **IMPLEMENTED · TESTED · INTEGRATED (real-parts e2e under a PIN; real Hub DB; 0230 on both local stacks) · IMAGE VERIFIED — both images from `4a8bdc6`, not boot-tested (Store Hub card `aac000e9…`, Pi Terminal card `2e7daa35…`; handoff 49 §11) · PORTAL NOT BROWSER-VERIFIED · HARDWARE NOT VERIFIED · END-TO-END NOT VERIFIED** · from `a0662d6`
 
 **Owner ruling** (KLD-2026-09-17-TERMINAL-PIN-DEVICE-CREDENTIAL-001, verbatim answers): "One shared Terminal PIN only" · "PIN alone" · "Just pin no logout login use the device as credentials" · "5 failures, 15-minute lock". Amends KLD-2026-09-03 §11/§15's staff layer out of the Pi path; §10, §12–§14, §20 stand.
 
@@ -15,7 +15,7 @@ Record: [`edge-platform/49_TERMINAL_PIN_AND_REAL_POS_AUTH.md`](edge-platform/49_
 
 **Proof.** Real-parts e2e: pair → SERVING → PIN setup twice → READY → Booking Draft on the Hub with outbox facts → lock → wrong PIN (4 left) → unlock. Hub e2e over live mTLS: verifier shape, no PIN in any row or log, 5-in-15 lock surviving a router restart, device checked before the PIN (revoked, unpaired, contained, ungranted), change, reset. Hub bundle and Argon2id run under the Hub image's Node 18 arm64.
 
-**Next:** rebuild BOTH images (the h47 Hub and h48 Terminal images predate the PIN), read them back, then the hardware ladder of handoff 48 §11 with "PIN setup → PIN unlock" in place of "staff sign-in". Required values: Argon2id profile, session policy, PIN across reflash/replacement (decision §4).
+**Next:** the hardware ladder of handoff 48 §11 with the two new cards and "PIN setup → PIN unlock" in place of "staff sign-in" — only when the owner authorizes hardware work.
 
 ## T1-STORE-OPERATIONS-001 — the POS becomes a governed release, reaches its Store Hub through terminal-edge, and reports what it is doing (2026-09-17)
 
