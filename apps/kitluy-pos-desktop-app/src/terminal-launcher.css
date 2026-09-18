@@ -1,0 +1,66 @@
+/* The Terminal launcher on a Pi (T1-FACE-PORT-001): full-screen, themed by savor-theme.css. */
+.kl-launcher {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  background: var(--sv-fill, #f6f6f6);
+  color: var(--sv-ink, #1b1b1b);
+  font-family: var(--sv-font, system-ui);
+}
+.kl-launcher .ts {
+  min-height: 100%;
+  box-sizing: border-box;
+}
+.kl-launcher .kl-brand-logo {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--sv-primary, #35977d);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  padding: 9px;
+  box-sizing: border-box;
+}
+.kl-launcher-pulse {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--sv-danger, #cb3a31);
+  display: inline-block;
+  flex-shrink: 0;
+}
+.kl-launcher-pulse.on {
+  background: var(--sv-primary, #35977d);
+  box-shadow: 0 0 0 4px var(--sv-primary-tint, #ecf6f1);
+}
+.kl-launcher-lang {
+  display: flex;
+  gap: 6px;
+}
+.kl-launcher-lang .kl-btn.on {
+  background: var(--sv-primary-tint, #ecf6f1);
+  color: var(--sv-primary-deep, #1f5e50);
+}
+.kl-launcher-card--assigned:not(:disabled) {
+  border-color: var(--sv-primary, #35977d);
+  box-shadow: 0 0 0 3px var(--sv-primary-tint, #ecf6f1);
+}
+.kl-launcher-card--assigned .ts-medal {
+  background: var(--sv-primary, #35977d);
+  color: #fff;
+}
+.kl-launcher-status {
+  max-width: 720px;
+  margin: 22px auto 0;
+  font-size: 13px;
+  color: var(--sv-ink-2, #4d4d4d);
+}
+.kl-launcher-status [data-t1-state] p {
+  margin: 4px 0;
+}
+/* A touch-only kiosk shows no pointer (the compositor draws one at its last position otherwise). */
+body[data-kitluy-kiosk="touch"],
+body[data-kitluy-kiosk="touch"] * {
+  cursor: none !important;
+}

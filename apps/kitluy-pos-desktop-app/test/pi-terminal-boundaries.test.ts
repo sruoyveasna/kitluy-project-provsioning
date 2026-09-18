@@ -122,6 +122,7 @@ describe("no cloud path for Store operations", () => {
       "electron/preload.cts",
       "src/App.tsx",
       "src/pin-screen.tsx",
+      "src/terminal-launcher.tsx",
       // The ported Laundry T1 face (T1-FACE-PORT-001): the donor's staff login
       // did not come with it.
       "src/vertical/laundry/face/index.tsx",

@@ -12,7 +12,7 @@ import type { ReactNode } from "react";
 import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { App, isLaundryFaceReady } from "../src/App.js";
+import { App, isLaundryFaceReady, kioskInputMode } from "../src/App.js";
 import type { T1BootstrapReport } from "../src/bootstrap/states.js";
 import type { IntakeCustomer } from "../src/intake/ports.js";
 import { AppStateProvider } from "../src/vertical/laundry/face/app/AppContext.js";
@@ -105,18 +105,48 @@ describe("the shell hands the screen to the Laundry face", () => {
     expect(html).not.toContain("KitLuy POS — Terminal Profiles");
   });
 
-  it("keeps the bootstrap shell while locked, and the PIN screen fails closed without its bridge", () => {
+  it("shows the Terminal launcher while locked: the assignment is shown, never chosen", () => {
     const html = renderToString(<App report={LOCKED} />);
-    expect(html).toContain("KitLuy POS — Terminal Profiles");
-    expect(html).toContain('data-t1-state="staff_authentication_required"');
-    // No preload bridge under the test runner: no keypad is offered.
-    expect(html).toContain('data-pin-screen="unavailable"');
+    expect(html).toContain('data-terminal-launcher="staff_authentication_required"');
+    expect(html).not.toContain("KitLuy POS — Terminal Profiles");
     expect(html).not.toContain("data-t1-view");
-    // The keypad the bridge unlocks wears the face's touch pad, not the scaffold.
+    // The one assigned card is live; the other three are locked with the reason.
+    expect(html).toMatch(/data-terminal-card="T1" data-assigned="true"/u);
+    expect(html).not.toMatch(/<button[^>]*data-terminal-card="T1"[^>]*\sdisabled/u);
+    for (const id of ["T2", "T3", "T4"]) {
+      expect(html).toMatch(
+        new RegExp(
+          `<button[^>]*disabled=""[^>]*data-terminal-card="${id}"|<button[^>]*data-terminal-card="${id}"[^>]*disabled`,
+          "u",
+        ),
+      );
+    }
+    // Default locale is Khmer; the lock glyph precedes the reason in both languages.
+    expect(html).toContain("🔒 ");
+    expect(html).toContain("បានចាត់តាំងតាម provisioning");
+    expect(html).not.toMatch(/Sign out|Select Your Terminal|Choose the workstation/u);
+    // The PIN modal opens on the tap, so nothing PIN-shaped is in the first paint.
+    expect(html).not.toContain("data-pin-screen");
+    // The pad the modal shows wears the face's touch keypad.
     const pinScreen = readFileSync(new URL("../src/pin-screen.tsx", import.meta.url), "utf8");
     expect(pinScreen).toContain('className="kl-numpad-grid kl-pin-keypad"');
     expect(pinScreen).toContain("kl-numpad-key--back");
     expect(pinScreen).toContain("data-key={key}");
+  });
+
+  it("keeps the launcher through the boot states, with the T1 card not yet tappable", () => {
+    const html = renderToString(<App report={{ ...LOCKED, state: "connecting_to_hub" }} />);
+    expect(html).toContain('data-terminal-launcher="connecting_to_hub"');
+    expect(html).toMatch(
+      /<button[^>]*disabled=""[^>]*data-terminal-card="T1"|<button[^>]*data-terminal-card="T1"[^>]*disabled/u,
+    );
+    expect(html).toContain('data-t1-state="connecting_to_hub"');
+  });
+
+  it("hides the pointer only on the touch kiosk path", () => {
+    expect(kioskInputMode(READY)).toBe("touch");
+    expect(kioskInputMode({ ...READY, link: undefined })).toBeNull();
+    expect(kioskInputMode(undefined)).toBeNull();
   });
 });
 
