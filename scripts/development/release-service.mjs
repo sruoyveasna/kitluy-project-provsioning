@@ -45,7 +45,8 @@
  * registry, and re-proves the SHA-256 over the bytes it received. This service
  * cannot make an unsigned release trustworthy, and neither can the Hub later.
  */
-import { createReadStream, existsSync, statSync } from "node:fs";
+import { createPrivateKey } from "node:crypto";
+import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import { createServer } from "node:http";
 import { networkInterfaces } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -53,9 +54,11 @@ import { fileURLToPath } from "node:url";
 
 import pg from "pg";
 
+import { signAssignment } from "./release-pack.mjs";
 import {
   ReleaseTargetRefusal,
   assertReleaseCapable,
+  resolveAssignmentScope,
   resolveDeviceByAssetTag,
   resolveReleaseTarget,
 } from "./release-target.mjs";
@@ -88,12 +91,13 @@ function die(message) {
 // answered was the management API's scaffold 404
 // ("Business contracts are not implemented in this scaffold") rather than a
 // governed assignment. Reachable and correct are different questions.
-const args = { port: 8791, local: false };
+const args = { port: 8791, local: false, autoAssign: process.env.KITLUY_DEV_AUTO_ASSIGN === "1" };
 for (let i = 2; i < process.argv.length; i += 1) {
   if (process.argv[i] === "--port") {
     args.port = Number(process.argv[i + 1]);
     i += 1;
   } else if (process.argv[i] === "--local") args.local = true;
+  else if (process.argv[i] === "--auto-assign") args.autoAssign = true;
 }
 if (!Number.isInteger(args.port) || args.port < 1024) die("--port must be an integer above 1023");
 
@@ -103,6 +107,41 @@ try {
 } catch (error) {
   die(String(error.message ?? error));
 }
+
+/**
+ * DEVELOPMENT AUTO-ASSIGNMENT BY BUSINESS TYPE (`--auto-assign`, owner
+ * instruction 2026-09-18: "auto install app based on business type").
+ *
+ * When a TERMINAL that holds a live Store assignment polls for a product and
+ * nothing is assigned to it, this service assigns the newest promoted internal
+ * release of the product its Store's primary vertical runs, signs the
+ * assignment with the development release-signing key, and answers it in the
+ * same poll. The device installs on its next pass. Nothing is assigned before
+ * pairing (no Store, no vertical), nothing for a product the vertical does not
+ * run, and never for `device-shell` (the image fallback stays governed by hand).
+ *
+ * This is DEVELOPMENT tooling standing in for a production rollout policy
+ * ([REQUIRED: owner rollout policy — who approves auto-assignment per Store and
+ * channel]). The vertical → product map lives here, in a script, not in a
+ * Neutral Core package.
+ */
+const PRODUCTS_BY_VERTICAL = { LAUNDRY: ["kitluy-terminal"], laundry: ["kitluy-terminal"] };
+
+function loadSigningKey(pkiDir) {
+  const keyPath = join(pkiDir, "dev-release-signing.key.pem");
+  const recordPath = join(pkiDir, "dev-release-signing.json");
+  if (!existsSync(keyPath) || !existsSync(recordPath)) {
+    die(
+      `--auto-assign needs the development release-signing key in ${pkiDir} (KITLUY_DEV_PKI_DIR)`,
+    );
+  }
+  const record = JSON.parse(readFileSync(recordPath, "utf8"));
+  if (record.purpose !== "release_signing") die(`${recordPath} declares purpose ${record.purpose}`);
+  if (record.environment !== "development") die(`${recordPath} is not development material`);
+  return { privateKey: createPrivateKey(readFileSync(keyPath, "utf8")), record };
+}
+
+const signer = args.autoAssign ? loadSigningKey(process.env.KITLUY_DEV_PKI_DIR ?? "") : null;
 
 const pool = new pg.Pool({ ...target.connectionConfig, max: 4 });
 try {
@@ -175,7 +214,10 @@ async function handleAssignment(url, response) {
       `select kitluy_releases.current_device_product_assignment_v1($1::uuid, $2) as a`,
       [device.id, product],
     );
-    const assignment = rows[0]?.a ?? null;
+    let assignment = rows[0]?.a ?? null;
+    if (assignment === null && signer !== null) {
+      assignment = await autoAssignByVertical(client, device, product);
+    }
     if (assignment === null) {
       // NOT an error: a device with nothing assigned is the normal resting
       // state, and the device treats it as "nothing to do".
@@ -188,6 +230,94 @@ async function handleAssignment(url, response) {
   } finally {
     client.release();
   }
+}
+
+/**
+ * See PRODUCTS_BY_VERTICAL. Returns the signed assignment the device may now be
+ * told, or null when the policy does not apply (unpaired, wrong class, product
+ * not the vertical's, no promoted release).
+ */
+async function autoAssignByVertical(client, device, product) {
+  if (device.device_class !== "terminal" || product === UNNAMED_PRODUCT) return null;
+  let scope;
+  try {
+    scope = await resolveAssignmentScope(client, device.id);
+  } catch {
+    return null; // not paired to a Store yet — nothing to derive from
+  }
+  if (scope.state !== "active") return null;
+  const store = await client.query(
+    `select primary_vertical_code from kitluy_core.digital_stores where id = $1::uuid`,
+    [scope.digital_store_id],
+  );
+  const vertical = store.rows[0]?.primary_vertical_code ?? null;
+  const products = vertical === null ? [] : (PRODUCTS_BY_VERTICAL[vertical] ?? []);
+  if (!products.includes(product)) return null;
+  const newest = await client.query(
+    `select id, version from kitluy_releases.release_artifacts
+      where product_key = $1 and environment = $2 and channel = 'internal' and state = 'internal'
+      order by published_at desc nulls last, created_at desc limit 1`,
+    [product, "development"],
+  );
+  const release = newest.rows[0];
+  if (release === undefined) return null;
+  const actor = "dev-auto-assign";
+  await client.query("begin");
+  try {
+    await client.query(
+      `select kitluy_releases.assign_release_v1($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5,$6::uuid,$7,$8) as r`,
+      [
+        release.id,
+        scope.tenant_id,
+        scope.digital_store_id,
+        scope.store_location_id,
+        "development",
+        device.id,
+        `auto-${release.id}-${device.id}`,
+        actor,
+      ],
+    );
+    const installation = await client.query(
+      `select i.id, i.assignment_sequence, c.environment
+         from kitluy_releases.device_installations i
+         join kitluy_releases.rollout_campaigns c on c.id = i.campaign_id
+        where i.device_id = $1::uuid and c.artifact_id = $2::uuid
+        order by i.assignment_sequence desc limit 1`,
+      [device.id, release.id],
+    );
+    const row = installation.rows[0];
+    if (row === undefined) throw new Error("no assignment row after assign_release_v1");
+    const binding = {
+      assignmentId: row.id,
+      deviceId: device.id,
+      releaseId: release.id,
+      assignmentSequence: Number(row.assignment_sequence),
+      environment: row.environment,
+    };
+    const envelope = signAssignment(binding, signer.privateKey, signer.record);
+    await client.query(
+      `select kitluy_releases.record_assignment_signature_v1($1::uuid,$2,$3,$4,$5)`,
+      [binding.assignmentId, envelope.keyId, envelope.keyVersion, envelope.signature, actor],
+    );
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback");
+    console.log(
+      `[release-serve] auto-assign refused for ${device.asset_tag}: ${String(error.message ?? error)}`,
+    );
+    return null;
+  }
+  const { rows } = await client.query(
+    `select kitluy_releases.current_device_product_assignment_v1($1::uuid, $2) as a`,
+    [device.id, product],
+  );
+  const assignment = rows[0]?.a ?? null;
+  if (assignment !== null) {
+    console.log(
+      `[release-serve] AUTO-ASSIGNED ${device.asset_tag} ${product} <- ${release.version} (${vertical}) seq=${String(assignment.assignmentSequence)}`,
+    );
+  }
+  return assignment;
 }
 
 /**
@@ -265,6 +395,9 @@ server.listen(args.port, "0.0.0.0", () => {
     .map((i) => i.address);
   console.log("");
   console.log(`[release-serve] DEVELOPMENT release source — assignment authority + artifact bytes`);
+  console.log(
+    `[release-serve]   auto-assign by vertical ${signer === null ? "OFF" : "ON (development policy stand-in)"}`,
+  );
   console.log(`[release-serve]   target   ${target.label}`);
   console.log(`[release-serve]   artifacts ${RELEASES_DIR}`);
   console.log(`[release-serve]   listening 0.0.0.0:${String(args.port)}`);
