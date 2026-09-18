@@ -107,6 +107,32 @@ describe("signed edge discovery (P04B §4)", () => {
     expect(verdict.refusalCode).toBe("DISCOVERY_EXPIRED");
   });
 
+  it("a record minted by a Hub clock a little ahead of the terminal's is accepted; far ahead is refused (hardware, 2026-09-17)", () => {
+    // The Hub mints with ITS clock; the terminal judges with ITS. On the boards
+    // the Hub ran ~10 ms ahead, and a record minted for the request itself was
+    // "in the future" by that much. Skew up to the refresh interval passes.
+    const { record, signature } = freshSigned(() => new Date(Date.now() + 10));
+    const behind = new Date();
+    expect(verifyEdgeDiscoveryRecord(record, signature, hubPem, EXPECTATION, behind).verified).toBe(
+      true,
+    );
+    const edge = freshSigned(() => new Date(Date.now() + 29_000));
+    expect(
+      verifyEdgeDiscoveryRecord(edge.record, edge.signature, hubPem, EXPECTATION, new Date())
+        .verified,
+    ).toBe(true);
+    const far = freshSigned(() => new Date(Date.now() + 31_000));
+    const verdict = verifyEdgeDiscoveryRecord(
+      far.record,
+      far.signature,
+      hubPem,
+      EXPECTATION,
+      new Date(),
+    );
+    expect(verdict.verified).toBe(false);
+    if (!verdict.verified) expect(verdict.refusalCode).toBe("DISCOVERY_NOT_YET_VALID");
+  });
+
   it("refresh mints a NEWLY signed record without changing the Hub identity", () => {
     let nowMs = 1_800_000_000_000;
     const { authority, record: first } = freshSigned(() => new Date(nowMs));

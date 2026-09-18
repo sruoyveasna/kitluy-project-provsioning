@@ -108,6 +108,28 @@ describe("the discovery record is judged against the connection, not just itself
     expect(verdict.refusalCode).toBe("DISCOVERY_WRONG_ENVIRONMENT");
   });
 
+  it("accepts a record a Hub clock minted a little ahead of this one, refuses one far ahead (hardware, 2026-09-17)", () => {
+    const expectation = { environment: "development", observedCertificateFingerprint: FINGERPRINT };
+    // ~10 ms ahead: what two NTP-synchronized boards actually differ by.
+    const slightlyAhead = payload({
+      issuedAt: new Date(Date.now() + 10).toISOString(),
+      expiresAt: new Date(Date.now() + 90_010).toISOString(),
+    });
+    expect(checkRecord(slightlyAhead, expectation, new Date()).accepted).toBe(true);
+    const atTheBound = payload({
+      issuedAt: new Date(Date.now() + 29_000).toISOString(),
+      expiresAt: new Date(Date.now() + 119_000).toISOString(),
+    });
+    expect(checkRecord(atTheBound, expectation, new Date()).accepted).toBe(true);
+    const farAhead = payload({
+      issuedAt: new Date(Date.now() + 31_000).toISOString(),
+      expiresAt: new Date(Date.now() + 121_000).toISOString(),
+    });
+    expect(checkRecord(farAhead, expectation, new Date()).refusalCode).toBe(
+      "DISCOVERY_NOT_YET_VALID",
+    );
+  });
+
   it("refuses an expired record", () => {
     const stale = payload({
       issuedAt: new Date(Date.now() - 600_000).toISOString(),

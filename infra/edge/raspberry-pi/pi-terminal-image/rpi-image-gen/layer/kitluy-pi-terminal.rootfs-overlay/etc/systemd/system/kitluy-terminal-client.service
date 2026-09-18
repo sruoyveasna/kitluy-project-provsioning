@@ -28,6 +28,12 @@
 Description=KitLuy POS application (governed release kitluy-terminal; cage + Electron)
 After=kitluy-firstboot.service kitluy-terminal-edge.service seatd.service systemd-user-sessions.service
 Wants=seatd.service
+# Conflicts= alone starts this unit WHILE the Device Shell is still stopping, and
+# seatd then refuses the second compositor ("seat is VT-bound and has an active
+# client"); libseat falls back to a seat an unprivileged user cannot open and
+# cage gives up after 10 s (hardware, 2026-09-17). With After= as well, systemd
+# orders the shell's stop before this start, and the seat is free.
+After=kitluy-device-shell.service
 Conflicts=kitluy-device-shell.service
 Conflicts=kitluy-bootstrap-screen.service
 Conflicts=getty@tty1.service

@@ -232,6 +232,18 @@ if [[ -f "$POS_UNIT" ]]; then
     bad "pos: takes the display from the Device Shell and getty, never shares it" \
         "two compositors on one DRM device, or a login prompt drawn over the POS"
   fi
+  # Conflicts= alone starts the POS while the shell is still stopping; seatd
+  # refuses a second compositor on a seat that has an active client, libseat
+  # falls back to a seat the POS user cannot open, and cage gives up
+  # (hardware, 2026-09-17). After= in BOTH directions orders each hand-over.
+  SHELL_UNIT_FOR_POS="${TERMINAL_OVERLAY}/etc/systemd/system/kitluy-device-shell.service"
+  if grep -q '^After=kitluy-device-shell.service$' "$POS_UNIT" \
+     && grep -q '^After=kitluy-terminal-client.service$' "$SHELL_UNIT_FOR_POS"; then
+    ok "pos: the display hand-over is ordered both ways (After= beside Conflicts=)"
+  else
+    bad "pos: the display hand-over is ordered both ways (After= beside Conflicts=)" \
+        "the POS starts while the Device Shell still holds the seat; cage cannot open a DRM session and the POS never draws"
+  fi
   if grep -q '^OnFailure=kitluy-device-shell.service$' "$POS_UNIT" \
      && grep -q '^StartLimitBurst=' "$POS_UNIT" \
      && grep -q '^Restart=on-failure$' "$POS_UNIT"; then

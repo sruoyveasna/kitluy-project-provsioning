@@ -36,6 +36,15 @@ export const EDGE_DISCOVERY_SERVICE_TYPE = "_kitluy-edge._tcp.local" as const;
 export const EDGE_LAN_PORT = 7443 as const;
 /** Locked timing (owner package §4). */
 export const EDGE_DISCOVERY_VALIDITY_SECONDS = 90 as const;
+/**
+ * Clock-skew tolerance on `issuedAt` — the device copy of
+ * `@kitluy/device-identity` `EDGE_DISCOVERY_CLOCK_SKEW_SECONDS` (the drift test
+ * holds them equal). Two NTP-synchronized boards differ by milliseconds; the
+ * Hub mints the record on demand with its own clock, so without this a record
+ * minted for the request itself was refused as "in the future" (hardware,
+ * 2026-09-17). Bounded by the Hub's refresh interval; expiry stays strict.
+ */
+export const EDGE_DISCOVERY_CLOCK_SKEW_SECONDS = 30 as const;
 
 /** The well-known route's body. */
 export interface SignedDiscoveryPayload {
@@ -177,7 +186,7 @@ export function checkRecord(
   if (Number.isNaN(issuedAt) || Number.isNaN(expiresAt)) {
     return refuse("DISCOVERY_MALFORMED", "the validity window is not a pair of timestamps");
   }
-  if (now.getTime() < issuedAt)
+  if (now.getTime() + EDGE_DISCOVERY_CLOCK_SKEW_SECONDS * 1000 < issuedAt)
     return refuse("DISCOVERY_NOT_YET_VALID", "issuedAt is in the future");
   if (now.getTime() >= expiresAt) return refuse("DISCOVERY_EXPIRED", "the record has expired");
 

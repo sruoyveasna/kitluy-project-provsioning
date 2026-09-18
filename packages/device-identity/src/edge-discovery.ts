@@ -36,6 +36,22 @@ export const EDGE_DISCOVERY_SERVICE_TYPE = "_kitluy-edge._tcp.local" as const;
 /** Locked timing (owner package §4). */
 export const EDGE_DISCOVERY_REFRESH_SECONDS = 30 as const;
 export const EDGE_DISCOVERY_VALIDITY_SECONDS = 90 as const;
+/**
+ * How far in the future a record's `issuedAt` may sit and still be accepted.
+ *
+ * The Hub mints the record on demand with ITS clock as `issuedAt`; the terminal
+ * judges it with ITS clock. Two NTP-synchronized boards still differ by
+ * milliseconds (2026-09-17 on hardware: Hub +2 ms, Terminal +12.6 ms from the
+ * pool), so a record minted for this very request arrived ~10 ms "before" it
+ * was issued and the link dropped from SERVING to HUB_REFUSED between one
+ * cycle and the next. A zero tolerance judged clock jitter, not the record.
+ *
+ * The bound is the refresh interval: a record is never more than one refresh
+ * younger than "now" on the Hub, and a clock further out than that is the
+ * authority-time contract's problem (§1: the Hub database clock is the only
+ * authority), not discovery's. `expiresAt` stays strict.
+ */
+export const EDGE_DISCOVERY_CLOCK_SKEW_SECONDS = EDGE_DISCOVERY_REFRESH_SECONDS;
 
 /** The one LAN port a KitLuy Store Hub serves (owner package §3). */
 export const EDGE_LAN_PORT = 7443 as const;
@@ -156,7 +172,7 @@ export function verifyEdgeDiscoveryRecord(
   if (record.port !== EDGE_LAN_PORT) {
     return refuse("DISCOVERY_WRONG_PORT", `the record advertises port ${record.port}`);
   }
-  if (now.getTime() < record.issuedAt.getTime()) {
+  if (now.getTime() + EDGE_DISCOVERY_CLOCK_SKEW_SECONDS * 1000 < record.issuedAt.getTime()) {
     return refuse("DISCOVERY_NOT_YET_VALID", "the record is dated in the future");
   }
   if (now.getTime() >= record.expiresAt.getTime()) {

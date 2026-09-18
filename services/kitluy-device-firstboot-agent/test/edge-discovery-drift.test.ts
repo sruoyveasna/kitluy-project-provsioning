@@ -10,6 +10,7 @@
  * Test-only import: nothing here reaches the image.
  */
 import {
+  EDGE_DISCOVERY_CLOCK_SKEW_SECONDS as authoritativeSkew,
   EDGE_DISCOVERY_KIND as authoritativeKind,
   EDGE_DISCOVERY_SERVICE_TYPE as authoritativeServiceType,
   EDGE_DISCOVERY_VALIDITY_SECONDS as authoritativeValidity,
@@ -18,6 +19,7 @@ import {
 import { describe, expect, it } from "vitest";
 
 import {
+  EDGE_DISCOVERY_CLOCK_SKEW_SECONDS,
   EDGE_DISCOVERY_KIND,
   EDGE_DISCOVERY_SERVICE_TYPE,
   EDGE_DISCOVERY_VALIDITY_SECONDS,
@@ -27,6 +29,10 @@ import {
 describe("the terminal's discovery contract does not drift from the package", () => {
   it("uses the same domain separator", () => {
     expect(EDGE_DISCOVERY_KIND).toBe(authoritativeKind);
+  });
+
+  it("tolerates the same clock skew on issuedAt", () => {
+    expect(EDGE_DISCOVERY_CLOCK_SKEW_SECONDS).toBe(authoritativeSkew);
   });
 
   it("looks for the same mDNS service type", () => {

@@ -36,6 +36,9 @@ Wants=seatd.service
 # THE DISPLAY HAS ONE OWNER. Without these, the text screen and this one both
 # draw, and getty prints a login prompt over whichever wins — a login no one can
 # satisfy, because root is locked and `pi` is password-disabled by design.
+# The mirror of the POS unit's After=: when the POS hands the display back (a
+# failed release, OnFailure=), the shell starts only once the POS has stopped.
+After=kitluy-terminal-client.service
 Conflicts=kitluy-bootstrap-screen.service
 Conflicts=getty@tty1.service
 # The same guard every unit in this tree carries: an image built before the
