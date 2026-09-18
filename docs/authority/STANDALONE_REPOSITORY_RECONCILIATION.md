@@ -104,7 +104,7 @@ repos/
 | Ahead/behind | in sync |
 | Worktrees | **2 external** — `worktrees/kitluy-ecosystem/wt-agent3-custui` (`custui/customer-ui`, `11d3dc2`), `worktrees/kitluy-ecosystem/wt-agent4-qa` (`qa/customer-qa`, `3fbb61c`) |
 | Corresponding monorepo target | **Split** — `apps/kitluy-pos-desktop-app/` **and** `verticals/phase1-laundry/` |
-| Migration status | **NOT MIGRATED** |
+| Migration status | **PARTIALLY MIGRATED (2026-09-18)** — the T1 face's presentation (shell, booking workspace, Items/Customer steps, terminal launcher, PIN modal chrome) lives in `apps/kitluy-pos-desktop-app/src/vertical/laundry/face/` over the Store Hub ports (KLD-2026-09-18-T1-FACE-PORT-001; handoff 50); the data layer, pricing, payment, printing, storage and T2–T4 remain per the disposition register |
 | Known unique functionality | Electron ARM64 POS, ESC/POS printing, serialport, Raspberry Pi 5 builder configs, `Release/` + `deployment-logs/` evidence |
 | Next reconciliation action | **Not a lift-and-shift.** Separate neutral POS shell from laundry-specific workflows — `packages/` is neutral Core and must never contain laundry terminology. Also resolve conflict **KLDRV-CONF-001** (Order/Service/Service Item vs T1 Booking) before porting vocabulary |
 

@@ -122,3 +122,17 @@ T003 is _Service, Garment, **Evidence** and **Custody** Intake_. Donor coverage:
 | **Custody**  | **0**       | **NO DONOR — canonical `custody-events.ts` is the starting authority** |
 
 Half of T003's named subject matter has no donor implementation to migrate.
+
+## F. Update — 2026-09-18, T1-FACE-PORT-001 (owner: "T1 booking face first")
+
+| Capability                            | Was                     | Now                                                                                                                                                                                                                                 |
+| ------------------------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| T1 POS intake/cashier — presentation  | GATED-PENDING-WS12-TASK | **MIGRATED (presentation only)** → `apps/kitluy-pos-desktop-app/src/vertical/laundry/face/` (shell, top bar, booking workspace, Items/Customer steps, keyboard/numpads, icons, theme, Khmer font); each screen names its donor file |
+| T1 POS intake/cashier — data layer    | REJECTED (Supabase)     | unchanged: re-implemented over the Store Hub ports (customer search/create, Booking Draft, PIN lock); catalog port answers `not_delivered` until WS-05 delivery                                                                     |
+| Pricing / payment / receipt / shifts  | GATED (T004–T006)       | unchanged; rendered as "not available yet" with the gating task named                                                                                                                                                               |
+| Terminal selection                    | REJECTED-WITH-REASON    | unchanged: the launcher shows the assignment (`src/terminal-launcher.tsx`), one live card, no choice                                                                                                                                |
+| Auth / PIN modal                      | SUPERSEDED              | the Terminal PIN pad in the donor's modal chrome (KLD-2026-09-17-TERMINAL-PIN-DEVICE-CREDENTIAL-001)                                                                                                                                |
+| Service catalog (`serviceCatalog.ts`) | GATED (T003)            | lane chrome ported (`lib/serviceCatalog.tsx`) keyed to pricing modes; services and prices come only from the delivered catalog                                                                                                      |
+| Localization Khmer/English            | GATED (T007)            | the donor had no string table — bilingual literals came over as-is; the launcher carries km/en text; a string table stays T007                                                                                                      |
+
+Record: `00_AI_HANDOFF/edge-platform/50_LAUNDRY_T1_FACE_ON_PI.md`; decision KLD-2026-09-18-T1-FACE-PORT-001.

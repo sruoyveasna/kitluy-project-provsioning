@@ -5192,3 +5192,18 @@ Owner mission TERMINAL-PIN-AND-REAL-POS-AUTH-001 §11; cloud group 0230.
 
 **Resolution applied.** The device runtime report gains a v2 kind: `hubLink.terminalPin` (state, set-at, locked-until — the Hub's status answer as terminal-edge recorded it) and `pos.terminalUnlocked` (replacing `staffSignedIn`). v1 reports from terminals in the field are still accepted (0230 widens the kind check; the parser accepts both; the signature binds whichever kind is declared). The Management API carries `terminalPin` and the Partner ladder's **PIN set** rung is done only from `terminalPin.state = set`; **Operational** is done only when connected, installed, running, configuration loaded and PIN set are all done from the same fresh report and the PIN is not locked. No rung is "unbuilt" any more.
 
+
+## KLD-2026-09-18-T1-FACE-PORT-001 — the designed laundry app becomes the Pi Terminal's T1 face, over the Store Hub ports (OWNER-DECIDED — "T1 booking face first")
+
+Owner instruction 2026-09-18 ("get the app from this project first, this is our designed and built laundry app") and the owner's choice among three scopes put to them the same day: **"T1 booking face first"**. Handoff 50.
+
+**Authority reconciled, not overridden.**
+
+- KLDRV-CONF-003 stays as the consolidation report resolved it (`13_POS_CONSOLIDATION_REPORT.md` §5: the canonical `apps/kitluy-pos-desktop-app` is the base; both standalone apps are donors). This decision names the donor for the T1 face's DESIGN: `kitluy-laundry-pos-desk-app@8b2f107`; the suite donor's ported laundry UI stays a reference. The reconciliation register's "Not a lift-and-shift" holds: the presentation is ported into the canonical app, the data layer is re-implemented over the Store Hub ports (WS-12-T002 intake, Terminal PIN lock), and the donor's Supabase layer stays REJECTED (hard rule 6).
+- KLD-2026-08-07-BOOKING-SEMANTICS-001 applies: the donor's cart is a Laundry Booking's lines; the donor's product trio (Wash & Fold / Dry Clean / Wash & Press) is not a canonical taxonomy and is replaced by the two pricing-mode lanes of the delivered catalog.
+- KLD-2026-09-17-TERMINAL-PIN-DEVICE-CREDENTIAL-001 applies: no staff login, no sign-out, no terminal picker on the Pi. The owner asked for "terminal selection before the PIN modal"; the disposition register's REJECTED-WITH-REASON for user-selectable terminal identity and the WS-12 task register §3 (profile bound by provisioning and pairing) stand, so the launcher **shows** the assignment (one live card) and locks the rest. **If the owner wants true selection, that is a conflict with a locked rule to be ruled on, not a build.**
+- Pricing truth (WS-05, signed configuration snapshots) and the "never invent" rule apply: while no catalog is delivered to a terminal, the Items step says so; the donor's fixture prices were removed, not shipped.
+
+**Provisional / `[REQUIRED]`.** Inter Tight and Plus Jakarta Sans font files for the exact Latin look (the Khmer face is bundled); the bootstrap report's terminal profile code (the launcher assumes T1 by construction).
+
+**Status.** Face released to the development Terminal (`0.1.0-face-202609181452`, `git-5809ead`) and seen on its screen; the catalog delivery (slice 2) and Booking lines (WS-12-T003) are the next steps.

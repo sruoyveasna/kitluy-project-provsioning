@@ -4,6 +4,19 @@ Read the newest relevant handoff before starting work. Naming:
 `YYYY-MM-DD__<AREA>__<TASK-ID>__<SLUG>__AI-HANDOFF.md` under the matching
 subfolder (repository/ shared/ apps/ services/ data/ infrastructure/ reviews/).
 
+## T1-FACE-PORT-001 — the designed laundry app is the Pi Terminal's T1 face, over the Store Hub ports (2026-09-18)
+
+Record: [`edge-platform/50_LAUNDRY_T1_FACE_ON_PI.md`](edge-platform/50_LAUNDRY_T1_FACE_ON_PI.md)
+· **IMPLEMENTED · TESTED · RELEASED to the development Terminal (`0.1.0-face-202609181452`, `git-5809ead`) · HARDWARE VERIFIED (screens captured on the device) · CATALOG NOT DELIVERED (slice 2) · PRICING / PAYMENT / LINES NOT BUILT (WS-12-T003–T005)**
+
+**Owner decisions** (KLD-2026-09-18-T1-FACE-PORT-001): "T1 booking face first" — the donor `kitluy-laundry-pos-desk-app@8b2f107` is the design base for the Pi T1 face; its Supabase layer stays REJECTED; the terminal launcher SHOWS the assignment (one live card), it never lets a person choose the terminal.
+
+**What exists now.** `apps/kitluy-pos-desktop-app/src/vertical/laundry/face/` — shell, top bar, booking workspace (Items → Customer → Pricing → Review), keyboard and numpads, SVG icons, bundled Khmer face, over `ports.ts` (customer search by phone, create with language, Booking Draft create/update/cancel, lock; catalog `not_delivered`). Items step shows the honest empty state; Pricing "not available"; Review opens the Booking Draft on the Hub. `src/terminal-launcher.tsx` with the PIN pad as a centred modal; touch kiosk hides the pointer.
+
+**Proof.** 20 face tests + boundary scans; three releases installed on seat Pi HEllo without reflash; the face seen on the device after the owner's PIN. Handoff 49 §13 records the same day's hardware ladder: Terminal PIN set on hardware, a real Store operation through the Hub, Terminal image rebuilt from `d32a39c` (IMAGE VERIFIED).
+
+**Next:** slice 2 — the WS-05 catalog delivered through the signed configuration (cloud → Hub → Terminal), then Booking lines (WS-12-T003).
+
 ## TERMINAL-PIN-AND-REAL-POS-AUTH-001 — the Terminal PIN is built; a Pi Terminal's credential is its device certificate plus one PIN, with no staff login (2026-09-17)
 
 Record: [`edge-platform/49_TERMINAL_PIN_AND_REAL_POS_AUTH.md`](edge-platform/49_TERMINAL_PIN_AND_REAL_POS_AUTH.md)
