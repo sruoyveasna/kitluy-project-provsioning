@@ -1,0 +1,80 @@
+/* The Terminal PIN lock screen in the Laundry face's theme (T1-FACE-PORT-001). */
+.kl-pin-screen {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--sv-fill, #f6f6f6);
+  font-family: var(--sv-font, system-ui);
+  color: var(--sv-ink, #1b1b1b);
+  z-index: 10;
+}
+.kl-pin-card {
+  width: min(440px, 92vw);
+  background: var(--sv-surface, #fff);
+  border: 1px solid var(--sv-line, #eee);
+  border-radius: 24px;
+  box-shadow: var(--sv-sh-lg, 0 20px 60px rgba(0, 0, 0, 0.12));
+  padding: 32px 30px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.kl-pin-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+.kl-pin-brand-mark {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--sv-primary, #35977d);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  padding: 9px;
+  box-sizing: border-box;
+}
+.kl-pin-brand-name {
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.kl-pin-brand-km {
+  font-family: var(--sv-font-km, sans-serif);
+  font-size: 12px;
+  color: var(--sv-mute, #7f7f7f);
+}
+.kl-pin-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+}
+.kl-pin-hint {
+  margin: 0;
+  font-size: 14px;
+  color: var(--sv-ink-2, #4d4d4d);
+  line-height: 1.5;
+}
+.kl-pin-dots {
+  margin: 6px 0;
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+  font-size: 30px;
+  color: var(--sv-primary-deep, #1f5e50);
+}
+.kl-pin-alert {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--sv-danger-soft, #fce7e4);
+  color: var(--sv-danger, #cb3a31);
+  font-size: 14px;
+}
+.kl-pin-keypad {
+  --kl-pad-key-h: 64px;
+  margin-top: 6px;
+}

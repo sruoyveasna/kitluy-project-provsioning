@@ -1,0 +1,629 @@
+/* Café Savor top bar — ported for Laundry T1 (uses --sv-* tokens on .lsv-shell) */
+
+.sv-topbar {
+  flex-shrink: 0;
+  min-height: 92px;
+  padding: 14px 20px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 16px;
+  /* Café has no Tailwind Preflight — reset so nav/clock/user text height matches */
+  font-size: 15px;
+  letter-spacing: -0.01em;
+  line-height: normal;
+}
+.sv-topbar > * {
+  min-width: 0;
+}
+.sv-logo {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background: var(--sv-primary);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.sv-logo svg {
+  width: 28px;
+  height: 28px;
+  color: white;
+}
+.sv-logo-wrap {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.sv-logo-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+.sv-logo-text .n {
+  /* Café savor.css base is 18px; SavorTopBar overrides inline to 22px */
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--sv-ink);
+}
+.sv-logo-text .km {
+  font-family: var(--sv-font-km);
+  font-size: 12px;
+  color: var(--sv-mute);
+  font-weight: 500;
+  margin-top: 2px;
+}
+
+.sv-nav {
+  background: var(--sv-surface);
+  border-radius: var(--sv-r-pill);
+  padding: 7px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--sv-line);
+  justify-self: center;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.sv-nav::-webkit-scrollbar {
+  display: none;
+}
+.sv-nav-item {
+  height: 52px;
+  padding: 0 28px;
+  border-radius: var(--sv-r-pill);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--sv-mute);
+  font-size: 16.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  line-height: 1;
+  transition: all 0.15s;
+  position: relative;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.sv-nav-item:hover {
+  color: var(--sv-ink);
+}
+.sv-nav-item.active {
+  background: var(--sv-primary);
+  color: white;
+  box-shadow: var(--sv-sh-press);
+}
+.sv-nav-item .nav-badge {
+  background: var(--sv-danger);
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 999px;
+  min-width: 20px;
+  text-align: center;
+}
+.sv-nav-item.active .nav-badge {
+  background: white;
+  color: var(--sv-primary-dark);
+}
+.sv-nav-item .draft-dot {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--sv-danger);
+  border: 2px solid var(--sv-surface);
+}
+.sv-nav-item.active .draft-dot {
+  border-color: var(--sv-primary);
+}
+
+.sv-top-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  position: relative;
+  gap: 12px;
+  width: clamp(420px, 32vw, 600px);
+  min-width: 0;
+  flex-shrink: 0;
+}
+@media (max-width: 1400px) {
+  .sv-top-right {
+    width: clamp(380px, 30vw, 520px);
+  }
+}
+
+.sv-util {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--sv-surface);
+  border: 1px solid var(--sv-line);
+  border-radius: var(--sv-r-pill);
+  height: 66px;
+  padding: 6px 12px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.sv-util-div {
+  width: 1px;
+  height: 28px;
+  background: var(--sv-line);
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+.sv-icon-btn {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+  display: grid;
+  place-items: center;
+  color: var(--sv-ink);
+  position: relative;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.sv-icon-btn:hover {
+  background: var(--sv-fill-2);
+}
+/* Mode A / Mode B presentation switch — same 50px hit target as the theme
+   toggle, so the two read as one pair of utility controls. */
+.sv-mode-chip {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1;
+  background: var(--sv-fill-2);
+  color: var(--sv-ink);
+  border: 1.5px solid var(--sv-line);
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s;
+}
+.sv-mode-chip[data-mode="B"] {
+  background: var(--sv-primary);
+  color: #fff;
+  border-color: var(--sv-primary);
+}
+
+.sv-icon-btn .dot-badge {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--sv-danger);
+  border: 2px solid var(--sv-surface);
+}
+
+.sv-user {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 16px 6px 7px;
+  background: var(--sv-surface);
+  border: 1px solid var(--sv-line);
+  border-radius: var(--sv-r-pill);
+  height: 66px;
+  max-width: 176px;
+}
+.sv-user-text {
+  min-width: 0;
+  overflow: hidden;
+}
+.sv-user-avatar {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--sv-primary), var(--sv-primary-dark));
+  color: white;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+.sv-user-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--sv-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 108px;
+}
+.sv-user-role {
+  font-size: 12.5px;
+  color: var(--sv-mute);
+  margin-top: -2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 108px;
+}
+.sv-user-more {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--sv-mute);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.sv-clock-pill {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.1;
+  padding: 0 8px;
+}
+.sv-clock-time {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--sv-ink);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.sv-clock-date {
+  font-size: 11px;
+  color: var(--sv-mute);
+  font-weight: 500;
+}
+
+.sv-fx {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 6px;
+}
+.sv-fx-flag {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--sv-primary-tint);
+  color: var(--sv-primary-dark);
+  display: grid;
+  place-items: center;
+  font-size: 16px;
+  font-weight: 700;
+}
+.sv-fx-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.05;
+}
+.sv-fx-rate {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--sv-ink);
+  font-variant-numeric: tabular-nums;
+}
+.sv-fx-label {
+  font-size: 10.5px;
+  color: var(--sv-mute);
+  font-weight: 500;
+}
+
+.sv-notif-wrap {
+  position: static;
+}
+.sv-bell-ring {
+  animation: svBellRing 2.4s ease-in-out infinite;
+}
+@keyframes svBellRing {
+  0%,
+  70%,
+  100% {
+    transform: rotate(0deg);
+  }
+  74% {
+    transform: rotate(11deg);
+  }
+  78% {
+    transform: rotate(-9deg);
+  }
+  82% {
+    transform: rotate(7deg);
+  }
+  86% {
+    transform: rotate(-5deg);
+  }
+  90% {
+    transform: rotate(3deg);
+  }
+  94% {
+    transform: rotate(0deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sv-bell-ring {
+    animation: none;
+  }
+}
+.dot-badge {
+  animation: svDotPulse 2.4s ease-in-out infinite;
+}
+@keyframes svDotPulse {
+  0%,
+  68%,
+  100% {
+    transform: scale(1);
+  }
+  74% {
+    transform: scale(1.35);
+  }
+  86% {
+    transform: scale(1.1);
+  }
+}
+
+.sv-notif-menu {
+  position: absolute;
+  top: calc(100% + 14px);
+  right: 0;
+  width: 360px;
+  background: var(--sv-surface);
+  border: 1px solid var(--sv-line);
+  border-radius: var(--sv-r-md);
+  box-shadow: var(--sv-sh-lg);
+  z-index: 50;
+  overflow: hidden;
+}
+.sv-notif-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--sv-line);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--sv-ink);
+}
+.sv-notif-head button {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--sv-primary);
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-family: inherit;
+}
+.sv-notif-list {
+  max-height: 420px;
+  overflow-y: auto;
+  padding: 6px;
+}
+.sv-notif-empty {
+  padding: 28px 16px;
+  text-align: center;
+  color: var(--sv-mute);
+  font-size: 13px;
+}
+.sv-notif-item {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
+  border-radius: var(--sv-r-sm);
+  text-align: left;
+  position: relative;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
+  color: inherit;
+}
+.sv-notif-item:hover {
+  background: var(--sv-fill-2);
+}
+.sv-notif-item.unread::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--sv-primary);
+}
+.sv-notif-ic {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  color: white;
+}
+.sv-notif-ic.ready {
+  background: var(--sv-primary);
+}
+.sv-notif-ic.tma {
+  background: #3b82f6;
+}
+.sv-notif-ic.stock {
+  background: var(--sv-warn);
+}
+.sv-notif-ic.sync {
+  background: var(--sv-mute);
+}
+.sv-notif-ic.shift {
+  background: var(--sv-ink-2);
+}
+.sv-notif-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sv-notif-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--sv-ink);
+}
+.sv-notif-sub {
+  font-size: 12px;
+  color: var(--sv-mute);
+  line-height: 1.35;
+}
+.sv-notif-time {
+  font-size: 11px;
+  color: var(--sv-soft);
+  flex-shrink: 0;
+}
+
+.sv-user-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+.sv-user-menu {
+  position: absolute;
+  top: calc(100% + 14px);
+  right: 0;
+  width: 360px;
+  background: var(--sv-surface);
+  border: 1px solid var(--sv-line);
+  border-radius: var(--sv-r-md);
+  box-shadow: var(--sv-sh-lg);
+  z-index: 50;
+  overflow: hidden;
+}
+.sv-user-menu-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 16px;
+  border-bottom: 1px solid var(--sv-line);
+}
+.sv-um-name {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--sv-ink);
+}
+.sv-um-role {
+  font-size: 12.5px;
+  color: var(--sv-mute);
+  margin-top: 1px;
+}
+.sv-um-shift {
+  font-size: 11.5px;
+  color: var(--sv-primary);
+  font-weight: 600;
+  margin-top: 3px;
+}
+.sv-user-menu-list {
+  padding: 6px;
+}
+.sv-um-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 12px;
+  border-radius: var(--sv-r-sm);
+  text-align: left;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
+  color: inherit;
+}
+.sv-um-item:hover {
+  background: var(--sv-fill-2);
+}
+.sv-um-ic {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--sv-fill);
+  color: var(--sv-ink);
+  display: grid;
+  place-items: center;
+}
+.sv-um-ic.danger {
+  background: var(--sv-danger-soft);
+  color: var(--sv-danger);
+}
+.sv-um-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.sv-um-body .t {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--sv-ink);
+}
+.sv-um-item.danger .t {
+  color: var(--sv-danger);
+}
+.sv-um-body .s {
+  font-size: 11.5px;
+  color: var(--sv-mute);
+}
+.sv-um-div {
+  height: 1px;
+  background: var(--sv-line);
+  margin: 6px 8px;
+}
+.sv-user-menu-foot {
+  padding: 10px 16px;
+  border-top: 1px solid var(--sv-line);
+  font-size: 11px;
+  color: var(--sv-soft);
+  text-align: center;
+}
+
+.sv-conn {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  min-width: 46px;
+  height: 44px;
+  padding: 0 8px;
+  border-radius: var(--sv-r-pill);
+  white-space: nowrap;
+  border: none;
+}
+.sv-conn-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.sv-conn.on {
+  background: var(--sv-primary-tint);
+  color: var(--sv-primary);
+}
+.sv-conn.off {
+  background: var(--sv-danger-soft);
+  color: var(--sv-danger);
+}

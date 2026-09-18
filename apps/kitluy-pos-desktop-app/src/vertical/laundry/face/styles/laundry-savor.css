@@ -1,0 +1,573 @@
+/*
+ * Phase 3A — T1 cafe-style ("Savor") topbar shell.
+ *
+ * Layout + hover/active affordances ONLY. Every colour is read from a
+ * --lsv-* custom property set inline on .lsv-shell (see LaundrySavorShell.tsx),
+ * which sources them from src/styles/tokens.ts — so the design tokens stay the
+ * single source of truth and this file holds no hard-coded brand colours and
+ * no business logic.
+ */
+
+.lsv-shell {
+  height: 100%;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--lsv-bg);
+}
+
+/* Top bar UI: savor-topbar.css (Café Savor port) */
+
+/* ── Phase 4 content primitives (Savor card / pill / grid rhythm) ───── */
+
+/* Soft white content panel — the Savor card surface. */
+.lsv-card {
+  background: var(--lsv-card);
+  border: 1px solid var(--lsv-border);
+  border-radius: 16px;
+  box-shadow: var(--lsv-shadow-md);
+}
+
+/* Pill filter chip (Order Queue / any segmented filter). */
+.lsv-filter-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--lsv-border);
+  background: var(--lsv-card);
+  color: var(--lsv-mute);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.lsv-filter-pill:hover {
+  color: var(--lsv-ink);
+  border-color: var(--lsv-primary-light);
+}
+.lsv-filter-pill.active {
+  background: var(--lsv-primary-soft);
+  border-color: var(--lsv-primary);
+  color: var(--lsv-primary-deep);
+}
+
+/* Tappable row card (Order Queue booking row, Dashboard active booking). */
+.lsv-row-card {
+  background: var(--lsv-card);
+  border: 1px solid var(--lsv-border);
+  border-radius: 16px;
+  box-shadow: var(--lsv-shadow-sm);
+  cursor: pointer;
+  transition:
+    box-shadow 0.15s,
+    border-color 0.15s,
+    transform 0.12s;
+}
+.lsv-row-card:hover {
+  box-shadow: var(--lsv-shadow-md);
+  border-color: var(--lsv-primary-light);
+}
+/* Keyboard focus ring — visible from arm's length on the operational touchscreen. */
+.lsv-row-card:focus-visible {
+  outline: 2px solid var(--lsv-primary);
+  outline-offset: 2px;
+}
+
+/* Savor product/garment tile (Step1 item grid). */
+.lsv-product-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+}
+.lsv-qty-circle {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  border: none;
+  cursor: pointer;
+  transition: all 0.12s;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ── Phase 4 dashboard — faithful Savor dashboard primitives ────────── */
+.lsv-dash-grid {
+  display: grid;
+  grid-template-columns: 1.6fr 1fr 1fr;
+  grid-template-rows: 1fr 1fr 1.4fr;
+  gap: 16px;
+  height: 100%;
+  min-height: 0;
+}
+.lsv-dash-card {
+  background: var(--lsv-card);
+  border: 1px solid var(--lsv-border);
+  border-radius: 20px;
+  box-shadow: var(--lsv-shadow-md);
+  padding: 22px 26px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+  min-height: 0;
+  /* Café Savor has no Tailwind Preflight; its text uses line-height: normal.
+     Reset here so dashboard text matches café height (Tailwind base = 1.5). */
+  line-height: normal;
+}
+.lsv-dash-card-h {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.lsv-dash-card-h h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--lsv-ink);
+  white-space: nowrap;
+}
+.lsv-dash-card-h .sub {
+  font-size: 12px;
+  color: var(--lsv-mute);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.lsv-seg {
+  display: flex;
+  background: var(--lsv-fill);
+  border-radius: 999px;
+  padding: 3px;
+  gap: 2px;
+}
+.lsv-seg button {
+  padding: 6px 16px;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--lsv-mute);
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.lsv-seg button.active {
+  background: var(--lsv-card);
+  color: var(--lsv-ink);
+  box-shadow: var(--lsv-shadow-sm);
+}
+
+/* Dashboard right rail — width MUST mirror the Menu page's booking panel
+   column (`.sv-booking-workspace` 2nd grid track in savor-workspace.css) so
+   the Quick-actions rail and the booking panel line up at every screen size. */
+.lsv-dash-rail {
+  flex-grow: 0;
+  flex-shrink: 0;
+  flex-basis: clamp(420px, 32vw, 600px);
+}
+@media (max-width: 1400px) {
+  .lsv-dash-rail {
+    flex-basis: clamp(380px, 30vw, 520px);
+  }
+}
+
+/* Dashboard quick-actions panel (+22px vs 14px vertical padding) */
+.lsv-dash-quick {
+  flex-shrink: 0;
+  padding: 25px 14px;
+  border-radius: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  line-height: normal;
+}
+
+/* Dashboard quick-action buttons (shared with café .sv-dash-btn) */
+.lsv-dash-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  border: none;
+  border-radius: var(--sv-r-pill, 999px);
+  padding: 12px 20px;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  min-height: 56px;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s;
+  box-sizing: border-box;
+  background: var(--sv-primary);
+  color: #fff;
+}
+.lsv-dash-btn.secondary {
+  background: var(--sv-btn-soft);
+  color: var(--sv-ink);
+  border: 1px solid var(--sv-line);
+}
+.lsv-dash-btn.secondary:hover {
+  background: var(--sv-btn-soft-2);
+}
+.lsv-dash-btn.secondary svg {
+  color: var(--sv-mute);
+}
+.lsv-dash-btn:not(.secondary):hover {
+  background: var(--sv-primary-dark);
+}
+
+/* KPI card */
+.lsv-kpi {
+  padding: 24px 26px;
+}
+.lsv-kpi .l {
+  font-size: 15px;
+  color: var(--lsv-mute);
+  font-weight: 500;
+}
+.lsv-kpi .v {
+  font-size: 34px;
+  font-weight: 700;
+  color: var(--lsv-ink);
+  letter-spacing: -0.02em;
+  margin-top: 8px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.05;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lsv-kpi .d {
+  font-size: 13px;
+  color: var(--lsv-mute);
+  margin-top: auto;
+  padding-top: 14px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+}
+.lsv-kpi .d .accent {
+  color: var(--lsv-primary);
+  font-weight: 600;
+}
+.lsv-kpi .d .dot {
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--lsv-border);
+  margin: 0 8px;
+}
+
+/* Activity heatmap */
+.lsv-heatmap {
+  display: grid;
+  grid-template-columns: 50px repeat(7, 1fr);
+  gap: 8px;
+  margin-top: 18px;
+  flex: 1;
+  min-height: 0;
+}
+.lsv-heatmap .yl,
+.lsv-heatmap .xl {
+  font-size: 11px;
+  color: var(--lsv-mute);
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+}
+.lsv-heatmap .yl {
+  justify-content: flex-end;
+}
+.lsv-heatmap .xl {
+  justify-content: center;
+  padding-top: 8px;
+}
+.lsv-heat {
+  border-radius: 10px;
+  background: var(--sv-heat-empty);
+  min-height: 24px;
+}
+.lsv-heat.l1 {
+  background: var(--sv-heat-1);
+}
+.lsv-heat.l2 {
+  background: var(--sv-heat-2);
+}
+.lsv-heat.l3 {
+  background: var(--sv-heat-3);
+}
+.lsv-heat.l4 {
+  background: var(--sv-heat-4);
+}
+.lsv-heat.l5 {
+  background: var(--sv-heat-5);
+}
+
+/* Top-table (Active bookings) */
+.lsv-top-table {
+  margin-top: 16px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.lsv-top-row {
+  display: grid;
+  grid-template-columns: 52px 2fr 1.4fr 0.7fr 1.3fr 1.1fr;
+  align-items: center;
+  gap: 16px;
+  padding: 11px 10px;
+  border-bottom: 1px solid var(--lsv-border);
+}
+.lsv-top-row.head {
+  color: var(--lsv-mute);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+.lsv-top-row.click {
+  cursor: pointer;
+  border-radius: 12px;
+  transition: background 0.12s;
+}
+.lsv-top-row.click:hover {
+  background: var(--lsv-fill);
+}
+.lsv-top-row .thumb {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: var(--lsv-primary-soft);
+  font-size: 20px;
+}
+.lsv-top-row .nm {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--lsv-ink);
+}
+.lsv-top-row .bar {
+  height: 8px;
+  background: var(--lsv-fill-2);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.lsv-top-row .bar > div {
+  height: 100%;
+  background: var(--lsv-primary);
+  border-radius: 999px;
+}
+
+/* ── Order Queue — booking-centric queue table + toolbar ─────────────
+   Mirrors the Active-bookings top-table above but with a queue-specific
+   column set (received time + monetary column, no revenue bar), a sticky
+   header, and a subtle amber rail for express/urgent bookings. Kept as its
+   own class family so the Dashboard's `.lsv-top-row` layout is untouched. */
+
+/* Segmented status-filter control — a recessed track holding one raised chip
+   for the active filter. Mirrors the proven `.lsv-seg` colour logic (track =
+   --lsv-fill, active chip = --lsv-card + soft shadow) but sized for touch
+   (44px) and with lightweight, non-boxed counts so the numbers read as data
+   rather than badges. Overflows horizontally (scroll) instead of wrapping. */
+.lsv-oq-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 5px;
+  background: var(--lsv-fill);
+  border: 1px solid var(--lsv-border);
+  border-radius: 16px;
+  overflow-x: auto;
+}
+.lsv-oq-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  height: 44px;
+  padding: 0 15px;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--lsv-mute);
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    box-shadow 0.15s;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.lsv-oq-tab:hover {
+  color: var(--lsv-ink);
+}
+.lsv-oq-tab.active {
+  background: var(--lsv-card);
+  color: var(--lsv-ink);
+  box-shadow: var(--lsv-shadow-sm);
+}
+.lsv-oq-tabcount {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--lsv-text-ter);
+  font-variant-numeric: tabular-nums;
+}
+.lsv-oq-tab:hover .lsv-oq-tabcount {
+  color: var(--lsv-mute);
+}
+.lsv-oq-tab.active .lsv-oq-tabcount {
+  color: var(--lsv-primary);
+}
+
+/* Search field — mirrors the app's canonical `.sv-step0-search-field`
+   (recessed --sv-fill-2 pill, 1.5px line, touch height) so the queue's search
+   reads like the Step-0 customer lookup rather than a floating card. */
+.lsv-oq-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  background: var(--sv-fill-2);
+  border: 1.5px solid var(--sv-line);
+  border-radius: 999px;
+  padding: 4px 10px 4px 16px;
+  min-height: 52px;
+}
+.lsv-oq-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  padding: 12px 0;
+  font-size: 15px;
+  font-family: inherit;
+  color: var(--sv-ink);
+}
+.lsv-oq-search input::placeholder {
+  color: var(--sv-soft);
+}
+
+/* Round icon action button — mirrors `.sv-filter-btn` (Scan / Refresh). */
+.lsv-oq-iconbtn {
+  flex-shrink: 0;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--sv-surface);
+  border: 1.5px solid var(--sv-line);
+  display: grid;
+  place-items: center;
+  color: var(--sv-mute);
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.lsv-oq-iconbtn:hover {
+  background: var(--sv-btn-soft);
+  color: var(--sv-ink);
+}
+
+.lsv-oq-table {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.lsv-oq-row {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 2.1fr) 1fr 1.2fr 0.6fr 1.2fr 1.1fr 30px;
+  align-items: center;
+  gap: 14px;
+  padding: 12px;
+  border-bottom: 1px solid var(--lsv-border);
+}
+.lsv-oq-row.head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--lsv-card);
+  color: var(--lsv-mute);
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+.lsv-oq-row.click {
+  cursor: pointer;
+  border-radius: 14px;
+  transition: background 0.12s;
+}
+.lsv-oq-row.click:hover {
+  background: var(--lsv-fill);
+}
+.lsv-oq-row.click:hover .lsv-oq-chev {
+  color: var(--lsv-primary);
+}
+/* Express / urgent booking — restrained amber rail, not a loud full-row fill. */
+.lsv-oq-row.urgent {
+  box-shadow: inset 3px 0 0 var(--lsv-amber);
+}
+/* Overdue dispatch booking — same restrained rail treatment, red. */
+.lsv-oq-row.overdue {
+  box-shadow: inset 3px 0 0 var(--lsv-danger);
+}
+.lsv-oq-row .thumb {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: var(--lsv-primary-soft);
+  font-size: 19px;
+}
+.lsv-oq-row .nm {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--lsv-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lsv-oq-chev {
+  display: grid;
+  place-items: center;
+  color: var(--lsv-mute);
+  transition: color 0.12s;
+}

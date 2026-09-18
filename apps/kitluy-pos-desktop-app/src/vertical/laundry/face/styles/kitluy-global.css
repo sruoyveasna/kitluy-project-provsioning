@@ -1,0 +1,1333 @@
+/* KitLuy Suite — shared primitives (aligned with Café POS global.css) */
+
+:root {
+  --kl-primary: #35977d;
+  --kl-primary-dark: #2f8470;
+  --kl-primary-deep: #1f5e50;
+  --kl-primary-tint: #ecf6f1;
+  --kl-ink: #1b1b1b;
+  --kl-ink-2: #4d4d4d;
+  --kl-mute: #7f7f7f;
+  --kl-soft: #a5a5a5;
+  --kl-line: #eeeeee;
+  --kl-fill: #f6f6f6;
+  --kl-surface: #ffffff;
+  --kl-danger: #cb3a31;
+  --kl-danger-soft: #fce7e4;
+  --kl-warn: #f79e1b;
+  --kl-r-sm: 12px;
+  --kl-r-md: 16px;
+  --kl-r-lg: 20px;
+  --kl-r-pill: 999px;
+  --kl-font:
+    "Inter Tight", "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --kl-font-km: "Noto Sans Khmer", var(--kl-font);
+  --kl-sh-md: 0 4px 12px rgba(0, 0, 0, 0.06);
+  --kl-sh-lg: 0 16px 40px rgba(0, 0, 0, 0.1);
+}
+
+.km {
+  font-family: var(--kl-font-km);
+}
+
+.scroll {
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.kl-card {
+  background: var(--kl-surface);
+  border: 1px solid var(--kl-line);
+  border-radius: var(--kl-r-md);
+  box-shadow: var(--kl-sh-md);
+}
+
+.kl-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 20px;
+  border-radius: var(--kl-r-pill);
+  font-size: 15px;
+  font-weight: 600;
+  transition:
+    background 0.15s,
+    transform 0.1s;
+}
+
+.kl-btn:active {
+  transform: scale(0.98);
+}
+
+.kl-btn--primary {
+  background: var(--kl-primary);
+  color: #fff;
+}
+
+.kl-btn--primary:hover {
+  background: var(--kl-primary-dark);
+}
+
+.kl-btn--soft {
+  background: #f3f3f3;
+  color: var(--kl-ink);
+}
+
+.kl-btn--soft:hover {
+  background: #efefef;
+}
+
+.kl-btn--lg {
+  min-height: 56px;
+  font-size: 16px;
+}
+
+.kl-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: var(--kl-r-pill);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.kl-badge--primary {
+  background: var(--kl-primary-tint);
+  color: var(--kl-primary-dark);
+}
+
+.kl-input {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 16px;
+  border: 1px solid var(--kl-line);
+  border-radius: var(--kl-r-md);
+  font-size: 15px;
+  background: var(--kl-surface);
+  color: var(--kl-ink);
+}
+
+.kl-input:focus {
+  outline: 2px solid var(--kl-primary);
+  border-color: transparent;
+}
+
+.kl-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 24px;
+}
+
+/* Terminal launcher — same layout language as Café POS */
+.term-select {
+  min-height: 100%;
+  padding: clamp(24px, 4vw, 56px);
+  overflow-y: auto;
+  background: var(--kl-fill);
+  color: var(--kl-ink);
+}
+
+.term-select__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+.term-select__head h1 {
+  margin: 0;
+  font-size: clamp(22px, 2.5vw, 32px);
+  font-weight: 700;
+}
+
+.term-select__head p {
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: var(--kl-mute);
+}
+
+.term-select__hub {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px;
+  margin-left: auto;
+}
+
+.term-select__pulse {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--kl-primary);
+  box-shadow: 0 0 0 4px var(--kl-primary-tint);
+  flex-shrink: 0;
+}
+
+.term-select__pulse--warn {
+  background: var(--kl-warn);
+  box-shadow: 0 0 0 4px #fffbeb;
+}
+
+.term-select__pulse--off {
+  background: var(--kl-danger);
+  box-shadow: 0 0 0 4px var(--kl-danger-soft);
+}
+
+.term-select__hub-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--kl-mute);
+}
+
+.term-select__featured {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  min-height: 280px;
+  overflow: hidden;
+  margin-bottom: 32px;
+}
+
+@media (max-width: 900px) {
+  .term-select__featured {
+    grid-template-columns: 1fr;
+  }
+}
+
+.term-select__featured-left {
+  padding: 36px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.term-select__tnum {
+  font-size: 64px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  margin-top: 12px;
+  color: var(--kl-ink);
+}
+
+.term-select__featured-left h2 {
+  margin: 8px 0;
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.term-select__featured-left p {
+  margin: 0 0 24px;
+  font-size: 14px;
+  color: var(--kl-mute);
+  line-height: 1.5;
+  max-width: 420px;
+}
+
+.term-select__featured-art {
+  background: linear-gradient(135deg, var(--kl-primary-tint), var(--kl-primary) 80%);
+  min-height: 200px;
+}
+
+.term-select__label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--kl-mute);
+  margin-bottom: 16px;
+  font-weight: 600;
+}
+
+.term-select__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.term-select__tile {
+  text-align: left;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 160px;
+  transition: box-shadow 0.15s;
+  cursor: pointer;
+}
+
+.term-select__tile:hover:not(:disabled) {
+  box-shadow: var(--kl-sh-md);
+}
+
+.term-select__tile--off {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.term-select__tile-id {
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--kl-ink);
+}
+
+.term-select__tile-name {
+  font-weight: 600;
+}
+
+.term-select__tile p {
+  font-size: 13px;
+  color: var(--kl-mute);
+  flex: 1;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.term-select__tile-res {
+  font-size: 11px;
+  font-family: ui-monospace, monospace;
+  color: var(--kl-soft);
+}
+
+.term-select__foot {
+  margin-top: 40px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--kl-mute);
+}
+
+.kl-brand-logo {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background: var(--kl-primary);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.kl-brand-logo svg {
+  width: 28px;
+  height: 28px;
+  color: white;
+}
+
+/* =====================================================================
+   Terminal selection — PlantOS's anatomy (icon medallion → name → role
+   badge → description), in the Savor palette. Grouped by PAIR, because
+   KitLuy has two machines, not four stations.
+   See docs/terminal-access-model.md
+   ===================================================================== */
+.ts {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 22px 28px 18px;
+  background:
+    radial-gradient(1200px 600px at 15% -10%, var(--sv-primary-tint), transparent 60%),
+    var(--sv-fill);
+}
+
+.ts-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+.ts-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.ts-brand h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--sv-ink);
+  letter-spacing: -0.01em;
+}
+.ts-brand .km {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  color: var(--sv-mute);
+}
+.ts-head-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ts-hub {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-radius: var(--sv-r-pill);
+  background: var(--sv-surface);
+  border: 1px solid var(--sv-line);
+}
+.ts-hub-label {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--sv-mute);
+}
+.ts-hub-value {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--sv-ink);
+}
+
+.ts-body {
+  flex: 1;
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 30px 0 8px;
+}
+.ts-title {
+  text-align: center;
+  margin-bottom: 26px;
+}
+.ts-title h2 {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--sv-ink);
+}
+.ts-title p {
+  margin: 5px 0 0;
+  font-size: 14px;
+  color: var(--sv-mute);
+}
+
+/* ---- a pair: the physical machine, with its terminals ---- */
+.ts-pair {
+  background: var(--sv-surface);
+  border: 1px solid var(--sv-line);
+  border-radius: var(--sv-r-lg, 20px);
+  padding: 20px;
+  margin-bottom: 20px;
+}
+.ts-pair.locked {
+  opacity: 0.5;
+}
+.ts-pair-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+.ts-pair-h h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--sv-ink);
+}
+.ts-pair-h p {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  color: var(--sv-mute);
+}
+.ts-pair-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--sv-font-mono);
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 6px 12px;
+  border-radius: var(--sv-r-pill);
+  background: var(--sv-primary-tint);
+  color: var(--sv-primary);
+  white-space: nowrap;
+}
+.ts-pair.locked .ts-pair-chip {
+  background: var(--sv-btn-soft);
+  color: var(--sv-mute);
+}
+
+.ts-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+/* ---- the card: PlantOS anatomy, our colours ---- */
+.ts-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+  padding: 24px 18px 20px;
+  border-radius: var(--sv-r-md);
+  border: 1.5px solid var(--sv-line);
+  background: var(--sv-fill-2);
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  transition:
+    border-color 0.14s ease,
+    transform 0.08s ease,
+    background 0.14s ease;
+}
+.ts-card:hover:not(:disabled) {
+  border-color: var(--sv-primary);
+  background: var(--sv-surface);
+}
+.ts-card:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.ts-card:disabled {
+  cursor: not-allowed;
+}
+.ts-card:focus-visible {
+  outline: 3px solid var(--sv-primary);
+  outline-offset: 2px;
+}
+
+/* the medallion — PlantOS's w-16 h-16 rounded-full icon */
+.ts-medal {
+  width: 62px;
+  height: 62px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--sv-primary-tint);
+  color: var(--sv-primary);
+  margin-bottom: 4px;
+}
+.ts-card--settings .ts-medal {
+  background: var(--sv-btn-soft);
+  color: var(--sv-ink-2);
+}
+
+.ts-card h4 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 750;
+  color: var(--sv-ink);
+  letter-spacing: -0.01em;
+}
+.ts-role {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 4px 11px;
+  border-radius: var(--sv-r-pill);
+  background: var(--sv-primary);
+  color: #fff;
+}
+.ts-card--settings .ts-role {
+  background: var(--sv-btn-soft);
+  color: var(--sv-ink-2);
+}
+.ts-desc {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--sv-mute);
+}
+.ts-hw {
+  margin-top: auto;
+  padding-top: 8px;
+  font-size: 11px;
+  color: var(--sv-soft);
+}
+
+.ts-foot-note {
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--sv-mute);
+  margin: 4px 0 0;
+  line-height: 1.6;
+}
+.ts-foot-note strong {
+  color: var(--sv-ink-2);
+}
+
+.ts-foot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding-top: 18px;
+  font-size: 12px;
+  color: var(--sv-mute);
+}
+
+@media (max-width: 1100px) {
+  .ts-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* DEV auth bypass — deliberately loud. It never reaches a production build. */
+.ts-bypass {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+  padding: 12px 16px;
+  border-radius: var(--sv-r-md);
+  background: color-mix(in srgb, var(--sv-warn) 14%, transparent);
+  border: 1.5px dashed var(--sv-warn);
+  color: var(--sv-warn);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.ts-bypass code {
+  font-family: var(--sv-font-mono);
+  font-size: 12px;
+}
+
+/* =====================================================================
+   Device Settings — a PUBLIC page (no login). Printer, printing, display,
+   diagnostics. Shop settings (exchange rate, partner) stay in T1.
+   ===================================================================== */
+.ds {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 22px 28px 32px;
+  background:
+    radial-gradient(1100px 560px at 12% -10%, var(--sv-primary-tint), transparent 60%),
+    var(--sv-fill);
+}
+.ds-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+.ds-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.ds-brand h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--sv-ink);
+  letter-spacing: -0.01em;
+}
+.ds-brand p {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  color: var(--sv-mute);
+}
+
+.ds-body {
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding-top: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ds-card {
+  background: var(--sv-surface);
+  border: 1px solid var(--sv-line);
+  border-radius: var(--sv-r-lg, 20px);
+  padding: 20px 22px;
+}
+.ds-card h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 750;
+  color: var(--sv-ink);
+}
+.ds-sub {
+  margin: 5px 0 0;
+  font-size: 13px;
+  color: var(--sv-mute);
+}
+.ds-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+.ds-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--sv-line-2);
+}
+.ds-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+.ds-card h2 + .ds-row {
+  padding-top: 16px;
+}
+
+.ds-mono {
+  font-family: var(--sv-font-mono);
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--sv-ink-2);
+}
+
+.ds-toggle {
+  width: 50px;
+  height: 29px;
+  border-radius: 999px;
+  background: var(--sv-line);
+  border: none;
+  cursor: pointer;
+  padding: 3px;
+  display: flex;
+  align-items: center;
+  transition: background 0.16s ease;
+}
+.ds-toggle.on {
+  background: var(--sv-primary);
+}
+.ds-toggle span {
+  width: 23px;
+  height: 23px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.16s ease;
+}
+.ds-toggle.on span {
+  transform: translateX(21px);
+}
+.ds-toggle:focus-visible {
+  outline: 3px solid var(--sv-primary);
+  outline-offset: 2px;
+}
+
+.ds-note {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--sv-mute);
+  text-align: center;
+}
+.ds-note strong {
+  color: var(--sv-ink-2);
+}
+
+/* the way in, from the sign-in screen */
+.login-device-btn {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 15px;
+  border-radius: var(--sv-r-pill);
+  background: var(--sv-surface);
+  border: 1px solid var(--sv-line);
+  color: var(--sv-ink-2);
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.login-device-btn:hover {
+  border-color: var(--sv-primary);
+  color: var(--sv-primary);
+}
+.login-device-btn:focus-visible {
+  outline: 3px solid var(--sv-primary);
+  outline-offset: 2px;
+}
+
+/* =====================================================================
+   T1 booking lookup — the quick-actions rail becomes a keypad, and the
+   Active-bookings card becomes the answer: WHICH SLOT.
+   ===================================================================== */
+.lk-display {
+  text-align: center;
+  padding: 14px 16px;
+  border-radius: var(--sv-r-md);
+  background: var(--sv-fill-2);
+  border: 1px solid var(--sv-line);
+}
+.lk-display .l {
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--sv-mute);
+}
+.lk-display .v {
+  font-family: var(--sv-font-mono);
+  font-size: 23px;
+  font-weight: 800;
+  color: var(--sv-ink);
+  margin-top: 6px;
+  letter-spacing: 0.03em;
+  word-break: break-all;
+}
+.lk-display .v.empty {
+  color: var(--sv-soft);
+}
+.lk-display .s {
+  font-size: 11.5px;
+  color: var(--sv-mute);
+  margin-top: 6px;
+}
+
+/* --- left card: empty / no-match states --- */
+.lk-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 10px;
+  padding: 30px;
+}
+.lk-empty h3 {
+  margin: 6px 0 0;
+  font-size: 17px;
+  font-weight: 750;
+  color: var(--sv-ink);
+}
+.lk-empty p {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--sv-mute);
+  max-width: 340px;
+  line-height: 1.6;
+}
+
+/* --- several hits: pick one --- */
+.lk-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 12px;
+}
+.lk-list-h {
+  font-size: 12.5px;
+  color: var(--sv-mute);
+  font-weight: 650;
+}
+.lk-hit {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 13px 14px;
+  border-radius: var(--sv-r-md);
+  border: 1px solid var(--sv-line-2);
+  background: var(--sv-surface);
+  cursor: pointer;
+  width: 100%;
+  font: inherit;
+}
+.lk-hit:hover {
+  border-color: var(--sv-primary);
+}
+
+/* --- one hit: the detail --- */
+.lk-detail {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-top: 14px;
+}
+.lk-cust {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.lk-svc {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  font-size: 20px;
+  flex: 0 0 auto;
+}
+.lk-svc.lg {
+  width: 54px;
+  height: 54px;
+  border-radius: 15px;
+  font-size: 26px;
+}
+
+/* the headline: WHERE IT IS */
+.lk-answer {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 20px;
+  border-radius: var(--sv-r-md);
+  background: var(--sv-primary-tint);
+  border: 2px solid var(--sv-primary);
+  color: var(--sv-primary);
+}
+.lk-answer .l {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.lk-answer .v {
+  font-family: var(--sv-font-mono);
+  font-size: 34px;
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--sv-ink);
+  margin-top: 3px;
+}
+.lk-answer.none {
+  background: color-mix(in srgb, var(--sv-warn) 10%, transparent);
+  border-color: color-mix(in srgb, var(--sv-warn) 40%, transparent);
+  color: var(--sv-warn);
+}
+
+.lk-orders {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.lk-order {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 13px 14px;
+  border-radius: var(--sv-r-md);
+  border: 1px solid var(--sv-line-2);
+  background: var(--sv-fill-2);
+}
+.lk-where {
+  text-align: right;
+  flex: 0 0 auto;
+}
+.lk-where .v {
+  font-size: 14px;
+  font-weight: 700;
+}
+.lk-where .v.slot {
+  font-family: var(--sv-font-mono);
+  font-size: 22px;
+  font-weight: 800;
+}
+.lk-where .n {
+  font-size: 11px;
+  color: var(--sv-mute);
+  margin-top: 2px;
+}
+
+.lk-bal {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-radius: var(--sv-r-md);
+  background: var(--sv-fill-2);
+  border: 1px solid var(--sv-line-2);
+  font-size: 13.5px;
+  color: var(--sv-mute);
+}
+.lk-bal strong {
+  font-size: 16px;
+}
+
+/* =====================================================================
+   T1 Customer Handoff — the last step. Fed live from T4 over the
+   Supabase Realtime broadcast channel (features/handoff/HandoffProvider).
+   ===================================================================== */
+.ho-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.ho-link i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: block;
+}
+.ho-link i.pulse {
+  animation: ho-pulse 1.8s ease-in-out infinite;
+}
+@keyframes ho-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ho-link i.pulse {
+    animation: none;
+  }
+}
+
+.ho-cols {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(320px, 26vw, 400px);
+  gap: 16px;
+}
+.ho-panel {
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ho-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.ho-meta .l {
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--sv-mute);
+}
+.ho-meta .v {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--sv-ink);
+  margin-top: 3px;
+}
+
+/* one action, or one reason there is none */
+.ho-block {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 16px 18px;
+  border-radius: var(--sv-r-md);
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.ho-block.warn {
+  background: color-mix(in srgb, var(--sv-warn) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--sv-warn) 35%, transparent);
+  color: var(--sv-warn);
+}
+.ho-block.ok {
+  background: var(--sv-primary-tint);
+  border: 1px solid var(--sv-primary-soft);
+  color: var(--sv-primary);
+}
+
+/* the live queue */
+.ho-queue-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 13px;
+  border-radius: var(--sv-r-md);
+  border: 1px solid var(--sv-line-2);
+  background: var(--sv-surface);
+  cursor: pointer;
+  font: inherit;
+  flex-shrink: 0;
+}
+.ho-queue-row:hover {
+  border-color: var(--sv-primary);
+}
+.ho-owe {
+  font-family: var(--sv-font-mono);
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--sv-warn);
+  white-space: nowrap;
+}
+.ho-none {
+  font-size: 12.5px;
+  color: var(--sv-mute);
+  line-height: 1.6;
+  padding: 10px 2px;
+}
+
+.ho-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  background: var(--sv-surface);
+  border: 1.5px solid var(--sv-line);
+  border-radius: var(--sv-r-lg, 20px);
+}
+.ho-cust {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+.ho-avatar {
+  width: 46px;
+  height: 46px;
+  border-radius: 13px;
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+  flex: 0 0 auto;
+}
+.ho-avatar.sm {
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  font-size: 18px;
+}
+.ho-arrived {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--sv-mute);
+  white-space: nowrap;
+}
+
+.ho-orders {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ho-order {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 10px 12px;
+  border-radius: var(--sv-r-sm);
+  background: var(--sv-fill-2);
+  border: 1px solid var(--sv-line-2);
+  font-size: 18px;
+}
+.ho-from {
+  font-family: var(--sv-font-mono);
+  font-size: 11.5px;
+  color: var(--sv-mute);
+  white-space: nowrap;
+}
+
+.ho-money {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: var(--sv-r-md);
+  background: var(--sv-primary-tint);
+  border: 1px solid var(--sv-primary-soft);
+}
+.ho-money.owes {
+  background: color-mix(in srgb, var(--sv-warn) 12%, transparent);
+  border-color: color-mix(in srgb, var(--sv-warn) 38%, transparent);
+}
+.ho-money .l {
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--sv-mute);
+}
+.ho-money .v {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--sv-ink);
+  margin-top: 3px;
+  font-family: var(--sv-font-mono);
+}
+
+/* Money owed → the cashier must tick this before Complete unlocks. */
+.ho-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  flex: 0 0 auto;
+  padding: 9px 13px;
+  border-radius: var(--sv-r-pill);
+  border: 1.5px solid var(--sv-line);
+  background: var(--sv-surface);
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--sv-ink-2);
+  cursor: pointer;
+}
+.ho-check .box {
+  width: 19px;
+  height: 19px;
+  border-radius: 6px;
+  flex: 0 0 auto;
+  border: 1.5px solid var(--sv-soft);
+  display: grid;
+  place-items: center;
+}
+.ho-check.on {
+  border-color: var(--sv-primary);
+  color: var(--sv-primary);
+}
+.ho-check.on .box {
+  background: var(--sv-primary);
+  border-color: var(--sv-primary);
+}
+
+.ho-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+  padding: 40px 30px;
+}
+.ho-empty h3 {
+  margin: 6px 0 0;
+  font-size: 17px;
+  font-weight: 750;
+  color: var(--sv-ink);
+}
+.ho-empty p {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--sv-mute);
+  max-width: 360px;
+  line-height: 1.6;
+}
+
+/* =====================================================================
+   Kill the browser's swipe-to-navigate gesture.
+
+   A left-to-right swipe is Chrome's "go back" gesture. Without this, a
+   back-swipe on T1 or T3/T4 leaves the app instead of changing tab — the
+   symptom is a pager that only ever moves FORWARD. `touch-action: pan-y`
+   is not enough: it stops the browser SCROLLING horizontally, but the
+   history gesture is overscroll, which is governed by this property.
+   ===================================================================== */
+html,
+body {
+  overscroll-behavior-x: none;
+}
+
+/* Scroll containers must not chain their overscroll up to the document,
+   or the gesture is handed back to the browser at their edge. */
+.swipe-tabs,
+.swipe-tabs .scroll,
+.swipe-tabs .hide-scrollbar {
+  overscroll-behavior-x: contain;
+}
+
+/* Handoff payment (T1) — settling up at pickup. */
+.ho-paid {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--sv-primary);
+}
+
+.hp-due,
+.hp-change {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-radius: var(--sv-r-md);
+  background: var(--sv-fill-2);
+  border: 1px solid var(--sv-line);
+  font-size: 13.5px;
+  color: var(--sv-mute);
+}
+.hp-due strong {
+  font-family: var(--sv-font-mono);
+  font-size: 22px;
+  color: var(--sv-ink);
+}
+.hp-change strong {
+  font-family: var(--sv-font-mono);
+  font-size: 20px;
+  color: var(--sv-warn);
+}
+.hp-change.ok {
+  background: var(--sv-primary-tint);
+  border-color: var(--sv-primary-soft);
+}
+.hp-change.ok strong {
+  color: var(--sv-primary);
+}
+
+.hp-methods {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.hp-method {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 52px;
+  border-radius: var(--sv-r-md);
+  border: 1.5px solid var(--sv-line);
+  background: var(--sv-surface);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--sv-ink-2);
+  cursor: pointer;
+}
+.hp-method.on {
+  border-color: var(--sv-primary);
+  background: var(--sv-primary-tint);
+  color: var(--sv-primary);
+}
+
+.hp-aba {
+  padding: 16px;
+  border-radius: var(--sv-r-md);
+  background: var(--sv-fill-2);
+  border: 1px solid var(--sv-line);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--sv-mute);
+}

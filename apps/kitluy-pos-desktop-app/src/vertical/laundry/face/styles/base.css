@@ -1,0 +1,91 @@
+/* PROVENANCE: donor src/index.css; the Tailwind directives are gone (the face uses none). */
+:root {
+  color-scheme: light dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Shared spinner for dispatch (and other) loading states. */
+@keyframes svspin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  /* dvh = the *real* visible viewport height. Falls back gracefully where
+     the dynamic viewport unit isn't supported. */
+  height: 100dvh;
+  width: 100vw;
+  font-family:
+    "Inter Tight",
+    "Plus Jakarta Sans",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* Kiosk: no rubber-band scroll, no accidental page scroll above the app. */
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+body {
+  /* On a touchscreen we never want the page itself to scroll. Individual
+     panels opt back in with overflow: auto. */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button {
+  font-family: inherit;
+  /* Touch targets shouldn't show a long-press text selection bubble. */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+input,
+textarea {
+  font-family: inherit;
+}
+
+/* Hide scrollbars on the scrollable list/grid containers but keep scroll
+   behaviour. Cashier flow: a thin native bar is fine, but on touch a
+   visible scrollbar steals horizontal space and looks broken when the
+   user drags directly. */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(15, 23, 42, 0.18);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(15, 23, 42, 0.28);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Opt-in: keep overflow scroll/wheel/trackpad behaviour; hide native scrollbar chrome. */
+.hide-scrollbar,
+.hide-scrollbar.scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.hide-scrollbar::-webkit-scrollbar,
+.hide-scrollbar.scroll::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}

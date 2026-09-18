@@ -1,0 +1,108 @@
+/* Shared touch pads — letter keyboard (left) + phone numpad (right) */
+
+:root {
+  --kl-pad-key-h: 56px;
+  --kl-pad-gap: 6px;
+  --kl-pad-radius: 12px;
+  --kl-pad-status-h: 30px;
+  /* status + 4 rows + 3 gaps (matches OnScreenKeyboard + numpad grid) */
+  --kl-pad-grid-h: calc(4 * var(--kl-pad-key-h) + 3 * var(--kl-pad-gap));
+  /* Step 0 create-customer: nudge keyboard up to align with booking-panel numpad */
+  --kl-keyboard-lift-create: 65px;
+}
+
+.kl-touch-pad-zone {
+  flex-shrink: 0;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.kl-pad-status {
+  min-height: var(--kl-pad-status-h);
+  margin-bottom: var(--kl-pad-gap);
+  display: flex;
+  align-items: flex-end;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--sv-ink, #1b1b1b);
+  word-break: break-all;
+}
+
+.kl-pad-status.right {
+  justify-content: flex-end;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.3px;
+}
+
+.kl-pad-status.left {
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.kl-pad-status.muted {
+  color: var(--sv-mute, #7f7f7f);
+  font-weight: 600;
+}
+
+.kl-numpad-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--kl-pad-gap);
+  width: 100%;
+  min-width: 0;
+}
+
+.kl-numpad-key {
+  height: var(--kl-pad-key-h);
+  min-width: 0;
+  box-sizing: border-box;
+  border-radius: var(--kl-pad-radius);
+  border: 1.5px solid var(--sv-line, #eee);
+  background: var(--sv-surface, #fff);
+  color: var(--sv-ink, #1b1b1b);
+  font-family: var(--sv-font, system-ui);
+  font-size: 22px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.kl-numpad-key--plus {
+  background: var(--sv-primary-tint, #ecf6f1);
+  color: var(--sv-primary-deep, #1f5e50);
+  font-size: 17px;
+}
+
+.kl-numpad-key--back {
+  background: var(--sv-danger-soft, #fce7e4);
+  color: var(--sv-danger, #cb3a31);
+}
+
+.kl-numpad-key:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.kl-touch-pad-footer {
+  flex-shrink: 0;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  border-top: 1px solid var(--sv-line, #eee);
+}
+
+/* Create-customer (step 0 main): lift keyboard band to line up Q row with numpad row 1 */
+.sv-menu-card.sv-step0-new-mode .sv-step0-new-body > .kl-touch-pad-footer {
+  position: relative;
+  top: calc(-1 * var(--kl-keyboard-lift-create));
+}

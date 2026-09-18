@@ -122,7 +122,14 @@ describe("no cloud path for Store operations", () => {
       "electron/preload.cts",
       "src/App.tsx",
       "src/pin-screen.tsx",
-      "src/intake-screen.tsx",
+      // The ported Laundry T1 face (T1-FACE-PORT-001): the donor's staff login
+      // did not come with it.
+      "src/vertical/laundry/face/index.tsx",
+      "src/vertical/laundry/face/ports.ts",
+      "src/vertical/laundry/face/features/t1-pos/T1POS.tsx",
+      "src/vertical/laundry/face/features/t1-pos/laundry-savor/LaundryTopBar.tsx",
+      "src/vertical/laundry/face/features/t1-pos/new-order/Step0Customer.tsx",
+      "src/vertical/laundry/face/features/t1-pos/new-order/Step3Review.tsx",
     ].map((file) =>
       // Code, not comments: the comments SAY there is no such thing.
       readFileSync(join(root, file), "utf8")

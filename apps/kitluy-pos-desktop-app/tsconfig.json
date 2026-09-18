@@ -7,7 +7,9 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "noEmit": true,
     "declaration": false,
-    "declarationMap": false
+    "declarationMap": false,
+    "baseUrl": ".",
+    "paths": { "@face/*": ["./src/vertical/laundry/face/*"] }
   },
   "include": ["src", "test", "vite.config.ts"]
 }

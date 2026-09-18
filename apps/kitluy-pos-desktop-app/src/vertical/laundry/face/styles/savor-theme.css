@@ -1,0 +1,188 @@
+/* KitLuy Savor — light / dark theme tokens (aligned with Café POS savor.css) */
+
+:root {
+  color-scheme: light;
+
+  /* Shared KitLuy primitives (pre-auth, terminal launcher) */
+  --kl-primary: #35977d;
+  --kl-primary-dark: #2f8470;
+  --kl-primary-deep: #1f5e50;
+  --kl-primary-tint: #ecf6f1;
+  --kl-ink: #1b1b1b;
+  --kl-ink-2: #4d4d4d;
+  --kl-mute: #7f7f7f;
+  --kl-soft: #a5a5a5;
+  --kl-line: #eeeeee;
+  --kl-fill: #f6f6f6;
+  --kl-surface: #ffffff;
+  --kl-danger: #cb3a31;
+  --kl-danger-soft: #fce7e4;
+  --kl-warn: #f79e1b;
+  --kl-btn-soft: #f3f3f3;
+  --kl-btn-soft-2: #efefef;
+  --kl-sh-md: 0 4px 12px rgba(0, 0, 0, 0.06);
+  --kl-sh-lg: 0 16px 40px rgba(0, 0, 0, 0.1);
+
+  /* Savor workspace tokens */
+  --sv-primary: #35977d;
+  --sv-primary-dark: #2f8470;
+  --sv-primary-deep: #1f5e50;
+  --sv-primary-soft: #b7dbc9;
+  --sv-primary-tint: #ecf6f1;
+  --sv-ink: #1b1b1b;
+  --sv-ink-2: #4d4d4d;
+  --sv-mute: #7f7f7f;
+  --sv-soft: #a5a5a5;
+  --sv-line: #eeeeee;
+  --sv-line-2: #e3e3e3;
+  --sv-fill: #f6f6f6;
+  --sv-fill-2: #f7f7f7;
+  --sv-surface: #ffffff;
+  --sv-btn-soft: #f3f3f3;
+  --sv-btn-soft-2: #efefef;
+  --sv-danger: #cb3a31;
+  --sv-danger-soft: #fce7e4;
+  --sv-warn: #f79e1b;
+  --sv-font:
+    "Inter Tight", "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --sv-font-km: "Noto Sans Khmer", var(--sv-font);
+  --sv-font-mono: ui-monospace, "JetBrains Mono", Menlo, monospace;
+  --sv-r-sm: 12px;
+  --sv-r-md: 16px;
+  --sv-r-lg: 20px;
+  --sv-r-pill: 999px;
+  --sv-sh-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --sv-sh-md: 0 4px 12px rgba(0, 0, 0, 0.06);
+  --sv-sh-lg: 0 16px 40px rgba(0, 0, 0, 0.1), 0 2px 6px rgba(0, 0, 0, 0.04);
+  --sv-sh-press: 0 6px 16px rgba(53, 151, 125, 0.25);
+
+  /* Customer activity heatmap (light) */
+  --sv-heat-empty: var(--sv-fill-2);
+  --sv-heat-1: #eaf5ef;
+  --sv-heat-2: #c6e5d3;
+  --sv-heat-3: #7fc3a3;
+  --sv-heat-4: #47a37d;
+  --sv-heat-5: var(--sv-primary);
+}
+
+body[data-theme="dark"] {
+  color-scheme: dark;
+
+  --kl-ink: #ffffff;
+  --kl-ink-2: #e3e3e3;
+  --kl-mute: #a5a5a5;
+  --kl-soft: #7f7f7f;
+  --kl-line: #2a2a2a;
+  --kl-fill: #0d0d0d;
+  --kl-surface: #1b1b1b;
+  --kl-primary-tint: rgba(53, 151, 125, 0.16);
+  --kl-danger-soft: rgba(203, 58, 49, 0.18);
+  --kl-btn-soft: #2a2a2a;
+  --kl-btn-soft-2: #242424;
+  --kl-sh-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --kl-sh-lg: 0 16px 40px rgba(0, 0, 0, 0.55);
+
+  --sv-ink: #ffffff;
+  --sv-ink-2: #e3e3e3;
+  --sv-mute: #a5a5a5;
+  --sv-soft: #7f7f7f;
+  --sv-line: #2a2a2a;
+  --sv-line-2: #1f1f1f;
+  --sv-fill: #0d0d0d;
+  --sv-fill-2: #151515;
+  --sv-surface: #1b1b1b;
+  --sv-btn-soft: #2a2a2a;
+  --sv-btn-soft-2: #242424;
+  --sv-primary-tint: rgba(53, 151, 125, 0.16);
+  --sv-primary-soft: rgba(53, 151, 125, 0.32);
+  --sv-danger-soft: rgba(203, 58, 49, 0.18);
+  --sv-sh-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --sv-sh-lg: 0 16px 40px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.3);
+  --sv-sh-press: 0 6px 16px rgba(53, 151, 125, 0.35);
+
+  /* Customer activity heatmap (dark) */
+  --sv-heat-empty: var(--sv-fill-2);
+  --sv-heat-1: rgba(53, 151, 125, 0.12);
+  --sv-heat-2: rgba(53, 151, 125, 0.22);
+  --sv-heat-3: rgba(53, 151, 125, 0.38);
+  --sv-heat-4: rgba(53, 151, 125, 0.58);
+  --sv-heat-5: var(--sv-primary);
+}
+
+html,
+body,
+#root {
+  background: var(--kl-fill);
+  color: var(--kl-ink);
+  font-family: var(--sv-font);
+  font-size: 15px;
+  letter-spacing: -0.01em;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* T1 shell — map legacy --lsv-* aliases to Savor tokens */
+.lsv-shell {
+  --lsv-primary: var(--sv-primary);
+  --lsv-primary-dark: var(--sv-primary-dark);
+  --lsv-primary-deep: var(--sv-primary-deep);
+  --lsv-primary-light: var(--sv-primary-soft);
+  --lsv-primary-soft: var(--sv-primary-tint);
+  --lsv-ink: var(--sv-ink);
+  --lsv-mute: var(--sv-mute);
+  --lsv-text-ter: var(--sv-soft);
+  --lsv-border: var(--sv-line);
+  --lsv-card: var(--sv-surface);
+  --lsv-bg: var(--sv-fill);
+  --lsv-fill: var(--sv-fill);
+  --lsv-fill-2: var(--sv-fill-2);
+  --lsv-danger: var(--sv-danger);
+  --lsv-green: #10b981;
+  --lsv-amber: var(--sv-warn);
+  --lsv-shadow-sm: var(--sv-sh-sm);
+  --lsv-shadow-md: var(--sv-sh-md);
+  font-family: var(--sv-font);
+  font-size: 15px;
+  letter-spacing: -0.01em;
+}
+
+button {
+  font-family: inherit;
+  letter-spacing: inherit;
+}
+
+body[data-theme="dark"] .kl-btn--soft {
+  background: var(--kl-btn-soft);
+  color: var(--kl-ink);
+}
+
+body[data-theme="dark"] .kl-btn--soft:hover {
+  background: var(--kl-btn-soft-2);
+}
+
+body[data-theme="dark"] .sv-cta:disabled {
+  color: var(--sv-mute);
+}
+
+body[data-theme="dark"] ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+}
+body[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.kl-theme-toggle {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid var(--kl-line);
+  background: var(--kl-surface);
+  color: var(--kl-ink);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.kl-theme-toggle:hover {
+  background: var(--kl-btn-soft);
+}

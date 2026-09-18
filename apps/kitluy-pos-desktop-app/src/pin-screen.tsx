@@ -21,6 +21,12 @@ import type { KitluyLocale } from "@kitluy/localization";
 
 import { T1_PIN_BRIDGE_KEY, type PinVerdict, type T1PinBridge } from "./bootstrap/bridge-types.js";
 import type { T1BootstrapReport } from "./bootstrap/states.js";
+// The lock screen wears the Laundry face's theme and touch pad (T1-FACE-PORT-001)
+// so the first thing a cashier sees is the designed product, not a scaffold.
+import "./vertical/laundry/face/styles/fonts.css";
+import "./vertical/laundry/face/styles/savor-theme.css";
+import "./vertical/laundry/face/styles/touch-input-pad.css";
+import "./pin-screen.css";
 
 const TEXT = {
   "km-KH": {
@@ -181,37 +187,68 @@ export function PinScreen(props: {
           : null;
 
   return (
-    <section data-pin-screen={face} aria-label={title}>
-      <h2>{title}</h2>
-      {hint !== null ? <p>{hint}</p> : null}
-      <p aria-label="pin-entry" data-pin-length={entry.length}>
-        {[0, 1, 2, 3].map((i) => (
-          <span key={i} data-dot={i < entry.length ? "filled" : "empty"}>
-            {i < entry.length ? "●" : "○"}{" "}
-          </span>
-        ))}
-      </p>
-      {busy ? <p>{text.busy}</p> : null}
-      {message !== null ? (
-        <p role="alert">
-          {message}
-          {attempts !== null ? ` — ${String(attempts)} ${text.attemptsLeft}` : ""}
+    <section data-pin-screen={face} aria-label={title} className="lsv-shell kl-pin-screen">
+      <div className="kl-pin-card">
+        <div className="kl-pin-brand">
+          <div className="kl-pin-brand-mark" aria-hidden>
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.4"
+              strokeLinecap="round"
+            >
+              <circle cx="5" cy="12" r="2.4" fill="currentColor" />
+              <line x1="7.4" y1="12" x2="12" y2="12" />
+              <circle cx="12" cy="12" r="2.4" fill="none" stroke="currentColor" />
+              <line x1="14.4" y1="12" x2="19" y2="12" />
+              <circle cx="19" cy="12" r="2.4" fill="currentColor" />
+            </svg>
+          </div>
+          <div>
+            <div className="kl-pin-brand-name">KitLuy</div>
+            <div className="kl-pin-brand-km km">ឃីត់លុយ · Laundry</div>
+          </div>
+        </div>
+        <h2 className="kl-pin-title">{title}</h2>
+        {hint !== null ? <p className="kl-pin-hint">{hint}</p> : null}
+        <p className="kl-pin-dots" aria-label="pin-entry" data-pin-length={entry.length}>
+          {[0, 1, 2, 3].map((i) => (
+            <span key={i} data-dot={i < entry.length ? "filled" : "empty"} className="kl-pin-dot">
+              {i < entry.length ? "●" : "○"}
+            </span>
+          ))}
         </p>
-      ) : null}
-      <div role="group" aria-label="keypad">
-        {KEYS.map((key) => (
-          <button
-            key={key}
-            type="button"
-            disabled={busy || face === "locked"}
-            onClick={() => {
-              press(key);
-            }}
-            data-key={key}
-          >
-            {key === "clear" ? text.clear : key === "back" ? text.back : key}
-          </button>
-        ))}
+        {busy ? <p className="kl-pin-hint">{text.busy}</p> : null}
+        {message !== null ? (
+          <p role="alert" className="kl-pin-alert">
+            {message}
+            {attempts !== null ? ` — ${String(attempts)} ${text.attemptsLeft}` : ""}
+          </p>
+        ) : null}
+        <div role="group" aria-label="keypad" className="kl-numpad-grid kl-pin-keypad">
+          {KEYS.map((key) => (
+            <button
+              key={key}
+              type="button"
+              className={
+                "kl-numpad-key" +
+                (key === "clear"
+                  ? " kl-numpad-key--plus"
+                  : key === "back"
+                    ? " kl-numpad-key--back"
+                    : "")
+              }
+              disabled={busy || face === "locked"}
+              onClick={() => {
+                press(key);
+              }}
+              data-key={key}
+            >
+              {key === "clear" ? text.clear : key === "back" ? text.back : key}
+            </button>
+          ))}
+        </div>
       </div>
     </section>
   );

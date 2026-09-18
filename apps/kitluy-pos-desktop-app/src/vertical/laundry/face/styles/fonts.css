@@ -1,0 +1,15 @@
+/*
+ * Fonts bundled with the face. The donor loaded Inter Tight, Plus Jakarta Sans
+ * and Noto Sans Khmer from Google Fonts at runtime; a kiosk on the Store LAN
+ * has no such route, so the Khmer face ships here (the donor's own variable
+ * TTF, SIL OFL) and Latin falls to the system stack the image carries
+ * (`fonts-dejavu-core`). [REQUIRED: owner-supplied Inter Tight files to match
+ * the design's Latin face exactly.]
+ */
+@font-face {
+  font-family: "Noto Sans Khmer";
+  src: url("../assets/fonts/NotoSansKhmer-Regular.ttf") format("truetype");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
