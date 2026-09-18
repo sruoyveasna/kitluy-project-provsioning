@@ -26,6 +26,7 @@ export const DEFAULT_ROOTS = {
     netDir: "/sys/class/net",
     routePath: "/proc/net/route",
     releaseStoreDir: "/persistent/shared/kitluy/releases/device-shell",
+    terminalReleaseStoreDir: "/persistent/shared/kitluy/releases/kitluy-terminal",
 };
 const REGISTRATION_PHASES = [
     "NOT_REGISTERED",
@@ -233,6 +234,44 @@ export function readRelease(roots = DEFAULT_ROOTS) {
         lastReason,
     };
 }
+/**
+ * T1-FIRST-BOOT-PIN-001: the device PIN posture the root agent publishes at
+ * `terminal/device-pin.json`. A missing or malformed file is `absent` — a fresh
+ * card, or an image whose agent predates the PIN; either way the person must
+ * create one before the board goes further.
+ */
+export function readDevicePin(stateDir = DEFAULT_ROOTS.stateDir) {
+    const raw = readJsonOrNull(join(stateDir, "terminal", "device-pin.json"));
+    const state = raw?.["state"];
+    return { state: state === "sealed" || state === "registered" ? state : "absent" };
+}
+/** The POS application's install journal, or null when the runtime has none yet. */
+export function readApplicationInstall(roots = DEFAULT_ROOTS) {
+    const journal = readJsonOrNull(join(roots.terminalReleaseStoreDir, "journal.json"));
+    if (journal === null)
+        return null;
+    const rawPhase = journal["phase"];
+    const phase = rawPhase === "ACTIVATING" ||
+        rawPhase === "HEALTH_PENDING" ||
+        rawPhase === "COMMITTED" ||
+        rawPhase === "ROLLED_BACK" ||
+        rawPhase === "FAILED"
+        ? rawPhase
+        : "IDLE";
+    const lastResult = journal["lastResult"];
+    const outcome = lastResult?.["outcome"];
+    return {
+        phase,
+        installedVersion: typeof journal["committedVersion"] === "string" ? journal["committedVersion"] : null,
+        lastOutcome: outcome === "INSTALLED" ||
+            outcome === "ROLLED_BACK" ||
+            outcome === "REFUSED" ||
+            outcome === "INTERRUPTED"
+            ? outcome
+            : null,
+        lastReason: typeof lastResult?.["reason"] === "string" ? lastResult["reason"] : null,
+    };
+}
 /** Never throws: an unreadable or malformed file reads as absent. */
 function readJsonOrNull(path) {
     try {
@@ -258,6 +297,8 @@ export function readSnapshot(roots = DEFAULT_ROOTS) {
             : { keyFingerprint: registration.keyFingerprint }),
         ...(deviceRecordId === undefined ? {} : { deviceRecordId }),
         release: readRelease(roots),
+        devicePin: readDevicePin(roots.stateDir),
+        application: readApplicationInstall(roots),
     };
 }
 //# sourceMappingURL=device-state-files.js.map

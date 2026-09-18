@@ -19,6 +19,7 @@ const electron_1 = require("electron");
 const SNAPSHOT_CHANNEL = "kitluy:shell:snapshot";
 const SNAPSHOT_CHANGED_CHANNEL = "kitluy:shell:snapshot-changed";
 const SUBMIT_CODE_CHANNEL = "kitluy:shell:submit-code";
+const DEVICE_PIN_SETUP_CHANNEL = "kitluy:shell:device-pin-setup";
 const NETWORK_STATUS_CHANNEL = "kitluy:shell:network-status";
 const NETWORK_SCAN_CHANNEL = "kitluy:shell:network-scan";
 const NETWORK_JOIN_CHANNEL = "kitluy:shell:network-join";
@@ -35,6 +36,8 @@ electron_1.contextBridge.exposeInMainWorld("kitluyShell", {
         electron_1.ipcRenderer.on(SNAPSHOT_CHANGED_CHANNEL, (_event, snapshot) => callback(snapshot));
     },
     submitPairingCode: (code) => electron_1.ipcRenderer.invoke(SUBMIT_CODE_CHANNEL, code),
+    // T1-FIRST-BOOT-PIN-001: the first-boot device PIN, sealed by the root broker.
+    setupDevicePin: (pin, pinConfirmation) => electron_1.ipcRenderer.invoke(DEVICE_PIN_SETUP_CHANNEL, pin, pinConfirmation),
     // --- Settings -------------------------------------------------------------
     getNetworkStatus: () => electron_1.ipcRenderer.invoke(NETWORK_STATUS_CHANNEL),
     scanNetworks: () => electron_1.ipcRenderer.invoke(NETWORK_SCAN_CHANNEL),

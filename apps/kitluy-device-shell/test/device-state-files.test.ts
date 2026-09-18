@@ -21,6 +21,7 @@ beforeEach(() => {
     netDir: join(root, "net"),
     routePath: join(root, "route"),
     releaseStoreDir: join(root, "releases"),
+    terminalReleaseStoreDir: join(root, "releases-terminal"),
   };
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));

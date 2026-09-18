@@ -267,6 +267,108 @@ describe("one attempt, and the status an operator is left with", () => {
     expect(JSON.parse(readFileSync(w.lastPath, "utf8"))).toEqual({ host: "10.0.0.5", port: 7443 });
   });
 
+  it("T1-FIRST-BOOT-PIN-001: registers the sealed first-boot PIN with the Hub on setup_required, once, and never writes it anywhere", async () => {
+    const w = workspace();
+    writeCredentials(w.operationalDir);
+    const calls: { path: string; body: unknown }[] = [];
+    let registered = 0;
+    let unsealed = 0;
+    const status = await runEdgeAttempt({
+      environment: "development",
+      operationalDir: w.operationalDir,
+      statusPath: w.statusPath,
+      lastEndpointPath: w.lastPath,
+      discover: () => Promise.resolve([{ host: "10.0.0.5", port: 7443, instance: "hub" }]),
+      devicePin: {
+        unseal: () => {
+          unsealed += 1;
+          return "4812";
+        },
+        onRegistered: () => {
+          registered += 1;
+        },
+      },
+      requestFn: (input) => {
+        calls.push({ path: input.path, body: input.body });
+        const pinAnswer = (state: string) => ({
+          result: "TERMINAL_PIN_STATUS",
+          pin: {
+            state,
+            pinVersion: state === "set" ? 1 : 0,
+            setAt: null,
+            lockedUntil: null,
+            attemptsBeforeLock: 5,
+          },
+          session: null,
+        });
+        return Promise.resolve({
+          status: 200,
+          body: input.path.startsWith("/.well-known")
+            ? payload()
+            : input.path === "/edge/v1/terminal-pin/status"
+              ? pinAnswer("setup_required")
+              : input.path === "/edge/v1/terminal-pin/setup"
+                ? pinAnswer("set")
+                : { ok: true },
+          peerCertificateFingerprint: FINGERPRINT,
+          peerDeviceId: HUB_ID,
+        });
+      },
+    });
+    expect(status.phase).toBe("SERVING");
+    const setup = calls.find((c) => c.path === "/edge/v1/terminal-pin/setup");
+    expect(setup?.body).toEqual({ pin: "4812", pinConfirmation: "4812" });
+    expect(unsealed).toBe(1);
+    expect(registered).toBe(1);
+    // The attempt's own status answer is the Hub's post-setup answer: set.
+    expect(status.terminalPin?.state).toBe("set");
+    // Nothing on disk carries the digits.
+    expect(readFileSync(w.statusPath, "utf8")).not.toContain("4812");
+    expect(readFileSync(w.lastPath, "utf8")).not.toContain("4812");
+
+    // Nothing sealed (already registered, or a board without one): no setup call.
+    calls.length = 0;
+    const idle = await runEdgeAttempt({
+      environment: "development",
+      operationalDir: w.operationalDir,
+      statusPath: w.statusPath,
+      lastEndpointPath: w.lastPath,
+      discover: () => Promise.resolve([{ host: "10.0.0.5", port: 7443, instance: "hub" }]),
+      devicePin: {
+        unseal: () => null,
+        onRegistered: () => {
+          registered += 1;
+        },
+      },
+      requestFn: (input) => {
+        calls.push({ path: input.path, body: input.body });
+        return Promise.resolve({
+          status: 200,
+          body: input.path.startsWith("/.well-known")
+            ? payload()
+            : input.path === "/edge/v1/terminal-pin/status"
+              ? {
+                  result: "TERMINAL_PIN_STATUS",
+                  pin: {
+                    state: "setup_required",
+                    pinVersion: 0,
+                    setAt: null,
+                    lockedUntil: null,
+                    attemptsBeforeLock: 5,
+                  },
+                  session: null,
+                }
+              : { ok: true },
+          peerCertificateFingerprint: FINGERPRINT,
+          peerDeviceId: HUB_ID,
+        });
+      },
+    });
+    expect(idle.phase).toBe("SERVING");
+    expect(calls.some((c) => c.path === "/edge/v1/terminal-pin/setup")).toBe(false);
+    expect(registered).toBe(1);
+  });
+
   it("records the Store Hub's Terminal PIN answer, and an older Hub without it is still SERVING", async () => {
     const w = workspace();
     writeCredentials(w.operationalDir);

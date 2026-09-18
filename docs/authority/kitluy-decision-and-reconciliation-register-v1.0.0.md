@@ -5207,3 +5207,15 @@ Owner instruction 2026-09-18 ("get the app from this project first, this is our 
 **Provisional / `[REQUIRED]`.** Inter Tight and Plus Jakarta Sans font files for the exact Latin look (the Khmer face is bundled); the bootstrap report's terminal profile code (the launcher assumes T1 by construction).
 
 **Status.** Face released to the development Terminal (`0.1.0-face-202609181452`, `git-5809ead`) and seen on its screen; the catalog delivery (slice 2) and Booking lines (WS-12-T003) are the next steps.
+
+## KLD-2026-09-18-FIRST-BOOT-PIN-001 — the Terminal PIN is created at FIRST BOOT on the device and registered with the Store Hub at pairing (OWNER-DECIDED; amends KLD-2026-09-03-TERMINAL-PROVISIONING-001 §10)
+
+Owner instruction 2026-09-18, after seeing the first release of the Laundry face on the Terminal: "for PIN set up first boot, it stay in the image by default like you set up a PIN for your device … when first boot up we must input the pin then app installing. it should show installing app progressing and when done should show terminal selection" — and, on the model put to them (device asks first, Hub still verifies): "yes … the PIN number that we use is the pin that we set already when in first boot".
+
+**What changes.** KLD-2026-09-03 §10 said the Terminal PIN is "created twice after the application installs". It is now created twice at FIRST BOOT, on the Device Shell, before registration, approval and pairing; the same PIN unlocks the terminal from the application's terminal-selection screen later.
+
+**What stands.** KLD-2026-09-17-TERMINAL-PIN-DEVICE-CREDENTIAL-001: the Store Hub is the verifier — Argon2id verifier, attempt window and lock, "PIN set" as a Hub fact, one shared Terminal PIN per device, no staff login. A fresh board has no Hub, so the PIN waits on the device SEALED (AES-256-GCM under an HKDF key from the device identity key; root 0600; the Shell sends the digits through the root broker and can never read them back). At the first Hub link that answers `setup_required`, terminal-edge performs the Hub's own setup with it and destroys the seal. The application's "create PIN" screen remains only for a Hub-side reset.
+
+**Sequence on a fresh card.** Device PIN (twice) → registration → admin approval → pairing code → "Installing KitLuy" with the update journal's phases (the update agent is asked to check at once, not on its next poll) → the application → terminal selection → the PIN → the counter.
+
+**Evidence.** `services/kitluy-device-firstboot-agent/src/device-pin.ts` (+ broker verbs `pin.status`, `pin.setup`, `update.check`; `edge-session.ts` registration), `apps/kitluy-device-shell` (`pin_setup` and `installing` screens), `apps/kitluy-pos-desktop-app` (`registering` face; `devicePin` in the report). Handoff 50 §7.

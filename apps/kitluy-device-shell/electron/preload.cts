@@ -18,6 +18,7 @@ import { contextBridge, ipcRenderer } from "electron";
 const SNAPSHOT_CHANNEL = "kitluy:shell:snapshot";
 const SNAPSHOT_CHANGED_CHANNEL = "kitluy:shell:snapshot-changed";
 const SUBMIT_CODE_CHANNEL = "kitluy:shell:submit-code";
+const DEVICE_PIN_SETUP_CHANNEL = "kitluy:shell:device-pin-setup";
 const NETWORK_STATUS_CHANNEL = "kitluy:shell:network-status";
 const NETWORK_SCAN_CHANNEL = "kitluy:shell:network-scan";
 const NETWORK_JOIN_CHANNEL = "kitluy:shell:network-join";
@@ -36,6 +37,9 @@ contextBridge.exposeInMainWorld("kitluyShell", {
   },
   submitPairingCode: (code: string): Promise<unknown> =>
     ipcRenderer.invoke(SUBMIT_CODE_CHANNEL, code),
+  // T1-FIRST-BOOT-PIN-001: the first-boot device PIN, sealed by the root broker.
+  setupDevicePin: (pin: string, pinConfirmation: string): Promise<unknown> =>
+    ipcRenderer.invoke(DEVICE_PIN_SETUP_CHANNEL, pin, pinConfirmation),
 
   // --- Settings -------------------------------------------------------------
   getNetworkStatus: (): Promise<unknown> => ipcRenderer.invoke(NETWORK_STATUS_CHANNEL),

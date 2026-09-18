@@ -78,6 +78,14 @@ export interface TerminalPinSummary {
   readonly state: "setup_required" | "set" | "reset_required";
   readonly lockedUntil: string | null;
   readonly attemptsBeforeLock: number;
+  /**
+   * T1-FIRST-BOOT-PIN-001: the DEVICE's posture, published by the root agent
+   * (`/var/lib/kitluy/terminal/device-pin.json`): `sealed` means the PIN a person
+   * created at first boot is waiting for terminal-edge to register it with the
+   * Hub — the POS then waits rather than asking for a new one. Absent on the
+   * WS-12-T001 workstation composition.
+   */
+  readonly devicePin?: "absent" | "sealed" | "registered";
 }
 
 /**

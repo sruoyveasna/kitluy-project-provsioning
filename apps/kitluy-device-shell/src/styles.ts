@@ -46,6 +46,10 @@ button { font-family: inherit; cursor: none; }
 .kt-box { width: 56px; height: 72px; display: grid; place-items: center; border: 2px solid var(--line); border-radius: 12px; background: var(--box); font-family: var(--mono); font-size: 34px; font-weight: 600; }
 .kt-box-filled { border-color: var(--accent); color: var(--accent); }
 .kt-keypad { display: grid; grid-template-columns: repeat(8, 1fr); gap: 10px; margin: 22px 0; }
+.kt-keypad-digits { grid-template-columns: repeat(5, 1fr); max-width: 520px; margin-left: auto; margin-right: auto; }
+.kt-progress { display: flex; gap: 10px; justify-content: center; margin-top: 26px; }
+.kt-progress-step { width: 64px; height: 10px; border-radius: 6px; background: var(--line); }
+.kt-progress-step-done { background: var(--accent); }
 .kt-key { min-height: 64px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); font-family: var(--mono); font-size: 22px; font-weight: 600; }
 .kt-key:active { background: var(--accent); color: var(--accent-ink); }
 .kt-actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }

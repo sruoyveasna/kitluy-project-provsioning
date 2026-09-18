@@ -39,6 +39,9 @@ const TEXT = {
     locked: "PIN ត្រូវបានចាក់សោ",
     lockedHint: "បញ្ចូលខុសច្រើនដងពេក។ សូមរង់ចាំរហូតដល់",
     resetHint: "PIN ត្រូវបានកំណត់ឡើងវិញ។ បង្កើត PIN ថ្មី។",
+    registering: "កំពុងចុះឈ្មោះ PIN របស់ឧបករណ៍ជាមួយ Store Hub…",
+    registeringHint:
+      "PIN ដែលអ្នកបានបង្កើតនៅពេលចាប់ផ្តើមដំបូង នឹងដោះសោ Terminal នេះក្នុងពេលបន្តិចទៀត។",
     mismatch: "លេខទាំងពីរមិនដូចគ្នាទេ។ សូមព្យាយាមម្ដងទៀត។",
     incorrect: "PIN មិនត្រឹមត្រូវ",
     attemptsLeft: "ការព្យាយាមនៅសល់",
@@ -57,6 +60,8 @@ const TEXT = {
     locked: "PIN locked",
     lockedHint: "Too many wrong entries. Wait until",
     resetHint: "The PIN was reset. Create a new one.",
+    registering: "Registering the device PIN with the Store Hub…",
+    registeringHint: "The PIN you created at first boot will unlock this terminal in a moment.",
     mismatch: "The two entries differ. Try again.",
     incorrect: "Incorrect PIN",
     attemptsLeft: "attempts left",
@@ -74,7 +79,13 @@ function pinBridge(): T1PinBridge | undefined {
   return (window as unknown as Record<string, T1PinBridge | undefined>)[T1_PIN_BRIDGE_KEY];
 }
 
-type Face = "create" | "confirm" | "unlock" | "locked";
+/**
+ * `registering` — T1-FIRST-BOOT-PIN-001: the Hub still says `setup_required`
+ * but the device holds the PIN created at first boot (`devicePin: "sealed"`);
+ * terminal-edge registers it on its next pass. The create face remains only
+ * for a Hub-side reset (or a device that never sealed one).
+ */
+type Face = "create" | "confirm" | "unlock" | "locked" | "registering";
 
 export function PinPad(props: {
   readonly locale: KitluyLocale;
@@ -99,14 +110,17 @@ export function PinPad(props: {
   if (bridge === undefined) return <p data-pin-screen="unavailable">{text.unavailable}</p>;
 
   const needsSetup = posture === undefined || posture.state !== "set";
+  const registering = posture?.state === "setup_required" && posture.devicePin === "sealed";
   const face: Face =
     lockedUntil !== null
       ? "locked"
-      : needsSetup
-        ? first === null
-          ? "create"
-          : "confirm"
-        : "unlock";
+      : registering
+        ? "registering"
+        : needsSetup
+          ? first === null
+            ? "create"
+            : "confirm"
+          : "unlock";
 
   const settle = (verdict: PinVerdict): void => {
     if (verdict.ok) {
@@ -154,7 +168,7 @@ export function PinPad(props: {
   };
 
   const press = (key: (typeof KEYS)[number]): void => {
-    if (busy || face === "locked") return;
+    if (busy || face === "locked" || face === "registering") return;
     if (key === "clear") {
       setEntry("");
       return;
@@ -175,7 +189,9 @@ export function PinPad(props: {
         ? text.confirm
         : face === "locked"
           ? text.locked
-          : text.unlock;
+          : face === "registering"
+            ? text.registering
+            : text.unlock;
   const hint =
     face === "create"
       ? posture?.state === "reset_required"
@@ -185,7 +201,9 @@ export function PinPad(props: {
         ? text.confirmHint
         : face === "locked"
           ? `${text.lockedHint} ${lockedUntil ?? ""}`
-          : null;
+          : face === "registering"
+            ? text.registeringHint
+            : null;
 
   return (
     <section data-pin-screen={face} aria-label={title} className="kl-pin-pad">
@@ -230,7 +248,7 @@ export function PinPad(props: {
                   ? " kl-numpad-key--back"
                   : "")
             }
-            disabled={busy || face === "locked"}
+            disabled={busy || face === "locked" || face === "registering"}
             onClick={() => {
               press(key);
             }}

@@ -52,6 +52,7 @@ describe("preload surface", () => {
       "getSnapshot",
       "onSnapshot",
       "submitPairingCode",
+      "setupDevicePin",
       "getNetworkStatus",
       "scanNetworks",
       "joinNetwork",

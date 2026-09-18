@@ -45,6 +45,19 @@ export interface ShellMessages {
 
   readonly assignedTitle: string;
   readonly assignedBody: string;
+  // T1-FIRST-BOOT-PIN-001
+  readonly pinCreateTitle: string;
+  readonly pinCreateIntro: string;
+  readonly pinConfirmTitle: string;
+  readonly pinConfirmIntro: string;
+  readonly pinMismatch: string;
+  readonly pinRefused: string;
+  readonly pinStarting: string;
+  readonly installingTitle: string;
+  readonly installingWaiting: string;
+  readonly installingActivating: string;
+  readonly installingHealth: string;
+  readonly installingFailed: string;
 
   readonly switchLanguage: string;
 
@@ -136,6 +149,18 @@ const km: ShellMessages = {
 
   assignedTitle: "បានកំណត់ទៅហាង",
   assignedBody: "ម៉ាស៊ីននេះត្រូវបានកំណត់ទៅហាងមួយ។ វានឹងបញ្ចប់ការរៀបចំដោយខ្លួនឯង។",
+  pinCreateTitle: "បង្កើត PIN របស់ឧបករណ៍",
+  pinCreateIntro: "បញ្ចូលលេខ ៤ ខ្ទង់។ PIN នេះនឹងដោះសោ Terminal នេះនៅពេលក្រោយ។",
+  pinConfirmTitle: "បញ្ជាក់ PIN",
+  pinConfirmIntro: "បញ្ចូលលេខ ៤ ខ្ទង់ដដែលម្ដងទៀត។",
+  pinMismatch: "លេខទាំងពីរមិនដូចគ្នាទេ។ សូមព្យាយាមម្ដងទៀត។",
+  pinRefused: "ឧបករណ៍មិនអាចរក្សាទុក PIN បានទេ",
+  pinStarting: "ឧបករណ៍កំពុងចាប់ផ្តើម… សូមព្យាយាមម្ដងទៀតក្នុងពេលបន្តិចទៀត។",
+  installingTitle: "កំពុងដំឡើងកម្មវិធី KitLuy",
+  installingWaiting: "កំពុងស្នើសុំកម្មវិធីពី Store…",
+  installingActivating: "កំពុងដំឡើង…",
+  installingHealth: "កំពុងពិនិត្យ…",
+  installingFailed: "ការដំឡើងបានបរាជ័យ។ ឧបករណ៍នឹងព្យាយាមម្ដងទៀតជាមួយកំណែថ្មី។",
 
   switchLanguage: "English",
 
@@ -225,6 +250,18 @@ const en: ShellMessages = {
 
   assignedTitle: "Assigned to a Store",
   assignedBody: "This terminal is assigned to a Store. It will finish setting up on its own.",
+  pinCreateTitle: "Create the device PIN",
+  pinCreateIntro: "Enter 4 digits. This PIN unlocks this terminal later.",
+  pinConfirmTitle: "Confirm the PIN",
+  pinConfirmIntro: "Enter the same 4 digits again.",
+  pinMismatch: "The two entries differ. Try again.",
+  pinRefused: "The device could not keep the PIN",
+  pinStarting: "The device is still starting — try again in a moment.",
+  installingTitle: "Installing KitLuy",
+  installingWaiting: "Asking the Store for the application…",
+  installingActivating: "Installing…",
+  installingHealth: "Checking the installation…",
+  installingFailed: "The installation failed. The device retries with a newer version.",
 
   switchLanguage: "ខ្មែរ",
 

@@ -5,7 +5,7 @@
  * injected monotonic one.
  */
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -212,7 +212,7 @@ function hub() {
   return { state, call };
 }
 
-function runtime(h: ReturnType<typeof hub>) {
+function runtime(h: ReturnType<typeof hub>, devicePinPosturePath: string | null = null) {
   let t = 1_000;
   return new PiTerminalRuntime({
     socketPath: "/nonexistent",
@@ -222,10 +222,27 @@ function runtime(h: ReturnType<typeof hub>) {
     bridgeStatus: () => Promise.resolve(STATUS),
     monotonicNow: () => (t += 1),
     logger: { log: () => undefined },
+    devicePinPosturePath,
   });
 }
 
 describe("the Pi Terminal runtime", () => {
+  it("T1-FIRST-BOOT-PIN-001: carries the device's PIN posture beside the Hub's answer, and only the posture", async () => {
+    const posturePath = join(dir, "device-pin.json");
+    writeFileSync(
+      posturePath,
+      JSON.stringify({ schema: "kitluy.device-pin-posture.v1", state: "sealed", sealedAt: "x" }),
+    );
+    const pos = runtime(hub(), posturePath);
+    const report = await pos.refresh();
+    expect(report.state).toBe("staff_authentication_required");
+    expect(report.pin).toMatchObject({ state: "setup_required", devicePin: "sealed" });
+    expect(JSON.stringify(report)).not.toMatch(/sealedAt|ciphertext/u);
+    // No posture file (the workstation composition): nothing is claimed.
+    const bare = await runtime(hub(), join(dir, "missing.json")).refresh();
+    expect(bare.pin).not.toHaveProperty("devicePin");
+  });
+
   it("locked until a PIN is set up twice; unlocked into T1; intake only when READY; locked again on demand", async () => {
     const h = hub();
     const pos = runtime(h);

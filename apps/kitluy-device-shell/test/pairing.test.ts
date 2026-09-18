@@ -198,6 +198,8 @@ describe("the seat on disk", () => {
       pairing: null,
       network: { hasLink: true, hasRoute: true },
       deviceRecordId: DEVICE,
+      // Past first boot: the device PIN exists (T1-FIRST-BOOT-PIN-001).
+      devicePin: { state: "registered" as const },
     };
 
     expect(deriveScreen({ ...base, assignment: null }).kind).toBe("approved_unassigned");

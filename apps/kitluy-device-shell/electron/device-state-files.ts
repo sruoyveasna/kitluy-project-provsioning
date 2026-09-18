@@ -22,6 +22,8 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { readTerminalAssignment } from "./terminal-assignment.js";
 import type {
+  ApplicationInstallView,
+  DevicePinView,
   ReleaseView,
   AssignmentView,
   NetworkState,
@@ -44,6 +46,8 @@ export interface DeviceRoots {
    * the update runtime recorded and never writes to it.
    */
   readonly releaseStoreDir: string;
+  /** The POS application's release store (product `kitluy-terminal`). Read-only. */
+  readonly terminalReleaseStoreDir: string;
 }
 
 export const DEFAULT_ROOTS: DeviceRoots = {
@@ -51,6 +55,7 @@ export const DEFAULT_ROOTS: DeviceRoots = {
   netDir: "/sys/class/net",
   routePath: "/proc/net/route",
   releaseStoreDir: "/persistent/shared/kitluy/releases/device-shell",
+  terminalReleaseStoreDir: "/persistent/shared/kitluy/releases/kitluy-terminal",
 };
 
 const REGISTRATION_PHASES: readonly RegistrationPhase[] = [
@@ -273,6 +278,50 @@ export function readRelease(roots: DeviceRoots = DEFAULT_ROOTS): ReleaseView | n
   };
 }
 
+/**
+ * T1-FIRST-BOOT-PIN-001: the device PIN posture the root agent publishes at
+ * `terminal/device-pin.json`. A missing or malformed file is `absent` — a fresh
+ * card, or an image whose agent predates the PIN; either way the person must
+ * create one before the board goes further.
+ */
+export function readDevicePin(stateDir = DEFAULT_ROOTS.stateDir): DevicePinView {
+  const raw = readJsonOrNull(join(stateDir, "terminal", "device-pin.json"));
+  const state = raw?.["state"];
+  return { state: state === "sealed" || state === "registered" ? state : "absent" };
+}
+
+/** The POS application's install journal, or null when the runtime has none yet. */
+export function readApplicationInstall(
+  roots: DeviceRoots = DEFAULT_ROOTS,
+): ApplicationInstallView | null {
+  const journal = readJsonOrNull(join(roots.terminalReleaseStoreDir, "journal.json"));
+  if (journal === null) return null;
+  const rawPhase = journal["phase"];
+  const phase: ApplicationInstallView["phase"] =
+    rawPhase === "ACTIVATING" ||
+    rawPhase === "HEALTH_PENDING" ||
+    rawPhase === "COMMITTED" ||
+    rawPhase === "ROLLED_BACK" ||
+    rawPhase === "FAILED"
+      ? rawPhase
+      : "IDLE";
+  const lastResult = journal["lastResult"] as Record<string, unknown> | null | undefined;
+  const outcome = lastResult?.["outcome"];
+  return {
+    phase,
+    installedVersion:
+      typeof journal["committedVersion"] === "string" ? journal["committedVersion"] : null,
+    lastOutcome:
+      outcome === "INSTALLED" ||
+      outcome === "ROLLED_BACK" ||
+      outcome === "REFUSED" ||
+      outcome === "INTERRUPTED"
+        ? outcome
+        : null,
+    lastReason: typeof lastResult?.["reason"] === "string" ? lastResult["reason"] : null,
+  };
+}
+
 /** Never throws: an unreadable or malformed file reads as absent. */
 function readJsonOrNull(path: string): Record<string, unknown> | null {
   try {
@@ -298,5 +347,7 @@ export function readSnapshot(roots: DeviceRoots = DEFAULT_ROOTS): ShellSnapshot 
       : { keyFingerprint: registration.keyFingerprint }),
     ...(deviceRecordId === undefined ? {} : { deviceRecordId }),
     release: readRelease(roots),
+    devicePin: readDevicePin(roots.stateDir),
+    application: readApplicationInstall(roots),
   };
 }

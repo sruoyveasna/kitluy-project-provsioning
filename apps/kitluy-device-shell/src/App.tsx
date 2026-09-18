@@ -25,7 +25,10 @@ import {
   BootScreen,
   Chrome,
   HaltedScreen,
+  InstallingScreen,
+  PinSetupScreen,
   WaitingScreen,
+  type PinSetupStep,
 } from "./screens.js";
 import { DeviceTab, DisplayTab, NetworkTab, PrinterTab, SettingsTabs } from "./settings.js";
 import {
@@ -135,6 +138,89 @@ export function App(): JSX.Element {
   }, [screen.kind, onKey, onBackspace, onContinue]);
 
   const toggleLocale = useCallback(() => setLocale((current) => otherLocale(current)), []);
+
+  // --- T1-FIRST-BOOT-PIN-001: the device PIN, created twice, sealed by root ---
+  // The digits live in renderer state only until the confirmation is sent, and
+  // are dropped whatever the broker answers. Nothing here logs or shows them.
+  const [pinStep, setPinStep] = useState<PinSetupStep>("create");
+  const [pinEntry, setPinEntry] = useState("");
+  const [pinFirst, setPinFirst] = useState<string | null>(null);
+  const [pinBusy, setPinBusy] = useState(false);
+  const [pinNotice, setPinNotice] = useState<string | null>(null);
+  const submitPin = useCallback(
+    (first: string, second: string) => {
+      const bridge = window.kitluyShell;
+      setPinEntry("");
+      setPinFirst(null);
+      setPinStep("create");
+      if (first !== second) {
+        setPinNotice(messagesFor(locale).pinMismatch);
+        return;
+      }
+      if (bridge === undefined) {
+        setPinNotice(messagesFor(locale).pinRefused);
+        return;
+      }
+      setPinBusy(true);
+      void bridge
+        .setupDevicePin(first, second)
+        .then((result) => {
+          if (result.ok) {
+            setPinNotice(null);
+            return;
+          }
+          const m = messagesFor(locale);
+          setPinNotice(
+            result.code === "IDENTITY_KEY_UNAVAILABLE"
+              ? m.pinStarting
+              : result.code === "PIN_CONFIRMATION_MISMATCH"
+                ? m.pinMismatch
+                : `${m.pinRefused}${result.message === undefined ? "" : ` — ${result.message}`}`,
+          );
+        })
+        .catch(() => setPinNotice(messagesFor(locale).pinRefused))
+        .finally(() => setPinBusy(false));
+    },
+    [locale],
+  );
+  const onPinDigit = useCallback(
+    (digit: string) => {
+      if (pinBusy) return;
+      setPinNotice(null);
+      const next = `${pinEntry}${digit}`;
+      if (next.length < 4) {
+        setPinEntry(next);
+        return;
+      }
+      if (pinStep === "create") {
+        setPinFirst(next);
+        setPinEntry("");
+        setPinStep("confirm");
+        return;
+      }
+      submitPin(pinFirst ?? "", next);
+    },
+    [pinBusy, pinEntry, pinStep, pinFirst, submitPin],
+  );
+  const onPinBackspace = useCallback(() => setPinEntry((e) => e.slice(0, -1)), []);
+  const onPinClear = useCallback(() => {
+    setPinEntry("");
+    setPinFirst(null);
+    setPinStep("create");
+    setPinNotice(null);
+  }, []);
+  useEffect(() => {
+    if (screen.kind !== "pin_setup") return;
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Backspace") {
+        onPinBackspace();
+        return;
+      }
+      if (/^[0-9]$/u.test(event.key)) onPinDigit(event.key);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [screen.kind, onPinDigit, onPinBackspace]);
 
   /**
    * A refusal from the broker is ORDINARY — no broker in this image, no radio
@@ -293,6 +379,23 @@ export function App(): JSX.Element {
       break;
     case "assigned":
       body = <AssignedScreen locale={locale} />;
+      break;
+    case "pin_setup":
+      body = (
+        <PinSetupScreen
+          locale={locale}
+          step={pinStep}
+          length={pinEntry.length}
+          busy={pinBusy}
+          notice={pinNotice}
+          onDigit={onPinDigit}
+          onBackspace={onPinBackspace}
+          onClear={onPinClear}
+        />
+      );
+      break;
+    case "installing":
+      body = <InstallingScreen locale={locale} phase={screen.phase} failed={screen.failed} />;
       break;
   }
 

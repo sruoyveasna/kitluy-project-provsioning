@@ -105,9 +105,34 @@ export interface ReleaseView {
   readonly lastReason: string | null;
 }
 
+/**
+ * T1-FIRST-BOOT-PIN-001 — the device PIN's public posture, as the root agent
+ * publishes it: `absent` (a fresh board must create one), `sealed` (created,
+ * waiting for the Store Hub), `registered` (the Hub holds it). Never digits.
+ */
+export interface DevicePinView {
+  readonly state: "absent" | "sealed" | "registered";
+}
+
+/**
+ * What the update runtime is doing with the POS application, from its journal.
+ * `IDLE` with nothing installed is the wait before the first check; the phases
+ * follow the install pass; `COMMITTED` means the application is installed.
+ */
+export interface ApplicationInstallView {
+  readonly phase: "IDLE" | "ACTIVATING" | "HEALTH_PENDING" | "COMMITTED" | "ROLLED_BACK" | "FAILED";
+  readonly installedVersion: string | null;
+  readonly lastOutcome: "INSTALLED" | "ROLLED_BACK" | "REFUSED" | "INTERRUPTED" | null;
+  readonly lastReason: string | null;
+}
+
 export interface ShellSnapshot {
   readonly registration: RegistrationView | null;
   readonly pairing: PairingView | null;
+  /** Absent on an image whose agent predates the device PIN; reads as `absent`. */
+  readonly devicePin?: DevicePinView | null;
+  /** The POS application's install journal, when the image carries a release runtime. */
+  readonly application?: ApplicationInstallView | null;
   /** The terminal's own seat, absent until it pairs. */
   readonly assignment?: AssignmentView | null;
   readonly network: NetworkState;
@@ -191,7 +216,16 @@ export type ShellScreen =
       readonly deviceLabel: string | null;
     }
   | { readonly kind: "approved_unassigned"; readonly deviceLabel: string | null }
-  | { readonly kind: "assigned"; readonly deviceLabel: string | null };
+  | { readonly kind: "assigned"; readonly deviceLabel: string | null }
+  /** T1-FIRST-BOOT-PIN-001: a fresh board creates its device PIN before anything else. */
+  | { readonly kind: "pin_setup"; readonly deviceLabel: string | null }
+  /** Paired; the application is being fetched, activated or health-checked. */
+  | {
+      readonly kind: "installing";
+      readonly deviceLabel: string | null;
+      readonly phase: ApplicationInstallView["phase"];
+      readonly failed: boolean;
+    };
 
 /**
  * THE ASSET TAG, DERIVED ONCE — mirror of the agent's `assetTagFromFingerprint`.
@@ -273,11 +307,19 @@ export function deriveScreen(snapshot: ShellSnapshot | null): ShellScreen {
   const deviceLabel = deviceLabelOf(snapshot);
   const noNetwork = !snapshot.network.hasRoute;
 
+  // A halted board is halted whatever else is true — including before its PIN.
+  if (phase === "CONTAINED") return { kind: "halted", reason: "contained", deviceLabel };
+  if (phase === "TRUST_REVIEW_REQUIRED") {
+    return { kind: "halted", reason: "trust_review", deviceLabel };
+  }
+  // FIRST BOOT: the device PIN comes before registration, approval and pairing
+  // (owner decision 2026-09-18). An image whose agent publishes no posture reads
+  // as `absent` too — the agent and the shell ship together.
+  if ((snapshot.devicePin?.state ?? "absent") === "absent") {
+    return { kind: "pin_setup", deviceLabel };
+  }
+
   switch (phase) {
-    case "CONTAINED":
-      return { kind: "halted", reason: "contained", deviceLabel };
-    case "TRUST_REVIEW_REQUIRED":
-      return { kind: "halted", reason: "trust_review", deviceLabel };
     case "APPROVED": {
       // TWO WAYS TO BE ASSIGNED, because two devices record it differently.
       //
@@ -290,9 +332,20 @@ export function deriveScreen(snapshot: ShellSnapshot | null): ShellScreen {
         (snapshot.pairing?.phase === "PAIRED" &&
           pairingBelongsTo(snapshot.pairing, snapshot.deviceRecordId)) ||
         assignmentBelongsTo(snapshot.assignment, snapshot.deviceRecordId);
-      return paired
-        ? { kind: "assigned", deviceLabel }
-        : { kind: "approved_unassigned", deviceLabel };
+      if (!paired) return { kind: "approved_unassigned", deviceLabel };
+      // Paired: the application is on its way. The shell shows the install
+      // (it is stopped the moment the POS unit takes the seat, so this is what
+      // a person sees between the code and the counter).
+      const app = snapshot.application ?? null;
+      if (app !== null && app.phase !== "COMMITTED") {
+        return {
+          kind: "installing",
+          deviceLabel,
+          phase: app.phase,
+          failed: app.phase === "ROLLED_BACK" || app.phase === "FAILED",
+        };
+      }
+      return { kind: "assigned", deviceLabel };
     }
     case "REGISTERING":
       return { kind: "waiting_for_approval", sub: "REGISTERING", deviceLabel, noNetwork };

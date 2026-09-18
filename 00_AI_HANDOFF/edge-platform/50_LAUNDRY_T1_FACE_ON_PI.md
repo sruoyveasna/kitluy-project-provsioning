@@ -53,3 +53,26 @@ A parallel Claude session (TERMINAL-APPLICATION-ASSIGNMENT work: `packages/termi
 ## 6. Git
 
 `78a6676` feat(pos): port the designed Laundry T1 face · `3f1e1e3` feat(pos): Terminal launcher with the PIN as a centred modal; touch kiosk hides the pointer · `5809ead` fix(pos): no emoji on the Pi face. Docs commit follows.
+
+## 7. First-boot device PIN, install progress, and the two hardware defects of the afternoon (2026-09-18, 15:30–17:30 +07:00)
+
+**Owner decision** KLD-2026-09-18-FIRST-BOOT-PIN-001: the PIN is created at first boot on the device, registered with the Hub at pairing; the Hub stays the verifier. Built:
+
+| Piece                                                                                                                                                                            | Where                                                                                                                       |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Sealed first-boot PIN (HKDF from the identity key → AES-256-GCM; root 0600; public posture `absent / sealed / registered` at `/var/lib/kitluy/terminal/device-pin.json`)         | `services/kitluy-device-firstboot-agent/src/device-pin.ts`                                                                  |
+| Root broker verbs `pin.status`, `pin.setup` (four digits each, never echoed), `update.check` (restart the update agent so a just-paired board installs now, not in five minutes) | `src/device-config.ts`                                                                                                      |
+| terminal-edge registers the sealed PIN on the Hub's first `setup_required`, then destroys the seal; never in a status file                                                       | `src/edge-session.ts`, `src/bin/terminal-edge.ts`                                                                           |
+| Device Shell: `pin_setup` screen first (digits keypad, dots, create → confirm), `installing` screen with the update journal's phase, `update.check` after PAIRED                 | `apps/kitluy-device-shell` (`model/shell-state.ts`, `screens.tsx`, `App.tsx`, `electron/{main,preload,device-state-files}`) |
+| POS: `registering` face while the Hub says `setup_required` and the device posture is `sealed`; the create face only for a reset                                                 | `apps/kitluy-pos-desktop-app/src/pin-screen.tsx`, `electron/pi-runtime.ts` (`pin.devicePin`)                                |
+
+Tests: agent 30 (device-pin + broker) + terminal-edge 24 (incl. registration once, nothing sealed → no call); shell 150; POS 152/2 skipped. Packaged overlay refreshed (`device-pin` declared to the packager). **NOT yet on a board**: the flow needs a fresh card — the next Terminal image.
+
+**Two defects found on the second board (`KL-54A3320E1201`, seat T1T2) and fixed:**
+
+1. **Two-profile seat refused as `PROFILE_NOT_T1`** — the seat listed T2 first, the terminal paired into `profileCodes[0]` (T2), and the Hub picked one grant by row order. Fix `12232f1`: the Hub reads the grant SET at the current assignment version (T1 among them → T1; the receipt may name any granted profile; Defect G still 409); terminal-edge pairs into the lowest-numbered profile. Hub agent hot-deployed (`/var/lib/kitluy/hotfix-12232f1`, runtime drop-in).
+2. **Defect H hit for real** — the update agent's install pass `restart`ed the POS while the Device Shell held the seat: cyclic transaction, POS never started, health gate failed, release rolled back and blocked. Fix `3e66672`: `start` when the POS is not running. Agent hot-deployed on the new board; a newer release (`03738b69…`, `0.1.0-face-202609181630`) installed and committed; the board reached `staff_authentication_required` with the Hub answering `setup_required`.
+
+Also this afternoon: the development device purge on `kitluy-fresh` (only the Store Hub and the terminals remain; backup `backups/kitluy-fresh-devices-20260918-1507/`), the dev release service's **auto-assignment by business type** (`9dbe2ac`; `LAUNDRY → kitluy-terminal`, proven: `AUTO-ASSIGNED KL-54A3320E1201 … seq=17`), configuration **v5** on the Hub carrying both terminals' grants (the old terminal's v4 grants closed and re-issued on v5 — a two-terminal publish is still by hand).
+
+**Still by hand (BLK-006):** provisioning a newly paired terminal on the Store Hub — the automation (cloud projection route + Hub poller) is the next build.

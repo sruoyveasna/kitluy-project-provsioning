@@ -24,7 +24,7 @@
  *   - no staff login, no email, no password: there is no such route from here;
  *   - a PIN is never stored, logged or written to the status file.
  */
-import { renameSync, writeFileSync, chmodSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, writeFileSync, chmodSync } from "node:fs";
 
 import {
   bootstrapT1ThroughEdge,
@@ -46,6 +46,20 @@ import {
 
 /** Read by the health reporter (root). Public facts only; 0644. */
 export const POS_RUNTIME_STATUS_PATH = "/var/lib/kitluy/terminal/pos-runtime.json";
+/** T1-FIRST-BOOT-PIN-001: the device PIN posture the root agent publishes. Never digits. */
+export const DEVICE_PIN_POSTURE_PATH = "/var/lib/kitluy/terminal/device-pin.json";
+
+export function readDevicePinPosture(
+  path: string = DEVICE_PIN_POSTURE_PATH,
+): "absent" | "sealed" | "registered" | undefined {
+  if (!existsSync(path)) return undefined;
+  try {
+    const state = (JSON.parse(readFileSync(path, "utf8")) as { state?: unknown }).state;
+    return state === "sealed" || state === "registered" ? state : "absent";
+  } catch {
+    return undefined;
+  }
+}
 /** v2: `terminalUnlocked` (there is no staff login on a Pi Terminal). */
 export const POS_RUNTIME_STATUS_SCHEMA = "kitluy.pos-runtime-status.v2";
 
@@ -115,6 +129,8 @@ export interface PiTerminalRuntimeOptions {
   /** Seams. Production derives both from `socketPath`. */
   readonly call?: HubCall;
   readonly bridgeStatus?: () => Promise<EdgeBridgeStatusWire>;
+  /** Where the device PIN posture is read from; null reads none (tests). */
+  readonly devicePinPosturePath?: string | null;
 }
 
 /** The states in which the terminal-level checks have passed and a PIN may be asked for. */
@@ -199,7 +215,7 @@ export class PiTerminalRuntime {
       },
       { applicationVersion: this.#options.applicationVersion },
     );
-    const posture = this.#pinPosture;
+    const posture = this.#withDevicePin(this.#pinPosture);
     const withPin: T1BootstrapReport =
       posture === undefined || !PIN_STATES.has(report.state) ? report : { ...report, pin: posture };
     this.#report = withPin;
@@ -354,6 +370,15 @@ export class PiTerminalRuntime {
     if (report === null || session === null) return null;
     if (report.state !== "ready" && report.state !== "offline_ready") return null;
     return createIntakeOperationsWithCall({ call: this.#call, sessionId: session.sessionId });
+  }
+
+  /** The Hub's PIN answer, with the DEVICE's posture beside it (T1-FIRST-BOOT-PIN-001). */
+  #withDevicePin(posture: T1BootstrapReport["pin"]): T1BootstrapReport["pin"] {
+    if (posture === undefined) return undefined;
+    const path = this.#options.devicePinPosturePath;
+    if (path === null) return posture;
+    const devicePin = readDevicePinPosture(path ?? DEVICE_PIN_POSTURE_PATH);
+    return devicePin === undefined ? posture : { ...posture, devicePin };
   }
 
   #publish(report: T1BootstrapReport): void {

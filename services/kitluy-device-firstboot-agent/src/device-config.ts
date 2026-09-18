@@ -45,6 +45,12 @@ import {
   type NetworkStatus,
   type WifiJoinOutcome,
 } from "./network.js";
+import {
+  DEVICE_PIN_PATTERN,
+  readDevicePinPosture,
+  sealDevicePin,
+  type DevicePinPosture,
+} from "./device-pin.js";
 
 /** A scanned network as it crosses the socket. `ssidBytes` is a Buffer and does not. */
 export interface AccessPointDto {
@@ -62,7 +68,12 @@ export type DeviceConfigRequest =
   | { readonly verb: "network.join"; readonly ssidHex: string; readonly psk?: string }
   | { readonly verb: "network.forget"; readonly ssidHex: string }
   | { readonly verb: "display.getBrightness" }
-  | { readonly verb: "display.setBrightness"; readonly percent: number };
+  | { readonly verb: "display.setBrightness"; readonly percent: number }
+  /** T1-FIRST-BOOT-PIN-001: the first-boot device PIN, sealed by root; the Shell never reads it back. */
+  | { readonly verb: "pin.status" }
+  | { readonly verb: "pin.setup"; readonly pin: string; readonly pinConfirmation: string }
+  /** Ask the update agent to check for the application now (a unit restart), not on its next poll. */
+  | { readonly verb: "update.check" };
 
 export type DeviceConfigResponse =
   | { readonly ok: true; readonly data: unknown }
@@ -79,6 +90,9 @@ export const VERBS = [
   "network.forget",
   "display.getBrightness",
   "display.setBrightness",
+  "pin.status",
+  "pin.setup",
+  "update.check",
 ] as const;
 
 /**
@@ -100,11 +114,37 @@ export interface DeviceConfigDeps {
   readonly forget?: (ssidHex: string) => Promise<void>;
   readonly getBrightness?: () => Promise<number | null>;
   readonly setBrightness?: (percent: number) => Promise<void>;
+  readonly checkForUpdates?: () => Promise<void>;
+  readonly pinStatus?: () => DevicePinPosture;
+  readonly pinSetup?: (input: {
+    readonly pin: string;
+    readonly pinConfirmation: string;
+  }) => ReturnType<typeof sealDevicePin>;
 }
 
 function refuse(code: string, message: string): DeviceConfigResponse {
   return { ok: false, code, message };
 }
+
+/**
+ * The update agent polls every five minutes; a restart makes it poll now. Its
+ * unit is `Type=simple` and idempotent, so a restart at any moment is safe —
+ * the install pass reconciles its journal first.
+ */
+async function restartUpdateAgent(): Promise<void> {
+  const { execFileSync } = await import("node:child_process");
+  execFileSync("systemctl", ["restart", "kitluy-update-agent.service"], { timeout: 20_000 });
+}
+
+/** Words for the person at the till. The digits are never in them. */
+const PIN_REFUSAL_TEXT = {
+  PIN_MALFORMED: "A device PIN is exactly four digits.",
+  PIN_CONFIRMATION_MISMATCH: "The two entries differ. Try again.",
+  PIN_ALREADY_SEALED: "A device PIN is already waiting for the Store Hub.",
+  PIN_ALREADY_REGISTERED:
+    "The Store Hub already holds this device's PIN; change it from the terminal.",
+  IDENTITY_KEY_UNAVAILABLE: "This device has no identity yet; the PIN cannot be sealed.",
+} as const;
 
 /**
  * Parse one line into a request, or refuse it.
@@ -162,6 +202,20 @@ export function parseRequest(line: string): DeviceConfigRequest | DeviceConfigRe
       return refuse("PSK_LENGTH", "A Wi-Fi password is between 8 and 63 characters.");
     }
     return psk === undefined ? { verb, ssidHex } : { verb, ssidHex, psk };
+  }
+
+  if (verb === "pin.setup") {
+    const pin = (raw as { pin?: unknown }).pin;
+    const pinConfirmation = (raw as { pinConfirmation?: unknown }).pinConfirmation;
+    // Shape only, here: four digits each. Equality and "already sealed" are the
+    // sealer's verdicts, so a mismatch is reported as the PIN rule, not as junk.
+    if (typeof pin !== "string" || !DEVICE_PIN_PATTERN.test(pin)) {
+      return refuse("PIN_MALFORMED", "A device PIN is exactly four digits.");
+    }
+    if (typeof pinConfirmation !== "string" || !DEVICE_PIN_PATTERN.test(pinConfirmation)) {
+      return refuse("PIN_MALFORMED", "The confirmation is exactly four digits.");
+    }
+    return { verb, pin, pinConfirmation };
   }
 
   if (verb === "display.setBrightness") {
@@ -229,6 +283,20 @@ export async function handle(
         }
         await deps.setBrightness(request.percent);
         return { ok: true, data: { percent: request.percent } };
+      }
+      case "update.check": {
+        await (deps.checkForUpdates ?? restartUpdateAgent)();
+        return { ok: true, data: { checking: true } };
+      }
+      case "pin.status":
+        return { ok: true, data: (deps.pinStatus ?? readDevicePinPosture)() };
+      case "pin.setup": {
+        const outcome = (deps.pinSetup ?? sealDevicePin)({
+          pin: request.pin,
+          pinConfirmation: request.pinConfirmation,
+        });
+        if (!outcome.ok) return refuse(outcome.code, PIN_REFUSAL_TEXT[outcome.code]);
+        return { ok: true, data: outcome.posture };
       }
     }
   } catch {

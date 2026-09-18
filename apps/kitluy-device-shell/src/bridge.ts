@@ -81,6 +81,8 @@ export interface KitluyShellBridge {
   getSnapshot(): Promise<ShellSnapshot>;
   onSnapshot(callback: (snapshot: ShellSnapshot) => void): void;
   submitPairingCode(code: string): Promise<SubmitResult>;
+  /** T1-FIRST-BOOT-PIN-001: the digits cross once, to the root broker; nothing comes back but a posture. */
+  setupDevicePin(pin: string, pinConfirmation: string): Promise<ConfigResult>;
 
   // --- Settings -------------------------------------------------------------
   getNetworkStatus(): Promise<ConfigResult>;

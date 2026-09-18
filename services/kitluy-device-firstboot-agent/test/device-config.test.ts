@@ -57,6 +57,10 @@ describe("the verb list is closed", () => {
       "network.join",
       "network.scan",
       "network.status",
+      // T1-FIRST-BOOT-PIN-001: the first-boot device PIN, sealed by root.
+      "pin.setup",
+      "pin.status",
+      "update.check",
     ]);
   });
 });

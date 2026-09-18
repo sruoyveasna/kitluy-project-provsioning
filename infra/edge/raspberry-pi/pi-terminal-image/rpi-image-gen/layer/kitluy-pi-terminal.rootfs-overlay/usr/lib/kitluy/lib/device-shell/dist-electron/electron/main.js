@@ -43,6 +43,7 @@ const NETWORK_JOIN_CHANNEL = "kitluy:shell:network-join";
 const NETWORK_FORGET_CHANNEL = "kitluy:shell:network-forget";
 const BRIGHTNESS_GET_CHANNEL = "kitluy:shell:brightness-get";
 const BRIGHTNESS_SET_CHANNEL = "kitluy:shell:brightness-set";
+const DEVICE_PIN_SETUP_CHANNEL = "kitluy:shell:device-pin-setup";
 const DEVICE_INFO_CHANNEL = "kitluy:shell:device-info";
 const PRINTER_GET_CHANNEL = "kitluy:shell:printer-get";
 const PRINTER_SAVE_CHANNEL = "kitluy:shell:printer-save";
@@ -138,13 +139,31 @@ void app.whenReady().then(() => {
                 message: "this terminal cannot reach KitLuy to pair yet",
             };
         }
-        return submitPairingCode(code, {
+        const outcome = await submitPairingCode(code, {
             transport,
             // From bootstrap-state.json, via the snapshot feed. A board that has not
             // registered has none, and the action refuses before the network.
             deviceRecordId: latest?.deviceRecordId,
             persist: writeTerminalAssignment,
         });
+        // Paired: ask the update agent to check for the application NOW rather than
+        // on its next five-minute poll — the person at the till is watching.
+        if (outcome.status === "PAIRED")
+            void requestDeviceConfig({ verb: "update.check" });
+        return outcome;
+    });
+    // T1-FIRST-BOOT-PIN-001. Shape-checked here (four digits each) and never
+    // logged; the root broker seals it under the device identity. The renderer
+    // gets a posture back, never the digits.
+    ipcMain.handle(DEVICE_PIN_SETUP_CHANNEL, async (_event, pin, confirmation) => {
+        const digits = /^[0-9]{4}$/u;
+        if (typeof pin !== "string" || !digits.test(pin)) {
+            return { ok: false, code: "PIN_MALFORMED", message: "A device PIN is exactly four digits." };
+        }
+        if (typeof confirmation !== "string" || !digits.test(confirmation)) {
+            return { ok: false, code: "PIN_MALFORMED", message: "A device PIN is exactly four digits." };
+        }
+        return requestDeviceConfig({ verb: "pin.setup", pin, pinConfirmation: confirmation });
     });
     // --- Settings -------------------------------------------------------------
     // Every argument is re-checked HERE, in the trusted process, before it reaches

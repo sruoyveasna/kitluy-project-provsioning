@@ -138,11 +138,19 @@ export function deriveScreen(snapshot) {
     const phase = snapshot.registration?.phase ?? "NOT_REGISTERED";
     const deviceLabel = deviceLabelOf(snapshot);
     const noNetwork = !snapshot.network.hasRoute;
+    // A halted board is halted whatever else is true — including before its PIN.
+    if (phase === "CONTAINED")
+        return { kind: "halted", reason: "contained", deviceLabel };
+    if (phase === "TRUST_REVIEW_REQUIRED") {
+        return { kind: "halted", reason: "trust_review", deviceLabel };
+    }
+    // FIRST BOOT: the device PIN comes before registration, approval and pairing
+    // (owner decision 2026-09-18). An image whose agent publishes no posture reads
+    // as `absent` too — the agent and the shell ship together.
+    if ((snapshot.devicePin?.state ?? "absent") === "absent") {
+        return { kind: "pin_setup", deviceLabel };
+    }
     switch (phase) {
-        case "CONTAINED":
-            return { kind: "halted", reason: "contained", deviceLabel };
-        case "TRUST_REVIEW_REQUIRED":
-            return { kind: "halted", reason: "trust_review", deviceLabel };
         case "APPROVED": {
             // TWO WAYS TO BE ASSIGNED, because two devices record it differently.
             //
@@ -154,9 +162,21 @@ export function deriveScreen(snapshot) {
             const paired = (snapshot.pairing?.phase === "PAIRED" &&
                 pairingBelongsTo(snapshot.pairing, snapshot.deviceRecordId)) ||
                 assignmentBelongsTo(snapshot.assignment, snapshot.deviceRecordId);
-            return paired
-                ? { kind: "assigned", deviceLabel }
-                : { kind: "approved_unassigned", deviceLabel };
+            if (!paired)
+                return { kind: "approved_unassigned", deviceLabel };
+            // Paired: the application is on its way. The shell shows the install
+            // (it is stopped the moment the POS unit takes the seat, so this is what
+            // a person sees between the code and the counter).
+            const app = snapshot.application ?? null;
+            if (app !== null && app.phase !== "COMMITTED") {
+                return {
+                    kind: "installing",
+                    deviceLabel,
+                    phase: app.phase,
+                    failed: app.phase === "ROLLED_BACK" || app.phase === "FAILED",
+                };
+            }
+            return { kind: "assigned", deviceLabel };
         }
         case "REGISTERING":
             return { kind: "waiting_for_approval", sub: "REGISTERING", deviceLabel, noNetwork };

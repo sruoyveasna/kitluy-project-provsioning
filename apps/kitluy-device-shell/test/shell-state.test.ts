@@ -19,6 +19,8 @@ function snapshot(over: Partial<ShellSnapshot>): ShellSnapshot {
     network: ONLINE,
     keyFingerprint: FINGERPRINT,
     deviceRecordId: "dev-1",
+    // A board past its first boot: the device PIN exists (T1-FIRST-BOOT-PIN-001).
+    devicePin: { state: "registered" },
     ...over,
   };
 }
@@ -26,6 +28,87 @@ function snapshot(over: Partial<ShellSnapshot>): ShellSnapshot {
 describe("deriveScreen", () => {
   it("null snapshot (pre-IPC) is booting", () => {
     expect(deriveScreen(null)).toEqual({ kind: "booting" });
+  });
+
+  // T1-FIRST-BOOT-PIN-001 -----------------------------------------------------
+  it("a fresh board creates its device PIN before registration, approval and pairing", () => {
+    for (const over of [
+      { devicePin: { state: "absent" as const } },
+      { devicePin: null },
+      { devicePin: undefined },
+    ]) {
+      expect(deriveScreen(snapshot({ registration: null, ...over }))).toEqual({
+        kind: "pin_setup",
+        deviceLabel: null,
+      });
+      expect(
+        deriveScreen(
+          snapshot({
+            registration: { phase: "APPROVED", deviceId: "dev-1", keyFingerprint: FINGERPRINT },
+            ...over,
+          }),
+        ).kind,
+      ).toBe("pin_setup");
+    }
+    // A sealed PIN (waiting for the Hub) is enough to go on.
+    expect(
+      deriveScreen(snapshot({ registration: null, devicePin: { state: "sealed" } })).kind,
+    ).toBe("waiting_for_approval");
+  });
+
+  it("a halted board is halted even before its PIN", () => {
+    expect(
+      deriveScreen(
+        snapshot({
+          registration: { phase: "CONTAINED", deviceId: "dev-1", keyFingerprint: FINGERPRINT },
+          devicePin: { state: "absent" },
+        }),
+      ),
+    ).toMatchObject({ kind: "halted", reason: "contained" });
+  });
+
+  it("paired and installing shows the install, with the journal's phase; committed is assigned", () => {
+    const paired = {
+      registration: { phase: "APPROVED" as const, deviceId: "dev-1", keyFingerprint: FINGERPRINT },
+      pairing: { phase: "PAIRED" as const, deviceRecordId: "dev-1" },
+    };
+    for (const phase of ["IDLE", "ACTIVATING", "HEALTH_PENDING"] as const) {
+      expect(
+        deriveScreen(
+          snapshot({
+            ...paired,
+            application: { phase, installedVersion: null, lastOutcome: null, lastReason: null },
+          }),
+        ),
+      ).toMatchObject({ kind: "installing", phase, failed: false });
+    }
+    expect(
+      deriveScreen(
+        snapshot({
+          ...paired,
+          application: {
+            phase: "ROLLED_BACK",
+            installedVersion: null,
+            lastOutcome: "ROLLED_BACK",
+            lastReason: "x",
+          },
+        }),
+      ),
+    ).toMatchObject({ kind: "installing", phase: "ROLLED_BACK", failed: true });
+    expect(
+      deriveScreen(
+        snapshot({
+          ...paired,
+          application: {
+            phase: "COMMITTED",
+            installedVersion: "1",
+            lastOutcome: "INSTALLED",
+            lastReason: null,
+          },
+        }),
+      ).kind,
+    ).toBe("assigned");
+    expect(deriveScreen(snapshot({ ...paired, application: null })).kind).toBe("assigned");
   });
 
   it("no registration file yet reads as NOT_REGISTERED waiting", () => {

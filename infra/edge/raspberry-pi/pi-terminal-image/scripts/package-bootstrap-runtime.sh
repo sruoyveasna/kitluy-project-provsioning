@@ -163,6 +163,8 @@ DEVICE_MODULES=(
   # @kitluy/device-identity — the same zero-runtime-dependency reason as
   # `hub-claim-bytes` and `device-registration-bytes`.
   edge-discovery-record edge-mdns edge-transport edge-pairing edge-session
+  # T1-FIRST-BOOT-PIN-001: the sealed first-boot device PIN (broker verbs, edge registration).
+  device-pin
   # The edge bridge: the POS's only path to the Hub, served by this same root
   # process on /run/kitluy-terminal-edge/bridge.sock (T1-STORE-OPERATIONS-001).
   edge-bridge

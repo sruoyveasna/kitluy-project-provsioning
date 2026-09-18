@@ -35,6 +35,7 @@
  * appear in the process table; this module's job is not to undo that.
  */
 import { joinNetwork, readNetworkStatus, scanAccessPoints, displaySsid, ssidToHex, withoutNetwork, } from "./network.js";
+import { DEVICE_PIN_PATTERN, readDevicePinPosture, sealDevicePin, } from "./device-pin.js";
 /**
  * Every verb this broker will ever answer. Adding one is a deliberate edit here
  * and in the preload surface test; nothing is dispatched by string concatenation.
@@ -46,6 +47,9 @@ export const VERBS = [
     "network.forget",
     "display.getBrightness",
     "display.setBrightness",
+    "pin.status",
+    "pin.setup",
+    "update.check",
 ];
 /**
  * A request line longer than this is refused unread rather than parsed.
@@ -60,6 +64,23 @@ const HEX = /^[0-9a-fA-F]*$/;
 function refuse(code, message) {
     return { ok: false, code, message };
 }
+/**
+ * The update agent polls every five minutes; a restart makes it poll now. Its
+ * unit is `Type=simple` and idempotent, so a restart at any moment is safe —
+ * the install pass reconciles its journal first.
+ */
+async function restartUpdateAgent() {
+    const { execFileSync } = await import("node:child_process");
+    execFileSync("systemctl", ["restart", "kitluy-update-agent.service"], { timeout: 20_000 });
+}
+/** Words for the person at the till. The digits are never in them. */
+const PIN_REFUSAL_TEXT = {
+    PIN_MALFORMED: "A device PIN is exactly four digits.",
+    PIN_CONFIRMATION_MISMATCH: "The two entries differ. Try again.",
+    PIN_ALREADY_SEALED: "A device PIN is already waiting for the Store Hub.",
+    PIN_ALREADY_REGISTERED: "The Store Hub already holds this device's PIN; change it from the terminal.",
+    IDENTITY_KEY_UNAVAILABLE: "This device has no identity yet; the PIN cannot be sealed.",
+};
 /**
  * Parse one line into a request, or refuse it.
  *
@@ -115,6 +136,19 @@ export function parseRequest(line) {
             return refuse("PSK_LENGTH", "A Wi-Fi password is between 8 and 63 characters.");
         }
         return psk === undefined ? { verb, ssidHex } : { verb, ssidHex, psk };
+    }
+    if (verb === "pin.setup") {
+        const pin = raw.pin;
+        const pinConfirmation = raw.pinConfirmation;
+        // Shape only, here: four digits each. Equality and "already sealed" are the
+        // sealer's verdicts, so a mismatch is reported as the PIN rule, not as junk.
+        if (typeof pin !== "string" || !DEVICE_PIN_PATTERN.test(pin)) {
+            return refuse("PIN_MALFORMED", "A device PIN is exactly four digits.");
+        }
+        if (typeof pinConfirmation !== "string" || !DEVICE_PIN_PATTERN.test(pinConfirmation)) {
+            return refuse("PIN_MALFORMED", "The confirmation is exactly four digits.");
+        }
+        return { verb, pin, pinConfirmation };
     }
     if (verb === "display.setBrightness") {
         const percent = raw.percent;
@@ -176,6 +210,21 @@ export async function handle(request, deps = {}) {
                 }
                 await deps.setBrightness(request.percent);
                 return { ok: true, data: { percent: request.percent } };
+            }
+            case "update.check": {
+                await (deps.checkForUpdates ?? restartUpdateAgent)();
+                return { ok: true, data: { checking: true } };
+            }
+            case "pin.status":
+                return { ok: true, data: (deps.pinStatus ?? readDevicePinPosture)() };
+            case "pin.setup": {
+                const outcome = (deps.pinSetup ?? sealDevicePin)({
+                    pin: request.pin,
+                    pinConfirmation: request.pinConfirmation,
+                });
+                if (!outcome.ok)
+                    return refuse(outcome.code, PIN_REFUSAL_TEXT[outcome.code]);
+                return { ok: true, data: outcome.posture };
             }
         }
     }

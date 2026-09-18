@@ -236,3 +236,146 @@ export function ApprovedScreen(props: {
     </section>
   );
 }
+
+// ---------------------------------------------------------------------------
+// T1-FIRST-BOOT-PIN-001 — the first-boot device PIN, and the install that follows
+// ---------------------------------------------------------------------------
+
+export type PinSetupStep = "create" | "confirm";
+
+/**
+ * The first screen a fresh board shows: create the device PIN (four digits,
+ * twice). Same keypad rhythm as the pairing code; digits only. The entry is
+ * held by the renderer only until the confirmation is sent to the root broker,
+ * and the screen never shows the digits — dots only.
+ */
+export function PinSetupScreen(props: {
+  locale: KitluyLocale;
+  step: PinSetupStep;
+  length: number;
+  busy: boolean;
+  notice: string | null;
+  onDigit: (digit: string) => void;
+  onBackspace: () => void;
+  onClear: () => void;
+}): JSX.Element {
+  const m = messagesFor(props.locale);
+  const title = props.step === "create" ? m.pinCreateTitle : m.pinConfirmTitle;
+  const intro = props.step === "create" ? m.pinCreateIntro : m.pinConfirmIntro;
+  const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"];
+  return (
+    <section
+      className="kt-approved"
+      aria-label="pin-setup"
+      data-screen="pin_setup"
+      data-pin-step={props.step}
+    >
+      <h1 className="kt-title">{title}</h1>
+      <p className="kt-lead">{intro}</p>
+
+      <div className="kt-code" role="group" aria-label={title}>
+        <div className="kt-boxes" aria-label="pin-entry" data-pin-length={props.length}>
+          {[0, 1, 2, 3].map((i) => (
+            <span key={i} className={i < props.length ? "kt-box kt-box-filled" : "kt-box"}>
+              {i < props.length ? "●" : ""}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <div className="kt-keypad kt-keypad-digits" role="group" aria-label={title}>
+        {keys.map((k) => (
+          <button
+            type="button"
+            key={k}
+            className="kt-key"
+            aria-label={`digit-${k}`}
+            disabled={props.busy}
+            onClick={() => props.onDigit(k)}
+          >
+            {k}
+          </button>
+        ))}
+      </div>
+
+      <div className="kt-actions">
+        <button
+          type="button"
+          className="kt-btn"
+          aria-label="backspace"
+          disabled={props.busy}
+          onClick={props.onBackspace}
+        >
+          {m.keyBackspace}
+        </button>
+        <button
+          type="button"
+          className="kt-btn"
+          aria-label="clear"
+          disabled={props.busy}
+          onClick={props.onClear}
+        >
+          {m.keyClear}
+        </button>
+      </div>
+
+      {props.notice === null ? null : (
+        <p className="kt-warn" role="alert" data-pin-notice="true">
+          {props.notice}
+        </p>
+      )}
+    </section>
+  );
+}
+
+/** Paired; the application is on its way. The phase comes from the update journal. */
+export function InstallingScreen(props: {
+  locale: KitluyLocale;
+  phase: "IDLE" | "ACTIVATING" | "HEALTH_PENDING" | "COMMITTED" | "ROLLED_BACK" | "FAILED";
+  failed: boolean;
+}): JSX.Element {
+  const m = messagesFor(props.locale);
+  const line = props.failed
+    ? m.installingFailed
+    : props.phase === "ACTIVATING"
+      ? m.installingActivating
+      : props.phase === "HEALTH_PENDING"
+        ? m.installingHealth
+        : m.installingWaiting;
+  const steps: readonly (typeof props.phase)[] = [
+    "IDLE",
+    "ACTIVATING",
+    "HEALTH_PENDING",
+    "COMMITTED",
+  ];
+  const reached = steps.indexOf(props.phase);
+  return (
+    <section
+      className="kt-center"
+      aria-label="installing"
+      data-screen="installing"
+      data-install-phase={props.phase}
+    >
+      <h1 className="kt-title">{m.installingTitle}</h1>
+      <p className="kt-lead">{line}</p>
+      <div
+        className="kt-progress"
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={3}
+        aria-valuenow={Math.max(0, reached)}
+      >
+        {steps.map((s, i) => (
+          <span
+            key={s}
+            className={
+              i <= reached && !props.failed
+                ? "kt-progress-step kt-progress-step-done"
+                : "kt-progress-step"
+            }
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
