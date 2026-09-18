@@ -138,6 +138,16 @@ export function createUnitControl(unit = DEVICE_SHELL_UNIT): UnitControl {
  *
  * So the restart looks at the store first. A usable release: restart the POS.
  * None: stop the POS and start the Device Shell, which is the floor.
+ *
+ * AND IT LOOKS AT THE UNIT (Defect H, 2026-09-18). The two units order each
+ * other (`After=` beside `Conflicts=`, so the seat is handed over cleanly in
+ * either direction). A `restart` of the POS while the Device Shell holds the
+ * seat asks systemd for one transaction that stops BOTH units, and that is
+ * cyclic under a mutual ordering — "Transaction order is cyclic", the POS never
+ * starts, the health gate fails, the release rolls back, and every fresh board's
+ * FIRST install dies exactly there. So: the POS is active → `restart` (the shell
+ * has no job); the POS is not → `start`, whose `Conflicts=` stops the shell
+ * first and starts the POS after it, in that order.
  */
 export function createTerminalClientUnitControl(
   paths: StorePaths,
@@ -147,8 +157,10 @@ export function createTerminalClientUnitControl(
     unit: TERMINAL_CLIENT_UNIT,
     restart(): Promise<void> {
       if (activeReleaseId(paths) !== null) {
-        return runCommand("systemctl", ["restart", TERMINAL_CLIENT_UNIT]) === null
-          ? Promise.reject(new Error(`systemctl restart ${TERMINAL_CLIENT_UNIT} failed`))
+        const state = runCommand("systemctl", ["is-active", TERMINAL_CLIENT_UNIT]);
+        const verb = state === "active" || state === "activating" ? "restart" : "start";
+        return runCommand("systemctl", [verb, TERMINAL_CLIENT_UNIT]) === null
+          ? Promise.reject(new Error(`systemctl ${verb} ${TERMINAL_CLIENT_UNIT} failed`))
           : Promise.resolve();
       }
       runCommand("systemctl", ["stop", TERMINAL_CLIENT_UNIT]);

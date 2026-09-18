@@ -411,14 +411,32 @@ describe("the POS restart never leaves the display empty", () => {
     return paths;
   }
 
-  it("restarts the POS while a usable release is installed", async () => {
+  it("restarts the POS while a usable release is installed and the POS is running", async () => {
     const calls: string[][] = [];
     const control = createTerminalClientUnitControl(storeWith("rel-1"), (_c, args) => {
       calls.push([...args]);
-      return "";
+      return args[0] === "is-active" ? "active" : "";
     });
     await control.restart();
-    expect(calls).toEqual([["restart", "kitluy-terminal-client.service"]]);
+    expect(calls).toEqual([
+      ["is-active", "kitluy-terminal-client.service"],
+      ["restart", "kitluy-terminal-client.service"],
+    ]);
+  });
+
+  it("Defect H: STARTS the POS when it is not running (the Device Shell holds the seat) — a restart transaction would be cyclic", async () => {
+    for (const state of ["inactive", "failed", null]) {
+      const calls: string[][] = [];
+      const control = createTerminalClientUnitControl(storeWith("rel-1"), (_c, args) => {
+        calls.push([...args]);
+        return args[0] === "is-active" ? state : "";
+      });
+      await control.restart();
+      expect(calls).toEqual([
+        ["is-active", "kitluy-terminal-client.service"],
+        ["start", "kitluy-terminal-client.service"],
+      ]);
+    }
   });
 
   it("with NO release (a rollback that had nothing to return to), gives the display to the Device Shell", async () => {
@@ -435,7 +453,9 @@ describe("the POS restart never leaves the display empty", () => {
   });
 
   it("a failed restart is a rejection, so the install pass rolls back rather than claiming success", async () => {
-    const control = createTerminalClientUnitControl(storeWith("rel-1"), () => null);
+    const control = createTerminalClientUnitControl(storeWith("rel-1"), (_c, args) =>
+      args[0] === "is-active" ? "active" : null,
+    );
     await expect(control.restart()).rejects.toThrow(
       /restart kitluy-terminal-client.service failed/u,
     );
