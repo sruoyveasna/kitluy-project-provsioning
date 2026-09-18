@@ -60,6 +60,7 @@ const ATTACKER_TENANT = "e0000000-0000-4000-8000-0000000000a1";
 const ATTACKER_STORE = "e0000000-0000-4000-8000-0000000000a2";
 const T1 = "laundry.t1.intake_cashier";
 const T3 = "laundry.t3.ready_scan_in";
+const T2 = "laundry.t2.customer_display";
 
 const live = await isHubDatabaseReachable();
 if (!live) console.warn("SKIPPED: T1 bootstrap routes — local Hub database unreachable");
@@ -667,6 +668,40 @@ describe.skipIf(!live)("T1 bootstrap routes and staff sessions (WS-12-T001-P02)"
     expect(eligibility["hubReplacementState"]).toBe("normal");
     expect(eligibility["requiredConfigurationVersion"]).toBe(7);
     expect(typeof eligibility["authorityTime"]).toBe("string");
+  });
+
+  it("a T1 + T2 counter seat paired into T2 is ELIGIBLE as T1 (2026-09-18, the first two-profile pairing)", async () => {
+    // The seat listed T2 first, so the terminal paired into T2; it also holds
+    // the T1 grant. The POS runtime is the T1 experience: eligibility must
+    // find the T1 grant among the terminal's grants and accept a receipt that
+    // names any granted profile — not let the grant row order decide.
+    const counter = await newLanTerminal("elig-t1t2", { profile: T2 });
+    await pool.query(
+      `insert into edge_config.terminal_profile_assignment
+         (id, tenant_id, digital_store_id, location_id, terminal_device_id,
+          profile_code, assignment_version, enabled, effective_from,
+          effective_until, source_snapshot_id)
+       values ($1, $2, $3, $4, $5, $6, 1, true, now() - interval '1 hour', null, $7)`,
+      [randomUUID(), TENANT, STORE, LOCATION, counter.deviceId, T1, ACTIVE_SNAPSHOT],
+    );
+    await pairTerminal(counter);
+    const response = await call(counter, "GET", EDGE_RUNTIME_ELIGIBILITY_PATH);
+    expect(response.status, JSON.stringify(response.body)).toBe(200);
+    const eligibility = response.body["eligibility"] as Record<string, unknown>;
+    expect(eligibility["terminalProfileCode"]).toBe(T1);
+    expect(eligibility["pairingEligibility"]).toBe("paired");
+
+    // A receipt naming a profile the terminal is NOT granted stays refused.
+    const stranger = await newLanTerminal("elig-t3-only", { profile: T3 });
+    await pairTerminal(stranger);
+    await pool.query(
+      `update edge_config.terminal_profile_assignment set profile_code = $2
+        where terminal_device_id = $1`,
+      [stranger.deviceId, T1],
+    );
+    const mismatch = await call(stranger, "GET", EDGE_RUNTIME_ELIGIBILITY_PATH);
+    expect(mismatch.status).toBe(409);
+    expect(detailsOf(mismatch)["result"]).toBe("ASSIGNMENT_GENERATION_STALE");
   });
 
   it("fails closed: missing pairing, non-T1 profile, a receipt ahead of the terminal, superseded credential", async () => {

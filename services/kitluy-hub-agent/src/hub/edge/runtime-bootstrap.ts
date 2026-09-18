@@ -288,13 +288,24 @@ async function readBlockingContainment(
   return isBlockingContainment(directive) ? directive : null;
 }
 
-/** The terminal's enabled, effective T1 profile grant from the ACTIVE snapshot. */
-export async function terminalHoldsCurrentT1Grant(
+/**
+ * The terminal's enabled, effective profile grants from the ACTIVE snapshot.
+ *
+ * A counter seat may grant several profiles at once — T1 and T2 together is
+ * the owner-locked model's own counter (T2 is the counter's second screen), and
+ * a Partner may list them in any order. So this is a SET, never "the" grant:
+ * the grants of the terminal's CURRENT assignment version (the newest version
+ * the cloud granted — an older version's grants are superseded, Defect G), and
+ * the caller asks whether T1 is among them. Picking one row with `limit 1`
+ * used to let the row order decide the terminal's fate (a T1 + T2 seat was
+ * refused PROFILE_NOT_T1 on the first real two-profile pairing, 2026-09-18).
+ */
+export async function readCurrentProfileGrants(
   client: HubClient,
   terminalDeviceId: string,
-): Promise<boolean> {
-  const grant = await client.query<{ profile_code: string }>(
-    `select tpa.profile_code
+): Promise<readonly { readonly id: string; readonly profile_code: string }[]> {
+  const grants = await client.query<{ id: string; profile_code: string }>(
+    `select tpa.id, tpa.profile_code
        from edge_config.terminal_profile_assignment tpa
        join edge_config.configuration_snapshot cs on cs.id = tpa.source_snapshot_id
       where tpa.terminal_device_id = $1::uuid
@@ -302,11 +313,28 @@ export async function terminalHoldsCurrentT1Grant(
         and tpa.effective_from <= now()
         and (tpa.effective_until is null or tpa.effective_until > now())
         and cs.state = 'active'
-      order by tpa.assignment_version desc
-      limit 1`,
+        and tpa.assignment_version = (
+          select max(x.assignment_version)
+            from edge_config.terminal_profile_assignment x
+            join edge_config.configuration_snapshot xs on xs.id = x.source_snapshot_id
+           where x.terminal_device_id = tpa.terminal_device_id
+             and x.enabled
+             and x.effective_from <= now()
+             and (x.effective_until is null or x.effective_until > now())
+             and xs.state = 'active')
+      order by tpa.profile_code`,
     [terminalDeviceId],
   );
-  return grant.rows[0]?.profile_code === T1_PROFILE_CODE;
+  return grants.rows;
+}
+
+/** Whether the terminal holds an enabled, effective T1 grant from the ACTIVE snapshot. */
+export async function terminalHoldsCurrentT1Grant(
+  client: HubClient,
+  terminalDeviceId: string,
+): Promise<boolean> {
+  const grants = await readCurrentProfileGrants(client, terminalDeviceId);
+  return grants.some((grant) => grant.profile_code === T1_PROFILE_CODE);
 }
 
 export async function deriveEligibility(
@@ -455,29 +483,27 @@ export async function deriveEligibility(
     );
   }
 
-  // Profile grant: enabled, effective now, sourced from the ACTIVE snapshot.
-  const grant = await client.query<{ id: string; profile_code: string }>(
-    `select tpa.id, tpa.profile_code
-       from edge_config.terminal_profile_assignment tpa
-       join edge_config.configuration_snapshot cs on cs.id = tpa.source_snapshot_id
-      where tpa.terminal_device_id = $1::uuid
-        and tpa.enabled
-        and tpa.effective_from <= now()
-        and (tpa.effective_until is null or tpa.effective_until > now())
-        and cs.state = 'active'
-      order by tpa.assignment_version desc
-      limit 1`,
-    [terminalDeviceId],
-  );
-  const grantRow = grant.rows[0];
-  if (grantRow === undefined) {
+  // Profile grants: enabled, effective now, sourced from the ACTIVE snapshot.
+  // The POS runtime is the T1 experience, so the T1 grant is the one this
+  // eligibility is about; the pairing receipt may name ANY profile the terminal
+  // is granted (a T1 + T2 counter seat pairs into whichever the seat lists
+  // first), never one it is not.
+  const grants = await readCurrentProfileGrants(client, terminalDeviceId);
+  if (grants.length === 0) {
     return refuse("PROFILE_NOT_GRANTED", "no enabled profile assignment exists");
   }
-  if (grantRow.profile_code !== T1_PROFILE_CODE) {
-    return refuse("PROFILE_NOT_T1", `the assigned profile is ${grantRow.profile_code}`);
+  const grantRow = grants.find((grant) => grant.profile_code === T1_PROFILE_CODE);
+  if (grantRow === undefined) {
+    return refuse(
+      "PROFILE_NOT_T1",
+      `the assigned profiles are ${grants.map((grant) => grant.profile_code).join(", ")}`,
+    );
   }
-  if (receiptRow.terminal_profile_code !== grantRow.profile_code) {
-    return refuse("ASSIGNMENT_GENERATION_STALE", "the pairing receipt binds another profile");
+  if (!grants.some((grant) => grant.profile_code === receiptRow.terminal_profile_code)) {
+    return refuse(
+      "ASSIGNMENT_GENERATION_STALE",
+      "the pairing receipt binds a profile outside the terminal's current grants",
+    );
   }
 
   // Containment: blocking directives refuse; investigation is reported.

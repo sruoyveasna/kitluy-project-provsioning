@@ -44,12 +44,29 @@ export function readSeat(path = TERMINAL_ASSIGNMENT_PATH) {
         return {
             ...(typeof store === "string" && UUID.test(store) ? { digitalStoreId: store } : {}),
             ...(typeof location === "string" && UUID.test(location) ? { storeLocationId: location } : {}),
-            profileCodes: keys.filter((k) => typeof k === "string" && PROFILE.test(k)),
+            profileCodes: orderProfilesForPairing(keys.filter((k) => typeof k === "string" && PROFILE.test(k))),
         };
     }
     catch {
         return { profileCodes: [] };
     }
+}
+/**
+ * The profile a multi-profile seat pairs INTO is its lowest-numbered one.
+ *
+ * A seat may grant several profiles (a counter is `t1` + `t2`: the primary
+ * experience and its second screen), listed in whatever order the Partner
+ * chose. The Hub records one profile on the pairing receipt and the POS
+ * runtime is the `t1` experience, so the terminal presents its primary
+ * profile first. The rule reads the `tN` segment only — no vertical vocabulary
+ * lives here — and keeps the Partner's order among equal numbers.
+ */
+export function orderProfilesForPairing(codes) {
+    const rank = (code) => {
+        const segment = /\.t([1-9][0-9]*)\./.exec(code);
+        return segment === null ? Number.MAX_SAFE_INTEGER : Number(segment[1]);
+    };
+    return [...codes].sort((a, b) => rank(a) - rank(b));
 }
 /** Public facts about this board for the POS, read fresh on every status call. */
 export function readTerminalFacts(assignmentPath = TERMINAL_ASSIGNMENT_PATH, registrationStatePath) {
