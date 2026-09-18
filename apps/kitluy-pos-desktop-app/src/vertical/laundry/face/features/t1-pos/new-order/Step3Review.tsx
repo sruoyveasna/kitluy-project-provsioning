@@ -16,6 +16,7 @@ import { useState } from "react";
 
 import { useThemeColors } from "@face/app/ThemeProvider";
 import { useAppState } from "@face/app/useAppState";
+import { I } from "@face/components/common/icons";
 import { ServiceItemIcon } from "@face/components/common/ServiceItemIcon";
 import { fmt } from "@face/lib/formatters";
 import { iconForItemName } from "@face/lib/itemIcons";
@@ -337,7 +338,7 @@ export const Step3Review = ({ layout }: { layout: "main" | "panel" }) => {
                       <ServiceItemIcon
                         iconPath={c.icon}
                         sizePx={20}
-                        fallback={<span style={{ fontSize: 16 }}>{iconForItemName(c.name)}</span>}
+                        fallback={iconForItemName(c.name, 16)}
                       />
                       <span className="sv-review-line-name">{c.name}</span>
                       <span className="sv-review-line-qty">×{c.qty}</span>
@@ -360,7 +361,7 @@ export const Step3Review = ({ layout }: { layout: "main" | "panel" }) => {
           )}
           {custNote && (
             <div className="sv-review-note" role="note">
-              📝 {custNote}
+              <I.StickyNote s={16} c="currentColor" /> {custNote}
             </div>
           )}
           <div className="sv-review-card">

@@ -97,9 +97,7 @@ export const WfItemsPanel = () => {
           <ServiceItemIcon
             iconPath={item.iconPath ?? item.icon}
             sizePx={SERVICE_ITEM_ICON_PX}
-            fallback={
-              <span style={{ fontSize: SERVICE_ITEM_ICON_PX }}>{iconForItemName(item.name)}</span>
-            }
+            fallback={iconForItemName(item.name, SERVICE_ITEM_ICON_PX)}
           />
         </div>
         <div className="sv-service-item-card__name" style={{ color: C.text }}>

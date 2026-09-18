@@ -161,7 +161,7 @@ export function TerminalLauncher(props: {
   return (
     <ScreenFrame>
       <div className="lsv-shell kl-launcher" data-terminal-launcher={report.state}>
-        <div className="ts scroll">
+        <div className="ts scroll hide-scrollbar">
           <header className="ts-head">
             <div className="ts-brand">
               <KitluyBrandLogo />
@@ -250,11 +250,17 @@ export function TerminalLauncher(props: {
                           <span className="ts-role">{assigned ? text.assigned : t.role}</span>
                           <p className="ts-desc">{t.desc}</p>
                           <span className="ts-hw">
-                            {assigned
-                              ? canUnlock
-                                ? text.tapToUnlock
-                                : t.hw
-                              : `🔒 ${text.lockedChip}`}
+                            {assigned ? (
+                              canUnlock ? (
+                                text.tapToUnlock
+                              ) : (
+                                t.hw
+                              )
+                            ) : (
+                              <>
+                                <I.Lock s={11} c="currentColor" /> {text.lockedChip}
+                              </>
+                            )}
                           </span>
                         </button>
                       );
@@ -264,9 +270,11 @@ export function TerminalLauncher(props: {
               );
             })}
 
-            <div className="kl-launcher-status">
-              <T1BootstrapView report={report} locale={locale} />
-            </div>
+            {canUnlock ? null : (
+              <div className="kl-launcher-status">
+                <T1BootstrapView report={report} locale={locale} />
+              </div>
+            )}
             <p className="ts-foot-note">{text.footNote}</p>
           </div>
         </div>

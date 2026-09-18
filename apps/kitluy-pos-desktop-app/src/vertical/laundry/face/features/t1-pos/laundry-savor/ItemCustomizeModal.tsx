@@ -43,7 +43,7 @@ export function ItemCustomizeModal({
               <ServiceItemIcon
                 iconPath={item.iconPath ?? item.icon}
                 sizePx={84}
-                fallback={<span style={{ fontSize: 48 }}>{iconForItemName(item.name)}</span>}
+                fallback={iconForItemName(item.name, 48)}
               />
             </div>
             <div className="sv-mod-info">

@@ -121,9 +121,9 @@ describe("the shell hands the screen to the Laundry face", () => {
         ),
       );
     }
-    // Default locale is Khmer; the lock glyph precedes the reason in both languages.
-    expect(html).toContain("🔒 ");
+    // Default locale is Khmer; an SVG lock (the Pi has no emoji font) precedes the reason.
     expect(html).toContain("បានចាត់តាំងតាម provisioning");
+    expect(html).not.toMatch(/\p{Extended_Pictographic}/u);
     expect(html).not.toMatch(/Sign out|Select Your Terminal|Choose the workstation/u);
     // The PIN modal opens on the tap, so nothing PIN-shaped is in the first paint.
     expect(html).not.toContain("data-pin-screen");
@@ -157,8 +157,10 @@ describe("the face over test ports", () => {
     );
     expect(html).toContain('data-t1-view="new_order"');
     expect(html).toContain('data-nav="new_order"');
-    expect(html).toContain("POS Cashier / Intake");
-    expect(html).toContain("Terminal PIN session");
+    expect(html).toContain("Cashier / Intake");
+    expect(html).toContain("PIN session");
+    // No emoji anywhere in the first paint: the Pi image has no emoji font.
+    expect(html).not.toMatch(/\p{Extended_Pictographic}/u);
     expect(html).toContain("v4");
     expect(html).toContain('data-wizard-step="0"');
     // The catalog port has not answered on a server render: loading, never a fixture.

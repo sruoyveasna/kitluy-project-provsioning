@@ -65,7 +65,7 @@ function CartLineRow({
         <ServiceItemIcon
           iconPath={line.icon}
           sizePx={22}
-          fallback={<span style={{ fontSize: 20 }}>{iconForItemName(line.name)}</span>}
+          fallback={iconForItemName(line.name, 20)}
         />
       </div>
       <div className="sv-od-line-body">
@@ -104,11 +104,7 @@ function WfGarmentRow({
   return (
     <div className="sv-od-line sv-od-line--wf-child">
       <div className="sv-od-line-thumb sv-od-line-thumb--sm">
-        <ServiceItemIcon
-          iconPath={icon}
-          sizePx={16}
-          fallback={<span style={{ fontSize: 14 }}>{iconForItemName(name)}</span>}
-        />
+        <ServiceItemIcon iconPath={icon} sizePx={16} fallback={iconForItemName(name, 14)} />
       </div>
       <div className="sv-od-line-body">
         <div className="sv-od-line-top">
@@ -151,7 +147,7 @@ export const LaundryBookingCartLines = () => {
               return {
                 itemId,
                 name: item?.name ?? `Item #${itemId}`,
-                icon: item?.icon ?? "👕",
+                icon: item?.icon ?? "",
                 qty,
               };
             }),

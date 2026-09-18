@@ -6,18 +6,13 @@ import { font } from "@face/styles/tokens";
 
 const CATEGORY_ICON_PX = 18;
 
-const categoryEmojiFallback = (code: string): string => {
-  switch (code.toUpperCase()) {
-    case "ADD_ON":
-      return "👔";
-    case "FORMAL":
-      return "👔";
-    case "CASUAL":
-      return "👕";
-    default:
-      return "📦";
-  }
-};
+// A Pi Terminal has no emoji font: category glyphs are the face's SVGs.
+const categoryIconFallback = (code: string, color: string) =>
+  ["ADD_ON", "FORMAL", "CASUAL"].includes(code.toUpperCase()) ? (
+    <I.Shirt s={CATEGORY_ICON_PX} c={color} />
+  ) : (
+    <I.Package s={CATEGORY_ICON_PX} c={color} />
+  );
 
 type Props = {
   categories: LaundryItemCategory[] | undefined;
@@ -82,11 +77,7 @@ export function ServiceCategoryPicker({
                 <ServiceItemIcon
                   iconPath={cat.iconPath}
                   sizePx={CATEGORY_ICON_PX}
-                  fallback={
-                    <span style={{ fontSize: CATEGORY_ICON_PX, lineHeight: 1 }}>
-                      {categoryEmojiFallback(cat.code)}
-                    </span>
-                  }
+                  fallback={categoryIconFallback(cat.code, selected ? accentColor : C.text)}
                 />
               </span>
               <span>{cat.name}</span>

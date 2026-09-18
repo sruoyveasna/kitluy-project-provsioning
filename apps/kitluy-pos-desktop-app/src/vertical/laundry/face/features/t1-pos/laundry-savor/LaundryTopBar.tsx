@@ -152,7 +152,9 @@ export const LaundryTopBar = ({ terminal }: { readonly terminal: TerminalFacts }
           <ConnectionIndicator online={terminal.hubReachable} />
           <span className="sv-util-div" />
           <div className="sv-fx" title="Configuration the Store Hub delivered">
-            <span className="sv-fx-flag">⚙</span>
+            <span className="sv-fx-flag">
+              <SvIcon name="settings" size={16} />
+            </span>
             <div className="sv-fx-text">
               <div className="sv-fx-rate">
                 {terminal.configurationVersion === null
@@ -185,8 +187,8 @@ export const LaundryTopBar = ({ terminal }: { readonly terminal: TerminalFacts }
           >
             <div className="sv-user-avatar">T1</div>
             <div className="sv-user-text">
-              <div className="sv-user-name">{terminal.profileLabel}</div>
-              <div className="sv-user-role">Terminal PIN session</div>
+              <div className="sv-user-name">Cashier / Intake</div>
+              <div className="sv-user-role">PIN session</div>
             </div>
             <button type="button" className="sv-user-more" tabIndex={-1} aria-label="Terminal menu">
               <SvIcon name="more" size={20} />

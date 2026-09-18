@@ -5,6 +5,8 @@
  */
 import { type CSSProperties, type ReactNode } from "react";
 
+import { isEmojiGlyph } from "@face/lib/itemIcons";
+
 interface ServiceItemIconProps {
   /**
    * `catalog.service_items.icon_path` (emoji glyph OR storage object key
@@ -38,7 +40,8 @@ export const ServiceItemIcon = ({
 }: ServiceItemIconProps) => {
   const trimmed = iconPath?.trim();
 
-  if (!trimmed) {
+  // No glyph, or an emoji the Pi's fonts cannot draw: the caller's SVG fallback.
+  if (!trimmed || isEmojiGlyph(trimmed)) {
     return <>{fallback}</>;
   }
 

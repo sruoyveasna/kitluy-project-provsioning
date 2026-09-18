@@ -52,7 +52,7 @@ export function resolveWfGarments(
     out.push({
       serviceItemId: null,
       name: item?.name ?? id,
-      icon: item?.icon ?? "🧺",
+      icon: item?.icon ?? "",
       quantity: qty,
     });
   }

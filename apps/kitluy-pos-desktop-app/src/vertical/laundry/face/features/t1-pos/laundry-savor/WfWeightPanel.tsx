@@ -96,7 +96,7 @@ export const WfWeightPanel = () => {
         {
           id: WF_KG_CART_ID,
           name: lineName,
-          icon: "⚖️",
+          icon: "",
           price: rateKhr,
           qty: kg,
           svc: "wf" as const,

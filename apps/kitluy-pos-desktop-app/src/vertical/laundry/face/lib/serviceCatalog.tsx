@@ -6,6 +6,9 @@
  * pricing modes (WS-05): `wf` = per weight, `pp` = per piece. A service's NAME
  * always comes from the delivered catalog; only the lane chrome lives here.
  */
+import type { ReactNode } from "react";
+
+import { I } from "@face/components/common/icons";
 import { C } from "@face/styles/tokens";
 import type { ServiceType } from "@face/types";
 
@@ -16,7 +19,9 @@ export const serviceLabel = (svc: ServiceType): string =>
 
 export const serviceLabelShort = (svc: ServiceType): string => (svc === "wf" ? "kg" : "pc");
 
-export const serviceEmoji = (svc: ServiceType): string => (svc === "wf" ? "🧺" : "👔");
+/** The lane's icon as an SVG — a Pi Terminal has no emoji font. */
+export const serviceIcon = (svc: ServiceType, size = 22): ReactNode =>
+  svc === "wf" ? <I.Basket s={size} c="currentColor" /> : <I.Shirt s={size} c="currentColor" />;
 
 export const serviceColor = (svc: ServiceType): string => (svc === "wf" ? C.primary : C.purple);
 

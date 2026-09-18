@@ -9,7 +9,7 @@
  * per-weight service opens the kg panel, per-piece services fill the grid.
  * When no catalog has been delivered, the step says so — it invents nothing.
  */
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 
 import { useThemeColors } from "@face/app/ThemeProvider";
 import { useAppState } from "@face/app/useAppState";
@@ -18,7 +18,7 @@ import { ServiceItemIcon } from "@face/components/common/ServiceItemIcon";
 import { useLaundryCatalog } from "@face/hooks/useLaundryCatalog";
 import { fmt } from "@face/lib/formatters";
 import { iconForItemName } from "@face/lib/itemIcons";
-import { serviceColor, serviceEmoji, serviceLabel, serviceSoftBg } from "@face/lib/serviceCatalog";
+import { serviceColor, serviceIcon, serviceLabel, serviceSoftBg } from "@face/lib/serviceCatalog";
 import { C as C_LIGHT, font } from "@face/styles/tokens";
 import type { CatalogItem, ServiceType } from "@face/types";
 
@@ -41,7 +41,7 @@ interface ServiceCard {
   name: string;
   desc: string;
   pricing: string;
-  icon: string;
+  icon: ReactNode;
   color: string;
   gradient: string;
 }
@@ -84,7 +84,7 @@ export const Step1Items = () => {
       name: first?.name ?? serviceLabel("wf"),
       desc: "Weigh the load and enter whole kilograms — optional garment checklist.",
       pricing: first !== undefined ? `${fmt(first.rateKhr)} / kg` : "Per kg",
-      icon: serviceEmoji("wf"),
+      icon: serviceIcon("wf", 34),
       color: C_LIGHT.primary,
       gradient: `linear-gradient(135deg, ${C_LIGHT.primaryDeep} 0%, ${C_LIGHT.primary} 100%)`,
     });
@@ -95,7 +95,7 @@ export const Step1Items = () => {
       name: serviceLabel("pp"),
       desc: `${String(perPiece.length)} service${perPiece.length === 1 ? "" : "s"} priced per piece — tap to add pieces.`,
       pricing: "Per piece",
-      icon: serviceEmoji("pp"),
+      icon: serviceIcon("pp", 34),
       color: C_LIGHT.purple,
       gradient: `linear-gradient(135deg, #5B21B6 0%, ${C_LIGHT.purple} 100%)`,
     });
@@ -316,9 +316,7 @@ export const Step1Items = () => {
           <ServiceItemIcon
             iconPath={item.iconPath ?? item.icon}
             sizePx={SERVICE_ITEM_ICON_PX}
-            fallback={
-              <span style={{ fontSize: SERVICE_ITEM_ICON_PX }}>{iconForItemName(item.name)}</span>
-            }
+            fallback={iconForItemName(item.name, SERVICE_ITEM_ICON_PX, svcColor)}
           />
         </div>
         <div className="sv-service-item-card__name" style={{ color: C.text }}>
@@ -329,7 +327,10 @@ export const Step1Items = () => {
         </div>
         {stainQty > 0 && (
           <div className="sv-service-item-card__stain" style={{ color: C.red }}>
-            🟠 {stainQty} stain
+            <span aria-hidden style={{ color: C.amber }}>
+              ●
+            </span>{" "}
+            {stainQty} stain
           </div>
         )}
         {qty === 0 && (
@@ -359,7 +360,9 @@ export const Step1Items = () => {
                 background: serviceSoftBg(selServiceType),
               }}
             >
-              <span style={{ fontSize: 22 }}>{serviceEmoji(selServiceType)}</span>
+              <span style={{ display: "inline-flex", color: serviceColor(selServiceType) }}>
+                {serviceIcon(selServiceType, 22)}
+              </span>
             </div>
             <div style={{ minWidth: 0 }}>
               <h3
