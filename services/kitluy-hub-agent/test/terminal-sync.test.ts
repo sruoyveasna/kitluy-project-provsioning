@@ -379,6 +379,63 @@ describe("the producer's envelope, at the Hub", () => {
     });
   });
 
+  it("carries the catalog and the money contract, and refuses a malformed one outright", () => {
+    const answer = doorAnswer();
+    const withSections = {
+      ...answer,
+      catalog: {
+        schema: "kitluy.config.catalog.v1",
+        currency_code: "KHR",
+        content_hash: "a".repeat(64),
+        families: [],
+        categories: [],
+        services: [],
+        garment_types: [],
+      },
+      money: { schema: "kitluy.config.money.v1", currency_code: "KHR", currency_exponent: 0 },
+    };
+    const ok = verifySyncEnvelope(
+      buildSignedEnvelope(withSections, nonce, signer).body,
+      trust.trust,
+      expect_,
+    );
+    expect(ok.ok).toBe(true);
+    if (ok.ok) {
+      expect(ok.envelope.catalog?.content_hash).toBe("a".repeat(64));
+      expect(ok.envelope.money?.currency_exponent).toBe(0);
+    }
+    const none = verifySyncEnvelope(
+      buildSignedEnvelope(answer, nonce, signer).body,
+      trust.trust,
+      expect_,
+    );
+    expect(none.ok && none.envelope.catalog === null && none.envelope.money === null).toBe(true);
+    const badCatalog = verifySyncEnvelope(
+      buildSignedEnvelope(
+        { ...withSections, catalog: { ...withSections.catalog, content_hash: "nope" } },
+        nonce,
+        signer,
+      ).body,
+      trust.trust,
+      expect_,
+    );
+    expect(badCatalog).toMatchObject({
+      ok: false,
+      refusal: "ENVELOPE_MALFORMED",
+      detail: "catalog",
+    });
+    const badMoney = verifySyncEnvelope(
+      buildSignedEnvelope(
+        { ...withSections, money: { schema: "kitluy.config.money.v1", currency_code: "KHR" } },
+        nonce,
+        signer,
+      ).body,
+      trust.trust,
+      expect_,
+    );
+    expect(badMoney).toMatchObject({ ok: false, refusal: "ENVELOPE_MALFORMED", detail: "money" });
+  });
+
   it("keeps the well-formed deliveries and names the malformed ones", () => {
     const rows = [doorRow(), doorRow({ device_id: "not-a-uuid", asset_tag: "KL-BROKEN" })];
     const { body } = buildSignedEnvelope(doorAnswer(rows), nonce, signer);

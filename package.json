@@ -29,6 +29,7 @@
     "dev:device:unassign": "node scripts/development/unassign-hosted-dev-device.mjs",
     "dev:fleet": "node scripts/development/fleet-service.mjs",
     "dev:hub-sync": "node scripts/development/hub-sync-service.mjs",
+    "dev:catalog:load": "node scripts/development/load-laundry-catalog.mjs",
     "dev:device:approve": "node scripts/development/approve-dev-device.mjs",
     "dev:pairing:code": "node scripts/development/issue-dev-pairing-code.mjs",
     "dsn:check": "node scripts/verification/assert-canonical-test-dsn.mjs",

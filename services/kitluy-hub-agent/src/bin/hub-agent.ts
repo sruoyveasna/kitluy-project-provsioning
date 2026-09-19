@@ -470,7 +470,7 @@ async function syncTerminalsCommand(): Promise<void> {
         (t) => `${t.terminalName}:${t.action}${t.detail ? ` (${t.detail})` : ""}`,
       ),
       configuration: result.outcome.configuration.published
-        ? `v${result.outcome.configuration.snapshotVersion} (${String(result.outcome.configuration.grantsWritten)} grants)`
+        ? `v${result.outcome.configuration.snapshotVersion} (${String(result.outcome.configuration.grantsWritten)} grants; ${result.outcome.configuration.sections.join("+")}; because ${result.outcome.configuration.because.join(",")})`
         : result.outcome.configuration.reason,
       malformed: result.malformed,
     });

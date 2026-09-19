@@ -29,6 +29,7 @@ export const NewOrder = () => {
     resetOrder,
     selServiceType,
     setSelServiceType,
+    setSelFamilyCode,
     setT1WizardScrollRatio,
   } = useAppState();
 
@@ -44,6 +45,7 @@ export const NewOrder = () => {
       ? () => {
           if (selServiceType) {
             setSelServiceType(null);
+            setSelFamilyCode(null);
             return;
           }
           resetOrder();

@@ -39,10 +39,14 @@ import type pg from "pg";
 
 import {
   applyEnvelope,
+  parseCatalogSection,
+  parseMoneySection,
   parseTerminalDelivery,
   type ApplyOutcome,
+  type CatalogSection,
   type HubScope,
   type HubSelfFacts,
+  type MoneySection,
   type TerminalDelivery,
 } from "./apply.js";
 import {
@@ -346,6 +350,9 @@ export interface VerifiedEnvelope {
   readonly deliveries: readonly TerminalDelivery[];
   /** Deliveries that did not parse, by name where one was readable. */
   readonly malformed: readonly string[];
+  /** The Laundry catalog and the money contract, when the cloud published them. */
+  readonly catalog: CatalogSection | null;
+  readonly money: MoneySection | null;
 }
 
 export type EnvelopeRefusal =
@@ -445,6 +452,16 @@ export function verifySyncEnvelope(
       malformed.push(`${typeof name === "string" ? name : "?"}: ${parsed.reason}`);
     }
   }
+  // Group 0233: present but malformed is a refusal of the whole envelope — a
+  // catalog the Hub cannot read must never become a signed section.
+  const catalog = parseCatalogSection(env["catalog"]);
+  if (env["catalog"] !== undefined && env["catalog"] !== null && catalog === null) {
+    return { ok: false, refusal: "ENVELOPE_MALFORMED", detail: "catalog" };
+  }
+  const money = parseMoneySection(env["money"]);
+  if (env["money"] !== undefined && env["money"] !== null && money === null) {
+    return { ok: false, refusal: "ENVELOPE_MALFORMED", detail: "money" };
+  }
   return {
     ok: true,
     envelope: {
@@ -452,6 +469,8 @@ export function verifySyncEnvelope(
       hubAssetTag: typeof h["assetTag"] === "string" ? h["assetTag"] : "",
       deliveries,
       malformed,
+      catalog,
+      money,
     },
   };
 }
@@ -617,6 +636,8 @@ export async function runTerminalSyncOnce(deps: SyncDeps): Promise<SyncOutcome> 
       deliveries: verified.envelope.deliveries,
       environment: config.environment,
       now: now(),
+      catalog: verified.envelope.catalog,
+      money: verified.envelope.money,
     });
   } catch (error) {
     return finish({
@@ -662,7 +683,7 @@ export function startTerminalSyncLoop(deps: SyncDeps): () => void {
             `${t.terminalName}:${t.action}${t.retiredPrevious ? "(previous retired)" : ""}${t.detail ? ` ${t.detail}` : ""}`,
         ),
         configuration: result.outcome.configuration.published
-          ? `v${result.outcome.configuration.snapshotVersion} (${String(result.outcome.configuration.grantsWritten)} grants)`
+          ? `v${result.outcome.configuration.snapshotVersion} (${String(result.outcome.configuration.grantsWritten)} grants; ${result.outcome.configuration.sections.join("+")}; because ${result.outcome.configuration.because.join(",")})`
           : result.outcome.configuration.reason,
         malformed: result.malformed.length,
       };

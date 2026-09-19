@@ -1,0 +1,572 @@
+{
+  "kind": "kitluy.laundry-catalog-load.v1",
+  "provenance": "kitluy-laundry-pos-desk-app@8b2f107 src/fixtures/laundryItemCatalog.ts, laundryItems.ts (WF_KG_RATE_KHR); owner choice 2026-09-19 'your designed app's catalog'",
+  "currency_code": "KHR",
+  "families": [
+    {
+      "code": "WASH_FOLD",
+      "lane": "per_weight",
+      "name": "Wash & Fold",
+      "name_km": "បោកបត់",
+      "sort_order": 10
+    },
+    {
+      "code": "DRY_CLEAN",
+      "lane": "per_piece",
+      "name": "Dry Clean",
+      "name_km": "បោកស្ងួត",
+      "sort_order": 20
+    },
+    {
+      "code": "WASH_PRESS",
+      "lane": "per_piece",
+      "name": "Wash & Press",
+      "name_km": "បោកអ៊ុត",
+      "sort_order": 30
+    }
+  ],
+  "categories": [
+    {
+      "code": "GENERAL",
+      "name": "General",
+      "sort_order": 10,
+      "families": ["DRY_CLEAN", "WASH_PRESS"]
+    },
+    {
+      "code": "TOPS",
+      "name": "Tops",
+      "sort_order": 10,
+      "families": ["WASH_FOLD"]
+    },
+    {
+      "code": "BOTTOMS",
+      "name": "Bottoms",
+      "sort_order": 20,
+      "families": ["WASH_FOLD"]
+    },
+    {
+      "code": "LINENS",
+      "name": "Linens & Home",
+      "sort_order": 30,
+      "families": ["WASH_FOLD"]
+    },
+    {
+      "code": "KIDS_SPORTS",
+      "name": "Kids & Sports",
+      "sort_order": 40,
+      "families": ["WASH_FOLD"]
+    }
+  ],
+  "services": [
+    {
+      "service_code": "WF-KG",
+      "family": "WASH_FOLD",
+      "pricing_mode": "PER_WEIGHT",
+      "name": "Wash & Fold (per kg)",
+      "unit_price_khr": 4000,
+      "garment_code": null,
+      "category_code": null,
+      "sort_order": 10
+    },
+    {
+      "service_code": "DC-SUIT_2PC",
+      "family": "DRY_CLEAN",
+      "pricing_mode": "PER_PIECE",
+      "name": "Men's Suit (2-piece) — Dry Clean",
+      "display_name": "Men's Suit (2-piece)",
+      "unit_price_khr": 25000,
+      "garment_code": "SUIT_2PC",
+      "category_code": "GENERAL",
+      "sort_order": 10
+    },
+    {
+      "service_code": "WP-SUIT_2PC",
+      "family": "WASH_PRESS",
+      "pricing_mode": "PER_PIECE",
+      "name": "Men's Suit (2-piece) — Wash & Press",
+      "display_name": "Men's Suit (2-piece)",
+      "unit_price_khr": 15000,
+      "garment_code": "SUIT_2PC",
+      "category_code": "GENERAL",
+      "sort_order": 10
+    },
+    {
+      "service_code": "DC-SUIT_3PC",
+      "family": "DRY_CLEAN",
+      "pricing_mode": "PER_PIECE",
+      "name": "Men's Suit (3-piece) — Dry Clean",
+      "display_name": "Men's Suit (3-piece)",
+      "unit_price_khr": 35000,
+      "garment_code": "SUIT_3PC",
+      "category_code": "GENERAL",
+      "sort_order": 20
+    },
+    {
+      "service_code": "WP-SUIT_3PC",
+      "family": "WASH_PRESS",
+      "pricing_mode": "PER_PIECE",
+      "name": "Men's Suit (3-piece) — Wash & Press",
+      "display_name": "Men's Suit (3-piece)",
+      "unit_price_khr": 20000,
+      "garment_code": "SUIT_3PC",
+      "category_code": "GENERAL",
+      "sort_order": 20
+    },
+    {
+      "service_code": "DC-DRESS_SHIRT",
+      "family": "DRY_CLEAN",
+      "pricing_mode": "PER_PIECE",
+      "name": "Dress Shirt — Dry Clean",
+      "display_name": "Dress Shirt",
+      "unit_price_khr": 8000,
+      "garment_code": "DRESS_SHIRT",
+      "category_code": "GENERAL",
+      "sort_order": 30
+    },
+    {
+      "service_code": "WP-DRESS_SHIRT",
+      "family": "WASH_PRESS",
+      "pricing_mode": "PER_PIECE",
+      "name": "Dress Shirt — Wash & Press",
+      "display_name": "Dress Shirt",
+      "unit_price_khr": 5000,
+      "garment_code": "DRESS_SHIRT",
+      "category_code": "GENERAL",
+      "sort_order": 30
+    },
+    {
+      "service_code": "DC-BLOUSE",
+      "family": "DRY_CLEAN",
+      "pricing_mode": "PER_PIECE",
+      "name": "Blouse — Dry Clean",
+      "display_name": "Blouse",
+      "unit_price_khr": 10000,
+      "garment_code": "BLOUSE",
+      "category_code": "GENERAL",
+      "sort_order": 40
+    },
+    {
+      "service_code": "WP-BLOUSE",
+      "family": "WASH_PRESS",
+      "pricing_mode": "PER_PIECE",
+      "name": "Blouse — Wash & Press",
+      "display_name": "Blouse",
+      "unit_price_khr": 6000,
+      "garment_code": "BLOUSE",
+      "category_code": "GENERAL",
+      "sort_order": 40
+    },
+    {
+      "service_code": "DC-EVENING_DRESS",
+      "family": "DRY_CLEAN",
+      "pricing_mode": "PER_PIECE",
+      "name": "Evening Dress — Dry Clean",
+      "display_name": "Evening Dress",
+      "unit_price_khr": 30000,
+      "garment_code": "EVENING_DRESS",
+      "category_code": "GENERAL",
+      "sort_order": 50
+    },
+    {
+      "service_code": "WP-EVENING_DRESS",
+      "family": "WASH_PRESS",
+      "pricing_mode": "PER_PIECE",
+      "name": "Evening Dress — Wash & Press",
+      "display_name": "Evening Dress",
+      "unit_price_khr": 18000,
+      "garment_code": "EVENING_DRESS",
+      "category_code": "GENERAL",
+      "sort_order": 50
+    },
+    {
+      "service_code": "DC-SKIRT",
+      "family": "DRY_CLEAN",
+      "pricing_mode": "PER_PIECE",
+      "name": "Skirt — Dry Clean",
+      "display_name": "Skirt",
+      "unit_price_khr": 12000,
+      "garment_code": "SKIRT",
+      "category_code": "GENERAL",
+      "sort_order": 60
+    },
+    {
+      "service_code": "WP-SKIRT",
+      "family": "WASH_PRESS",
+      "pricing_mode": "PER_PIECE",
+      "name": "Skirt — Wash & Press",
+      "display_name": "Skirt",
+      "unit_price_khr": 7000,
+      "garment_code": "SKIRT",
+      "category_code": "GENERAL",
+      "sort_order": 60
+    },
+    {
+      "service_code": "DC-WINTER_COAT",
+      "family": "DRY_CLEAN",
+      "pricing_mode": "PER_PIECE",
+      "name": "Winter Coat — Dry Clean",
+      "display_name": "Winter Coat",
+      "unit_price_khr": 28000,
+      "garment_code": "WINTER_COAT",
+      "category_code": "GENERAL",
+      "sort_order": 70
+    },
+    {
+      "service_code": "WP-WINTER_COAT",
+      "family": "WASH_PRESS",
+      "pricing_mode": "PER_PIECE",
+      "name": "Winter Coat — Wash & Press",
+      "display_name": "Winter Coat",
+      "unit_price_khr": 16000,
+      "garment_code": "WINTER_COAT",
+      "category_code": "GENERAL",
+      "sort_order": 70
+    },
+    {
+      "service_code": "DC-LEATHER_JACKET",
+      "family": "DRY_CLEAN",
+      "pricing_mode": "PER_PIECE",
+      "name": "Leather Jacket — Dry Clean",
+      "display_name": "Leather Jacket",
+      "unit_price_khr": 35000,
+      "garment_code": "LEATHER_JACKET",
+      "category_code": "GENERAL",
+      "sort_order": 80
+    },
+    {
+      "service_code": "WP-LEATHER_JACKET",
+      "family": "WASH_PRESS",
+      "pricing_mode": "PER_PIECE",
+      "name": "Leather Jacket — Wash & Press",
+      "display_name": "Leather Jacket",
+      "unit_price_khr": 22000,
+      "garment_code": "LEATHER_JACKET",
+      "category_code": "GENERAL",
+      "sort_order": 80
+    },
+    {
+      "service_code": "DC-CURTAINS",
+      "family": "DRY_CLEAN",
+      "pricing_mode": "PER_PIECE",
+      "name": "Curtains (per pair) — Dry Clean",
+      "display_name": "Curtains (per pair)",
+      "unit_price_khr": 20000,
+      "garment_code": "CURTAINS",
+      "category_code": "GENERAL",
+      "sort_order": 90
+    },
+    {
+      "service_code": "WP-CURTAINS",
+      "family": "WASH_PRESS",
+      "pricing_mode": "PER_PIECE",
+      "name": "Curtains (per pair) — Wash & Press",
+      "display_name": "Curtains (per pair)",
+      "unit_price_khr": 12000,
+      "garment_code": "CURTAINS",
+      "category_code": "GENERAL",
+      "sort_order": 90
+    },
+    {
+      "service_code": "DC-BED_SHEET_SET",
+      "family": "DRY_CLEAN",
+      "pricing_mode": "PER_PIECE",
+      "name": "Bed Sheet Set — Dry Clean",
+      "display_name": "Bed Sheet Set",
+      "unit_price_khr": 18000,
+      "garment_code": "BED_SHEET_SET",
+      "category_code": "GENERAL",
+      "sort_order": 100
+    },
+    {
+      "service_code": "WP-BED_SHEET_SET",
+      "family": "WASH_PRESS",
+      "pricing_mode": "PER_PIECE",
+      "name": "Bed Sheet Set — Wash & Press",
+      "display_name": "Bed Sheet Set",
+      "unit_price_khr": 10000,
+      "garment_code": "BED_SHEET_SET",
+      "category_code": "GENERAL",
+      "sort_order": 100
+    },
+    {
+      "service_code": "DC-TROUSERS",
+      "family": "DRY_CLEAN",
+      "pricing_mode": "PER_PIECE",
+      "name": "Trousers / Pants — Dry Clean",
+      "display_name": "Trousers / Pants",
+      "unit_price_khr": 12000,
+      "garment_code": "TROUSERS",
+      "category_code": "GENERAL",
+      "sort_order": 110
+    },
+    {
+      "service_code": "WP-TROUSERS",
+      "family": "WASH_PRESS",
+      "pricing_mode": "PER_PIECE",
+      "name": "Trousers / Pants — Wash & Press",
+      "display_name": "Trousers / Pants",
+      "unit_price_khr": 7000,
+      "garment_code": "TROUSERS",
+      "category_code": "GENERAL",
+      "sort_order": 110
+    },
+    {
+      "service_code": "DC-TIE",
+      "family": "DRY_CLEAN",
+      "pricing_mode": "PER_PIECE",
+      "name": "Tie — Dry Clean",
+      "display_name": "Tie",
+      "unit_price_khr": 6000,
+      "garment_code": "TIE",
+      "category_code": "GENERAL",
+      "sort_order": 120
+    },
+    {
+      "service_code": "WP-TIE",
+      "family": "WASH_PRESS",
+      "pricing_mode": "PER_PIECE",
+      "name": "Tie — Wash & Press",
+      "display_name": "Tie",
+      "unit_price_khr": 3000,
+      "garment_code": "TIE",
+      "category_code": "GENERAL",
+      "sort_order": 120
+    },
+    {
+      "service_code": "DC-SWEATER",
+      "family": "DRY_CLEAN",
+      "pricing_mode": "PER_PIECE",
+      "name": "Sweater / Cardigan — Dry Clean",
+      "display_name": "Sweater / Cardigan",
+      "unit_price_khr": 15000,
+      "garment_code": "SWEATER",
+      "category_code": "GENERAL",
+      "sort_order": 130
+    },
+    {
+      "service_code": "WP-SWEATER",
+      "family": "WASH_PRESS",
+      "pricing_mode": "PER_PIECE",
+      "name": "Sweater / Cardigan — Wash & Press",
+      "display_name": "Sweater / Cardigan",
+      "unit_price_khr": 9000,
+      "garment_code": "SWEATER",
+      "category_code": "GENERAL",
+      "sort_order": 130
+    },
+    {
+      "service_code": "DC-SCARF",
+      "family": "DRY_CLEAN",
+      "pricing_mode": "PER_PIECE",
+      "name": "Scarf / Shawl — Dry Clean",
+      "display_name": "Scarf / Shawl",
+      "unit_price_khr": 10000,
+      "garment_code": "SCARF",
+      "category_code": "GENERAL",
+      "sort_order": 140
+    },
+    {
+      "service_code": "WP-SCARF",
+      "family": "WASH_PRESS",
+      "pricing_mode": "PER_PIECE",
+      "name": "Scarf / Shawl — Wash & Press",
+      "display_name": "Scarf / Shawl",
+      "unit_price_khr": 6000,
+      "garment_code": "SCARF",
+      "category_code": "GENERAL",
+      "sort_order": 140
+    },
+    {
+      "service_code": "DC-UNIFORM_SET",
+      "family": "DRY_CLEAN",
+      "pricing_mode": "PER_PIECE",
+      "name": "Uniform Set — Dry Clean",
+      "display_name": "Uniform Set",
+      "unit_price_khr": 18000,
+      "garment_code": "UNIFORM_SET",
+      "category_code": "GENERAL",
+      "sort_order": 150
+    },
+    {
+      "service_code": "WP-UNIFORM_SET",
+      "family": "WASH_PRESS",
+      "pricing_mode": "PER_PIECE",
+      "name": "Uniform Set — Wash & Press",
+      "display_name": "Uniform Set",
+      "unit_price_khr": 10000,
+      "garment_code": "UNIFORM_SET",
+      "category_code": "GENERAL",
+      "sort_order": 150
+    }
+  ],
+  "garment_types": [
+    {
+      "code": "WF_TSHIRT",
+      "name": "T-Shirt",
+      "category_code": "TOPS",
+      "sort_order": 10,
+      "families": ["WASH_FOLD"]
+    },
+    {
+      "code": "WF_POLO",
+      "name": "Polo Shirt",
+      "category_code": "TOPS",
+      "sort_order": 20,
+      "families": ["WASH_FOLD"]
+    },
+    {
+      "code": "WF_SHIRT",
+      "name": "Shirt (long sleeve)",
+      "category_code": "TOPS",
+      "sort_order": 30,
+      "families": ["WASH_FOLD"]
+    },
+    {
+      "code": "WF_BLOUSE",
+      "name": "Blouse",
+      "category_code": "TOPS",
+      "sort_order": 40,
+      "families": ["WASH_FOLD"]
+    },
+    {
+      "code": "WF_HOODIE",
+      "name": "Hoodie / Sweater",
+      "category_code": "TOPS",
+      "sort_order": 50,
+      "families": ["WASH_FOLD"]
+    },
+    {
+      "code": "WF_JACKET",
+      "name": "Light Jacket",
+      "category_code": "TOPS",
+      "sort_order": 60,
+      "families": ["WASH_FOLD"]
+    },
+    {
+      "code": "WF_PANTS",
+      "name": "Pants / Jeans",
+      "category_code": "BOTTOMS",
+      "sort_order": 70,
+      "families": ["WASH_FOLD"]
+    },
+    {
+      "code": "WF_SHORTS",
+      "name": "Shorts",
+      "category_code": "BOTTOMS",
+      "sort_order": 80,
+      "families": ["WASH_FOLD"]
+    },
+    {
+      "code": "WF_SKIRT",
+      "name": "Dress / Skirt",
+      "category_code": "BOTTOMS",
+      "sort_order": 90,
+      "families": ["WASH_FOLD"]
+    },
+    {
+      "code": "WF_UNDERWEAR",
+      "name": "Underwear",
+      "category_code": "BOTTOMS",
+      "sort_order": 100,
+      "families": ["WASH_FOLD"]
+    },
+    {
+      "code": "WF_SOCKS",
+      "name": "Socks (pair)",
+      "category_code": "BOTTOMS",
+      "sort_order": 110,
+      "families": ["WASH_FOLD"]
+    },
+    {
+      "code": "WF_PYJAMAS",
+      "name": "Pyjamas",
+      "category_code": "BOTTOMS",
+      "sort_order": 120,
+      "families": ["WASH_FOLD"]
+    },
+    {
+      "code": "WF_TOWEL",
+      "name": "Towel",
+      "category_code": "LINENS",
+      "sort_order": 130,
+      "families": ["WASH_FOLD"]
+    },
+    {
+      "code": "WF_BATH_MAT",
+      "name": "Bath Mat",
+      "category_code": "LINENS",
+      "sort_order": 140,
+      "families": ["WASH_FOLD"]
+    },
+    {
+      "code": "WF_BED_SHEET",
+      "name": "Bed Sheet",
+      "category_code": "LINENS",
+      "sort_order": 150,
+      "families": ["WASH_FOLD"]
+    },
+    {
+      "code": "WF_PILLOWCASE",
+      "name": "Pillowcase",
+      "category_code": "LINENS",
+      "sort_order": 160,
+      "families": ["WASH_FOLD"]
+    },
+    {
+      "code": "WF_BLANKET",
+      "name": "Blanket (thin)",
+      "category_code": "LINENS",
+      "sort_order": 170,
+      "families": ["WASH_FOLD"]
+    },
+    {
+      "code": "WF_CURTAIN",
+      "name": "Curtain (per panel)",
+      "category_code": "LINENS",
+      "sort_order": 180,
+      "families": ["WASH_FOLD"]
+    },
+    {
+      "code": "WF_TABLECLOTH",
+      "name": "Tablecloth",
+      "category_code": "LINENS",
+      "sort_order": 190,
+      "families": ["WASH_FOLD"]
+    },
+    {
+      "code": "WF_GYM",
+      "name": "Gym Wear",
+      "category_code": "KIDS_SPORTS",
+      "sort_order": 200,
+      "families": ["WASH_FOLD"]
+    },
+    {
+      "code": "WF_UNIFORM",
+      "name": "School Uniform",
+      "category_code": "KIDS_SPORTS",
+      "sort_order": 210,
+      "families": ["WASH_FOLD"]
+    },
+    {
+      "code": "WF_BABY",
+      "name": "Baby Clothes",
+      "category_code": "KIDS_SPORTS",
+      "sort_order": 220,
+      "families": ["WASH_FOLD"]
+    },
+    {
+      "code": "WF_CAP",
+      "name": "Cap / Hat",
+      "category_code": "KIDS_SPORTS",
+      "sort_order": 230,
+      "families": ["WASH_FOLD"]
+    },
+    {
+      "code": "WF_SPORTS_TOWEL",
+      "name": "Sports Towel",
+      "category_code": "KIDS_SPORTS",
+      "sort_order": 240,
+      "families": ["WASH_FOLD"]
+    }
+  ]
+}

@@ -25,6 +25,7 @@ import { fileURLToPath } from "node:url";
 import type { T1BootstrapReport } from "../src/bootstrap/states.js";
 import type { IntakeOperations } from "../src/intake/ports.js";
 import { DEFAULT_EDGE_BRIDGE_SOCKET } from "./edge-bridge-client.js";
+import { registerConfigurationIpc } from "./configuration-ipc.js";
 import { registerIntakeIpc } from "./intake-ipc.js";
 import { PiTerminalRuntime, POS_RUNTIME_STATUS_PATH } from "./pi-runtime.js";
 import { registerPinIpc } from "./pin-ipc.js";
@@ -72,6 +73,7 @@ async function startPiTerminal(): Promise<void> {
   ipcMain.handle(REPORT_CHANNEL, () => runtime.report);
   registerIntakeIpc(ipcMain, () => runtime.intakeOperations());
   registerPinIpc(ipcMain, runtime);
+  registerConfigurationIpc(ipcMain, () => runtime.configurationRead());
 
   const window = createWindow();
   runtime.onReport((report) => {
@@ -93,6 +95,12 @@ async function startWorkstation(): Promise<void> {
   // a completed bootstrap). Handlers exist from startup so the renderer's
   // surface is stable; they FAIL CLOSED, never crash.
   registerIntakeIpc(ipcMain, () => intakeOperations);
+  // The workstation composition keeps its verified configuration in the
+  // SQLite store behind the bootstrap; surfacing it there is a later step.
+  registerConfigurationIpc(ipcMain, () => ({
+    status: "not_delivered",
+    reason: "the workstation composition does not surface the configuration sections yet",
+  }));
 
   const window = createWindow();
   app.on("activate", () => {

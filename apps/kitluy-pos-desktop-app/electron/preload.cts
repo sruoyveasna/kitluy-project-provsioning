@@ -58,3 +58,10 @@ contextBridge.exposeInMainWorld("kitluyT1Pin", {
     ipcRenderer.invoke("kitluy:t1:pin:change", payload),
   lock: (): Promise<unknown> => ipcRenderer.invoke("kitluy:t1:pin:lock"),
 });
+
+// T1-REAL-OPERATIONS-001: the verified configuration's sections, read whole.
+// No section name travels from the renderer; the main process answers with
+// what the Hub signed and nothing else.
+contextBridge.exposeInMainWorld("kitluyT1Configuration", {
+  read: (): Promise<unknown> => ipcRenderer.invoke("kitluy:t1:configuration:read"),
+});

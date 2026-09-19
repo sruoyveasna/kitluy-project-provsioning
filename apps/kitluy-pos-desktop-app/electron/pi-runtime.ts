@@ -26,6 +26,9 @@
  */
 import { existsSync, readFileSync, renameSync, writeFileSync, chmodSync } from "node:fs";
 
+import type { T1ConfigurationRead } from "../src/bootstrap/bridge-types.js";
+import { parseConfigurationSections } from "../src/bootstrap/configuration-sections.js";
+
 import {
   bootstrapT1ThroughEdge,
   type EdgeBridgeStatusWire,
@@ -361,6 +364,39 @@ export class PiTerminalRuntime {
       }
     }
     return this.#refreshFromNow();
+  }
+
+  /**
+   * The sections of the configuration this runtime VERIFIED (digest against
+   * the Hub's signed envelope, validity window under Hub time — edge-machine).
+   * Whole, read-only, in memory: a restart re-verifies before it answers again.
+   * T1-REAL-OPERATIONS-001 (slice 1).
+   */
+  configurationRead(): T1ConfigurationRead {
+    const verified = this.#configuration;
+    if (verified === null) {
+      return {
+        status: "not_delivered",
+        reason:
+          "this terminal has not verified a configuration delivery from the Store Hub yet " +
+          "(it is read at startup and on every refresh)",
+      };
+    }
+    const sections = parseConfigurationSections(verified.wire.payloadJson);
+    if (sections === null) {
+      return {
+        status: "not_delivered",
+        reason:
+          "the verified configuration payload is not a set of sections this terminal can read",
+      };
+    }
+    return {
+      status: "delivered",
+      snapshotId: verified.wire.delivery.snapshotId,
+      configurationVersion: verified.wire.delivery.configurationVersion,
+      verifiedAtHubTime: verified.verifiedAtHubTime,
+      sections,
+    };
   }
 
   /** Intake only while READY and unlocked — otherwise null (fail closed). */

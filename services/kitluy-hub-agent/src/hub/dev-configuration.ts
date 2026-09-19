@@ -122,6 +122,18 @@ export interface PublishInput {
    * Default `false` keeps the one-terminal CLI publish exactly as it was.
    */
   readonly supersedeOpenGrants?: boolean;
+  /**
+   * Further sections published in the SAME signed snapshot — the Laundry
+   * `catalog` (schema kitluy.config.catalog.v1) and the Store's money contract
+   * as `pricing` (what `loadStoreMoneyContract` reads), delivered by the cloud
+   * through the terminal sync (T1-REAL-OPERATIONS-001, slice 1). Each is the
+   * cloud's content verbatim; the Hub authors none of it.
+   */
+  readonly extraSections?: readonly {
+    readonly sectionCode: string;
+    readonly content: Record<string, unknown>;
+    readonly required?: boolean;
+  }[];
 }
 
 /**
@@ -173,6 +185,14 @@ export async function publishDevelopmentConfiguration(
         },
       };
 
+      const extra: SnapshotSection[] = (input.extraSections ?? [])
+        .filter((x) => x.sectionCode !== TERMINAL_PROFILES_SECTION)
+        .map((x) => ({
+          sectionCode: x.sectionCode,
+          sectionVersion: snapshotVersion,
+          required: x.required ?? false,
+          content: x.content,
+        }));
       const unsigned = {
         snapshotId: randomUUID(),
         tenantId: input.tenantId,
@@ -184,7 +204,7 @@ export async function publishDevelopmentConfiguration(
         expiresAt: null,
         minimumHubVersion: "0.1.0",
         maximumHubVersion: null,
-        sections: [section],
+        sections: [section, ...extra],
       };
       const signature = signer.sign(
         snapshotManifest({

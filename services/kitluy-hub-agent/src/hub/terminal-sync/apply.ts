@@ -33,7 +33,7 @@ import type pg from "pg";
 import { HUB_RUNTIME_ROLE, withHubTransaction, type HubClient } from "../db.js";
 import { publishDevelopmentConfiguration } from "../dev-configuration.js";
 import type { DevelopmentHmacBatchSigner } from "../sync/signing.js";
-import { TERMINAL_PROJECTION_KIND, UUID, HEX64 } from "./contract.js";
+import { HEX64, TERMINAL_PROJECTION_KIND, UUID, canonicalJson } from "./contract.js";
 
 export interface HubScope {
   readonly tenantId: string;
@@ -77,6 +77,51 @@ export interface TerminalDelivery {
 }
 
 export type DeliveryRefusal = { readonly ok: false; readonly reason: string };
+
+/**
+ * The Laundry catalog as the cloud door projects it (group 0233; schema
+ * kitluy.config.catalog.v1). Held opaque beyond the fields the Hub itself
+ * needs: the schema, the currency and the content hash that gates republish.
+ */
+export interface CatalogSection {
+  readonly schema: "kitluy.config.catalog.v1";
+  readonly currency_code: string;
+  readonly content_hash: string;
+  readonly services: readonly Record<string, unknown>[];
+  readonly [key: string]: unknown;
+}
+
+/** The Store's money contract (kitluy.config.money.v1) — the Hub's `pricing` section. */
+export interface MoneySection {
+  readonly schema: "kitluy.config.money.v1";
+  readonly currency_code: string;
+  readonly currency_exponent: number;
+  readonly [key: string]: unknown;
+}
+
+export function parseCatalogSection(value: unknown): CatalogSection | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "object" || Array.isArray(value)) return null;
+  const r = value as Record<string, unknown>;
+  if (r["schema"] !== "kitluy.config.catalog.v1") return null;
+  if (typeof r["currency_code"] !== "string" || !/^[A-Z]{3}$/u.test(r["currency_code"]))
+    return null;
+  if (typeof r["content_hash"] !== "string" || !HEX64.test(r["content_hash"])) return null;
+  if (!Array.isArray(r["services"])) return null;
+  return r as unknown as CatalogSection;
+}
+
+export function parseMoneySection(value: unknown): MoneySection | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "object" || Array.isArray(value)) return null;
+  const r = value as Record<string, unknown>;
+  if (r["schema"] !== "kitluy.config.money.v1") return null;
+  if (typeof r["currency_code"] !== "string" || !/^[A-Z]{3}$/u.test(r["currency_code"]))
+    return null;
+  if (typeof r["currency_exponent"] !== "number" || !Number.isInteger(r["currency_exponent"]))
+    return null;
+  return r as unknown as MoneySection;
+}
 
 const PROFILE = /^[a-z0-9_]+\.t[1-9][0-9]*\.[a-z0-9_]+$/u;
 const NAME = /^[A-Za-z0-9 ._:-]{1,80}$/u;
@@ -592,6 +637,30 @@ export function grantSetsEqual(a: GrantSet, b: GrantSet): boolean {
   return true;
 }
 
+/** The catalog hash and the pricing content the ACTIVE snapshot carries (null = none). */
+export async function readActiveSections(
+  client: HubClient,
+  locationId: string,
+): Promise<{
+  readonly catalogHash: string | null;
+  readonly pricing: Record<string, unknown> | null;
+}> {
+  const { rows } = await client.query<{
+    section_code: string;
+    content_json: Record<string, unknown>;
+  }>(
+    `select s.section_code, s.content_json
+       from edge_config.configuration_section s
+       join edge_config.active_configuration a on a.snapshot_id = s.snapshot_id
+      where a.location_id = $1::uuid and s.section_code in ('catalog', 'pricing')`,
+    [locationId],
+  );
+  const catalog = rows.find((r) => r.section_code === "catalog")?.content_json;
+  const pricing = rows.find((r) => r.section_code === "pricing")?.content_json ?? null;
+  const hash = catalog?.["content_hash"];
+  return { catalogHash: typeof hash === "string" ? hash : null, pricing };
+}
+
 // ---------------------------------------------------------------------------
 // The whole envelope.
 // ---------------------------------------------------------------------------
@@ -603,6 +672,9 @@ export interface ApplyInput {
   readonly now?: Date;
   /** The development configuration signer; the publisher's on-board key when absent. */
   readonly signer?: DevelopmentHmacBatchSigner;
+  /** The catalog and money contract the cloud delivered; null = none published. */
+  readonly catalog?: CatalogSection | null;
+  readonly money?: MoneySection | null;
 }
 
 export interface ApplyOutcome {
@@ -621,6 +693,9 @@ export interface ApplyOutcome {
         readonly published: true;
         readonly snapshotVersion: string;
         readonly grantsWritten: number;
+        /** Which sections travelled with the grants, and why the publish happened. */
+        readonly sections: readonly string[];
+        readonly because: readonly ("grants" | "catalog" | "money")[];
       };
 }
 
@@ -683,8 +758,21 @@ export async function applyEnvelope(pool: pg.Pool, input: ApplyInput): Promise<A
     HUB_RUNTIME_ROLE,
   );
 
+  // What the ACTIVE snapshot carries today, so a quiet minute republishes nothing.
+  const held = await withHubTransaction(
+    pool,
+    (client) => readActiveSections(client, scope.storeLocationId),
+    HUB_RUNTIME_ROLE,
+  );
+  const catalog = input.catalog ?? null;
+  const money = input.money ?? null;
+  const because: ("grants" | "catalog" | "money")[] = [];
+  if (!grantSetsEqual(desired, current)) because.push("grants");
+  if (catalog !== null && held.catalogHash !== catalog.content_hash) because.push("catalog");
+  if (money !== null && canonicalJson(held.pricing) !== canonicalJson(money)) because.push("money");
+
   let configuration: ApplyOutcome["configuration"];
-  if (grantSetsEqual(desired, current)) {
+  if (because.length === 0) {
     configuration = { published: false, reason: "unchanged" };
   } else if (desired.size === 0) {
     // Nothing to grant: withdraw what is open rather than activate an empty
@@ -704,6 +792,26 @@ export async function applyEnvelope(pool: pg.Pool, input: ApplyInput): Promise<A
     );
     configuration = { published: false, reason: "no_grants", grantsWithdrawn: withdrawn };
   } else {
+    const extraSections = [
+      ...(money === null
+        ? []
+        : [
+            {
+              sectionCode: "pricing",
+              content: money as unknown as Record<string, unknown>,
+              required: true,
+            },
+          ]),
+      ...(catalog === null
+        ? []
+        : [
+            {
+              sectionCode: "catalog",
+              content: catalog as unknown as Record<string, unknown>,
+              required: false,
+            },
+          ]),
+    ];
     const outcome = await publishDevelopmentConfiguration(pool, {
       tenantId: scope.tenantId,
       digitalStoreId: scope.digitalStoreId,
@@ -715,12 +823,15 @@ export async function applyEnvelope(pool: pg.Pool, input: ApplyInput): Promise<A
       })),
       supersedeOpenGrants: true,
       now,
+      extraSections,
       ...(input.signer === undefined ? {} : { signer: input.signer }),
     });
     configuration = {
       published: true,
       snapshotVersion: outcome.snapshotVersion,
       grantsWritten: outcome.grantsWritten,
+      sections: ["terminal_profiles", ...extraSections.map((x) => x.sectionCode)],
+      because,
     };
   }
 

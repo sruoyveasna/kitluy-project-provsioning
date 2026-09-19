@@ -26,19 +26,35 @@ export type T1View = "dashboard" | "new_order" | "orders" | "handoff" | "shift_c
  */
 export type ServiceType = "wf" | "pp";
 
+/**
+ * A service FAMILY as the catalog delivers it (group 0233
+ * `kitluy_laundry.service_families`): the donor's three product cards — Wash &
+ * Fold, Dry Clean, Wash & Press — now data, each with its lane. The face
+ * renders one card per family that has at least one priced service.
+ */
+export interface CatalogFamily {
+  code: string;
+  lane: ServiceType;
+  name: string;
+  nameKm: string | null;
+  sortOrder: number;
+}
+
 /** A cart entry: one catalog service (per piece) or the weighed load (per kg). */
 export interface CartItem {
   id: string;
   name: string;
   icon: string;
-  /** Unit price in KHR (integer; KHR has no minor unit). Display only until
-   * WS-12-T004 prices the Booking through the vertical pricing authority. */
+  /** Unit price in KHR (integer; KHR has no minor unit) — the delivered
+   * effective price. Display until the Hub prices the Booking (slice 2). */
   price: number;
   /** Pieces for a per-piece line; whole kilograms for the per-kg line. */
   qty: number;
   svc: ServiceType;
   stain?: boolean;
   serviceCode?: string;
+  familyCode?: string;
+  familyName?: string;
 }
 
 /** One per-piece catalog service projected for the grid. */
@@ -51,6 +67,8 @@ export interface CatalogItem {
   priceKhr: number;
   category?: string | null;
   categorySortOrder?: number | null;
+  familyCode?: string | null;
+  familyName?: string | null;
 }
 
 /** A garment type for the per-kg checklist (T003 Garment intake vocabulary). */
@@ -76,6 +94,26 @@ export interface WfKgOffering {
   name: string;
   /** Rate per kilogram in KHR. */
   rateKhr: number;
+  familyCode?: string | null;
+  familyName?: string | null;
+}
+
+/**
+ * The Store's money contract as delivered (kitluy.config.money.v1) — what the
+ * face may show about how the Hub will price: the billable-weight rule and,
+ * when the owner configured one, the KHR per USD rate. Never a price.
+ */
+export interface DeliveredMoney {
+  currencyCode: string;
+  currencyExponent: number;
+  weightRule: {
+    increment: number;
+    rounding: "up" | "nearest";
+    minimum: number;
+  } | null;
+  khrPerUsd: number | null;
+  expressSurchargeBps: number | null;
+  locationCode: string | null;
 }
 
 /**

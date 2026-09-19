@@ -18,9 +18,9 @@ import { ServiceItemIcon } from "@face/components/common/ServiceItemIcon";
 import { useLaundryCatalog } from "@face/hooks/useLaundryCatalog";
 import { fmt } from "@face/lib/formatters";
 import { iconForItemName } from "@face/lib/itemIcons";
-import { serviceColor, serviceIcon, serviceLabel, serviceSoftBg } from "@face/lib/serviceCatalog";
+import { serviceIcon, serviceLabel, serviceSoftBg } from "@face/lib/serviceCatalog";
 import { C as C_LIGHT, font } from "@face/styles/tokens";
-import type { CatalogItem, ServiceType } from "@face/types";
+import type { CatalogFamily, CatalogItem, ServiceType } from "@face/types";
 
 import { BookingMainHead } from "../laundry-savor/BookingMainHead";
 import { ItemCustomizeModal } from "../laundry-savor/ItemCustomizeModal";
@@ -37,8 +37,11 @@ const parseStainKey = (key: string): { itemId: string; stain: boolean } =>
 const SERVICE_ITEM_ICON_PX = 28;
 
 interface ServiceCard {
-  code: ServiceType;
+  /** The delivered family (Wash & Fold / Dry Clean / Wash & Press). */
+  familyCode: string;
+  lane: ServiceType;
   name: string;
+  nameKm: string | null;
   desc: string;
   pricing: string;
   icon: ReactNode;
@@ -46,10 +49,17 @@ interface ServiceCard {
   gradient: string;
 }
 
+/** The family colour: the per-kg lane keeps the primary, per-piece families alternate. */
+const FAMILY_PALETTE = [
+  { color: "#6D28D9", gradient: "linear-gradient(135deg, #5B21B6 0%, #6D28D9 100%)" },
+  { color: "#0F766E", gradient: "linear-gradient(135deg, #115E59 0%, #0F766E 100%)" },
+  { color: "#B45309", gradient: "linear-gradient(135deg, #92400E 0%, #B45309 100%)" },
+] as const;
+
 /** Width share for the card row — cards with lines grow; always sums to 1. */
 const serviceCardWidthShare = (
-  code: ServiceType,
-  codesInCart: readonly ServiceType[],
+  code: string,
+  codesInCart: readonly string[],
   cardCount: number,
 ): number => {
   const n = codesInCart.length;
@@ -60,8 +70,17 @@ const serviceCardWidthShare = (
 
 export const Step1Items = () => {
   const C = useThemeColors();
-  const { cart, setCart, selServiceType, setSelServiceType, itemQtys, setItemQtys, showToast } =
-    useAppState();
+  const {
+    cart,
+    setCart,
+    selServiceType,
+    setSelServiceType,
+    selFamilyCode,
+    setSelFamilyCode,
+    itemQtys,
+    setItemQtys,
+    showToast,
+  } = useAppState();
   const catalog = useLaundryCatalog();
 
   const [stainPicker, setStainPicker] = useState<CatalogItem | null>(null);
@@ -70,36 +89,55 @@ export const Step1Items = () => {
   const delivered = catalog.status === "delivered" ? catalog : null;
   const perPiece: readonly CatalogItem[] = delivered?.perPiece ?? [];
   const perWeight = delivered?.perWeight ?? [];
+  const families: readonly CatalogFamily[] = delivered?.families ?? [];
   const perPieceById = new Map(perPiece.map((i) => [i.id, i]));
 
   useEffect(() => {
     setSelCategoryId(null);
-  }, [selServiceType]);
+  }, [selServiceType, selFamilyCode]);
 
-  const cards: ServiceCard[] = [];
-  if (perWeight.length > 0) {
-    const first = perWeight[0];
-    cards.push({
-      code: "wf",
-      name: first?.name ?? serviceLabel("wf"),
-      desc: "Weigh the load and enter whole kilograms — optional garment checklist.",
-      pricing: first !== undefined ? `${fmt(first.rateKhr)} / kg` : "Per kg",
-      icon: serviceIcon("wf", 34),
-      color: C_LIGHT.primary,
-      gradient: `linear-gradient(135deg, ${C_LIGHT.primaryDeep} 0%, ${C_LIGHT.primary} 100%)`,
-    });
-  }
-  if (perPiece.length > 0) {
-    cards.push({
-      code: "pp",
-      name: serviceLabel("pp"),
-      desc: `${String(perPiece.length)} service${perPiece.length === 1 ? "" : "s"} priced per piece — tap to add pieces.`,
+  // ONE CARD PER DELIVERED FAMILY. The donor hard-coded Wash & Fold / Dry
+  // Clean / Wash & Press; here they are rows of `service_families`, and a
+  // family with no priced service in this Location has no card.
+  const cards: ServiceCard[] = families.map((family, index) => {
+    if (family.lane === "wf") {
+      const offering = perWeight.find((o) => o.familyCode === family.code) ?? perWeight[0];
+      return {
+        familyCode: family.code,
+        lane: "wf",
+        name: family.name,
+        nameKm: family.nameKm,
+        desc: "Weigh the load and enter whole kilograms — optional garment checklist.",
+        pricing: offering !== undefined ? `${fmt(offering.rateKhr)} / kg` : "Per kg",
+        icon: serviceIcon("wf", 34),
+        color: C_LIGHT.primary,
+        gradient: `linear-gradient(135deg, ${C_LIGHT.primaryDeep} 0%, ${C_LIGHT.primary} 100%)`,
+      };
+    }
+    const count = perPiece.filter((i) => i.familyCode === family.code).length;
+    const palette = FAMILY_PALETTE[index % FAMILY_PALETTE.length] ?? FAMILY_PALETTE[0];
+    return {
+      familyCode: family.code,
+      lane: "pp",
+      name: family.name,
+      nameKm: family.nameKm,
+      desc: `${String(count)} item${count === 1 ? "" : "s"} priced per piece — tap to add pieces.`,
       pricing: "Per piece",
       icon: serviceIcon("pp", 34),
-      color: C_LIGHT.purple,
-      gradient: `linear-gradient(135deg, #5B21B6 0%, ${C_LIGHT.purple} 100%)`,
-    });
-  }
+      color: palette.color,
+      gradient: palette.gradient,
+    };
+  });
+  const selectedFamily = families.find((f) => f.code === selFamilyCode) ?? null;
+  const selectedCard = cards.find((c) => c.familyCode === selFamilyCode) ?? null;
+  const familyItems = perPiece.filter((i) => i.familyCode === (selFamilyCode ?? i.familyCode));
+  const familyCategories = (delivered?.categories ?? []).filter((c) =>
+    familyItems.some((i) => i.category === c.id),
+  );
+  const openFamily = (card: ServiceCard) => {
+    setSelFamilyCode(card.familyCode);
+    setSelServiceType(card.lane);
+  };
 
   // ---------------------------------------------------------- service pick
   if (!selServiceType) {
@@ -149,25 +187,34 @@ export const Step1Items = () => {
           {cards.length > 0 ? (
             <div className="sv-svc-pick-grid">
               {(() => {
+                const inCartOf = (st: ServiceCard) =>
+                  cart.filter((c) =>
+                    st.lane === "wf" ? c.svc === "wf" : c.familyCode === st.familyCode,
+                  );
                 const codesInCart = cards
-                  .filter((st) => cart.some((c) => c.svc === st.code))
-                  .map((st) => st.code);
+                  .filter((st) => inCartOf(st).length > 0)
+                  .map((st) => st.familyCode);
                 return cards.map((st) => {
-                  const svcItems = cart.filter((c) => c.svc === st.code);
+                  const svcItems = inCartOf(st);
                   const hasItems = svcItems.length > 0;
                   const cartQty = svcItems.reduce((s, c) => s + c.qty, 0);
-                  const widthShare = serviceCardWidthShare(st.code, codesInCart, cards.length);
+                  const widthShare = serviceCardWidthShare(
+                    st.familyCode,
+                    codesInCart,
+                    cards.length,
+                  );
                   return (
                     <div
-                      key={st.code}
+                      key={st.familyCode}
                       role="button"
                       tabIndex={0}
-                      data-service-card={st.code}
-                      onClick={() => setSelServiceType(st.code)}
+                      data-service-card={st.lane}
+                      data-service-family={st.familyCode}
+                      onClick={() => openFamily(st)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
-                          setSelServiceType(st.code);
+                          openFamily(st);
                         }
                       }}
                       className={
@@ -196,7 +243,14 @@ export const Step1Items = () => {
                           </span>
                         </span>
                         <div className="sv-svc-pick-card-icon">{st.icon}</div>
-                        <h3 className="sv-svc-pick-card-title">{st.name}</h3>
+                        <h3 className="sv-svc-pick-card-title">
+                          {st.name}
+                          {st.nameKm !== null ? (
+                            <span className="km" style={{ display: "block", fontSize: 14 }}>
+                              {st.nameKm}
+                            </span>
+                          ) : null}
+                        </h3>
                         <p className="sv-svc-pick-card-desc">{st.desc}</p>
                       </div>
                       <div className="sv-svc-pick-card-foot">
@@ -243,6 +297,8 @@ export const Step1Items = () => {
             svc: "pp" as const,
             stain,
             serviceCode: it.code,
+            ...(it.familyCode ? { familyCode: it.familyCode } : {}),
+            ...(it.familyName ? { familyName: it.familyName } : {}),
           },
         ];
       });
@@ -257,7 +313,7 @@ export const Step1Items = () => {
     setStainPicker(null);
   };
 
-  const svcColor = selServiceType === "wf" ? C.primary : C.purple;
+  const svcColor = selServiceType === "wf" ? C.primary : (selectedCard?.color ?? C.purple);
   const svcBg = selServiceType === "wf" ? C.primarySoft : C.purpleLight;
 
   const renderPerPieceItem = (item: CatalogItem) => {
@@ -343,7 +399,8 @@ export const Step1Items = () => {
   };
 
   const laneTitle =
-    selServiceType === "wf" ? (perWeight[0]?.name ?? serviceLabel("wf")) : serviceLabel("pp");
+    selectedFamily?.name ??
+    (selServiceType === "wf" ? (perWeight[0]?.name ?? serviceLabel("wf")) : serviceLabel("pp"));
 
   return (
     <div
@@ -360,7 +417,7 @@ export const Step1Items = () => {
                 background: serviceSoftBg(selServiceType),
               }}
             >
-              <span style={{ display: "inline-flex", color: serviceColor(selServiceType) }}>
+              <span style={{ display: "inline-flex", color: svcColor }}>
                 {serviceIcon(selServiceType, 22)}
               </span>
             </div>
@@ -370,10 +427,15 @@ export const Step1Items = () => {
                   fontSize: 17,
                   fontWeight: 700,
                   margin: 0,
-                  color: serviceColor(selServiceType),
+                  color: svcColor,
                 }}
               >
                 {laneTitle}
+                {selectedFamily?.nameKm ? (
+                  <span className="km" style={{ marginLeft: 8, fontWeight: 500, fontSize: 14 }}>
+                    {selectedFamily.nameKm}
+                  </span>
+                ) : null}
               </h3>
               <span style={{ fontSize: 12, color: C.textSec }}>
                 {selServiceType === "wf"
@@ -391,8 +453,8 @@ export const Step1Items = () => {
         {selServiceType === "wf" && <WfServicePanel />}
         {selServiceType === "pp" && (
           <ServiceItemMenuTemplate
-            items={[...perPiece]}
-            categories={undefined}
+            items={[...familyItems]}
+            categories={familyCategories.length > 1 ? familyCategories : undefined}
             selectedCategoryId={selCategoryId}
             onSelectCategory={setSelCategoryId}
             accentColor={svcColor}
@@ -405,7 +467,7 @@ export const Step1Items = () => {
       {stainPicker && (
         <ItemCustomizeModal
           item={stainPicker}
-          svcLabel={serviceLabel("pp")}
+          svcLabel={selectedFamily?.name ?? serviceLabel("pp")}
           onClose={() => setStainPicker(null)}
           onConfirm={({ stain, qty }) => addWithStain(stainPicker, stain, qty)}
         />

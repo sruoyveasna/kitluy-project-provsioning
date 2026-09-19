@@ -288,6 +288,12 @@ export function buildSignedEnvelope(answer, nonce, signer, now = new Date()) {
       assignmentGeneration: scope.assignmentGeneration,
     },
     terminals,
+    // Group 0233: the Laundry catalog with effective Location prices (and its
+    // content hash) and the Store's published money contract. Null when the
+    // door holds none — the Hub then publishes no catalog/pricing section and
+    // refuses to price, which is the rule.
+    catalog: answer.catalog ?? null,
+    money: answer.money ?? null,
   };
   const signature = {
     algorithm: "ed25519",
@@ -361,6 +367,8 @@ export function createHubSyncHandler({ pool, signer, log = console }) {
     const { body: signed, skipped } = buildSignedEnvelope(answer, verdict.nonce, signer);
     log.info(
       `[hub-sync] ${answer.hub.assetTag}: ${String(signed.envelope.terminals.length)} terminal(s) ` +
+        `· catalog ${answer.catalog ? `${String((answer.catalog.services ?? []).length)} services ${String(answer.catalog.content_hash ?? "").slice(0, 12)}` : "none"} ` +
+        `· money ${answer.money ? "published" : "none"} ` +
         `[${signed.envelope.terminals.map((t) => `${t.terminalName}:${t.profileCodes.join("+") || "-"}`).join(", ")}]` +
         (skipped.length > 0 ? ` skipped without an X.509 serial: ${skipped.join(", ")}` : "") +
         ` (${correlationId})`,

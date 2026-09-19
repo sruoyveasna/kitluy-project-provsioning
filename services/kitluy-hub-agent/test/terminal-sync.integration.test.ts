@@ -408,6 +408,115 @@ describe.skipIf(!live)("applying a terminal-projection envelope to a real Hub da
     expect(outcome.configuration).toMatchObject({ published: true, grantsWritten: 1 });
   });
 
+  it("publishes the catalog and the money contract as sections, and only when their content changed", async () => {
+    const catalog = {
+      schema: "kitluy.config.catalog.v1" as const,
+      currency_code: "KHR",
+      content_hash: "1".repeat(64),
+      families: [{ code: "WASH_FOLD", lane: "per_weight", name: "Wash & Fold", sort_order: 10 }],
+      categories: [],
+      services: [
+        {
+          service_code: "WF-KG",
+          family_code: "WASH_FOLD",
+          pricing_mode: "PER_WEIGHT",
+          unit_price_minor: 4000,
+          display_name: "Wash & Fold (per kg)",
+        },
+      ],
+      garment_types: [],
+    };
+    const money = {
+      schema: "kitluy.config.money.v1" as const,
+      currency_code: "KHR",
+      currency_exponent: 0,
+      money_rounding: "round_half_up_minor_unit",
+      weight_rule: { unit: "kg", increment: 1, rounding: "up", minimum: 1 },
+      location_code: "TEST-01",
+    };
+    const live = delivery({
+      terminalDeviceId: randomUUID(),
+      terminalName: "KL-CATALOG-0001",
+      credentialId: randomUUID(),
+      x509CertificateSerial: hexSerial(),
+      identityKeyFingerprint: publicKeyFingerprint(edPublicPem()),
+      profileCodes: [T1],
+    });
+    // First: grants unchanged from the previous test? The previous terminal was
+    // named again with T1; this is a NEW terminal, so grants change too.
+    const first = await applyEnvelope(pool, {
+      self,
+      deliveries: [live],
+      environment: "development",
+      signer,
+      catalog,
+      money,
+    });
+    expect(first.configuration).toMatchObject({
+      published: true,
+      sections: ["terminal_profiles", "pricing", "catalog"],
+    });
+    if (!first.configuration.published) return;
+    expect(first.configuration.because).toEqual(
+      expect.arrayContaining(["grants", "catalog", "money"]),
+    );
+    const held = await withHubTransaction(pool, async (c) => {
+      const r = await c.query<{ section_code: string; content_json: Record<string, unknown> }>(
+        `select s.section_code, s.content_json from edge_config.configuration_section s
+           join edge_config.active_configuration a on a.snapshot_id = s.snapshot_id
+          where a.location_id = $1::uuid order by 1`,
+        [scope.storeLocationId],
+      );
+      return r.rows;
+    });
+    expect(held.map((h) => h.section_code)).toEqual(["catalog", "pricing", "terminal_profiles"]);
+    expect(held.find((h) => h.section_code === "pricing")?.content_json).toMatchObject({
+      currency_code: "KHR",
+      currency_exponent: 0,
+      location_code: "TEST-01",
+    });
+    expect(held.find((h) => h.section_code === "catalog")?.content_json).toMatchObject({
+      content_hash: "1".repeat(64),
+    });
+
+    // Same everything → nothing published.
+    const same = await applyEnvelope(pool, {
+      self,
+      deliveries: [live],
+      environment: "development",
+      signer,
+      catalog,
+      money,
+    });
+    expect(same.configuration).toEqual({ published: false, reason: "unchanged" });
+
+    // A new catalog hash alone → republished, because catalog only.
+    const priced = await applyEnvelope(pool, {
+      self,
+      deliveries: [live],
+      environment: "development",
+      signer,
+      catalog: { ...catalog, content_hash: "2".repeat(64) },
+      money,
+    });
+    expect(priced.configuration).toMatchObject({ published: true, because: ["catalog"] });
+
+    // A new FX rate alone → republished, because money only.
+    const fx = await applyEnvelope(pool, {
+      self,
+      deliveries: [live],
+      environment: "development",
+      signer,
+      catalog: { ...catalog, content_hash: "2".repeat(64) },
+      money: { ...money, fx: { USD: { khr_per_usd: 4100 } } },
+    });
+    expect(fx.configuration).toMatchObject({ published: true, because: ["money"] });
+    const grants = await withHubTransaction(pool, (c) =>
+      readActiveGrantSet(c, scope.storeLocationId),
+    );
+    expect([...grants]).toEqual([[live.terminalDeviceId, [T1]]]);
+  });
+
   it("refuses to publish outside development (the projections' door refused there too)", async () => {
     await expect(
       applyEnvelope(pool, {

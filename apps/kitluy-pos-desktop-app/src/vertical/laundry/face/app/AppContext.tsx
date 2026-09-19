@@ -83,6 +83,9 @@ export interface AppState {
   setCart: SetState<CartItem[]>;
   selServiceType: ServiceType | null;
   setSelServiceType: SetState<ServiceType | null>;
+  /** The delivered service FAMILY the lane was opened for (Dry Clean vs Wash & Press). */
+  selFamilyCode: string | null;
+  setSelFamilyCode: SetState<string | null>;
   itemQtys: Record<string, number>;
   setItemQtys: SetState<Record<string, number>>;
   wfItemQtys: Record<string, number>;
@@ -148,6 +151,7 @@ export const AppStateProvider = ({
 
   const [cart, setCart] = useState<CartItem[]>([]);
   const [selServiceType, setSelServiceType] = useState<ServiceType | null>(null);
+  const [selFamilyCode, setSelFamilyCode] = useState<string | null>(null);
   const [itemQtys, setItemQtys] = useState<Record<string, number>>({});
   const [wfItemQtys, setWfItemQtys] = useState<Record<string, number>>({});
   const [wfKg, setWfKg] = useState(0);
@@ -219,6 +223,7 @@ export const AppStateProvider = ({
     setWfKgInputActive(false);
     setWfKgDigits("");
     setSelServiceType(null);
+    setSelFamilyCode(null);
   }, []);
 
   const resetOrder = useCallback(() => {
@@ -234,6 +239,7 @@ export const AppStateProvider = ({
     setStaffNote("");
     setCart([]);
     setSelServiceType(null);
+    setSelFamilyCode(null);
     setItemQtys({});
     setWfItemQtys({});
     setWfKg(0);
@@ -274,6 +280,8 @@ export const AppStateProvider = ({
       setCart,
       selServiceType,
       setSelServiceType,
+      selFamilyCode,
+      setSelFamilyCode,
       itemQtys,
       setItemQtys,
       wfItemQtys,
@@ -315,6 +323,7 @@ export const AppStateProvider = ({
       staffNote,
       cart,
       selServiceType,
+      selFamilyCode,
       itemQtys,
       wfItemQtys,
       wfKg,

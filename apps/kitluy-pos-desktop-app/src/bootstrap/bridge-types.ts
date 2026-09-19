@@ -47,3 +47,27 @@ export interface T1PinBridge {
 
 /** WS-12-T002-P02 §5 — the eight named intake operations, as the renderer sees them. */
 export const T1_INTAKE_BRIDGE_KEY = "kitluyT1Intake" as const;
+
+/**
+ * T1-REAL-OPERATIONS-001 (slice 1) — the VERIFIED configuration's sections, as
+ * the renderer may read them. READ-ONLY and whole: the main process hands over
+ * the sections of the delivery whose digest it checked against the Hub's
+ * signed envelope; the renderer selects nothing and can change nothing.
+ */
+export const T1_CONFIGURATION_BRIDGE_KEY = "kitluyT1Configuration" as const;
+export const T1_CONFIGURATION_READ_CHANNEL = "kitluy:t1:configuration:read" as const;
+
+export type T1ConfigurationRead =
+  | {
+      readonly status: "delivered";
+      readonly snapshotId: string;
+      readonly configurationVersion: number;
+      readonly verifiedAtHubTime: string;
+      /** `{ section_code: content }`, exactly as the Hub published it. */
+      readonly sections: Readonly<Record<string, unknown>>;
+    }
+  | { readonly status: "not_delivered"; readonly reason: string };
+
+export interface T1ConfigurationBridge {
+  read(): Promise<T1ConfigurationRead>;
+}
