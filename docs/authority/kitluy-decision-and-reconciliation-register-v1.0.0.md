@@ -5219,3 +5219,15 @@ Owner instruction 2026-09-18, after seeing the first release of the Laundry face
 **Sequence on a fresh card.** Device PIN (twice) → registration → admin approval → pairing code → "Installing KitLuy" with the update journal's phases (the update agent is asked to check at once, not on its next poll) → the application → terminal selection → the PIN → the counter.
 
 **Evidence.** `services/kitluy-device-firstboot-agent/src/device-pin.ts` (+ broker verbs `pin.status`, `pin.setup`, `update.check`; `edge-session.ts` registration), `apps/kitluy-device-shell` (`pin_setup` and `installing` screens), `apps/kitluy-pos-desktop-app` (`registering` face; `devicePin` in the report). Handoff 50 §7.
+
+## KLD-2026-09-19-HUB-TERMINAL-SYNC-001 — a development Store Hub provisions its own terminals from the cloud; provisioning by hand is no longer the path (OWNER-DECIDED)
+
+Owner, 2026-09-19: "Do we have any way that we can make this run automatically? I am not able to ask you to do it every time like this." → "Do A: connect first, then implement the automatic." → "now start implement it."
+
+**What is decided.** In the `development` environment the Store Hub pulls its terminals' projection from the cloud itself and applies it: the Hub's own identity projection, each terminal's projection (identity + credential facts), and the development configuration carrying every live terminal's profile grants. The by-hand chain (`hub-terminal-projection.mjs` → `hub-provision-terminal --delivery` → `publish-development-configuration`) is fallback and diagnosis only.
+
+**What it is built on, and what it is not.** The cloud side is a governed READ door (group 0232) authenticated by the Hub's device identity key (the group 0224/0229 predicate) and scoped by the Hub's own active assignment — the READ half of the BLK-006 producer, which survives the hand-over. The transport and the delivery signature are a development stand-in (`scripts/development/hub-sync-service.mjs`, a dedicated development `transport_signing` key; KLD-2026-07-28-002 §1/§7 purposes kept separate). The production producer (BLK-006) and its signer custody (BLK-005) are unchanged and still gate pilot/production; the Hub consumer refuses outside `development`. The Hub never authors a terminal's identity, credential, scope or profiles: it holds what the cloud delivered, verified.
+
+**Conflicts recorded.** KLREC-2026-09-19-ASSIGNMENT-GENERATION-SEMANTICS-001: `hub/authorization.ts` equates the Hub's and a terminal's `assignment_generation`; the cloud keeps one per device and the pairing/eligibility paths keep them apart. Not resolved here; the Hub is now projected at its true generation. Decision needed before the WS-12 command pipeline carries Booking lines.
+
+**Evidence.** Handoff 51; `7813fa3`, `ed0e87d`; hardware run 2026-09-19 on `KL-CFADA8C75001`.

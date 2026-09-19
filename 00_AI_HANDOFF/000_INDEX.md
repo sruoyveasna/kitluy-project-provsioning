@@ -4,6 +4,19 @@ Read the newest relevant handoff before starting work. Naming:
 `YYYY-MM-DD__<AREA>__<TASK-ID>__<SLUG>__AI-HANDOFF.md` under the matching
 subfolder (repository/ shared/ apps/ services/ data/ infrastructure/ reviews/).
 
+## HUB-TERMINAL-SYNC-001 — the Store Hub provisions its own terminals from the cloud; no more provisioning by hand (2026-09-19)
+
+Record: [`edge-platform/51_THE_STORE_HUB_PROVISIONS_ITS_OWN_TERMINALS.md`](edge-platform/51_THE_STORE_HUB_PROVISIONS_ITS_OWN_TERMINALS.md)
+· **IMPLEMENTED · TESTED (31 sync tests; hub-agent 38 files green, two pre-existing failures belong to the parallel session's uncommitted work) · HARDWARE VERIFIED on the development Store Hub (hot-deployed `hotfix-0bbc6ac`) · HUB IMAGE NOT YET REBUILT · DEVELOPMENT ONLY (BLK-006 producer / BLK-005 signer custody unchanged)** · `7813fa3`, `ed0e87d`
+
+**Owner ruling** (KLD-2026-09-19-HUB-TERMINAL-SYNC-001): "Do we have any way that we can make this run automatically — I am not able to ask you to do it every time like this" → "Do A: connect first, then implement the automatic".
+
+**What exists now.** Cloud group 0232: a read door that answers a Store Hub, authenticated by its own device identity key, with the projection of every terminal in its own Store scope. A development producer (`pnpm dev:hub-sync`, :8792) signs the envelope with a dedicated `transport_signing` dev key. The Hub agent pulls every 60 s, verifies signature / key / nonce / own id / own scope / freshness, projects itself and each terminal, retires what the cloud no longer names, and republishes the development configuration with all grants only when the grant set changed (previous grants closed in the same transaction). Store Hub image bakes `HUB_SYNC_URL` and the public trust record.
+
+**Proof.** First pass on the live Hub: two terminals `unchanged`, configuration `unchanged`, Hub generation 1 → 5, a stale purged terminal retired; both boards `SERVING` afterwards.
+
+**Next:** the first-boot scenario on a fresh Terminal card (the Hub now provisions the new identity by itself), then the Hub image rebuild.
+
 ## T1-FACE-PORT-001 — the designed laundry app is the Pi Terminal's T1 face, over the Store Hub ports (2026-09-18)
 
 Record: [`edge-platform/50_LAUNDRY_T1_FACE_ON_PI.md`](edge-platform/50_LAUNDRY_T1_FACE_ON_PI.md)
