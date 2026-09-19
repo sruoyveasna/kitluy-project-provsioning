@@ -82,10 +82,24 @@ const FILES = {
   releaseSigningKey: "dev-release-signing.key.pem",
   releaseSigningPublicKey: "dev-release-signing.pub.pem",
   releaseSigningTrustRecord: "dev-release-signing.json",
+  // HUB-SYNC DELIVERY SIGNING — a FOURTH key, separate for the same reason.
+  //
+  // The development hub-sync service (scripts/development/hub-sync-service.mjs,
+  // HUB-TERMINAL-SYNC-001) signs the terminal-projection envelope a Store Hub
+  // fetches. That is a cloud-to-Hub TRANSPORT signature (`transport_signing`),
+  // not a release manifest and not a configuration snapshot, so it gets a key
+  // of its own; the release key must not sign it and the Hub's release trust
+  // loader would refuse it if it did. The Hub image carries only the PUBLIC
+  // record beside it, at /etc/kitluy/hub-sync-trust.json.
+  hubSyncSigningKey: "dev-hub-sync-signing.key.pem",
+  hubSyncSigningPublicKey: "dev-hub-sync-signing.pub.pem",
+  hubSyncSigningTrustRecord: "dev-hub-sync-signing.json",
 };
 
 /** Bumped only when a release-signing key is deliberately replaced. */
 const RELEASE_SIGNING_KEY_VERSION = 1;
+/** Bumped only when the hub-sync delivery key is deliberately replaced. */
+const HUB_SYNC_SIGNING_KEY_VERSION = 1;
 
 function die(message) {
   console.error(`REFUSED: ${message}`);
@@ -102,18 +116,26 @@ function parseArgs(argv) {
   // what the never-overwrite rule exists to prevent. So this mode mints ONLY
   // the release key, and still refuses if that key is already there.
   let releaseKeyOnly = false;
+  // Same shape for the hub-sync delivery key (2026-09-19): mint ONLY that key
+  // into an existing PKI, refusing if it is already there.
+  let hubSyncKeyOnly = false;
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === "--dir") {
       dir = argv[i + 1] ?? "";
       i += 1;
     } else if (argv[i] === "--release-key-only") {
       releaseKeyOnly = true;
+    } else if (argv[i] === "--hub-sync-key-only") {
+      hubSyncKeyOnly = true;
     }
   }
   if (dir.trim() === "") {
     die("no directory given. Pass --dir <path> or set KITLUY_DEV_PKI_DIR.");
   }
-  return { directory: resolve(dir.trim()), releaseKeyOnly };
+  if (releaseKeyOnly && hubSyncKeyOnly) {
+    die("--release-key-only and --hub-sync-key-only are one key each; run them separately.");
+  }
+  return { directory: resolve(dir.trim()), releaseKeyOnly, hubSyncKeyOnly };
 }
 
 /**
@@ -171,7 +193,7 @@ function validity(certificate, years) {
 }
 
 function main() {
-  const { directory, releaseKeyOnly } = parseArgs(process.argv.slice(2));
+  const { directory, releaseKeyOnly, hubSyncKeyOnly } = parseArgs(process.argv.slice(2));
   assertOutsideRepository(directory);
 
   const paths = Object.fromEntries(
@@ -182,11 +204,19 @@ function main() {
     "releaseSigningPublicKey",
     "releaseSigningTrustRecord",
   ]);
-  // In release-key-only mode the CA files are EXPECTED to exist; only the three
-  // release files must not.
+  const HUB_SYNC_KEYS = new Set([
+    "hubSyncSigningKey",
+    "hubSyncSigningPublicKey",
+    "hubSyncSigningTrustRecord",
+  ]);
+  // In a key-only mode the CA files are EXPECTED to exist; only that key's
+  // three files must not. A full bootstrap mints the CA, the release key and
+  // the hub-sync key together, so every file is guarded.
   const guarded = releaseKeyOnly
     ? Object.entries(paths).filter(([key]) => RELEASE_KEYS.has(key))
-    : Object.entries(paths);
+    : hubSyncKeyOnly
+      ? Object.entries(paths).filter(([key]) => HUB_SYNC_KEYS.has(key))
+      : Object.entries(paths);
   for (const [key, path] of guarded) {
     if (existsSync(path)) {
       die(
@@ -252,11 +282,53 @@ function main() {
     return signing;
   };
 
+  const mintHubSyncSigningKey = () => {
+    console.log("[dev-pki] generating the hub-sync delivery key (purpose: transport_signing)");
+    const signing = edKeyPair("hub-sync-signing");
+    write(paths.hubSyncSigningKey, signing.privateKeyPem, 0o600);
+    write(paths.hubSyncSigningPublicKey, signing.publicKeyPem, 0o644);
+    write(
+      paths.hubSyncSigningTrustRecord,
+      `${JSON.stringify(
+        {
+          kind: "kitluy.hub-sync-trust-key.v1",
+          keyId: signing.fingerprint,
+          keyVersion: HUB_SYNC_SIGNING_KEY_VERSION,
+          algorithm: "ed25519",
+          purpose: "transport_signing",
+          environment: "development",
+          productionEligible: false,
+          state: "current",
+          publicKeyPem: signing.publicKeyPem,
+        },
+        null,
+        2,
+      )}\n`,
+      0o644,
+    );
+    console.log("");
+    console.log(
+      `[dev-pki]   hub-sync signing ${signing.fingerprint} (v${HUB_SYNC_SIGNING_KEY_VERSION})`,
+    );
+    console.log(
+      "[dev-pki] The PUBLIC record is what a Store Hub image carries at /etc/kitluy/hub-sync-trust.json — never the key:",
+    );
+    console.log(`[dev-pki]   ${paths.hubSyncSigningTrustRecord}`);
+    return signing;
+  };
+
   if (releaseKeyOnly) {
     if (!existsSync(paths.rootCertificate)) {
       die(`${directory} has no development CA. Create one first without --release-key-only.`);
     }
     mintReleaseSigningKey();
+    return;
+  }
+  if (hubSyncKeyOnly) {
+    if (!existsSync(paths.rootCertificate)) {
+      die(`${directory} has no development CA. Create one first without --hub-sync-key-only.`);
+    }
+    mintHubSyncSigningKey();
     return;
   }
 
@@ -402,6 +474,7 @@ function main() {
   write(paths.canonicalChain, `${JSON.stringify(canonicalChain, null, 2)}\n`, 0o644);
 
   const releaseSigning = mintReleaseSigningKey();
+  const hubSyncSigning = mintHubSyncSigningKey();
 
   const fingerprint = (certificate) =>
     forge.md.sha256
@@ -420,10 +493,17 @@ function main() {
   console.log(
     `[dev-pki]   release signing       ${releaseSigning.fingerprint} (v${RELEASE_SIGNING_KEY_VERSION}, purpose release_signing)`,
   );
+  console.log(
+    `[dev-pki]   hub-sync signing      ${hubSyncSigning.fingerprint} (v${HUB_SYNC_SIGNING_KEY_VERSION}, purpose transport_signing)`,
+  );
   console.log("");
   console.log("[dev-pki] The release trust anchor a Pi Terminal image must carry is the PUBLIC");
   console.log("[dev-pki] record beside it — never the key:");
   console.log(`[dev-pki]   ${join(directory, FILES.releaseSigningTrustRecord)}`);
+  console.log(
+    "[dev-pki] The hub-sync trust anchor a Store Hub image carries, likewise public only:",
+  );
+  console.log(`[dev-pki]   ${join(directory, FILES.hubSyncSigningTrustRecord)}`);
   console.log("");
   console.log("[dev-pki] Point the issuing service at it and keep it out of every image:");
   console.log(`[dev-pki]   export KITLUY_DEV_PKI_DIR=${directory}`);

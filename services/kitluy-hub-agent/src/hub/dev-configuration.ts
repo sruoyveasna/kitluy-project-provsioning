@@ -111,6 +111,17 @@ export interface PublishInput {
   readonly environment: string;
   readonly signer?: DevelopmentHmacBatchSigner;
   readonly now?: Date;
+  /**
+   * Close every grant still OPEN at this location before writing the new set,
+   * in the same transaction. The eligibility read honours only the grants at
+   * the highest assignment_version from the ACTIVE snapshot, but the partial
+   * unique index `terminal_profile_assignment_active_uq` refuses a second open
+   * row for the same (terminal, profile) — so a re-publish for a terminal
+   * already granted fails unless its previous rows are closed first. Done by
+   * hand on 2026-09-18 (handoff 50 §7); the terminal sync passes `true`.
+   * Default `false` keeps the one-terminal CLI publish exactly as it was.
+   */
+  readonly supersedeOpenGrants?: boolean;
 }
 
 /**
@@ -208,6 +219,16 @@ export async function publishDevelopmentConfiguration(
         actorType: "service",
         healthCheck: { source: "development-configuration-publisher" },
       });
+
+      if (input.supersedeOpenGrants === true) {
+        await client.query(
+          `update edge_config.terminal_profile_assignment
+              set effective_until = $2::timestamptz
+            where location_id = $1::uuid and enabled and effective_until is null
+              and effective_from < $2::timestamptz`,
+          [input.locationId, now.toISOString()],
+        );
+      }
 
       let grantsWritten = 0;
       for (const grant of input.grants) {

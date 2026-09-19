@@ -264,6 +264,45 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 5b. Terminal sync (HUB-TERMINAL-SYNC-001): the Hub knows where to ask and
+#     whom to trust — and carries no key for it
+# ---------------------------------------------------------------------------
+# A development Hub provisions its own terminals by pulling a signed projection
+# from the hub-sync producer named in hub.env and verifying it against the
+# PUBLIC trust record baked at /etc/kitluy/hub-sync-trust.json. Absent either
+# one it does nothing, so a build that forgot them is inert, not dangerous —
+# but it is a different image from the one that provisions by itself, and the
+# suite says which one was built.
+HUB_ENV="${ROOTFS}/etc/kitluy/hub.env"
+if grep -qE '^HUB_SYNC_TRUST_PATH=/etc/kitluy/hub-sync-trust.json$' "$HUB_ENV" 2>/dev/null; then
+  ok "hub.env names the hub-sync trust record"
+else
+  bad "hub.env names the hub-sync trust record" "HUB_SYNC_TRUST_PATH is missing from /etc/kitluy/hub.env"
+fi
+if grep -qE '^HUB_SYNC_URL=https?://[^[:space:]]+$' "$HUB_ENV" 2>/dev/null; then
+  ok "hub.env carries a hub-sync producer address ($(grep -E '^HUB_SYNC_URL=' "$HUB_ENV" | cut -d= -f2-))"
+else
+  skip "hub.env carries a hub-sync producer address" "built without --hub-sync-url: this Hub will not provision terminals by itself"
+fi
+TRUST_RECORD="${ROOTFS}/etc/kitluy/hub-sync-trust.json"
+if [[ -f "$TRUST_RECORD" ]]; then
+  if grep -q "PRIVATE KEY" "$TRUST_RECORD"; then
+    bad "the hub-sync trust record is public material only" "a PRIVATE KEY block is in the image"
+  elif node -e '
+    const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+    const ok = r.kind === "kitluy.hub-sync-trust-key.v1" && r.purpose === "transport_signing"
+      && r.environment === "development" && r.algorithm === "ed25519" && typeof r.publicKeyPem === "string";
+    process.exit(ok ? 0 : 1);
+  ' "$TRUST_RECORD" 2>/dev/null; then
+    ok "the hub-sync trust record is a development transport_signing public record"
+  else
+    bad "the hub-sync trust record is a development transport_signing public record" "wrong kind, purpose, environment or algorithm"
+  fi
+else
+  skip "the hub-sync trust record is present" "no dev PKI at build time: the Hub will refuse every terminal-projection envelope"
+fi
+
+# ---------------------------------------------------------------------------
 # 6. The built image boots without an ordering cycle
 # ---------------------------------------------------------------------------
 # Hardware 2026-09-16 (handoff 46 §5): var-lib-kitluy-hub.mount was implicitly

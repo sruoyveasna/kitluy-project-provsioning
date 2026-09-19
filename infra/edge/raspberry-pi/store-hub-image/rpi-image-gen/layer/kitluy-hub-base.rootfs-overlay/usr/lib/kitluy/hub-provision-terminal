@@ -27,6 +27,13 @@
 # to someone else's Store is the failure this check exists to prevent.
 #
 # When the BLK-006 producer lands, this door is deleted, not kept as a fallback.
+#
+# 2026-09-19 (HUB-TERMINAL-SYNC-001): a development Hub with HUB_SYNC_URL set
+# now does this ITSELF — the Hub agent pulls the same projection from the
+# development hub-sync producer (signed both ways), applies it, and publishes
+# the configuration with every terminal's grants. This door stays for a Hub
+# built without a sync URL and for diagnosis (`--list`); by hand is no longer
+# the normal path. `hub-agent sync-terminals` runs one pass on demand.
 # =============================================================================
 set -eu
 

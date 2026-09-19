@@ -89,7 +89,33 @@ mmdebstrap:
       HUB_TLS_KEY_PATH=/var/lib/kitluy/operational/operational-tls.key.pem
       HUB_TLS_CERT_PATH=/var/lib/kitluy/operational/operational-tls.crt.pem
       HUB_DEVICE_CA_PATH=/var/lib/kitluy/operational/operational-tls.chain.pem
+
+      # TERMINAL SYNC (HUB-TERMINAL-SYNC-001, development only). The producer
+      # this Hub pulls its own terminals' projections from, signed by the key
+      # whose PUBLIC record is /etc/kitluy/hub-sync-trust.json. Empty means the
+      # Hub provisions no terminal by itself and says so once at start; the
+      # builder injects the value with --hub-sync-url. Not a secret: an address.
+      HUB_SYNC_URL=
+      HUB_SYNC_TRUST_PATH=/etc/kitluy/hub-sync-trust.json
+      HUB_SYNC_INTERVAL_SECONDS=60
       EOF
+    # The hub-sync producer address and the PUBLIC trust record, when the
+    # builder supplied them (see the release trust record in the Terminal
+    # image's kitluy-base layer for the same shape and the same refusal).
+    - |
+      if [ -n "${IGconf_kitluy_hub_sync_url:-}" ]; then
+        sed -i "s|^HUB_SYNC_URL=.*|HUB_SYNC_URL=${IGconf_kitluy_hub_sync_url}|" "$1/etc/kitluy/hub.env"
+      fi
+      if [ -n "${IGconf_kitluy_hub_sync_trust_record:-}" ]; then
+        printf '%s\n' "${IGconf_kitluy_hub_sync_trust_record}" > "$1/etc/kitluy/hub-sync-trust.json"
+        chmod 0644 "$1/etc/kitluy/hub-sync-trust.json"
+        if grep -q "PRIVATE KEY" "$1/etc/kitluy/hub-sync-trust.json"; then
+          echo "REFUSED: the hub-sync trust record contains a PRIVATE KEY block" >&2
+          exit 1
+        fi
+      else
+        echo "kitluy: no hub-sync trust anchor supplied; the Hub will refuse every terminal-projection envelope" >&2
+      fi
     # The Hub ADVERTISES; terminals listen. The service name is locked by the
     # bootstrap contract (KLD-2026-08-06-WS12-T001-EDGE-BOOTSTRAP-001) and must
     # not be renamed here.

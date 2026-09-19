@@ -51,6 +51,11 @@ import {
   composeDevelopmentListener,
   startDevelopmentListener,
 } from "../hub/edge/development-listener.js";
+import {
+  runTerminalSyncOnce,
+  startTerminalSyncLoop,
+  terminalSyncConfigFromEnv,
+} from "../hub/terminal-sync/index.js";
 
 const log = createLogger(SERVICE_NAME);
 
@@ -277,11 +282,42 @@ async function main(): Promise<void> {
     storeLocationId: composition.identity.storeLocationId,
   });
 
+  // ===========================================================================
+  // Terminal sync — DEVELOPMENT ONLY (HUB-TERMINAL-SYNC-001, 2026-09-19).
+  // ===========================================================================
+  // The Hub pulls its own terminals' projections from the cloud producer
+  // named by HUB_SYNC_URL, verifies them against the trust record baked into
+  // the image, and applies them — the work `hub-provision-terminal` and
+  // `publish-development-configuration` did by hand. Absent URL or trust
+  // record: it does nothing and says so once. It runs alongside the listener
+  // because the listener's routes re-read authorization per request, so a
+  // terminal projected a moment ago is served on its next call, no restart.
+  const syncConfig = terminalSyncConfigFromEnv();
+  let stopSync: (() => void) | undefined;
+  if ("disabled" in syncConfig) {
+    log.info("terminal sync not started", { reason: syncConfig.disabled });
+  } else {
+    stopSync = startTerminalSyncLoop({
+      pool: pool!,
+      config: syncConfig.config,
+      log: {
+        info: (message, fields) => log.info(message, fields ?? {}),
+        warn: (message, fields) => log.warn(message, fields ?? {}),
+      },
+    });
+    log.info("terminal sync started", {
+      url: syncConfig.config.url,
+      intervalSeconds: syncConfig.config.intervalSeconds,
+      trust: syncConfig.config.trustPath,
+    });
+  }
+
   // The process now stays up because the server holds the event loop open.
   // Shutdown is explicit so an update can stop it without severing a request
   // mid-flight.
   const shutdown = (signal: string): void => {
     log.info("Store Hub is stopping", { signal });
+    stopSync?.();
     void listener
       .close()
       .catch(() => undefined)
@@ -403,8 +439,55 @@ async function resetTerminalPinCommand(args: readonly string[]): Promise<void> {
   }
 }
 
+/**
+ * `hub-agent sync-terminals` — ONE terminal-sync pass, now, from the shell.
+ *
+ * The same code the running agent executes every minute; useful right after a
+ * Partner pairs a terminal, or to read the refusal reason when the loop is
+ * quiet. Exit 0 when applied, 1 when refused or unreachable.
+ */
+async function syncTerminalsCommand(): Promise<void> {
+  const syncConfig = terminalSyncConfigFromEnv();
+  if ("disabled" in syncConfig) throw new Error(syncConfig.disabled);
+  const pool = createHubPool();
+  try {
+    const result = await runTerminalSyncOnce({
+      pool,
+      config: syncConfig.config,
+      log: {
+        info: (message, fields) => log.info(message, fields ?? {}),
+        warn: (message, fields) => log.warn(message, fields ?? {}),
+      },
+    });
+    if (result.kind !== "applied") {
+      throw new Error(
+        `${result.kind === "refused" ? result.code : "PRODUCER_UNREACHABLE"}: ${result.detail ?? ""}`,
+      );
+    }
+    log.info("terminal sync applied", {
+      hub: result.hubAssetTag,
+      terminals: result.outcome.terminals.map(
+        (t) => `${t.terminalName}:${t.action}${t.detail ? ` (${t.detail})` : ""}`,
+      ),
+      configuration: result.outcome.configuration.published
+        ? `v${result.outcome.configuration.snapshotVersion} (${String(result.outcome.configuration.grantsWritten)} grants)`
+        : result.outcome.configuration.reason,
+      malformed: result.malformed,
+    });
+  } finally {
+    await pool.end().catch(() => undefined);
+  }
+}
+
 const subcommand = process.argv[2];
-if (subcommand === "reset-terminal-pin") {
+if (subcommand === "sync-terminals") {
+  syncTerminalsCommand().catch((error: unknown) => {
+    log.error("terminal sync did NOT apply", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    process.exit(1);
+  });
+} else if (subcommand === "reset-terminal-pin") {
   resetTerminalPinCommand(process.argv.slice(3)).catch((error: unknown) => {
     log.error("Terminal PIN reset was REFUSED", {
       error: error instanceof Error ? error.message : String(error),

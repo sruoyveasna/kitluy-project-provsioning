@@ -60,6 +60,10 @@ Usage: build-rpi-image.sh --profile <store-hub> [options]
   --enrollment-url <url>  bake the fleet enrollment endpoint into the image,
                           e.g. http://172.16.21.17:8787 . Without it the card
                           boots and reports that no endpoint is configured.
+  --hub-sync-url <url>    bake the development hub-sync producer the Hub pulls
+                          its terminal projections from, e.g.
+                          http://172.16.21.17:8792 (HUB-TERMINAL-SYNC-001).
+                          Without it the Hub provisions no terminal by itself.
 
 Options:
   --profile <name>     Image profile to build (required).
@@ -93,6 +97,11 @@ while [[ $# -gt 0 ]]; do
     # endpoint because it is a different service: Supabase does not serve
     # /v1/device-enrollment, and the fleet service does not serve this.
     --registration-url) REGISTRATION_URL="${2:-}"; shift 2 ;;
+    # The development hub-sync producer (HUB-TERMINAL-SYNC-001). A separate
+    # service on a separate port, so a separate value: the fleet service does
+    # not serve it, and deriving one address from another is how a device ends
+    # up talking to whatever answers.
+    --hub-sync-url)    HUB_SYNC_URL="${2:-}"; shift 2 ;;
     --allow-unconfigured-image) ALLOW_UNCONFIGURED="yes"; shift ;;
     # A stable hardware profile KEY (never a UUID) so the image stays generic.
     --hardware-profile-key) HARDWARE_PROFILE_KEY="${2:-}"; shift 2 ;;
@@ -208,6 +217,7 @@ mkdir -p "$BUILD_DIR"
 # should be a decision, not a side effect.
 RIG_OVERRIDES=()
 ENROLLMENT_URL="${ENROLLMENT_URL:-${KITLUY_ENROLLMENT_BASE_URL:-}}"
+HUB_SYNC_URL="${HUB_SYNC_URL:-${KITLUY_HUB_SYNC_URL:-}}"
 REGISTRATION_URL="${REGISTRATION_URL:-${KITLUY_REGISTRATION_URL:-}}"
 ALLOW_UNCONFIGURED="${ALLOW_UNCONFIGURED:-no}"
 HARDWARE_PROFILE_KEY="${HARDWARE_PROFILE_KEY:-${KITLUY_HARDWARE_PROFILE_KEY:-}}"
@@ -415,6 +425,34 @@ if [[ -n "$REGISTRATION_URL" ]]; then
 else
   warn "no --registration-url given: this image cannot register itself to the"
   warn "  cloud. The rootfs is read-only, so rebuild with --registration-url."
+fi
+
+# THE HUB-SYNC PRODUCER AND ITS TRUST ANCHOR (HUB-TERMINAL-SYNC-001).
+#
+# Two things, and the Hub needs both or it provisions no terminal: the address
+# of the development producer (into /etc/kitluy/hub.env) and the PUBLIC record
+# of the key that producer signs with (into /etc/kitluy/hub-sync-trust.json).
+# The record is compacted to one line because rpi-image-gen refuses an override
+# containing a newline; the JSON is identical. ABSENT IS SAFE: with either one
+# missing the sync says so once at start and does nothing.
+if [[ -n "$HUB_SYNC_URL" ]]; then
+  RIG_OVERRIDES+=("IGconf_kitluy_hub_sync_url=${HUB_SYNC_URL}")
+  log "hub-sync producer baked: ${HUB_SYNC_URL}"
+else
+  warn "no --hub-sync-url given: this Hub will NOT provision its terminals by itself"
+  warn "  (the manual hub-provision-terminal door remains)."
+fi
+if [[ -n "${KITLUY_DEV_PKI_DIR:-}" && -f "${KITLUY_DEV_PKI_DIR}/dev-hub-sync-signing.json" ]]; then
+  HUB_SYNC_TRUST_RECORD="$(node -e 'process.stdout.write(JSON.stringify(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))))' "${KITLUY_DEV_PKI_DIR}/dev-hub-sync-signing.json")"
+  if grep -q "PRIVATE KEY" <<<"$HUB_SYNC_TRUST_RECORD"; then
+    die "${KITLUY_DEV_PKI_DIR}/dev-hub-sync-signing.json contains a PRIVATE KEY block. A device carries public material only."
+  fi
+  RIG_OVERRIDES+=("IGconf_kitluy_hub_sync_trust_record=${HUB_SYNC_TRUST_RECORD}")
+  HUB_SYNC_KEY_ID="$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).keyId)' "${KITLUY_DEV_PKI_DIR}/dev-hub-sync-signing.json")"
+  log "hub-sync trust anchor baked: ${HUB_SYNC_KEY_ID:0:16}... (transport_signing, development)"
+else
+  warn "no hub-sync trust anchor: the Hub will refuse every terminal-projection envelope."
+  warn "  Run: node scripts/pki/bootstrap-dev-pki.mjs --dir \$KITLUY_DEV_PKI_DIR --hub-sync-key-only"
 fi
 
 if [[ -n "$HARDWARE_PROFILE_KEY" ]]; then
