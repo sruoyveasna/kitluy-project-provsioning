@@ -609,6 +609,8 @@ export interface ApplyOutcome {
   readonly hubProjected: true;
   readonly hubIdentityCredential: boolean;
   readonly terminals: readonly TerminalProjectionResult[];
+  /** Terminals this Hub held as active that the cloud no longer names: retired. */
+  readonly retiredAbsent: readonly string[];
   readonly configuration:
     | {
         readonly published: false;
@@ -660,7 +662,12 @@ export async function applyEnvelope(pool: pg.Pool, input: ApplyInput): Promise<A
       const self = await projectHubSelf(client, input.self);
       const results: TerminalProjectionResult[] = [];
       for (const d of inScope) results.push(await projectTerminal(client, d, now));
-      return { self, results };
+      const retiredAbsent = await retireAbsentTerminals(
+        client,
+        scope.storeLocationId,
+        inScope.map((d) => d.terminalDeviceId),
+      );
+      return { self, results, retiredAbsent };
     },
     HUB_RUNTIME_ROLE,
   );
@@ -721,6 +728,41 @@ export async function applyEnvelope(pool: pg.Pool, input: ApplyInput): Promise<A
     hubProjected: true,
     hubIdentityCredential: projected.self.identityCredential,
     terminals: [...projected.results, ...refusedScope],
+    retiredAbsent: projected.retiredAbsent,
     configuration,
   };
+}
+
+/**
+ * THE CLOUD'S ANSWER IS THE LIST. A terminal this Hub still holds as `active`
+ * at this location that the cloud no longer names — purged, unassigned, or
+ * its credential gone — is retired and its credentials superseded, so nothing
+ * on the Hub keeps a device the cloud has let go of (seen on hardware
+ * 2026-09-19: `KL-1054DD1CCC8E`, purged from the cloud the day before, still
+ * active on the Hub). Reversible: a terminal the cloud names again is
+ * re-projected `active` by the ordinary path.
+ */
+async function retireAbsentTerminals(
+  client: HubClient,
+  locationId: string,
+  deliveredIds: readonly string[],
+): Promise<string[]> {
+  const { rows } = await client.query<{ id: string; terminal_name: string }>(
+    `update edge_identity.terminal_device
+        set lifecycle_status = 'retired', updated_at = now()
+      where location_id = $1::uuid
+        and lifecycle_status = 'active'
+        and not (id = any($2::uuid[]))
+      returning id, terminal_name`,
+    [locationId, deliveredIds],
+  );
+  for (const row of rows) {
+    await client.query(
+      `update edge_identity.device_credential
+          set status = 'superseded'
+        where device_id = $1::uuid and status = 'active'`,
+      [row.id],
+    );
+  }
+  return rows.map((r) => r.terminal_name);
 }

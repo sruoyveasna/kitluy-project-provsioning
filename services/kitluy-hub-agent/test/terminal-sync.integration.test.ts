@@ -322,7 +322,7 @@ describe.skipIf(!live)("applying a terminal-projection envelope to a real Hub da
     expect([...grants]).toEqual([[reflashed.terminalDeviceId, [T1, T3]]]);
   });
 
-  it("withdraws every grant when the cloud answers with no terminal, without activating an empty configuration", async () => {
+  it("retires the terminals the cloud no longer names and withdraws every grant, without activating an empty configuration", async () => {
     const before = await snapshotCount();
     const outcome = await applyEnvelope(pool, {
       self,
@@ -330,6 +330,7 @@ describe.skipIf(!live)("applying a terminal-projection envelope to a real Hub da
       environment: "development",
       signer,
     });
+    expect(outcome.retiredAbsent).toEqual(["KL-TEST-SYNC-0001"]);
     expect(outcome.configuration).toMatchObject({
       published: false,
       reason: "no_grants",
@@ -340,6 +341,13 @@ describe.skipIf(!live)("applying a terminal-projection envelope to a real Hub da
       readActiveGrantSet(c, scope.storeLocationId),
     );
     expect(grants.size).toBe(0);
+    const live = await withHubTransaction(pool, (c) =>
+      c.query(
+        `select 1 from edge_identity.terminal_device where location_id = $1::uuid and lifecycle_status = 'active'`,
+        [scope.storeLocationId],
+      ),
+    );
+    expect(live.rowCount).toBe(0);
   });
 
   it("refuses an expired credential and a hardware profile this Hub does not hold", async () => {
@@ -377,6 +385,27 @@ describe.skipIf(!live)("applying a terminal-projection envelope to a real Hub da
       }),
     ]);
     expect(outcome.configuration).toEqual({ published: false, reason: "unchanged" });
+  });
+
+  it("re-projects a terminal as active when the cloud names it again", async () => {
+    const back = delivery({
+      terminalDeviceId: randomUUID(),
+      credentialId: randomUUID(),
+      x509CertificateSerial: hexSerial(),
+      identityKeyFingerprint: publicKeyFingerprint(edPublicPem()),
+      profileCodes: [T1],
+    });
+    // A retired row keeps its name, so this is the same-name path again: the
+    // previous row is renamed and this one takes the name.
+    const outcome = await applyEnvelope(pool, {
+      self,
+      deliveries: [back],
+      environment: "development",
+      signer,
+    });
+    expect(outcome.terminals[0]).toMatchObject({ action: "projected" });
+    expect(outcome.retiredAbsent).toEqual([]);
+    expect(outcome.configuration).toMatchObject({ published: true, grantsWritten: 1 });
   });
 
   it("refuses to publish outside development (the projections' door refused there too)", async () => {
