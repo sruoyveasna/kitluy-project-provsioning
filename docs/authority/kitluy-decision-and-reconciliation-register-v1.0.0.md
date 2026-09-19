@@ -5231,3 +5231,12 @@ Owner, 2026-09-19: "Do we have any way that we can make this run automatically? 
 **Conflicts recorded.** KLREC-2026-09-19-ASSIGNMENT-GENERATION-SEMANTICS-001: `hub/authorization.ts` equates the Hub's and a terminal's `assignment_generation`; the cloud keeps one per device and the pairing/eligibility paths keep them apart. Not resolved here; the Hub is now projected at its true generation. Decision needed before the WS-12 command pipeline carries Booking lines.
 
 **Evidence.** Handoff 51; `7813fa3`, `ed0e87d`; hardware run 2026-09-19 on `KL-CFADA8C75001`.
+
+## KLD-2026-09-19-T1-REAL-OPERATIONS-001 — the KitLuy Laundry POS does real Store operations, T1 first (OWNER-APPROVED PLAN)
+
+Owner, 2026-09-19: "make this app working and service real data … based on kitluy-laundry-pos-desk-app and kitluy-suite-supabase … prepare a plan first" → plan presented → "go". Recorded in full at `docs/decisions/kitluy-t1-real-operations-plan-owner-decision-v1.0.0.md`.
+
+**Decided.** (1) T1 creates the Booking at "Confirm" from the verified cart in ONE Hub command on the approved `confirm-intake` route (the WS-12-T002 Booking Draft is `{id}`), with a read-only `quote` route so the Pricing step shows Hub-priced lines first; the Hub prices everything itself and refuses a mismatch. (2) KLREC-2026-09-19-ASSIGNMENT-GENERATION-SEMANTICS-001 is resolved: the command layer compares the presented generation with the TERMINAL's own projected generation; the Hub's is a separate device counter. (3) The Store's money contract (KHR, exponent 0, whole-kg-up minimum 1 kg, USD rate, location code, optional express %) is authored in the cloud as a PUBLISHED `kitluy_config.configuration_versions` row (`laundry.money.v1`) and delivered with the catalog; the owner supplies the USD rate — nothing defaults. (4) The standalone repositories stay reference sources (rules, price vocabulary); schema lands as monorepo migrations. Owner answers: designed price list; whole kg rounded up, min 1; cash in full KHR+USD; USB ESC/POS printer.
+
+**Slice 1 done** (handoff 52): cloud group 0233, `pnpm dev:catalog:load`, hub-sync catalog+money sections, terminal read of the verified configuration, the face over the delivered catalog. Slices 2–5 follow the plan.
+

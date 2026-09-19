@@ -4,6 +4,17 @@ Read the newest relevant handoff before starting work. Naming:
 `YYYY-MM-DD__<AREA>__<TASK-ID>__<SLUG>__AI-HANDOFF.md` under the matching
 subfolder (repository/ shared/ apps/ services/ data/ infrastructure/ reviews/).
 
+## T1-REAL-OPERATIONS-001 — slice 1: the real catalog and the money contract reach the Pi Terminal through the signed configuration (2026-09-19)
+
+Record: [`edge-platform/52_THE_CATALOG_REACHES_THE_TERMINAL.md`](edge-platform/52_THE_CATALOG_REACHES_THE_TERMINAL.md) · plan [`docs/decisions/kitluy-t1-real-operations-plan-owner-decision-v1.0.0.md`](../docs/decisions/kitluy-t1-real-operations-plan-owner-decision-v1.0.0.md)
+· **IMPLEMENTED · TESTED · RELEASED (`0.1.0-catalog-202609191140`) · HARDWARE VERIFIED (the running POS reads catalog + money from its verified configuration v6) · slices 2–5 NOT STARTED** · `e478925`
+
+**Owner decisions** (KLD-2026-09-19-T1-REAL-OPERATIONS-001): the designed app's price list; whole kg rounded up, minimum 1 kg; cash in full KHR + USD; USB ESC/POS printer; T1 creates the Booking at confirm in one Hub command; the command-layer generation check is fixed; the money contract is authored in the cloud; the standalone repositories stay reference sources.
+
+**What exists now.** Cloud group 0233 (vocabulary tables; the projection door grows `catalog` + `money`); `pnpm dev:catalog:load`; the hub-sync envelope and the Hub's signed snapshot carry `pricing` + `catalog` (hash-gated); the terminal reads its verified sections over a read-only bridge and the face renders one card per delivered family with real prices.
+
+**Next:** slice 2 — quote → confirm-intake → cash (KHR/USD) → receipt record on the Hub; needs the owner's KHR/USD rate.
+
 ## HUB-TERMINAL-SYNC-001 — the Store Hub provisions its own terminals from the cloud; no more provisioning by hand (2026-09-19)
 
 Record: [`edge-platform/51_THE_STORE_HUB_PROVISIONS_ITS_OWN_TERMINALS.md`](edge-platform/51_THE_STORE_HUB_PROVISIONS_ITS_OWN_TERMINALS.md)
