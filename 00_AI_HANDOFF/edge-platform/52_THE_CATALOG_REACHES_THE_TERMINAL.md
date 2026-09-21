@@ -90,3 +90,28 @@ Tests that would have caught it and now exist: the REAL bridge request over a un
 | sha256 | `260db65c43d6116d021cc5681a99458af00594f875dcdabed18d72cf6f2c1f20` |
 | Sparse companion | `kitluy-pos-terminal-wayland-arm64.img.sparse.zst`, 999 552 856 B, `74117a0e8870aff1534051161a6b07a6d3f2e8fddfcf22edda81a158da50d870` |
 | Read-back | overlay **112/112** against `54c123d` (100 files + 12 links, 0 differ) — re-checked after integration, still valid | Expected on a fresh card: register → approve → pair → (the Hub provisions the terminal by itself) → Shell PIN screen → the PIN twice → "Installing KitLuy" (seconds, not minutes) → T1 → the same PIN.
+
+## 8. The from-scratch board test, and the two defects it exposed (2026-09-21 afternoon)
+
+The owner purged `KL-1CB3577C26A7` (handoff 51), flashed `260db65c…` on that card and ran the whole chain. **It works**, and the order the owner ruled is now enforced rather than merely displayed — from the board's own journals:
+
+```
+15:56  registers as a NEW device KL-173B26D44330 (same hardware, no memory of its past)
+       -> AWAITING_APPROVAL; the owner approves; boot classification NEW_DEVICE APPROVED
+16:14:48  pin.setup -> 200 (ONE call) and the posture file written "registered"
+          — written by the broker, so the PIN came from the Device Shell, not the POS fallback
+16:14:48  kitluy.update.waiting TERMINAL_PIN_SETUP_PENDING   (the install held for the PIN)
+16:15:03  kitluy.update.waiting TERMINAL_PIN_SETUP_PENDING   (the 15 s recheck, not 5 minutes)
+16:15:19  the POS unit starts
+16:15:59  kitluy.update.pass INSTALLED 0.1.0-catalog-202609191140
+then      POS state "ready", configuration v9, terminal unlocked, 36 priced services
+```
+
+All four fixes of `2354af3`/`ad68de1`/`800ecb2` verified in the field: the broker is reachable, the Hub accepts the setup call (200, not 422), the first install waits for the PIN, and the recheck is seconds.
+
+**Defect 1 — a freshly flashed board showed nothing at all.** Cause and fix in the register entry `KLREC-2026-09-21-DISPLAY-HANDOVER-ORDERING-001`: two systemd ordering cycles (one from `d32a39c`, one from `ad68de1`) made systemd delete the Device Shell's start job, silently, with no line in its own journal. Fixed in `954f496`; the suite now builds the `After=`/`Before=` graph across both overlays and fails on any cycle, naming the path — it found the second cycle within seconds of being written.
+
+**Defect 2 — a terminal that was working looked dead.** The owner rebooted `KL-54A3320E1201` after moving its Ethernet cable: the POS painted a launcher with four locked cards and the true state in a 13-pixel line, and stayed there 1 min 47 s while the Hub link was refused for clock skew (`DISCOVERY_NOT_YET_VALID`, an old image without `d32a39c`'s tolerance). Every word was correct and it still read as a broken machine. `585b7c3` replaces that line with `TerminalProgressPanel`: a headline in the person's language, three pulsing dots, the same state vocabulary rendered by `T1BootstrapView` underneath, seconds on THIS step, and for a state a person can act on the one thing to check. States needing a human drop the working tone and `aria-busy`, so the screen never pretends to be busy at somebody who could be fixing it. Released as `0.1.0-progress-202609211648` and installed on all three terminals (`KL-173B26D44330`, `KL-54A3320E1201`, `KL-5CA5F71B726A`), each `SERVING`, PIN `set`, configuration v9.
+
+**Image read-back (2026-09-21 17:20, worktree `wt-pin-image` detached at `4d78665`) — IMAGE VERIFIED, not boot-tested. THIS is now the image to flash.** `kitluy-pos-terminal-wayland-arm64.img.zst` sha256 `a4cf03ee5b2666ed52258f62388788ae421ba8e50843b66dcf068641cd93debd` (998 856 262 B); `.img.sparse.zst` `b166f6d921fac435f788aa4fd6bf6b07e814f9ced17405977062b6187ed254b2`; raw `.img` `17e997d410bcd64c177884aa11b87d1863ca1bdf3f7dc6d2193a0ee20615f0b7` — all equal to the manifest. Overlay **112/112** against the commit. Read out of the final erofs: the shell unit has NO `After=kitluy-terminal-client.service`, the broker has NO `After=kitluy-terminal-edge.service`, the POS keeps its single `After=kitluy-device-shell.service`; `shareSocketWithGroup`, the `idempotency-key`, `terminalPinSetupPending` and `PIN_HOLD_RECHECK_SECONDS = 15` all still present. Suites: rpi-image-gen 23/0/1, build-gates 67/0, environment-gating 20/0, systemd-runtime **246**/0 (the new cycle guard), image-contents 117/0/0, secret+binding scan 17/0. Supersedes `260db65c…`.
+
