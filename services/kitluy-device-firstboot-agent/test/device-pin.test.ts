@@ -5,6 +5,7 @@
  * bridge, the Hub answers, the board keeps only the public posture.
  */
 import { existsSync, mkdtempSync, readFileSync, statSync } from "node:fs";
+import { createServer, type IncomingMessage } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -12,9 +13,12 @@ import { describe, expect, it } from "vitest";
 
 import { parseRequest, serve, VERBS } from "../src/device-config.js";
 import {
+  bridgePinSetupCall,
   markDevicePinRegistered,
+  pinSetupIdempotencyKey,
   readDevicePinPosture,
   registerDevicePinWithHub,
+  TERMINAL_PIN_SETUP_ROUTE,
   type DevicePinPaths,
   type HubPinSetupCall,
 } from "../src/device-pin.js";
@@ -129,6 +133,59 @@ describe("the Terminal PIN goes to the Store Hub", () => {
       state: "registered",
       registeredAt: "2026-09-19T05:01:00.000Z",
     });
+  });
+});
+
+describe("the bridge call itself — what the Hub's setup route requires", () => {
+  // The Hub's edge routes refuse any mutation without an Idempotency-Key (422,
+  // "an Idempotency-Key header is required") — hardware run 2026-09-21. This
+  // drives the REAL request over a unix socket, the way the broker does, and
+  // reads back what arrives: the route, the body and that header.
+  it("POSTs the two entries to the Hub's setup route with an Idempotency-Key the Hub accepts", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kitluy-bridge-"));
+    const socketPath = join(dir, "bridge.sock");
+    const seen: { method?: string; url?: string; key?: unknown; body?: string } = {};
+    const server = createServer((req: IncomingMessage, res) => {
+      let body = "";
+      req.setEncoding("utf8");
+      req.on("data", (chunk: string) => (body += chunk));
+      req.on("end", () => {
+        seen.method = req.method;
+        seen.url = req.url;
+        seen.key = req.headers["idempotency-key"];
+        seen.body = body;
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ result: "PIN_ESTABLISHED" }));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+    try {
+      const answer = await bridgePinSetupCall(socketPath)({ pin: "2468", pinConfirmation: "2468" });
+      expect(answer.status).toBe(200);
+      expect(seen.method).toBe("POST");
+      expect(seen.url).toBe(TERMINAL_PIN_SETUP_ROUTE);
+      expect(JSON.parse(seen.body ?? "")).toEqual({ pin: "2468", pinConfirmation: "2468" });
+      // The Hub's own shape for the key: /^[A-Za-z0-9_.:-]{1,96}$/ (edge routes).
+      expect(typeof seen.key).toBe("string");
+      expect(seen.key).toMatch(/^[A-Za-z0-9_.:-]{1,96}$/u);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("mints a fresh key per attempt", () => {
+    const a = pinSetupIdempotencyKey();
+    const b = pinSetupIdempotencyKey();
+    expect(a).not.toBe(b);
+    expect(a).toMatch(/^shell-pin-setup-[0-9a-f-]{36}$/u);
+    expect(a.length).toBeLessThanOrEqual(96);
+  });
+
+  it("reports a bridge that is not there as a connection failure, not a Hub verdict", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kitluy-bridge-"));
+    await expect(
+      bridgePinSetupCall(join(dir, "absent.sock"))({ pin: "2468", pinConfirmation: "2468" }),
+    ).rejects.toBeInstanceOf(Error);
   });
 });
 

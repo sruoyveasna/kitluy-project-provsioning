@@ -18,6 +18,7 @@
  * The posture is a convenience for the screens; the Hub's own PIN status
  * (edge status `terminalPin.state`) is the truth the Shell gates on.
  */
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { request } from "node:http";
 import { dirname } from "node:path";
@@ -110,6 +111,17 @@ export type HubPinSetupCall = (body: {
   readonly pinConfirmation: string;
 }) => Promise<{ readonly status: number; readonly body: unknown }>;
 
+/**
+ * Every Hub mutation carries an Idempotency-Key (edge routes: "an
+ * Idempotency-Key header is required", 422 without one — the second thing the
+ * 2026-09-21 hardware run found once the socket was reachable). One fresh key
+ * per attempt: a person pressing the digits twice is two attempts, and the
+ * Hub's own PIN_ALREADY_SET answers the second.
+ */
+export function pinSetupIdempotencyKey(): string {
+  return `shell-pin-setup-${randomUUID()}`;
+}
+
 export function bridgePinSetupCall(socketPath: string, timeoutMs = 15_000): HubPinSetupCall {
   return (body) =>
     new Promise((resolve, reject) => {
@@ -120,7 +132,11 @@ export function bridgePinSetupCall(socketPath: string, timeoutMs = 15_000): HubP
           method: "POST",
           path: TERMINAL_PIN_SETUP_ROUTE,
           timeout: timeoutMs,
-          headers: { "content-type": "application/json", "content-length": String(payload.length) },
+          headers: {
+            "content-type": "application/json",
+            "content-length": String(payload.length),
+            "idempotency-key": pinSetupIdempotencyKey(),
+          },
         },
         (response) => {
           const chunks: Buffer[] = [];

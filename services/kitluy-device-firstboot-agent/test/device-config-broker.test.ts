@@ -7,7 +7,8 @@
  * zero on a till nobody can then see to fix.
  */
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, statSync } from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -17,6 +18,7 @@ import {
   findBacklight,
   forgetNetwork,
   readBrightnessPercent,
+  shareSocketWithGroup,
   writeBrightnessPercent,
 } from "../src/bin/device-config-broker.js";
 import { MAX_REQUEST_BYTES } from "../src/device-config.js";
@@ -168,5 +170,31 @@ describe("the line protocol", () => {
     socket.emit("data", "\n   \n");
     await settle();
     expect(written).toHaveLength(0);
+  });
+});
+
+describe("who may connect", () => {
+  // A unix socket is reached by PATH. On the first two Terminal boards the
+  // socket was 0660 root:kitluy-terminal and the RuntimeDirectory around it was
+  // 0750 root:root, so the Shell's connect() ended in EACCES before the socket's
+  // own mode was ever consulted — every Settings verb and the Terminal PIN with
+  // it (hardware, 2026-09-21). The directory is shared with the group too.
+  it("shares the socket AND its directory with the client group, and nothing wider", async () => {
+    const root = tmp();
+    const dir = join(root, "kitluy-device-config");
+    mkdirSync(dir, { mode: 0o700 });
+    const socketPath = join(dir, "socket");
+    const server = createServer();
+    await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+    try {
+      const gid = process.getgid?.() ?? 0;
+      shareSocketWithGroup(socketPath, gid);
+      expect(statSync(dir).mode & 0o777).toBe(0o750);
+      expect(statSync(socketPath).mode & 0o777).toBe(0o660);
+      expect(statSync(dir).gid).toBe(gid);
+      expect(statSync(socketPath).gid).toBe(gid);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });
