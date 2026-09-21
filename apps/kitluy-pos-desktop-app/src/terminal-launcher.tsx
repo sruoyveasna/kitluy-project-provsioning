@@ -21,7 +21,7 @@ import { useState } from "react";
 import type { KitluyLocale } from "@kitluy/localization";
 
 import type { T1BootstrapReport, T1RuntimeState } from "./bootstrap/states.js";
-import { T1BootstrapView } from "./bootstrap-view.js";
+import { TerminalProgressPanel } from "./terminal-progress.js";
 import { PinPad } from "./pin-screen.js";
 import { ThemeToggleButton } from "./vertical/laundry/face/components/common/ThemeToggleButton.js";
 import { I } from "./vertical/laundry/face/components/common/icons.js";
@@ -270,9 +270,13 @@ export function TerminalLauncher(props: {
               );
             })}
 
+            {/* A locked launcher used to explain itself in one 13-pixel line, and
+                on the counter that reads as a dead machine (owner, 2026-09-21).
+                The panel keeps the same state vocabulary inside it and adds what
+                a person needs: that it is working, which step, and how long. */}
             {canUnlock ? null : (
               <div className="kl-launcher-status">
-                <T1BootstrapView report={report} locale={locale} />
+                <TerminalProgressPanel report={report} locale={locale} />
               </div>
             )}
             <p className="ts-foot-note">{text.footNote}</p>

@@ -143,6 +143,32 @@ describe("the shell hands the screen to the Laundry face", () => {
     expect(html).toContain('data-t1-state="connecting_to_hub"');
   });
 
+  // Owner, 2026-09-21, after a board sat 1 min 47 s on a correct but silent
+  // screen: "there is no processing UI or status show… it made me think that my
+  // device was error". A waiting terminal must look like it is working.
+  it("says it is working, which step, and for how long — while it waits", () => {
+    const html = renderToString(<App report={{ ...LOCKED, state: "connecting_to_hub" }} />);
+    expect(html).toContain('data-terminal-progress="connecting_to_hub"');
+    expect(html).toContain('data-progress-tone="working"');
+    expect(html).toContain('aria-busy="true"');
+    expect(html).toContain("data-progress-elapsed=");
+    // The state vocabulary and the refusal code stay exactly where WS-12-T001
+    // put them: the panel is chrome around the truth, not a second copy of it.
+    expect(html).toContain('data-t1-state="connecting_to_hub"');
+  });
+
+  it("stops pretending to work when a person has to act, and says what to check", () => {
+    const html = renderToString(
+      <App report={{ ...LOCKED, state: "hub_unavailable", refusalCode: "EDGE_HUB_UNREACHABLE" }} />,
+    );
+    expect(html).toContain('data-progress-tone="attention"');
+    expect(html).toContain('aria-busy="false"');
+    expect(html).toContain('data-t1-refusal="EDGE_HUB_UNREACHABLE"');
+    // Khmer is the default locale on the Pi: the hint is shown in it.
+    expect(html).toContain("ពិនិត្យខ្សែបណ្តាញ");
+    expect(html).not.toMatch(/\p{Extended_Pictographic}/u);
+  });
+
   it("hides the pointer only on the touch kiosk path", () => {
     expect(kioskInputMode(READY)).toBe("touch");
     expect(kioskInputMode({ ...READY, link: undefined })).toBeNull();

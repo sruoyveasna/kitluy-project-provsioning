@@ -59,6 +59,96 @@
 .kl-launcher-status [data-t1-state] p {
   margin: 4px 0;
 }
+
+/* THE WAITING PANEL (owner, 2026-09-21: a board that was working looked dead
+   for 1 min 47 s). Three things must be visible across a counter: movement,
+   the step, and how long it has been on it. */
+.kl-terminal-progress {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  padding: 18px 20px;
+  border-radius: 14px;
+  border: 1px solid var(--sv-line, #e2e2e2);
+  background: var(--sv-surface-2, #fafafa);
+  text-align: left;
+}
+.kl-terminal-progress--attention {
+  border-color: var(--sv-warn-line, #e6c07a);
+  background: var(--sv-warn-surface, #fff8ec);
+}
+.kl-terminal-progress__body {
+  flex: 1;
+  min-width: 0;
+}
+.kl-terminal-progress__headline {
+  margin: 0 0 6px;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--sv-ink, #1b1b1b);
+}
+.kl-terminal-progress__state p {
+  margin: 2px 0;
+  font-size: 14px;
+  color: var(--sv-ink-2, #4d4d4d);
+}
+.kl-terminal-progress__state code {
+  font-size: 12px;
+  opacity: 0.7;
+}
+.kl-terminal-progress__hint {
+  margin: 8px 0 0;
+  font-size: 14px;
+  color: var(--sv-ink, #1b1b1b);
+}
+.kl-terminal-progress__elapsed {
+  margin: 10px 0 0;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--sv-ink-3, #6b6b6b);
+}
+/* The movement. Three dots, because a spinner at 60 fps on a Pi's compositor
+   costs a repaint every frame for the whole panel. */
+.kl-terminal-progress__mark {
+  display: flex;
+  gap: 5px;
+  padding-top: 8px;
+}
+.kl-terminal-progress__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--sv-accent, #3f6df5);
+  animation: kl-progress-pulse 1.2s ease-in-out infinite;
+}
+.kl-terminal-progress--attention .kl-terminal-progress__dot {
+  background: var(--sv-warn, #d08b00);
+}
+.kl-terminal-progress__dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.kl-terminal-progress__dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+@keyframes kl-progress-pulse {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+/* A till that a person must not be distracted by, and an accessibility setting
+   that must be honoured even on a kiosk. */
+@media (prefers-reduced-motion: reduce) {
+  .kl-terminal-progress__dot {
+    animation: none;
+    opacity: 0.6;
+  }
+}
 /* A touch-only kiosk shows no pointer (the compositor draws one at its last position otherwise). */
 body[data-kitluy-kiosk="touch"],
 body[data-kitluy-kiosk="touch"] * {
