@@ -12,12 +12,14 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@kitluy-verticals/phase1-laundry": "workspace:*",
     "@kitluy/api-errors": "workspace:*",
     "@kitluy/device-boot-classification": "workspace:*",
     "@kitluy/device-identity": "workspace:*",
     "@kitluy/job-contracts": "workspace:*",
     "@kitluy/observability": "workspace:*",
     "@kitluy/shared-config": "workspace:*",
+    "@kitluy/terminal-seat-contracts": "workspace:*",
     "node-forge": "catalog:",
     "pg": "catalog:"
   },

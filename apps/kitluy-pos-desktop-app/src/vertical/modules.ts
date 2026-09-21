@@ -13,7 +13,7 @@
  * `@kitluy/feature-flags`. Only verticals with an implementation appear here —
  * the remaining six are reserved boundaries, not registrations.
  */
-import { LAUNDRY_TERMINAL_PROFILES } from "@kitluy-verticals/phase1-laundry";
+import { LAUNDRY_APPLICATIONS, LAUNDRY_TERMINAL_PROFILES } from "@kitluy-verticals/phase1-laundry";
 
 import type { VerticalModule } from "./contract.js";
 
@@ -67,6 +67,7 @@ export const LAUNDRY_MODULE: VerticalModule = {
       requiredHardware: [],
     },
   ],
+  applications: LAUNDRY_APPLICATIONS,
 };
 
 /**
@@ -92,6 +93,11 @@ export const CAFE_RESTAURANT_MODULE: VerticalModule = {
     "café/restaurant implementation (tabs, tables, floor plans, KDS) classified " +
     "REGISTER-INACTIVE; not yet migrated.",
   terminals: [],
+  // PRODUCT-DEFINITION DEPENDENCY (TERMINAL-APPLICATION-ASSIGNMENT-001 req. 14):
+  // café terminal profiles and the café application are not defined by the
+  // owner. Nothing is declared, so nothing can be derived for a café seat —
+  // `deriveTerminalSeatDesiredState` refuses with NO_APPLICATION_FOR_SEAT.
+  applications: [],
 };
 
 /** Modules compiled into the shell. Registration is explicit, never discovered. */

@@ -47,6 +47,8 @@ export interface SignedTerminalConfigurationRecord {
   readonly deviceRecordId: string;
   readonly assignmentGeneration: number;
   readonly terminalProfileCode: string;
+  /** The Store's explicit primary vertical from the v2 delivery. */
+  readonly primaryVertical: string;
   readonly minimumApplicationVersion: string;
   readonly maximumApplicationVersion: string | null;
   readonly issuedAt: string;

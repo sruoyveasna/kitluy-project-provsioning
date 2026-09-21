@@ -395,7 +395,12 @@ export async function bootstrapT1ThroughEdge(
       envelope.hubDeviceId !== eligibility.hubDeviceId ||
       envelope.terminalDeviceId !== deviceId ||
       envelope.assignmentGeneration !== eligibility.assignmentGeneration ||
-      envelope.terminalProfileCode !== TERMINAL_PROFILE_T1_INTAKE_CASHIER
+      envelope.terminalProfileCode !== TERMINAL_PROFILE_T1_INTAKE_CASHIER ||
+      // v2: the explicit vertical must be stated by the Hub and bound to the
+      // delivery. Absent or disagreeing -> refused, never derived.
+      typeof eligibility.primaryVertical !== "string" ||
+      eligibility.primaryVertical.length === 0 ||
+      envelope.primaryVertical !== eligibility.primaryVertical
     ) {
       return {
         ok: false,

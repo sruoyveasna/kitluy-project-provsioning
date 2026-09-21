@@ -173,15 +173,21 @@ try {
   // when the membership permits; otherwise proceed, because on the hosted
   // development project `postgres` owns the objects and already holds what the
   // door needs. (The membership there carries SET false — see handoff D-12.)
+  //
+  // The capability is read with `pg_has_role`, not with `pg_auth_members`
+  // columns: `set_option` and `inherit_option` exist only on PostgreSQL 16 and
+  // later, and the hardware stack `kitluy-fresh` runs 15.8, where the query
+  // failed outright (`column m.set_option does not exist`) before a code could
+  // be issued. `MEMBER` is exactly "may SET ROLE to it" on every supported
+  // version, and the row is absent when the role does not exist, which leaves
+  // the hosted behaviour below unchanged.
   const { rows: grants } = await client.query(
-    `select m.set_option
-       from pg_auth_members m
-       join pg_roles g on g.oid = m.roleid
-      where g.rolname = 'kitluy_hub_issuance_service'
-        and pg_has_role(current_user, m.member, 'usage')`,
+    `select pg_has_role(current_user, r.oid, 'member') as can_set
+       from pg_roles r
+      where r.rolname = 'kitluy_hub_issuance_service'`,
   );
   await client.query("begin");
-  if (grants.some((g) => g.set_option === true)) {
+  if (grants.some((g) => g.can_set === true)) {
     await client.query("set local role kitluy_hub_issuance_service");
   }
   const { rows: opened } = await client.query(

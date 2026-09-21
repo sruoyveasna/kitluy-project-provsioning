@@ -11,7 +11,16 @@
  * Skips, rather than passing vacuously, when the stack is unreachable or
  * predates group 0213.
  */
+import { LAUNDRY_APPLICATIONS } from "@kitluy-verticals/phase1-laundry";
+import { ApplicationRegistry, SurfaceRegistry } from "@kitluy/terminal-seat-contracts";
 import { createHash, randomUUID } from "node:crypto";
+
+const seatDerivation = (() => {
+  const applications = ApplicationRegistry.create(LAUNDRY_APPLICATIONS);
+  if (!applications.ok) throw new Error("test: laundry applications must register");
+  return { applications: applications.value, surfaces: SurfaceRegistry.empty() };
+})();
+
 
 import pg from "pg";
 import { afterAll, describe, expect, it } from "vitest";
@@ -229,7 +238,7 @@ async function open(seatId: string, code: string, ttl = 900): Promise<Record<str
   return rows[0]!.r;
 }
 
-const composition = new TerminalPairingComposition({ source: pool });
+const composition = new TerminalPairingComposition({ source: pool, seatDerivation });
 
 describe.skipIf(!live)("a Pi Terminal takes its seat with the code alone", () => {
   it("PAIRS: one pending_trust assignment, one terminal assignment per role, seat bound, session consumed", async () => {

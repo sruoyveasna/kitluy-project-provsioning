@@ -83,12 +83,13 @@ on conflict do nothing;
 
 insert into edge_identity.hub_assignment
   (id, hub_device_id, tenant_id, digital_store_id, location_id,
-   assignment_generation, assigned_at, ended_at, status, operational_cert_serial)
+   assignment_generation, assigned_at, ended_at, status, operational_cert_serial,
+   primary_vertical_code)
 values
   ('e0000000-0000-4000-8000-000000000012', 'e0000000-0000-4000-8000-000000000010',
    'e0000000-0000-4000-8000-000000000001', 'e0000000-0000-4000-8000-000000000002',
    'e0000000-0000-4000-8000-000000000003', 1, '2026-07-01T02:00:00Z', null,
-   'active', 'DEMO-OPS-CERT-0001')
+   'active', 'DEMO-OPS-CERT-0001', 'laundry')
 on conflict do nothing;
 
 insert into edge_identity.device_credential

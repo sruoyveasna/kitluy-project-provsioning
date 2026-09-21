@@ -92,6 +92,10 @@ export interface TerminalPairingContext {
     readonly terminalProfileKey: string;
   }[];
   readonly vertical: string;
+  /** v2 (TERMINAL-APPLICATION-ASSIGNMENT-001): server-derived. Absent from a pre-0231 registry. */
+  readonly desiredApplications?: readonly string[];
+  /** v2: Partner-configured. Absent from a pre-0231 registry. */
+  readonly allowedSurfaces?: readonly string[];
   readonly requiredAppFamily: string | null;
   readonly releaseChannel: string | null;
   readonly environment: string;

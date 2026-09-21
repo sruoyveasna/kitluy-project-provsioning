@@ -1,0 +1,29 @@
+{
+  "name": "@kitluy/terminal-seat-contracts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Terminal Seat -> application assignment -> allowed surfaces contracts: generic application identifiers, server-derived desired applications, Partner-configurable allowed surfaces, and desired-vs-actual runtime comparison. Neutral Core: no vertical vocabulary.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "@types/node": "catalog:",
+    "vitest": "catalog:"
+  },
+  "dependencies": {
+    "@kitluy/shared-types": "workspace:*"
+  }
+}

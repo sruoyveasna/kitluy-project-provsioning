@@ -22,6 +22,7 @@
  * exists so startup can prove what it wired without printing a secret: it emits
  * the project host and the database host, never a key, never a password.
  */
+import { terminalSeatDerivation } from "./terminal-seat-derivation.js";
 import pg from "pg";
 import { optionalString, requireEnvironment, requireString, type Env } from "@kitluy/shared-config";
 import { createSupabaseTokenVerifier, type TokenVerifier } from "./authorization.js";
@@ -243,7 +244,7 @@ export function createManagementRuntime(env: Env = process.env, max = 8): Manage
       approval: { pool },
       // Terminal pairing (group 0213): Partner routes enter
       // `kitluy_terminal_issuance_service` inside a transaction.
-      terminals: { pool },
+      terminals: { pool, seatDerivation: terminalSeatDerivation },
       // The device recovery view (group 0227) reads as
       // `kitluy_device_boot_service` inside a transaction.
       recovery: { pool },

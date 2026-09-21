@@ -51,6 +51,7 @@ function eligibility(overrides: Partial<RuntimeEligibilityWire> = {}): RuntimeEl
     assignmentId: "a1",
     assignmentGeneration: 3,
     terminalProfileCode: T1,
+    primaryVertical: "laundry",
     credentialId: "c1",
     credentialGeneration: 3,
     credentialEligibility: "eligible",
@@ -80,6 +81,7 @@ function delivery(
       terminalDeviceId: TERMINAL,
       assignmentGeneration: 3,
       terminalProfileCode: T1,
+      primaryVertical: "laundry",
       minimumApplicationVersion: "0.1.0",
       maximumApplicationVersion: null,
       issuedAt: new Date(HUB_NOW.getTime() - 60_000).toISOString(),
@@ -315,6 +317,22 @@ describe("every refusal fails closed into a named state", () => {
     [
       "the configuration is for another profile",
       { delivery: delivery({ terminalProfileCode: "laundry.t3.ready_scan_in" }) },
+      "assignment_invalid",
+      "CONFIG_SCOPE_MISMATCH",
+    ],
+    // v2 (TERMINAL-APPLICATION-ASSIGNMENT-001): the explicit vertical is bound
+    // and required. A Hub that states none, or a delivery that disagrees with
+    // the eligibility, is refused — the vertical is never derived from the
+    // profile prefix.
+    [
+      "the Hub states no primary vertical",
+      { eligibility: eligibility({ primaryVertical: "" }) },
+      "assignment_invalid",
+      "CONFIG_SCOPE_MISMATCH",
+    ],
+    [
+      "the configuration names another vertical than the eligibility",
+      { delivery: delivery({ primaryVertical: "cafe_restaurant" }) },
       "assignment_invalid",
       "CONFIG_SCOPE_MISMATCH",
     ],

@@ -14,6 +14,7 @@
  * This is an INTERNAL modular architecture. It is deliberately NOT an
  * externally installable plugin system (owner decision §18).
  */
+import type { ApplicationDescriptor } from "@kitluy/terminal-seat-contracts";
 import type { VerticalKey } from "@kitluy/shared-types";
 
 /**
@@ -54,6 +55,14 @@ export interface VerticalModule {
   readonly displayName: string;
   readonly state: VerticalModuleState;
   readonly terminals: readonly VerticalTerminalExperience[];
+  /**
+   * The applications this vertical declares (TERMINAL-APPLICATION-ASSIGNMENT-001).
+   * Registered into an `ApplicationRegistry` by the composing shell; derived
+   * per seat by `@kitluy/terminal-seat-contracts`, never selected. Empty for a
+   * vertical whose applications are not yet defined — declaring one would
+   * overstate what exists.
+   */
+  readonly applications: readonly ApplicationDescriptor[];
   /**
    * Source provenance — which implementation this experience derives from.
    * Required because the donor repositories will eventually be retired

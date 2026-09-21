@@ -32,6 +32,8 @@
  * It is a formal security suite: it FAILS rather than skips when the database,
  * the development PKI or the pinned trust anchors are missing.
  */
+import { LAUNDRY_APPLICATIONS } from "@kitluy-verticals/phase1-laundry";
+import { ApplicationRegistry, SurfaceRegistry } from "@kitluy/terminal-seat-contracts";
 import {
   X509Certificate,
   createHash,
@@ -42,6 +44,13 @@ import {
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+const seatDerivation = (() => {
+  const applications = ApplicationRegistry.create(LAUNDRY_APPLICATIONS);
+  if (!applications.ok) throw new Error("test: laundry applications must register");
+  return { applications: applications.value, surfaces: SurfaceRegistry.empty() };
+})();
+
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
@@ -1378,7 +1387,7 @@ describe("A PI TERMINAL: re-flashed, re-seated, recovers", () => {
       [id, sha256(code)],
     );
     expect(opened[0]!.r.outcome, JSON.stringify(opened[0]!.r)).toBe("OPENED");
-    const paired = await new TerminalPairingComposition({ source: pool }).pair({
+    const paired = await new TerminalPairingComposition({ source: pool, seatDerivation }).pair({
       deviceRecordId: board.deviceId,
       presentedCode: code,
       actorRef: "device/reflash-suite-terminal",

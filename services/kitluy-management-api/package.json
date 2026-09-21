@@ -13,11 +13,13 @@
     "test:contract": "vitest run test/contract.test.ts"
   },
   "dependencies": {
+    "@kitluy-verticals/phase1-laundry": "workspace:*",
     "@kitluy/api-errors": "workspace:*",
     "@kitluy/device-boot-classification": "workspace:*",
     "@kitluy/device-identity": "workspace:*",
     "@kitluy/observability": "workspace:*",
     "@kitluy/shared-config": "workspace:*",
+    "@kitluy/terminal-seat-contracts": "workspace:*",
     "pg": "catalog:"
   },
   "devDependencies": {

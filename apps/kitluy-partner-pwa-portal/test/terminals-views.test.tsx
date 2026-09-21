@@ -260,3 +260,62 @@ describe("navigation and the ladder", () => {
     expect(html).toContain(MESSAGES["en-US"].hubNone);
   });
 });
+
+describe("Terminal Seat desired state — TERMINAL-APPLICATION-ASSIGNMENT-001 (requirements 9 and 13)", () => {
+  const derived = {
+    primaryVertical: "laundry",
+    allowedSurfaces: [] as readonly string[],
+    desired: {
+      kind: "derived" as const,
+      applications: ["laundry.pos"],
+      derivation: [{ applicationId: "laundry.pos", byProfileCodes: TERMINAL.terminalProfileKeys }],
+    },
+  };
+
+  it("shows the DERIVED application before pairing, and 'not reported' — never 'installed' — with no device", () => {
+    const html = view({
+      terminals: [{ ...TERMINAL, ...derived, desiredVsActual: { hasReport: false, reportIsStale: false, reportedAt: null, applications: [{ applicationId: "laundry.pos", status: "unreported", reportedVersion: null }], surfaces: [] } }],
+    });
+    expect(html).toContain("Application");
+    expect(html).toContain("Allowed surfaces");
+    expect(html).toContain('data-desired="derived"');
+    expect(html).toContain('data-application="laundry.pos"');
+    expect(html).toContain('data-actual="unreported"');
+    expect(html).toContain("not reported");
+    expect(html).toContain("derived by the server");
+    expect(html).not.toContain("data-actual=\"in_sync\"");
+    // Empty surfaces are shown as "none", not hidden.
+    expect(html).toContain(">none<");
+  });
+
+  it("shows 'running' with the reported version only when the device REPORTED it, and flags a stale report", () => {
+    const html = view({
+      terminals: [{ ...TERMINAL, ...derived, desiredVsActual: { hasReport: true, reportIsStale: true, reportedAt: "2026-09-18T10:00:00Z", applications: [{ applicationId: "laundry.pos", status: "in_sync", reportedVersion: "1.2.3" }], surfaces: [] } }],
+    });
+    expect(html).toContain('data-actual="in_sync"');
+    expect(html).toContain("running 1.2.3");
+    expect(html).toContain("stale report");
+  });
+
+  it("shows a not-derivable seat as a refusal with its code, never a guessed application", () => {
+    const html = view({
+      terminals: [{ ...TERMINAL, primaryVertical: "cafe_restaurant", allowedSurfaces: [], desired: { kind: "not_derivable", code: "terminal_seat.profile.vertical_mismatch", detail: "x" }, desiredVsActual: null }],
+    });
+    expect(html).toContain('data-desired="not_derivable"');
+    expect(html).toContain('data-refusal="terminal_seat.profile.vertical_mismatch"');
+    expect(html).toContain("no application can be derived");
+    expect(html).not.toContain('data-application=');
+  });
+
+  it("renders 'not provided' when the Management API did not send the seat fields — nothing is inferred client-side", () => {
+    const html = view({ terminals: [TERMINAL] });
+    expect(html).toContain('data-desired="not_provided"');
+    expect(html).toContain("not provided");
+    expect(html).not.toContain("laundry.pos");
+  });
+
+  it("lists allowed surfaces verbatim when the Partner set them", () => {
+    const html = view({ terminals: [{ ...TERMINAL, ...derived, allowedSurfaces: ["settings.network", "diagnostics.printer"] }] });
+    expect(html).toContain("settings.network, diagnostics.printer");
+  });
+});

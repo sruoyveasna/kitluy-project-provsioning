@@ -20,6 +20,15 @@
  * signature, expiry judged against the caller's Hub-anchored time. No
  * second canonicalizer may exist — the Hub signs and the terminal
  * verifies exactly these bytes.
+ *
+ * v2 — TERMINAL-APPLICATION-ASSIGNMENT-001 (resolves KLREQ-VERTICAL-ENVELOPE-001).
+ * The delivery now carries `primaryVertical`: the Digital Store's EXPLICIT
+ * authoritative primary vertical, signed by the Hub alongside the profile.
+ * Until v2 the vertical was derived from the `terminalProfileCode` prefix
+ * as a TEMPORARY-COMPATIBILITY-DERIVATION; the prefix is now only a
+ * cross-check performed by `@kitluy/digital-store-context`, and a
+ * disagreement refuses. The domain separator changed so that no v1 signature
+ * can verify as v2 and no v2 delivery can be presented to a v1 verifier.
  */
 
 import type { TrustEnvironment } from "./environments.js";
@@ -27,6 +36,11 @@ import { verifyDetachedSignature } from "./dev-crypto.js";
 
 /** Domain separator. Distinct from every other signing domain. */
 export const TERMINAL_CONFIGURATION_DELIVERY_KIND =
+  "kitluy.terminal-configuration-delivery.v2" as const;
+
+/** The superseded v1 separator. Never signed again; kept so a stray v1
+ * artifact can be named in a refusal rather than mistaken for corruption. */
+export const TERMINAL_CONFIGURATION_DELIVERY_KIND_V1 =
   "kitluy.terminal-configuration-delivery.v1" as const;
 
 export interface TerminalConfigurationDelivery {
@@ -41,6 +55,8 @@ export interface TerminalConfigurationDelivery {
   readonly terminalDeviceId: string;
   readonly assignmentGeneration: number;
   readonly terminalProfileCode: string;
+  /** The Digital Store's explicit primary vertical (registry key). Signed. */
+  readonly primaryVertical: string;
   readonly minimumApplicationVersion: string;
   readonly maximumApplicationVersion: string | null;
   readonly issuedAt: Date;
@@ -71,6 +87,7 @@ export function terminalConfigurationDeliveryBytes(d: TerminalConfigurationDeliv
       d.terminalDeviceId,
       String(d.assignmentGeneration),
       d.terminalProfileCode,
+      d.primaryVertical,
       d.minimumApplicationVersion,
       d.maximumApplicationVersion === null ? "-" : d.maximumApplicationVersion,
       d.issuedAt.toISOString(),
@@ -92,6 +109,7 @@ export type ConfigurationDeliveryRefusalCode =
   | "DELIVERY_WRONG_TERMINAL"
   | "DELIVERY_WRONG_ASSIGNMENT"
   | "DELIVERY_WRONG_PROFILE"
+  | "DELIVERY_WRONG_VERTICAL"
   | "DELIVERY_PAYLOAD_MISMATCH"
   | "DELIVERY_SIGNATURE_INVALID";
 
@@ -106,6 +124,8 @@ export interface ConfigurationDeliveryExpectation {
   readonly terminalDeviceId: string;
   readonly assignmentGeneration: number;
   readonly terminalProfileCode: string;
+  /** From the terminal's pairing receipt / assignment — never from the delivery. */
+  readonly primaryVertical: string;
 }
 
 export interface ConfigurationDeliveryVerdict {
@@ -161,6 +181,11 @@ export function verifyTerminalConfigurationDelivery(
   }
   if (delivery.terminalProfileCode !== expectation.terminalProfileCode) {
     return refuse("DELIVERY_WRONG_PROFILE", "the delivery binds another terminal profile");
+  }
+  // Fail closed on an absent vertical as well as a wrong one: a v2 delivery
+  // that carries no vertical is not "compatible", it is malformed.
+  if (delivery.primaryVertical.length === 0 || delivery.primaryVertical !== expectation.primaryVertical) {
+    return refuse("DELIVERY_WRONG_VERTICAL", "the delivery names another business vertical");
   }
   if (delivery.payloadSha256 !== computedPayloadSha256) {
     return refuse(

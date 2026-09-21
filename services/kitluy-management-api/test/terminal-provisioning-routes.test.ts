@@ -13,7 +13,15 @@
  *      door parameter (only its digest does).
  *   5. An unwired deployment answers 503, never 404.
  */
+import { LAUNDRY_APPLICATIONS, LAUNDRY_POS_PRODUCT_BINDING } from "@kitluy-verticals/phase1-laundry";
+import { ApplicationRegistry, SurfaceRegistry } from "@kitluy/terminal-seat-contracts";
 import { describe, expect, it } from "vitest";
+
+const testSeatDerivation = (() => {
+  const applications = ApplicationRegistry.create(LAUNDRY_APPLICATIONS);
+  if (!applications.ok) throw new Error("test: laundry applications must register");
+  return { applications: applications.value, surfaces: SurfaceRegistry.empty(), productBindings: [LAUNDRY_POS_PRODUCT_BINDING] };
+})();
 
 import type { DatabaseHandle, TokenVerifier } from "../src/authorization.js";
 import {
@@ -54,13 +62,16 @@ function db(assignedStores: readonly string[], permitted = true): DatabaseHandle
   };
 }
 
-const terminalRow = (id: string, storeId: string) => ({
+const terminalRow = (id: string, storeId: string, vertical = "LAUNDRY") => ({
   id,
   digital_store_id: storeId,
   store_location_id: LOCATION,
   location_reference: "BKK1 — Boeung Keng Kang 1",
   label: "Front Counter 01",
   terminal_profile_keys: KEYS,
+  allowed_surfaces: [],
+  primary_vertical_code: vertical,
+  bound_assignment_generation: null,
   created_at: new Date("2026-09-04T09:00:00Z"),
   bound_device_id: null,
   bound_device_reference: null,
@@ -78,7 +89,7 @@ const terminalRow = (id: string, storeId: string) => ({
 });
 
 /** Records every door call so the route's inputs are visible. */
-function terminals() {
+function terminals(vertical = "LAUNDRY") {
   const doorCalls: { sql: string; params: readonly unknown[] }[] = [];
   const deps = {
     pool: {
@@ -122,6 +133,10 @@ function terminals() {
               doorCalls.push({ sql, params: params ?? [] });
               return Promise.resolve({ rows: [{ result: { outcome: "ROLES_SET" } }] });
             }
+            if (sql.includes("set_physical_terminal_allowed_surfaces_v1")) {
+              doorCalls.push({ sql, params: params ?? [] });
+              return Promise.resolve({ rows: [{ result: { outcome: "SURFACES_SET" } }] });
+            }
             return Promise.resolve({ rows: [] });
           },
           release: () => undefined,
@@ -130,11 +145,11 @@ function terminals() {
       query: (sql: string, params?: readonly unknown[]) => {
         if (sql.includes("from kitluy_devices.physical_terminals pt")) {
           const wanted = String(params?.[0]);
-          if (wanted === TERMINAL) return Promise.resolve({ rows: [terminalRow(TERMINAL, STORE)] });
+          if (wanted === TERMINAL) return Promise.resolve({ rows: [terminalRow(TERMINAL, STORE, vertical)] });
           if (wanted === FOREIGN_TERMINAL) {
             return Promise.resolve({ rows: [terminalRow(FOREIGN_TERMINAL, OTHER_STORE)] });
           }
-          if (wanted === STORE) return Promise.resolve({ rows: [terminalRow(TERMINAL, STORE)] });
+          if (wanted === STORE) return Promise.resolve({ rows: [terminalRow(TERMINAL, STORE, vertical)] });
           return Promise.resolve({ rows: [] });
         }
         if (sql.includes("select digital_store_id from kitluy_devices.physical_terminals")) {
@@ -169,7 +184,7 @@ function terminals() {
       },
     },
   };
-  return { doorCalls, deps };
+  return { doorCalls, deps: { ...deps, seatDerivation: testSeatDerivation } };
 }
 
 function deps(
@@ -394,5 +409,66 @@ describe("listing a Store's seats and setting roles", () => {
       d,
     );
     expect(foreign.status).toBe(404);
+  });
+});
+
+describe("Terminal Seat desired state — TERMINAL-APPLICATION-ASSIGNMENT-001", () => {
+  it("shows Location, profiles, the DERIVED application and allowed surfaces BEFORE pairing, and reports actual as unreported", async () => {
+    const t = terminals();
+    const res = await get(`/partner/stores/${STORE}/terminals`, deps(db([STORE]), t));
+    expect(res.status).toBe(200);
+    const seat = (res.body as { terminals: Record<string, unknown>[] }).terminals[0] as Record<string, unknown>;
+    expect(seat.locationReference).toBe("BKK1 — Boeung Keng Kang 1");
+    expect(seat.terminalProfileKeys).toEqual(KEYS);
+    // The DB stores LAUNDRY; the contract's canonical form is the registry key.
+    expect(seat.primaryVertical).toBe("laundry");
+    expect(seat.allowedSurfaces).toEqual([]);
+    expect(seat.desired).toEqual({
+      kind: "derived",
+      applications: ["laundry.pos"],
+      derivation: [{ applicationId: "laundry.pos", byProfileCodes: KEYS }],
+    });
+    // No device bound, no report: never "installed".
+    expect(seat.desiredVsActual).toMatchObject({
+      hasReport: false,
+      applications: [{ applicationId: "laundry.pos", status: "unreported" }],
+    });
+  });
+
+  it("shows a not-derivable seat as such, never a guessed application", async () => {
+    // The Store says café; the seat's profiles are laundry's. The explicit
+    // vertical and the prefixes disagree, so derivation REFUSES — the Partner
+    // sees the refusal, not a guessed application.
+    const t = terminals("CAFE_RESTAURANT");
+    const res = await get(`/partner/stores/${STORE}/terminals`, deps(db([STORE]), t));
+    expect(res.status).toBe(200);
+    const seat = (res.body as { terminals: Record<string, unknown>[] }).terminals[0] as Record<string, unknown>;
+    expect(seat.primaryVertical).toBe("cafe_restaurant");
+    expect(seat.desired).toMatchObject({ kind: "not_derivable", code: "terminal_seat.profile.vertical_mismatch" });
+    expect(seat.desiredVsActual).toBeNull();
+  });
+
+  it("refuses an UNKNOWN surface at the API, with its identifier, before any door is called", async () => {
+    const t = terminals();
+    const res = await post(`/partner/terminals/${TERMINAL}/surfaces`, { allowedSurfaces: ["settings.network"] }, deps(db([STORE]), t));
+    expect(res.status).toBe(422);
+    expect(JSON.stringify(res.body)).toContain("KLUY-PHYSTERM-SURFACE-UNKNOWN");
+    expect(t.doorCalls.some((c) => c.sql.includes("set_physical_terminal_allowed_surfaces_v1"))).toBe(false);
+  });
+
+  it("sets an empty allowed-surface set through the door on an owned seat, and hides a foreign one", async () => {
+    const t = terminals();
+    const d = deps(db([STORE]), t);
+    const ok = await post(`/partner/terminals/${TERMINAL}/surfaces`, { allowedSurfaces: [] }, d);
+    expect(ok.status).toBe(200);
+    expect(t.doorCalls.some((c) => c.sql.includes("set_physical_terminal_allowed_surfaces_v1"))).toBe(true);
+    const foreign = await post(`/partner/terminals/${FOREIGN_TERMINAL}/surfaces`, { allowedSurfaces: [] }, d);
+    expect(foreign.status).toBe(404);
+  });
+
+  it("rejects a malformed body for surfaces", async () => {
+    const t = terminals();
+    const res = await post(`/partner/terminals/${TERMINAL}/surfaces`, { allowedSurfaces: "settings" }, deps(db([STORE]), t));
+    expect(res.status).toBe(422);
   });
 });

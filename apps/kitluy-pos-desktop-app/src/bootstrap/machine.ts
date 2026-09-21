@@ -536,6 +536,19 @@ export async function bootstrapT1(
     });
   }
 
+  // Step 7b — the Store's explicit primary vertical must be stated by the Hub
+  // (delivery v2, TERMINAL-APPLICATION-ASSIGNMENT-001). A Hub that omits it is
+  // refused: the terminal never derives the vertical from the profile prefix.
+  const primaryVertical =
+    typeof eligibility.primaryVertical === "string" ? eligibility.primaryVertical.trim() : "";
+  if (primaryVertical.length === 0) {
+    return finish("assignment_invalid", {
+      refusalCode: "VERTICAL_UNAVAILABLE",
+      detail: "the Store Hub stated no primary vertical for this terminal",
+      hub: hubSummary,
+    });
+  }
+
   // Step 8 — the signed configuration delivery.
   enter("configuration_loading");
   const refreshed = await acquireHubTime();
@@ -573,6 +586,7 @@ export async function bootstrapT1(
     terminalDeviceId: identity.terminalDeviceId,
     assignmentGeneration: eligibility.assignmentGeneration,
     terminalProfileCode: TERMINAL_PROFILE_T1_INTAKE_CASHIER,
+    primaryVertical,
   };
   const scope = {
     tenantId: receipt.tenantId,
@@ -629,6 +643,8 @@ export async function bootstrapT1(
               terminalDeviceId: wireRecord.deviceRecordId,
               assignmentGeneration: wireRecord.assignmentGeneration,
               terminalProfileCode: wireRecord.terminalProfileCode,
+              primaryVertical:
+                typeof wireRecord.primaryVertical === "string" ? wireRecord.primaryVertical : "",
               minimumApplicationVersion: wireRecord.minimumApplicationVersion,
               maximumApplicationVersion: wireRecord.maximumApplicationVersion,
               issuedAt: new Date(wireRecord.issuedAt),
@@ -707,6 +723,7 @@ export async function bootstrapT1(
       deviceRecordId: envelope.terminalDeviceId,
       assignmentGeneration: envelope.assignmentGeneration,
       terminalProfileCode: envelope.terminalProfileCode,
+      primaryVertical: envelope.primaryVertical,
       minimumApplicationVersion: envelope.minimumApplicationVersion,
       maximumApplicationVersion: envelope.maximumApplicationVersion,
       issuedAt: envelope.issuedAt,

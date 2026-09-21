@@ -52,6 +52,7 @@ import {
   readPhysicalTerminalScope,
   readStoreHubReadiness,
   readTerminalPairingSession,
+  setPhysicalTerminalAllowedSurfaces,
   setPhysicalTerminalRoles,
   type TerminalProvisioningDeps,
 } from "./terminal-provisioning.js";
@@ -685,6 +686,50 @@ async function handleSetTerminalRoles(
 }
 
 /**
+ * `POST /management/v1/partner/terminals/{id}/surfaces` — replace a seat's
+ * allowed surfaces (0231, TERMINAL-APPLICATION-ASSIGNMENT-001). A separate
+ * dimension from roles: grants no role and no application. Surfaces may change
+ * while a device holds the seat; they reach the terminal through a newer
+ * configuration version, never by rewriting the assignment.
+ */
+async function handleSetTerminalSurfaces(
+  deps: ManagementRouterDependencies,
+  request: ManagementRequest,
+  physicalTerminalId: string,
+): Promise<KernelResponse> {
+  if (deps.terminals === undefined) return TERMINALS_UNCONFIGURED;
+  const read = readBody(request, ["allowedSurfaces"]);
+  if ("error" in read) return read.error;
+  const raw = read.body.allowedSurfaces;
+  if (!Array.isArray(raw) || !raw.every((v) => typeof v === "string")) {
+    return validationFailed("allowedSurfaces must be a list of surface identifiers.");
+  }
+
+  const outcome = await authorizePartnerRequest(
+    deps.db,
+    deps.verifier,
+    request.authorization,
+    PARTNER_PERMISSION.TERMINAL_PAIRING_ISSUE,
+    null,
+    deps.environment ?? "development",
+  );
+  if (outcome.kind === "deny") return partnerDenial(outcome);
+  if (!UUID_PATTERN.test(physicalTerminalId)) return notFound("No such terminal.");
+  const scope = await readPhysicalTerminalScope(deps.terminals, physicalTerminalId);
+  if (scope === null || !outcome.digitalStoreIds.includes(scope.digitalStoreId)) {
+    return notFound("No such terminal.");
+  }
+
+  const set = await setPhysicalTerminalAllowedSurfaces(deps.terminals, {
+    physicalTerminalId,
+    allowedSurfaces: raw as string[],
+    operatorRef: `partner/${outcome.userId}`,
+  });
+  if (set.kind === "refused") return validationFailed(set.detail, set.code);
+  return { status: 200, body: { terminal: set.terminal, dataAsOf: nowIso(deps) } };
+}
+
+/**
  * `POST /management/v1/terminal-pairing-sessions` — open a session for ONE seat
  * and return its code once. No QR: the installer types the code on the Pi.
  */
@@ -1018,6 +1063,13 @@ export async function handleManagementRequest(
       return { status: 405, body: errorEnvelope("VALIDATION_FAILED", "Method not allowed") };
     }
     return await handleSetTerminalRoles(deps, request, decodeURIComponent(rolesMatch[1] ?? ""));
+  }
+  const surfacesMatch = /^\/partner\/terminals\/([^/]+)\/surfaces$/.exec(route);
+  if (surfacesMatch !== null) {
+    if (request.method !== "POST") {
+      return { status: 405, body: errorEnvelope("VALIDATION_FAILED", "Method not allowed") };
+    }
+    return await handleSetTerminalSurfaces(deps, request, decodeURIComponent(surfacesMatch[1] ?? ""));
   }
   if (route === "/terminal-pairing-sessions") {
     if (request.method !== "POST") {

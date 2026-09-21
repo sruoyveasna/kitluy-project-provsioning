@@ -24,6 +24,10 @@
  * At `pending_trust` / `awaiting_trust`, exactly as for a Hub. The route may
  * then try to advance trust (group 0198+), and reports what actually happened.
  */
+import {
+  deriveTerminalSeatDesiredState,
+  type DerivationRegistries,
+} from "@kitluy/terminal-seat-contracts";
 import { randomUUID } from "node:crypto";
 
 import type pg from "pg";
@@ -39,6 +43,13 @@ export type TerminalPairingResultCode =
   | "REDEMPTION_REFUSED"
   | "ALREADY_ASSIGNED"
   | "REQUEST_INVALID"
+  /**
+   * The seat matched the code but derives no installable state: unknown
+   * vertical, a profile from another vertical, an unregistered surface, or no
+   * registered application for the seat (TERMINAL-APPLICATION-ASSIGNMENT-001).
+   * Refused BEFORE consumption, so the session and the seat are untouched.
+   */
+  | "SEAT_NOT_DERIVABLE"
   | "INTERNAL_ERROR";
 
 export interface TerminalPairingCompositionResult<T = undefined> {
@@ -72,7 +83,16 @@ export interface TerminalPairingContext {
     readonly terminalAssignmentId: string;
     readonly terminalProfileKey: string;
   }[];
+  /** The Store's EXPLICIT primary vertical (server row). Never derived. */
   readonly vertical: string;
+  /**
+   * SERVER-DERIVED from `vertical` + `terminalProfileKeys` through the injected
+   * application registry. The Pi installs these and nothing else.
+   */
+  readonly desiredApplications: readonly string[];
+  /** Partner-configured (0231). Grants no role and no application. */
+  readonly allowedSurfaces: readonly string[];
+  /** Superseded by `desiredApplications`; kept null for v1 readers. */
   readonly requiredAppFamily: null;
   readonly releaseChannel: null;
   readonly environment: string;
@@ -173,6 +193,13 @@ function strings(value: unknown): readonly string[] | null {
 export interface TerminalPairingCompositionDeps {
   readonly source: ClientSource;
   readonly logger?: SafeLogger;
+  /**
+   * The application and surface registries the composition root compiled in.
+   * REQUIRED: a pairing that cannot derive the seat's applications is refused,
+   * so a composition without registries would refuse every pairing. This
+   * class stays neutral — it never names a vertical; `main.ts` does.
+   */
+  readonly seatDerivation: DerivationRegistries;
 }
 
 export class TerminalPairingComposition {
@@ -232,6 +259,8 @@ export class TerminalPairingComposition {
 
           // Every value below is a server row. A MATCH_READY missing any of
           // them means the door and this layer disagree; fail, never guess.
+          // v2 (0231) adds `allowed_surfaces`; a v1 context is read as none.
+          const allowedSurfaces = strings(presented.allowed_surfaces) ?? [];
           const sessionId = str(presented.session_id);
           const tenantId = str(presented.tenant_id);
           const digitalStoreId = str(presented.digital_store_id);
@@ -258,6 +287,43 @@ export class TerminalPairingComposition {
               result: "INTERNAL_ERROR",
               correlationId,
               auditDetail: "presentation matched but returned an incomplete context",
+            };
+          }
+
+          // Derive the seat's desired state BEFORE consuming anything. The
+          // Store's explicit vertical is the authority; the profile prefixes
+          // are cross-checked; the application is derived, never chosen; an
+          // unknown surface refuses. A seat that derives nothing is not
+          // installable, so it is not paired (fail closed, requirement 12).
+          //
+          // CASING RECONCILIATION (recorded, not silently resolved — CLAUDE.md
+          // hard rule 8): `digital_stores.primary_vertical_code` is stored
+          // UPPER-CASE (`LAUNDRY`, group 0215 `upper(btrim(...))`), while the
+          // contract's canonical form is the lower-case registry key
+          // (`laundry`, `VerticalKey`) that profile prefixes and the Hub's
+          // signed delivery use. The SQL door already compares with `lower()`.
+          // This boundary normalises to the registry key and emits THAT in the
+          // context, so every consumer downstream sees one form. The DB
+          // convention is left as the owner set it; see the task handoff and
+          // the decision register entry.
+          const derived = deriveTerminalSeatDesiredState(
+            {
+              seatId: physicalTerminalId,
+              tenantId,
+              digitalStoreId,
+              storeLocationId,
+              label,
+              primaryVertical: vertical.trim().toLowerCase(),
+              terminalProfileCodes: keys,
+              allowedSurfaces,
+            },
+            this.deps.seatDerivation,
+          );
+          if (!derived.ok) {
+            return {
+              result: "SEAT_NOT_DERIVABLE",
+              correlationId,
+              auditDetail: `${derived.error.code}: ${derived.error.message}`,
             };
           }
 
@@ -321,7 +387,10 @@ export class TerminalPairingComposition {
                 physicalTerminalLabel: label,
                 terminalProfileKeys: keys,
                 terminalAssignments,
-                vertical,
+                // The narrowed registry key, not the raw DB spelling.
+                vertical: derived.value.primaryVertical,
+                desiredApplications: derived.value.desiredApplications,
+                allowedSurfaces: derived.value.allowedSurfaces,
                 requiredAppFamily: null,
                 releaseChannel: null,
                 environment,

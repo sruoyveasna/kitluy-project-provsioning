@@ -2,7 +2,7 @@
   "name": "@kitluy-apps/kitluy-device-shell",
   "version": "0.1.0",
   "private": true,
-  "description": "Pi Terminal Device Shell — the neutral graphical first-boot surface (kiosk Electron/Wayland) that shows registration state and, once approved, takes a pairing code. Carries no Store authority and no path to a business app before activation (owner decision v2.0.0 §4–§5).",
+  "description": "Pi Terminal Device Shell \u2014 the neutral graphical first-boot surface (kiosk Electron/Wayland) that shows registration state and, once approved, takes a pairing code. Carries no Store authority and no path to a business app before activation (owner decision v2.0.0 \u00a74\u2013\u00a75).",
   "type": "module",
   "main": "dist-electron/electron/main.js",
   "scripts": {
@@ -19,6 +19,7 @@
   },
   "devDependencies": {
     "@kitluy-services/kitluy-device-firstboot-agent": "workspace:*",
+    "@kitluy/terminal-seat-contracts": "workspace:*",
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",

@@ -28,6 +28,7 @@ const validAssignment: AuthoritativeStoreAssignment = {
   terminalProfileCode: "laundry.t1.intake_cashier",
   assignmentGeneration: 7,
   configurationVersion: 42,
+  declaredVertical: "laundry",
 };
 
 describe("terminal profile code parsing", () => {
@@ -71,7 +72,7 @@ describe("resolveStoreContext — the authorised path", () => {
     if (result.ok) {
       expect(result.value.vertical).toBe("laundry");
       expect(result.value.terminalSegment).toBe("t1");
-      expect(result.value.verticalSource).toBe("derived_from_profile_code");
+      expect(result.value.verticalSource).toBe("declared");
       expect(result.value.assignmentGeneration).toBe(7);
       expect(result.value.configurationVersion).toBe(42);
     }
@@ -86,8 +87,11 @@ describe("resolveStoreContext — the authorised path", () => {
 
 describe("resolveStoreContext — fail-closed refusals", () => {
   it("refuses a registered but INACTIVE vertical (Phase 2-8)", () => {
+    // Declared and prefix AGREE on a Phase 2 vertical, so the cross-check
+    // passes and the phase gate is what refuses.
     const result = resolveStoreContext({
       ...validAssignment,
+      declaredVertical: "cafe_restaurant",
       terminalProfileCode: "cafe_restaurant.cashier.default",
     });
     expect(result.ok).toBe(false);
@@ -97,8 +101,11 @@ describe("resolveStoreContext — fail-closed refusals", () => {
   });
 
   it("refuses a vertical outside the eight-phase registry", () => {
+    // Declared and prefix agree on a key outside the registry: refused as
+    // UNKNOWN, not as a mismatch.
     const result = resolveStoreContext({
       ...validAssignment,
+      declaredVertical: "barbershop",
       terminalProfileCode: "barbershop.t1.cashier",
     });
     expect(result.ok).toBe(false);
@@ -144,9 +151,27 @@ describe("resolveStoreContext — fail-closed refusals", () => {
   });
 });
 
-describe("temporary-compatibility derivation (KLD-2026-08-07-BOOKING-SEMANTICS-001 §5)", () => {
-  it("is explicitly marked temporary, not permanent authority", () => {
-    expect(VERTICAL_DERIVATION_STATUS).toBe("TEMPORARY-COMPATIBILITY-DERIVATION");
+describe("explicit vertical with prefix cross-check (TERMINAL-APPLICATION-ASSIGNMENT-001)", () => {
+  it("refuses an assignment that carries NO explicit vertical — derivation is retired", () => {
+    const { declaredVertical: _omitted, ...withoutVertical } = validAssignment;
+    const result = resolveStoreContext({ ...withoutVertical, declaredVertical: "" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe("digital_store.vertical.no_evidence");
+    // A caller that bypasses the type entirely gets the same refusal.
+    const untyped = resolveStoreContext(withoutVertical as unknown as AuthoritativeStoreAssignment);
+    expect(untyped.ok).toBe(false);
+    if (!untyped.ok) expect(untyped.error.code).toBe("digital_store.vertical.no_evidence");
+  });
+
+  it("never reports the vertical as derived from the profile code", () => {
+    const result = resolveStoreContext(validAssignment);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.verticalSource).not.toBe("derived_from_profile_code");
+  });
+
+  it("is marked as the resolved contract, not a temporary derivation", () => {
+    expect(VERTICAL_DERIVATION_STATUS).toBe("EXPLICIT-VERTICAL-WITH-PREFIX-CROSS-CHECK");
+    expect(VERTICAL_EVIDENCE_NOTE).not.toContain("TEMPORARY");
     expect(VERTICAL_ENVELOPE_FOLLOW_UP).toBe("KLREQ-VERTICAL-ENVELOPE-001");
     expect(VERTICAL_EVIDENCE_NOTE).toContain("Digital Store.primary_vertical");
   });

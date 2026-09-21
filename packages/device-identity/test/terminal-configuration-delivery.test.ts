@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
   DevelopmentDeviceKeyProvider,
   TERMINAL_CONFIGURATION_DELIVERY_KIND,
+  TERMINAL_CONFIGURATION_DELIVERY_KIND_V1,
   terminalConfigurationDeliveryBytes,
   verifyTerminalConfigurationDelivery,
   type DeviceRecordId,
@@ -37,6 +38,7 @@ function delivery(
     terminalDeviceId: "b0000000-0000-4000-8000-000000000006",
     assignmentGeneration: 1,
     terminalProfileCode: "laundry.t1.intake_cashier",
+    primaryVertical: "laundry",
     minimumApplicationVersion: "0.1.0",
     maximumApplicationVersion: null,
     issuedAt: new Date("2026-08-06T08:00:00.000Z"),
@@ -64,6 +66,7 @@ function expectation(d: TerminalConfigurationDelivery) {
     terminalDeviceId: d.terminalDeviceId,
     assignmentGeneration: d.assignmentGeneration,
     terminalProfileCode: d.terminalProfileCode,
+    primaryVertical: d.primaryVertical,
   };
 }
 
@@ -90,6 +93,8 @@ describe("terminal configuration delivery (WS-12-T001-P02 §3)", () => {
       [{ terminalDeviceId: randomUUID() }, "DELIVERY_WRONG_TERMINAL"],
       [{ assignmentGeneration: 2 }, "DELIVERY_WRONG_ASSIGNMENT"],
       [{ terminalProfileCode: "laundry.t2.customer_display" }, "DELIVERY_WRONG_PROFILE"],
+      [{ primaryVertical: "cafe_restaurant" }, "DELIVERY_WRONG_VERTICAL"],
+      [{ primaryVertical: "" }, "DELIVERY_WRONG_VERTICAL"],
     ];
     for (const [over, refusal] of cases) {
       const tampered = delivery(over);
@@ -135,5 +140,37 @@ describe("terminal configuration delivery (WS-12-T001-P02 §3)", () => {
     expect(bytes.startsWith(`${TERMINAL_CONFIGURATION_DELIVERY_KIND}\n`)).toBe(true);
     // null maximum serializes as "-" — the house null sentinel.
     expect(bytes.split("\n")).toContain("-");
+  });
+});
+
+describe("v2 — explicit primary vertical (TERMINAL-APPLICATION-ASSIGNMENT-001)", () => {
+  it("signs under the v2 domain separator, never v1", () => {
+    expect(TERMINAL_CONFIGURATION_DELIVERY_KIND).toBe("kitluy.terminal-configuration-delivery.v2");
+    expect(TERMINAL_CONFIGURATION_DELIVERY_KIND_V1).toBe("kitluy.terminal-configuration-delivery.v1");
+    const bytes = Buffer.from(terminalConfigurationDeliveryBytes(delivery())).toString("utf8");
+    expect(bytes.startsWith(`${TERMINAL_CONFIGURATION_DELIVERY_KIND}\n`)).toBe(true);
+    expect(bytes.includes(TERMINAL_CONFIGURATION_DELIVERY_KIND_V1)).toBe(false);
+  });
+
+  it("includes the vertical in the signed bytes, directly after the profile code", () => {
+    const d = delivery();
+    const lines = Buffer.from(terminalConfigurationDeliveryBytes(d)).toString("utf8").split("\n");
+    const profileIndex = lines.indexOf(d.terminalProfileCode);
+    expect(profileIndex).toBeGreaterThan(0);
+    expect(lines[profileIndex + 1]).toBe("laundry");
+  });
+
+  it("a signature over a different vertical does not verify for this one", () => {
+    const d = delivery();
+    const signedForOther = sign({ ...d, primaryVertical: "cafe_restaurant" });
+    const verdict = verifyTerminalConfigurationDelivery(
+      d,
+      signedForOther,
+      hubPem,
+      expectation(d),
+      d.payloadSha256,
+    );
+    expect(verdict.verified).toBe(false);
+    expect(verdict.refusalCode).toBe("DELIVERY_SIGNATURE_INVALID");
   });
 });

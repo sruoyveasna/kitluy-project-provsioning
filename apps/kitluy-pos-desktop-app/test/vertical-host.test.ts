@@ -32,6 +32,7 @@ const assignment = (over: Partial<AuthoritativeStoreAssignment> = {}) =>
     terminalProfileCode: "laundry.t1.intake_cashier",
     assignmentGeneration: 3,
     configurationVersion: 11,
+    declaredVertical: "laundry",
     ...over,
   }) satisfies AuthoritativeStoreAssignment;
 
@@ -86,7 +87,8 @@ describe("the same shell becomes the correct terminal", () => {
 describe("Phase 2 can never load as Phase 1", () => {
   it("refuses a café assignment — the phase gate blocks it first", () => {
     const result = registry.resolve(
-      assignment({ terminalProfileCode: "cafe_restaurant.cashier.default" }),
+      // Declared and prefix agree on Phase 2; the phase gate is what refuses.
+      assignment({ declaredVertical: "cafe_restaurant", terminalProfileCode: "cafe_restaurant.cashier.default" }),
     );
     expect(result.ok).toBe(false);
     // The phase gate refuses before the host is consulted.

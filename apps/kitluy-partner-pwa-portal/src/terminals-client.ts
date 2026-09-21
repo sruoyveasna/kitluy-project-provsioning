@@ -82,6 +82,25 @@ export interface PhysicalTerminal {
   readonly boundDevice: BoundDevice | null;
   readonly lastSession: TerminalSessionSummary | null;
   readonly runtime?: TerminalRuntime | null;
+  /**
+   * TERMINAL-APPLICATION-ASSIGNMENT-001 — the Store's explicit vertical, the
+   * SERVER-DERIVED desired application(s), the Partner-configured allowed
+   * surfaces, and desired-vs-actual from the device-reported runtime. Optional
+   * so a portal built ahead of the Management API renders "not provided"
+   * rather than crashing; never inferred client-side.
+   */
+  readonly primaryVertical?: string;
+  readonly allowedSurfaces?: readonly string[];
+  readonly desired?:
+    | { readonly kind: "derived"; readonly applications: readonly string[]; readonly derivation: readonly { readonly applicationId: string; readonly byProfileCodes: readonly string[] }[] }
+    | { readonly kind: "not_derivable"; readonly code: string; readonly detail: string };
+  readonly desiredVsActual?: {
+    readonly hasReport: boolean;
+    readonly reportIsStale: boolean;
+    readonly reportedAt: string | null;
+    readonly applications: readonly { readonly applicationId: string; readonly status: string; readonly reportedVersion: string | null; readonly reason?: string }[];
+    readonly surfaces: readonly { readonly surfaceId: string; readonly status: string }[];
+  } | null;
   readonly createdAt: string;
 }
 

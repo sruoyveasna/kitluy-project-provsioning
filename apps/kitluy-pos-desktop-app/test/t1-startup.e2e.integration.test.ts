@@ -655,6 +655,7 @@ describe.skipIf(!live)("T1 end-to-end startup against a running development Hub 
         deviceRecordId: String(envelope["terminalDeviceId"]),
         assignmentGeneration: Number(envelope["assignmentGeneration"]),
         terminalProfileCode: String(envelope["terminalProfileCode"]),
+        primaryVertical: String(envelope["primaryVertical"]),
         minimumApplicationVersion: String(envelope["minimumApplicationVersion"]),
         maximumApplicationVersion:
           envelope["maximumApplicationVersion"] === null

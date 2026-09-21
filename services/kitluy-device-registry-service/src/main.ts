@@ -42,6 +42,7 @@ import {
   TERMINAL_PROVISIONING_PREFIX,
 } from "./provisioning-routes.js";
 import { createEd25519SnapshotSigner } from "./snapshot-signer.js";
+import { terminalSeatDerivation } from "./terminal-seat-derivation.js";
 import { SERVICE_NAME, SERVICE_VERSION } from "./index.js";
 
 const log = createLogger(SERVICE_NAME);
@@ -255,6 +256,7 @@ const terminalPairingRouter = createTerminalPairingRouter({
   composition: new TerminalPairingComposition({
     source: revocation.pool,
     logger: { info: (fields) => log.info("terminal-pairing", fields) },
+    seatDerivation: terminalSeatDerivation,
   }),
   advanceTrust: (deviceRecordId) =>
     advanceDeviceTrust(revocation.pool, {

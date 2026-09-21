@@ -20,6 +20,15 @@
  * Reads (list, session status, ownership) use the server's trusted identity
  * after authorization, exactly as `readPairingSession` does.
  */
+import {
+  adaptDeviceRuntimeReport,
+  compareDesiredVsActual,
+  deriveTerminalSeatDesiredState,
+  type DerivationRegistries as SeatRegistries,
+  type DesiredVsActual,
+  type ProductApplicationBinding,
+  type RuntimeApplicationEvidence,
+} from "@kitluy/terminal-seat-contracts";
 import { createHash } from "node:crypto";
 
 import type pg from "pg";
@@ -28,6 +37,12 @@ import { generateCode, HUB_PAIRING_TTL_SECONDS } from "./hub-pairing-issuance.js
 
 export interface TerminalProvisioningDeps {
   readonly pool: pg.Pool;
+  /**
+   * Terminal Seat derivation registries (TERMINAL-APPLICATION-ASSIGNMENT-001).
+   * Injected by the composition root; this module never names a vertical.
+   * The Partner sees the DERIVED desired state, never a chosen one.
+   */
+  readonly seatDerivation: SeatRegistries & { readonly productBindings: readonly ProductApplicationBinding[] };
 }
 
 export interface PhysicalTerminalDto {
@@ -37,6 +52,28 @@ export interface PhysicalTerminalDto {
   readonly locationReference: string | null;
   readonly label: string;
   readonly terminalProfileKeys: readonly string[];
+  /**
+   * The Store's explicit primary vertical, as the registry key. Read from the
+   * Store row (0215 stores it upper-case; normalised here — see the task
+   * handoff, "casing reconciliation").
+   */
+  readonly primaryVertical: string;
+  /** Partner-configured (0231). Grants no role and no application. */
+  readonly allowedSurfaces: readonly string[];
+  /**
+   * SERVER-DERIVED from the vertical and the roles. Shown BEFORE pairing so the
+   * Partner sees exactly what the Pi will be told (requirement 9). When the
+   * seat cannot be derived, the refusal is shown instead of a guess.
+   */
+  readonly desired:
+    | { readonly kind: "derived"; readonly applications: readonly string[]; readonly derivation: readonly { readonly applicationId: string; readonly byProfileCodes: readonly string[] }[] }
+    | { readonly kind: "not_derivable"; readonly code: string; readonly detail: string };
+  /**
+   * Desired vs Actual, from the device-reported runtime (0229) read through
+   * `adaptDeviceRuntimeReport`. `hasReport: false` before any report; every
+   * application then reads `unreported` — never "installed".
+   */
+  readonly desiredVsActual: DesiredVsActual | null;
   readonly boundDevice: null | {
     readonly deviceId: string;
     readonly deviceReference: string;
@@ -206,6 +243,9 @@ interface TerminalRow {
   location_reference: string | null;
   label: string;
   terminal_profile_keys: string[] | null;
+  allowed_surfaces: string[] | null;
+  primary_vertical_code: string | null;
+  bound_assignment_generation: string | number | null;
   created_at: Date | string;
   bound_device_id: string | null;
   bound_device_reference: string | null;
@@ -230,6 +270,12 @@ const TERMINAL_SELECT = `
                      from kitluy_devices.physical_terminal_roles r
                     where r.physical_terminal_id = pt.id and r.removed_at is null),
                   '{}'::text[])                           as terminal_profile_keys,
+         coalesce((select array_agg(x.surface_key order by x.ordinal, x.added_at)
+                     from kitluy_devices.physical_terminal_allowed_surfaces x
+                    where x.physical_terminal_id = pt.id and x.removed_at is null),
+                  '{}'::text[])                           as allowed_surfaces,
+         ds.primary_vertical_code                        as primary_vertical_code,
+         a.assignment_generation                         as bound_assignment_generation,
          d.id                                            as bound_device_id,
          d.asset_tag                                     as bound_device_reference,
          d.lifecycle_state::text                         as bound_lifecycle,
@@ -244,6 +290,7 @@ const TERMINAL_SELECT = `
          rs.received_at                                  as runtime_received_at,
          rs.report_age_seconds                           as runtime_age_seconds
     from kitluy_devices.physical_terminals pt
+    left join kitluy_core.digital_stores ds on ds.id = pt.digital_store_id
     left join kitluy_core.store_locations sl on sl.id = pt.store_location_id
     left join kitluy_devices.devices d on d.id = pt.bound_device_id
     left join kitluy_devices.device_assignments a on a.id = pt.bound_assignment_id
@@ -255,6 +302,36 @@ const TERMINAL_SELECT = `
 
 function text(value: unknown): string | null {
   return typeof value === "string" ? value : null;
+}
+
+/** The stored 0229 report's `application` block as adapter evidence, or null. */
+function runtimeApplicationEvidence(value: unknown): RuntimeApplicationEvidence | null {
+  if (value === null || typeof value !== "object") return null;
+  const a = value as Record<string, unknown>;
+  const phase = text(a["journalPhase"]);
+  const outcome = text(a["lastOutcome"]);
+  const PHASES = ["IDLE", "ACTIVATING", "HEALTH_PENDING", "COMMITTED", "ROLLED_BACK", "FAILED"] as const;
+  const OUTCOMES = ["INSTALLED", "ROLLED_BACK", "REFUSED", "INTERRUPTED"] as const;
+  const journalPhase = (PHASES as readonly string[]).includes(phase ?? "") ? (phase as (typeof PHASES)[number]) : "IDLE";
+  const lastOutcome = (OUTCOMES as readonly string[]).includes(outcome ?? "") ? (outcome as (typeof OUTCOMES)[number]) : null;
+  return {
+    product: text(a["product"]) ?? "unknown",
+    installedVersion: text(a["installedVersion"]),
+    journalPhase,
+    lastOutcome,
+    lastReason: text(a["lastReason"]),
+    runningReleaseId: text(a["runningReleaseId"]),
+    unitActive: a["unitActive"] === true,
+  };
+}
+
+function runtimePosEvidence(value: unknown): { readonly configurationVersion: number | null; readonly observedAt: string } | null {
+  if (value === null || typeof value !== "object") return null;
+  const p = value as Record<string, unknown>;
+  return {
+    configurationVersion: typeof p["configurationVersion"] === "number" ? p["configurationVersion"] : null,
+    observedAt: text(p["observedAt"]) ?? "",
+  };
 }
 
 /**
@@ -318,7 +395,56 @@ function terminalPinDto(value: unknown): NonNullable<TerminalRuntimeDto["hubLink
   return { state, setAt: text(pin["setAt"]), lockedUntil: text(pin["lockedUntil"]) };
 }
 
-function toTerminalDto(row: TerminalRow): PhysicalTerminalDto {
+function toTerminalDto(row: TerminalRow, deps: TerminalProvisioningDeps): PhysicalTerminalDto {
+  const primaryVertical = (row.primary_vertical_code ?? "").trim().toLowerCase();
+  const allowedSurfaces = row.allowed_surfaces ?? [];
+  const derived = deriveTerminalSeatDesiredState(
+    {
+      seatId: row.id,
+      tenantId: "-", // not needed for derivation; the seat row is already tenant-scoped
+      digitalStoreId: row.digital_store_id,
+      storeLocationId: row.store_location_id,
+      label: row.label,
+      primaryVertical,
+      terminalProfileCodes: row.terminal_profile_keys ?? [],
+      allowedSurfaces,
+    },
+    deps.seatDerivation,
+  );
+  const desired: PhysicalTerminalDto["desired"] = derived.ok
+    ? {
+        kind: "derived",
+        applications: derived.value.desiredApplications,
+        derivation: derived.value.derivation.map((d) => ({ applicationId: d.applicationId, byProfileCodes: d.byProfileCodes })),
+      }
+    : { kind: "not_derivable", code: derived.error.code, detail: derived.error.message };
+
+  let desiredVsActual: DesiredVsActual | null = null;
+  if (derived.ok) {
+    const report = row.runtime_report;
+    const generation = Number(row.bound_assignment_generation ?? 0);
+    const adapted =
+      row.bound_device_id === null || report === null
+        ? null
+        : adaptDeviceRuntimeReport(
+            {
+              application: runtimeApplicationEvidence(report["application"]),
+              pos: runtimePosEvidence(report["pos"]),
+            },
+            { seatId: row.id, terminalDeviceId: row.bound_device_id },
+            deps.seatDerivation.productBindings,
+            iso(row.runtime_received_at ?? new Date(0)),
+          );
+    // Configuration version of the desired state is not tracked per seat yet
+    // (surfaces travel in configuration, not assignment); compare on the
+    // assignment generation and let a missing report version read as stale.
+    const cmp = compareDesiredVsActual(
+      { desired: derived.value, assignmentGeneration: generation, configurationVersion: 0 },
+      adapted,
+    );
+    desiredVsActual = cmp.ok ? cmp.value : null;
+  }
+
   return {
     physicalTerminalId: row.id,
     digitalStoreId: row.digital_store_id,
@@ -326,6 +452,10 @@ function toTerminalDto(row: TerminalRow): PhysicalTerminalDto {
     locationReference: row.location_reference,
     label: row.label,
     terminalProfileKeys: row.terminal_profile_keys ?? [],
+    primaryVertical,
+    allowedSurfaces,
+    desired,
+    desiredVsActual,
     boundDevice:
       row.bound_device_id === null || row.bound_device_reference === null
         ? null
@@ -365,7 +495,7 @@ export async function listPhysicalTerminals(
    order by pt.created_at, pt.label`,
     [digitalStoreId],
   );
-  return rows.map(toTerminalDto);
+  return rows.map((row) => toTerminalDto(row, deps));
 }
 
 export async function readPhysicalTerminal(
@@ -378,7 +508,7 @@ export async function readPhysicalTerminal(
     [physicalTerminalId],
   );
   const row = rows[0];
-  return row === undefined ? null : toTerminalDto(row);
+  return row === undefined ? null : toTerminalDto(row, deps);
 }
 
 /** Which Store a seat belongs to, for the ownership check. Null when absent. */
@@ -553,6 +683,43 @@ export async function setPhysicalTerminalRoles(
       code: "KLUY-PHYSTERM-NOT-FOUND",
       detail: "no such physical terminal",
     };
+  }
+  return { kind: "set", terminal };
+}
+
+/**
+ * Replace a seat's ALLOWED SURFACES (0231). Validated against the owner's
+ * surface registry BEFORE the door is called: an unknown surface is refused
+ * here with its identifier, rather than stored and later refused at pairing.
+ * The door itself checks only the shape (Neutral Fleet knows no vocabulary).
+ */
+export async function setPhysicalTerminalAllowedSurfaces(
+  deps: TerminalProvisioningDeps,
+  input: {
+    readonly physicalTerminalId: string;
+    readonly allowedSurfaces: readonly string[];
+    readonly operatorRef: string;
+  },
+): Promise<{ readonly kind: "set"; readonly terminal: PhysicalTerminalDto } | TerminalRefusal> {
+  const known = deps.seatDerivation.surfaces.requireAll(input.allowedSurfaces);
+  if (!known.ok) {
+    return { kind: "refused", code: "KLUY-PHYSTERM-SURFACE-UNKNOWN", detail: known.error.message };
+  }
+  try {
+    const result = await asIssuer(deps, (client) =>
+      callDoor(client, "kitluy_devices.set_physical_terminal_allowed_surfaces_v1($1::uuid, $2::text[], $3)", [
+        input.physicalTerminalId,
+        [...known.value],
+        input.operatorRef,
+      ]),
+    );
+    if (result.outcome !== "SURFACES_SET") return refusalOf(result, "KLUY-PHYSTERM-SURFACES-NOT-SET");
+  } catch {
+    return { kind: "refused", code: "KLUY-PHYSTERM-SURFACES-NOT-SET", detail: UNMAPPED_DETAIL };
+  }
+  const terminal = await readPhysicalTerminal(deps, input.physicalTerminalId);
+  if (terminal === null) {
+    return { kind: "refused", code: "KLUY-PHYSTERM-NOT-FOUND", detail: "no such physical terminal" };
   }
   return { kind: "set", terminal };
 }

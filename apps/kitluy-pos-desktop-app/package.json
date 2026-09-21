@@ -22,6 +22,7 @@
     "@kitluy/localization": "workspace:*",
     "@kitluy/shared-types": "workspace:*",
     "@kitluy/terminal-local-store": "workspace:*",
+    "@kitluy/terminal-seat-contracts": "workspace:*",
     "@kitluy/web-ui": "workspace:*",
     "react": "catalog:",
     "react-dom": "catalog:"

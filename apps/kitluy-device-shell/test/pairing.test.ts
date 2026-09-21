@@ -39,7 +39,10 @@ const PAIRED: PairingTransportResult = {
     digitalStoreReference: "STORE-1",
     storeLocationReference: "LOC-1",
     physicalTerminalLabel: "Counter 1",
-    terminalProfileKeys: ["T1"],
+    terminalProfileKeys: ["laundry.t1.intake_cashier"],
+    vertical: "laundry",
+    desiredApplications: ["laundry.pos"],
+    allowedSurfaces: [],
   },
 };
 
@@ -163,7 +166,10 @@ describe("the seat on disk", () => {
     digitalStoreReference: "STORE-1",
     storeLocationReference: "LOC-1",
     physicalTerminalLabel: "Counter 1",
-    terminalProfileKeys: ["T1"],
+    terminalProfileKeys: ["laundry.t1.intake_cashier"],
+    primaryVertical: "laundry",
+    desiredApplications: ["laundry.pos"],
+    allowedSurfaces: [],
     updatedAt: new Date().toISOString(),
   };
 

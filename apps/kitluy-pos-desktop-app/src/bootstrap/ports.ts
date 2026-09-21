@@ -193,6 +193,8 @@ export interface RuntimeEligibilityWire {
   readonly assignmentId: string;
   readonly assignmentGeneration: number;
   readonly terminalProfileCode: string;
+  /** The Store's explicit primary vertical, Hub-attested (v2). */
+  readonly primaryVertical: string;
   readonly credentialId: string;
   readonly credentialGeneration: number;
   readonly credentialEligibility: string;
@@ -219,6 +221,8 @@ export interface ConfigurationDeliveryEnvelopeWire {
   readonly terminalDeviceId: string;
   readonly assignmentGeneration: number;
   readonly terminalProfileCode: string;
+  /** The Store's explicit primary vertical, signed into the v2 delivery. */
+  readonly primaryVertical: string;
   readonly minimumApplicationVersion: string;
   readonly maximumApplicationVersion: string | null;
   readonly issuedAt: string;

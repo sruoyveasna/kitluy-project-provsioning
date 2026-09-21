@@ -662,6 +662,9 @@ describe.skipIf(!live)("T1 bootstrap routes and staff sessions (WS-12-T001-P02)"
     expect(eligibility["terminalDeviceId"]).toBe(t.deviceId);
     expect(eligibility["assignmentGeneration"]).toBe(1);
     expect(eligibility["terminalProfileCode"]).toBe(T1);
+    // v2: the Store's explicit vertical is part of the eligibility scope the
+    // Hub later signs into the delivery (TERMINAL-APPLICATION-ASSIGNMENT-001).
+    expect(eligibility["primaryVertical"]).toBe("laundry");
     expect(eligibility["credentialEligibility"]).toBe("eligible");
     expect(eligibility["pairingEligibility"]).toBe("paired");
     expect(eligibility["containmentState"]).toBe("none");
@@ -1113,6 +1116,7 @@ describe.skipIf(!live)("T1 bootstrap routes and staff sessions (WS-12-T001-P02)"
     expect(delivery["configurationVersion"]).toBe(7);
     expect(delivery["terminalDeviceId"]).toBe(t.deviceId);
     expect(delivery["terminalProfileCode"]).toBe(T1);
+    expect(delivery["primaryVertical"]).toBe("laundry");
     expect(delivery["assignmentGeneration"]).toBe(1);
     // The DELIVERY signer self-describes (owner decision §3 "signer and
     // public-key identifier"): the envelope names the Hub operational key
@@ -1136,6 +1140,7 @@ describe.skipIf(!live)("T1 bootstrap routes and staff sessions (WS-12-T001-P02)"
         terminalDeviceId: String(delivery["terminalDeviceId"]),
         assignmentGeneration: Number(delivery["assignmentGeneration"]),
         terminalProfileCode: String(delivery["terminalProfileCode"]),
+        primaryVertical: String(delivery["primaryVertical"]),
         minimumApplicationVersion: String(delivery["minimumApplicationVersion"]),
         maximumApplicationVersion:
           delivery["maximumApplicationVersion"] === null
@@ -1160,6 +1165,7 @@ describe.skipIf(!live)("T1 bootstrap routes and staff sessions (WS-12-T001-P02)"
         terminalDeviceId: t.deviceId,
         assignmentGeneration: 1,
         terminalProfileCode: T1,
+        primaryVertical: "laundry",
       },
       createHash("sha256").update(Buffer.from(payloadJson, "utf8")).digest("hex"),
     );

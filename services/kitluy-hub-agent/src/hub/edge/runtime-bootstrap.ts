@@ -135,7 +135,10 @@ export type EligibilityRefusal =
   | "PAIRING_REQUIRED"
   | "PROFILE_NOT_GRANTED"
   | "PROFILE_NOT_T1"
-  | "CONTAINMENT_PROHIBITS";
+  | "CONTAINMENT_PROHIBITS"
+  /** The Hub assignment carries no primary vertical; a delivery cannot be
+   *  signed without one (TERMINAL-APPLICATION-ASSIGNMENT-001, fail closed). */
+  | "VERTICAL_UNAVAILABLE";
 
 export interface RuntimeEligibilityPayload {
   readonly protocolVersion: string;
@@ -149,6 +152,8 @@ export interface RuntimeEligibilityPayload {
   readonly assignmentId: string;
   readonly assignmentGeneration: number;
   readonly terminalProfileCode: string;
+  /** The Digital Store's explicit primary vertical, from the Hub assignment. */
+  readonly primaryVertical: string;
   readonly credentialId: string;
   readonly credentialGeneration: number;
   readonly credentialEligibility: "eligible";
@@ -372,8 +377,10 @@ export async function deriveEligibility(
     digital_store_id: string;
     location_id: string;
     assignment_generation: number;
+    primary_vertical_code: string | null;
   }>(
-    `select hub_device_id, tenant_id, digital_store_id, location_id, assignment_generation
+    `select hub_device_id, tenant_id, digital_store_id, location_id, assignment_generation,
+            primary_vertical_code
        from edge_identity.hub_assignment
       where hub_device_id = $1 and ended_at is null
       order by assignment_generation desc
@@ -383,6 +390,16 @@ export async function deriveEligibility(
   const scope = hubAssignment.rows[0];
   if (scope === undefined) {
     return refuse("HUB_ASSIGNMENT_MISSING", "this Store Hub has no active assignment");
+  }
+  // The explicit vertical is signed into every delivery (v2). A Hub that does
+  // not hold it refuses to attest, rather than deriving one from a profile
+  // prefix — the derivation this contract retired.
+  const primaryVertical = scope.primary_vertical_code?.trim() ?? "";
+  if (primaryVertical.length === 0) {
+    return refuse(
+      "VERTICAL_UNAVAILABLE",
+      "this Store Hub's assignment carries no primary vertical; nothing can be signed for the terminal",
+    );
   }
 
   // Terminal scope and generation, from the projection the credential names.
@@ -538,6 +555,7 @@ export async function deriveEligibility(
       assignmentId: grantRow.id,
       assignmentGeneration: terminalRow.assignment_generation,
       terminalProfileCode: grantRow.profile_code,
+      primaryVertical,
       credentialId: credentialRow.id,
       credentialGeneration: credentialRow.rotation_generation,
       credentialEligibility: "eligible",
@@ -573,6 +591,7 @@ export interface ConfigurationDeliveryBody {
     readonly terminalDeviceId: string;
     readonly assignmentGeneration: number;
     readonly terminalProfileCode: string;
+    readonly primaryVertical: string;
     readonly minimumApplicationVersion: string;
     readonly maximumApplicationVersion: string | null;
     readonly issuedAt: string;
@@ -727,6 +746,7 @@ export async function readCurrentConfigurationDelivery(
         terminalDeviceId,
         assignmentGeneration: scope.assignmentGeneration,
         terminalProfileCode: scope.terminalProfileCode,
+        primaryVertical: scope.primaryVertical,
         minimumApplicationVersion,
         maximumApplicationVersion,
         issuedAt: snapshotRow.created_at,

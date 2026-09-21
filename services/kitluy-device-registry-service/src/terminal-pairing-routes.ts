@@ -59,6 +59,7 @@ const CANONICAL_ERROR: Readonly<Record<TerminalPairingResultCode, KitluyErrorCod
   REDEMPTION_REFUSED: "RESOURCE_VERSION_CONFLICT",
   ALREADY_ASSIGNED: "RESOURCE_VERSION_CONFLICT",
   REQUEST_INVALID: "VALIDATION_FAILED",
+  SEAT_NOT_DERIVABLE: "VALIDATION_FAILED",
   INTERNAL_ERROR: "INTERNAL_ERROR",
 };
 
@@ -70,6 +71,8 @@ const SAFE_MESSAGE: Readonly<Record<TerminalPairingResultCode, string>> = {
   ALREADY_ASSIGNED:
     "this Pi Terminal is already assigned to a Store; its assignment must be revoked before it can pair again",
   REQUEST_INVALID: "the request was malformed",
+  SEAT_NOT_DERIVABLE:
+    "this seat cannot be installed as defined; ask the Partner to check its Store vertical, terminal profiles and allowed surfaces",
   INTERNAL_ERROR: "the pairing service is unavailable",
 };
 

@@ -82,11 +82,13 @@ export interface AuthoritativeStoreAssignment {
   /** Configuration version the decision was taken against. */
   readonly configurationVersion: number;
   /**
-   * Explicit primary vertical, when the signed configuration payload carries
-   * one. Optional because the current `ConfigurationDeliveryEnvelopeWire` does
-   * not yet include a vertical field — see `VERTICAL_EVIDENCE_NOTE`.
+   * The Digital Store's EXPLICIT primary vertical, from the Hub-signed
+   * configuration delivery (`TerminalConfigurationDelivery.primaryVertical`,
+   * v2). REQUIRED since TERMINAL-APPLICATION-ASSIGNMENT-001 resolved
+   * `KLREQ-VERTICAL-ENVELOPE-001`: an assignment with no declared vertical is
+   * refused, never derived.
    */
-  readonly declaredVertical?: string;
+  readonly declaredVertical: string;
 }
 
 /** The resolved, authorised context the POS shell may act on. */
@@ -101,45 +103,43 @@ export interface ResolvedStoreContext {
   readonly terminalSegment: string;
   readonly assignmentGeneration: number;
   readonly configurationVersion: number;
-  /** How the vertical was established — recorded for audit and diagnostics. */
+  /**
+   * How the vertical was established. Always `"declared"` since v2; the
+   * literal union is kept so consumers written against the transitional
+   * contract still type-check, but `"derived_from_profile_code"` is no longer
+   * produced by this function.
+   */
   readonly verticalSource: "declared" | "derived_from_profile_code";
 }
 
 /**
- * TEMPORARY-COMPATIBILITY-DERIVATION — ruled by
- * `KLD-2026-08-07-BOOKING-SEMANTICS-001` §5.
+ * EXPLICIT-VERTICAL-WITH-PREFIX-CROSS-CHECK — the state after
+ * TERMINAL-APPLICATION-ASSIGNMENT-001 resolved `KLREQ-VERTICAL-ENVELOPE-001`.
  *
  * Canonical truth for the business vertical is `Digital Store.primary_vertical`.
- * The terminal profile describes the terminal's ROLE INSIDE that Store — it is
- * NOT the permanent source of business-vertical truth.
+ * Since delivery v2 the Hub signs it into `TerminalConfigurationDelivery.
+ * primaryVertical`, and it arrives here as `declaredVertical`. The terminal
+ * profile describes the terminal's ROLE INSIDE that Store; its prefix is
+ * retained ONLY as a cross-check. The previous TEMPORARY-COMPATIBILITY-
+ * DERIVATION (KLD-2026-08-07-BOOKING-SEMANTICS-001 §5) is retired: an
+ * assignment without a declared vertical now REFUSES instead of deriving one.
  *
- * The signed `ConfigurationDeliveryEnvelopeWire` (WS-12-T001) carries
- * `terminalProfileCode` but no explicit vertical field, so the vertical is
- * DERIVED from the canonical profile-code prefix. That prefix is itself
- * Hub-signed, so authority still rests entirely with the Hub, never with the
- * terminal — but the derivation is accepted only as a temporary compatibility
- * measure.
+ * The fail-closed protection is unchanged and must NOT be weakened:
  *
- * GOVERNED FOLLOW-UP: `KLREQ-VERTICAL-ENVELOPE-001` — deliver authoritative
- * Digital Store vertical information through the Hub configuration/assignment
- * envelope. It must be executed by the task that OWNS that signed contract; a
- * signed contract is never modified casually by a task that does not own it.
- *
- * The fail-closed protection below must NOT be weakened:
- *
- *     explicit vertical + derived vertical + disagreement -> REFUSE
+ *     explicit vertical + profile prefix + disagreement -> REFUSE
+ *     no explicit vertical                              -> REFUSE
  */
-export const VERTICAL_DERIVATION_STATUS = "TEMPORARY-COMPATIBILITY-DERIVATION" as const;
+export const VERTICAL_DERIVATION_STATUS = "EXPLICIT-VERTICAL-WITH-PREFIX-CROSS-CHECK" as const;
 
-/** Open item tracking the governed envelope contract change. */
+/** The item this contract change resolved. Kept as a stable reference. */
 export const VERTICAL_ENVELOPE_FOLLOW_UP = "KLREQ-VERTICAL-ENVELOPE-001" as const;
 
 export const VERTICAL_EVIDENCE_NOTE: string =
-  "TEMPORARY-COMPATIBILITY-DERIVATION (KLD-2026-08-07-BOOKING-SEMANTICS-001 §5). " +
-  "Canonical vertical truth is Digital Store.primary_vertical. The vertical is " +
-  "derived from the Hub-signed terminalProfileCode prefix only until the " +
-  "configuration envelope carries an explicit vertical field " +
-  "(KLREQ-VERTICAL-ENVELOPE-001). Both sources, when present, must agree.";
+  "EXPLICIT-VERTICAL-WITH-PREFIX-CROSS-CHECK (TERMINAL-APPLICATION-ASSIGNMENT-001, " +
+  "resolving KLREQ-VERTICAL-ENVELOPE-001). Canonical vertical truth is " +
+  "Digital Store.primary_vertical, signed by the Hub into the v2 configuration " +
+  "delivery. The terminalProfileCode prefix is a cross-check only; disagreement " +
+  "refuses, and a missing declared vertical refuses.";
 
 const refuse = (code: VerticalResolutionRefusalCode, message: string): KitluyErrorLike => ({
   code,
@@ -193,8 +193,18 @@ export function resolveStoreContext(
 
   const declared = assignment.declaredVertical;
 
-  // Both present -> must agree. Never prefer one silently.
-  if (declared !== undefined && declared !== verticalSegment) {
+  // The explicit vertical is REQUIRED. Absence is refused, never derived.
+  if (typeof declared !== "string" || declared.length === 0) {
+    return err(
+      refuse(
+        VERTICAL_RESOLUTION_REFUSALS.NO_VERTICAL_EVIDENCE,
+        "The signed configuration carries no explicit primary vertical.",
+      ),
+    );
+  }
+
+  // Cross-check: the profile prefix must agree. Never used to "correct" it.
+  if (declared !== verticalSegment) {
     return err(
       refuse(
         VERTICAL_RESOLUTION_REFUSALS.VERTICAL_PROFILE_MISMATCH,
@@ -203,15 +213,7 @@ export function resolveStoreContext(
     );
   }
 
-  const candidate = declared ?? verticalSegment;
-  if (!candidate) {
-    return err(
-      refuse(
-        VERTICAL_RESOLUTION_REFUSALS.NO_VERTICAL_EVIDENCE,
-        "No vertical evidence in the signed configuration.",
-      ),
-    );
-  }
+  const candidate = declared;
   if (!isVerticalKey(candidate)) {
     return err(
       refuse(
@@ -239,6 +241,6 @@ export function resolveStoreContext(
     terminalSegment,
     assignmentGeneration: assignment.assignmentGeneration,
     configurationVersion: assignment.configurationVersion,
-    verticalSource: declared !== undefined ? "declared" : "derived_from_profile_code",
+    verticalSource: "declared",
   });
 }

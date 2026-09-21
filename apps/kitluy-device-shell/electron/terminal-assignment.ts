@@ -55,6 +55,15 @@ export interface TerminalAssignment {
   readonly storeLocationReference: string;
   readonly physicalTerminalLabel: string;
   readonly terminalProfileKeys: readonly string[];
+  /**
+   * v2 (TERMINAL-APPLICATION-ASSIGNMENT-001). The Store's explicit primary
+   * vertical, the SERVER-DERIVED applications this seat installs, and the
+   * Partner-configured allowed surfaces. `null` = recorded by a shell that
+   * predates v2, i.e. UNKNOWN — never assumed. New pairings always write them.
+   */
+  readonly primaryVertical: string | null;
+  readonly desiredApplications: readonly string[] | null;
+  readonly allowedSurfaces: readonly string[] | null;
   readonly updatedAt: string;
 }
 
@@ -96,11 +105,26 @@ export function readTerminalAssignment(path = TERMINAL_ASSIGNMENT_PATH): Termina
   try {
     const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
     if (parsed === null || typeof parsed !== "object") return null;
-    const candidate = parsed as { deviceRecordId?: unknown; assignmentId?: unknown };
-    return typeof candidate.deviceRecordId === "string" &&
-      typeof candidate.assignmentId === "string"
-      ? (parsed as TerminalAssignment)
-      : null;
+    const candidate = parsed as {
+      deviceRecordId?: unknown;
+      assignmentId?: unknown;
+      primaryVertical?: unknown;
+      desiredApplications?: unknown;
+      allowedSurfaces?: unknown;
+    };
+    if (typeof candidate.deviceRecordId !== "string" || typeof candidate.assignmentId !== "string") {
+      return null;
+    }
+    // A pre-v2 file carries none of the seat fields; they read as null
+    // (unknown), not as empty (known-empty). Display state only.
+    const list = (v: unknown): readonly string[] | null =>
+      Array.isArray(v) && v.every((x) => typeof x === "string") ? (v as string[]) : null;
+    return {
+      ...(parsed as Omit<TerminalAssignment, "primaryVertical" | "desiredApplications" | "allowedSurfaces">),
+      primaryVertical: typeof candidate.primaryVertical === "string" ? candidate.primaryVertical : null,
+      desiredApplications: list(candidate.desiredApplications),
+      allowedSurfaces: list(candidate.allowedSurfaces),
+    };
   } catch {
     return null;
   }

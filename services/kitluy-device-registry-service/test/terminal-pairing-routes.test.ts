@@ -72,7 +72,9 @@ const PAIRED: TerminalPairingCompositionResult<PairedTerminalMaterial> = {
         { terminalAssignmentId: "9", terminalProfileKey: "laundry.t1.intake_cashier" },
         { terminalAssignmentId: "10", terminalProfileKey: "laundry.t2.customer_display" },
       ],
-      vertical: "LAUNDRY",
+      vertical: "laundry",
+      desiredApplications: ["laundry.pos"],
+      allowedSurfaces: [],
       requiredAppFamily: null,
       releaseChannel: null,
       environment: "development",
@@ -101,8 +103,14 @@ describe("a paired Pi Terminal is told everything the owner's §7 lists, and not
       "laundry.t1.intake_cashier",
       "laundry.t2.customer_display",
     ]);
-    expect(context.vertical).toBe("LAUNDRY");
+    // The composition now emits the registry key, not the DB spelling (0215 stores upper-case).
+    expect(context.vertical).toBe("laundry");
     expect(context.requiredAppFamily).toBeNull();
+    // v2: the server-derived application and the Partner-configured surfaces
+    // reach the Pi in the same context; the vertical is the registry key.
+    expect(context.desiredApplications).toEqual(["laundry.pos"]);
+    expect(context.allowedSurfaces).toEqual([]);
+    expect(context.vertical).toBe("laundry");
     expect(context.releaseChannel).toBeNull();
     expect(body.detail).toContain("awaiting trust");
   });
@@ -187,5 +195,21 @@ describe("request problems are request problems", () => {
       request({ deviceRecordId: DEVICE, code: GOOD_CODE }, { headers: {} }),
     );
     expect(res.status).toBe(httpStatusFor("VALIDATION_FAILED"));
+  });
+});
+
+describe("SEAT_NOT_DERIVABLE (TERMINAL-APPLICATION-ASSIGNMENT-001)", () => {
+  it("is a 4xx validation refusal with a safe operator sentence and no internal detail", async () => {
+    const res = await router({
+      result: "SEAT_NOT_DERIVABLE",
+      correlationId: "corr-1",
+      auditDetail: "terminal_seat.application.none_derivable: internal",
+    }).handle(request({ deviceRecordId: DEVICE, code: GOOD_CODE }));
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBeLessThan(500);
+    const text = JSON.stringify(res.body);
+    expect(text).toContain("VALIDATION_FAILED");
+    expect(text).toContain("cannot be installed as defined");
+    expect(text).not.toContain("none_derivable");
   });
 });

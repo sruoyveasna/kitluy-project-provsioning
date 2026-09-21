@@ -11,6 +11,7 @@
  * explicit owner/spec decision — not guessed.
  */
 export * from "./terminal-profiles.js";
+export * from "./applications.js";
 export * from "./t2-display-state-machine.js";
 export * from "./custody-events.js";
 export * from "./pricing.js";

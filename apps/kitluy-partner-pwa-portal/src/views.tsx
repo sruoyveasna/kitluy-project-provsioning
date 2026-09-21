@@ -567,6 +567,62 @@ export interface PairingState {
   readonly gone: boolean;
 }
 
+/**
+ * The seat's DESIRED application(s) as the server derived them, with the
+ * device-reported ACTUAL beside each (TERMINAL-APPLICATION-ASSIGNMENT-001,
+ * requirements 9 and 13). Nothing here is computed in the browser: a missing
+ * field renders "not provided", a refusal renders as a refusal, and an
+ * application with no report renders "not reported" — never "installed".
+ */
+const ACTUAL_MESSAGE: Readonly<Record<string, MessageKey>> = {
+  unreported: "actualUnreported",
+  in_sync: "actualInSync",
+  missing: "actualMissing",
+  installing: "actualInstalling",
+  installed_not_running: "actualInstalledNotRunning",
+  failed: "actualFailed",
+  unexpected: "actualUnexpected",
+};
+
+function DesiredApplicationCell(props: {
+  locale: KitluyLocale;
+  terminal: PhysicalTerminal;
+}): JSX.Element {
+  const t = MESSAGES[props.locale];
+  const desired = props.terminal.desired;
+  if (desired === undefined) return <span className="kl-muted">{t.applicationNotProvided}</span>;
+  if (desired.kind === "not_derivable") {
+    return (
+      <span role="status" data-refusal={desired.code} className="kl-muted">
+        {t.applicationNotDerivable} <small style={{ fontFamily: MONO }}>({desired.code})</small>
+      </span>
+    );
+  }
+  const actual = props.terminal.desiredVsActual ?? null;
+  return (
+    <>
+      {desired.applications.map((id) => {
+        const row = actual?.applications.find((a) => a.applicationId === id);
+        const statusKey = row === undefined ? "unreported" : row.status;
+        const message = [
+          t[ACTUAL_MESSAGE[statusKey] ?? "actualUnreported"],
+          row?.reportedVersion ? row.reportedVersion : null,
+          actual?.reportIsStale ? `· ${t.actualStale}` : null,
+        ]
+          .filter((part): part is string => part !== null)
+          .join(" ");
+        return (
+          <div key={id} data-application={id} data-actual={statusKey}>
+            <span style={{ fontFamily: MONO }}>{id}</span>{" "}
+            <small className="kl-muted">{message}</small>
+          </div>
+        );
+      })}
+      <small className="kl-muted">{t.applicationDerived}</small>
+    </>
+  );
+}
+
 export function TerminalsView(props: {
   locale: KitluyLocale;
   store: PartnerStore;
@@ -626,6 +682,8 @@ export function TerminalsView(props: {
                     <th scope="col">{t.terminalColumn}</th>
                     <th scope="col">{t.profilesColumn}</th>
                     <th scope="col">{t.locationColumn}</th>
+                    <th scope="col">{t.applicationColumn}</th>
+                    <th scope="col">{t.surfacesColumn}</th>
                     <th scope="col">{t.deviceColumn}</th>
                     <th scope="col">{t.progressColumn}</th>
                     <th scope="col">{t.actionColumn}</th>
@@ -664,6 +722,18 @@ export function TerminalsView(props: {
                           })}
                         </td>
                         <td>{terminal.locationReference ?? "—"}</td>
+                        <td data-desired={terminal.desired?.kind ?? "not_provided"}>
+                          <DesiredApplicationCell locale={props.locale} terminal={terminal} />
+                        </td>
+                        <td>
+                          {terminal.allowedSurfaces === undefined ? (
+                            <span className="kl-muted">{t.applicationNotProvided}</span>
+                          ) : terminal.allowedSurfaces.length === 0 ? (
+                            <span className="kl-muted">{t.noSurfaces}</span>
+                          ) : (
+                            <span style={{ fontFamily: MONO }}>{terminal.allowedSurfaces.join(", ")}</span>
+                          )}
+                        </td>
                         <td>
                           {terminal.boundDevice === null ? (
                             <span className="kl-muted">{t.noBoundDevice}</span>
