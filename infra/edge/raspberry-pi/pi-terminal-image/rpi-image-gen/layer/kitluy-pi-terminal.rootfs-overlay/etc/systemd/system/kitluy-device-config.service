@@ -4,6 +4,9 @@ Description=KitLuy Terminal device-configuration broker (privileged verbs for Se
 # opens onto a socket that is not there yet and reports the device unreachable.
 Before=kitluy-device-shell.service
 After=systemd-networkd.service
+# The bridge the PIN travels through; not Requires= — the broker's other verbs
+# (Wi-Fi, brightness) must work on a board that has no Hub yet.
+After=kitluy-terminal-edge.service
 ConditionPathExists=/usr/lib/kitluy/device-config-broker
 
 [Service]
@@ -44,6 +47,18 @@ PrivateNetwork=no
 # The shop's Wi-Fi configuration. Slot-shared, so this is a real bind mount to
 # the persistent partition and survives a slot switch.
 ReadWritePaths=/etc/wpa_supplicant
+# THE TERMINAL PIN GOES TO THE STORE HUB THROUGH THE terminal-edge BRIDGE
+# (KLD-2026-09-19-PIN-AFTER-PAIRING-001). Connecting to a unix socket needs
+# WRITE on its inode, and ProtectSystem=strict mounts /run read-only, so root
+# or not the broker's connect() failed with EROFS and the Shell said "the Store
+# Hub is not connected yet" while the Hub was fine (hardware, 2026-09-21: the
+# owner's first PIN never left the board; the application's create face took
+# it instead). /run is a tmpfs of sockets and pid files — writable as a whole
+# rather than pinning terminal-edge's RuntimeDirectory, which systemd removes
+# and recreates on every restart of that unit and would leave a stale bind.
+ReadWritePaths=/run
+# The public PIN posture (`terminal/device-pin.json`) the Shell and the POS read.
+ReadWritePaths=-/var/lib/kitluy
 # ProtectKernelTunables makes /sys read-only, which is right for everything
 # except the one file this is allowed to write. The leading `-` keeps the unit
 # startable on a board with no backlight class at all — an HDMI monitor has

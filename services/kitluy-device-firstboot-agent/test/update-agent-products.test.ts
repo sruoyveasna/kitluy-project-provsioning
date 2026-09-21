@@ -20,6 +20,7 @@ import {
   productsOnThisImage,
   resetTerminalClientStartForTests,
   startInstalledTerminalClientOnce,
+  terminalPinSetupPending,
   type SystemctlRunner,
 } from "../src/bin/update-bootstrap.js";
 import {
@@ -154,5 +155,35 @@ describe("an installed POS is started after a reboot, once", () => {
       action: "START_FAILED",
       releaseId: "rel-a",
     });
+  });
+});
+
+describe("the first install waits for the Terminal PIN (KLD-2026-09-19-PIN-AFTER-PAIRING-001)", () => {
+  function edgeStatus(body: unknown): string {
+    const path = join(root, `edge-status-${String(Math.random()).slice(2)}.json`);
+    writeFileSync(path, typeof body === "string" ? body : JSON.stringify(body));
+    return path;
+  }
+
+  it("holds only on the Hub's explicit setup_required while SERVING", () => {
+    expect(
+      terminalPinSetupPending(
+        edgeStatus({ phase: "SERVING", terminalPin: { state: "setup_required" } }),
+      ),
+    ).toBe(true);
+    // The Hub holds a PIN already (a recovered board): no hold.
+    expect(
+      terminalPinSetupPending(edgeStatus({ phase: "SERVING", terminalPin: { state: "set" } })),
+    ).toBe(false);
+    // Not connected yet: the install is not what waits for the Hub; the pass does.
+    expect(
+      terminalPinSetupPending(
+        edgeStatus({ phase: "PAIRING_REQUIRED", terminalPin: { state: "setup_required" } }),
+      ),
+    ).toBe(false);
+    // An older Hub with no PIN answer, a missing file, or junk: no hold.
+    expect(terminalPinSetupPending(edgeStatus({ phase: "SERVING" }))).toBe(false);
+    expect(terminalPinSetupPending(join(root, "missing.json"))).toBe(false);
+    expect(terminalPinSetupPending(edgeStatus("not json"))).toBe(false);
   });
 });

@@ -182,16 +182,34 @@ export async function registerDevicePinWithHub(
     return { ok: false, code: "HUB_NOT_CONNECTED" };
   }
   if (answer.status === 200) {
-    return { ok: true, posture: markDevicePinRegistered(paths, deps.now ?? new Date()) };
+    // The Hub holds the PIN from this instant. The posture file is a convenience
+    // for the screens; failing to write it must not report the Hub's success as
+    // a failure (the Shell would ask again and the Hub would answer ALREADY_SET).
+    return { ok: true, posture: markRegisteredBestEffort(paths, deps.now ?? new Date()) };
   }
   const result = hubResult(answer.body);
   if (result === "PIN_CONFIRMATION_MISMATCH")
     return { ok: false, code: "PIN_CONFIRMATION_MISMATCH" };
   if (result === "PIN_ALREADY_SET") {
     // The Hub already holds one (a re-run after success): the posture follows the Hub.
-    markDevicePinRegistered(paths, deps.now ?? new Date());
+    markRegisteredBestEffort(paths, deps.now ?? new Date());
     return { ok: false, code: "PIN_ALREADY_SET" };
   }
   if (answer.status === 0 || answer.status >= 500) return { ok: false, code: "HUB_NOT_CONNECTED" };
   return { ok: false, code: "HUB_REFUSED" };
+}
+
+function markRegisteredBestEffort(
+  paths: Pick<DevicePinPaths, "posture">,
+  now: Date,
+): DevicePinPosture {
+  try {
+    return markDevicePinRegistered(paths, now);
+  } catch {
+    return {
+      schema: "kitluy.device-pin-posture.v1",
+      state: "registered",
+      registeredAt: now.toISOString(),
+    };
+  }
 }
