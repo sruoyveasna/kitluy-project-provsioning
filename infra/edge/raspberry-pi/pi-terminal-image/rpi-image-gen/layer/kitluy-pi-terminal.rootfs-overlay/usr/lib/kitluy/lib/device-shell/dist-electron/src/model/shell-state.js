@@ -144,12 +144,6 @@ export function deriveScreen(snapshot) {
     if (phase === "TRUST_REVIEW_REQUIRED") {
         return { kind: "halted", reason: "trust_review", deviceLabel };
     }
-    // FIRST BOOT: the device PIN comes before registration, approval and pairing
-    // (owner decision 2026-09-18). An image whose agent publishes no posture reads
-    // as `absent` too — the agent and the shell ship together.
-    if ((snapshot.devicePin?.state ?? "absent") === "absent") {
-        return { kind: "pin_setup", deviceLabel };
-    }
     switch (phase) {
         case "APPROVED": {
             // TWO WAYS TO BE ASSIGNED, because two devices record it differently.
@@ -164,9 +158,20 @@ export function deriveScreen(snapshot) {
                 assignmentBelongsTo(snapshot.assignment, snapshot.deviceRecordId);
             if (!paired)
                 return { kind: "approved_unassigned", deviceLabel };
-            // Paired: the application is on its way. The shell shows the install
-            // (it is stopped the moment the POS unit takes the seat, so this is what
-            // a person sees between the code and the counter).
+            // PAIRED AND CONNECTED: the Terminal PIN is created NOW, on the Store Hub
+            // (owner ruling 2026-09-19 — "right after we paired and successfully
+            // activated"). The Hub says whether one is missing; the board's posture
+            // only bridges the seconds until the Hub's status is re-read.
+            const edge = snapshot.edge ?? null;
+            if (edge !== null &&
+                edge.phase === "SERVING" &&
+                edge.terminalPinState === "setup_required" &&
+                (snapshot.devicePin?.state ?? "absent") !== "registered") {
+                return { kind: "pin_setup", deviceLabel };
+            }
+            // Then the application is on its way. The shell shows the install (it is
+            // stopped the moment the POS unit takes the seat, so this is what a person
+            // sees between the PIN and the counter).
             const app = snapshot.application ?? null;
             if (app !== null && app.phase !== "COMMITTED") {
                 return {

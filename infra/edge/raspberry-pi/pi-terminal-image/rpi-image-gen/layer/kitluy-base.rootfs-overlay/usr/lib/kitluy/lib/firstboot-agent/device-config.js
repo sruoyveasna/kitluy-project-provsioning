@@ -35,7 +35,7 @@
  * appear in the process table; this module's job is not to undo that.
  */
 import { joinNetwork, readNetworkStatus, scanAccessPoints, displaySsid, ssidToHex, withoutNetwork, } from "./network.js";
-import { DEVICE_PIN_PATTERN, readDevicePinPosture, sealDevicePin, } from "./device-pin.js";
+import { DEVICE_PIN_PATTERN, readDevicePinPosture, registerDevicePinWithHub, } from "./device-pin.js";
 /**
  * Every verb this broker will ever answer. Adding one is a deliberate edit here
  * and in the preload surface test; nothing is dispatched by string concatenation.
@@ -75,11 +75,11 @@ async function restartUpdateAgent() {
 }
 /** Words for the person at the till. The digits are never in them. */
 const PIN_REFUSAL_TEXT = {
-    PIN_MALFORMED: "A device PIN is exactly four digits.",
+    PIN_MALFORMED: "A Terminal PIN is exactly four digits.",
     PIN_CONFIRMATION_MISMATCH: "The two entries differ. Try again.",
-    PIN_ALREADY_SEALED: "A device PIN is already waiting for the Store Hub.",
-    PIN_ALREADY_REGISTERED: "The Store Hub already holds this device's PIN; change it from the terminal.",
-    IDENTITY_KEY_UNAVAILABLE: "This device has no identity yet; the PIN cannot be sealed.",
+    PIN_ALREADY_SET: "The Store Hub already holds this terminal's PIN; change it from the terminal.",
+    HUB_NOT_CONNECTED: "The Store Hub is not connected yet; the PIN is created once it is.",
+    HUB_REFUSED: "The Store Hub refused to set the PIN.",
 };
 /**
  * Parse one line into a request, or refuse it.
@@ -140,10 +140,10 @@ export function parseRequest(line) {
     if (verb === "pin.setup") {
         const pin = raw.pin;
         const pinConfirmation = raw.pinConfirmation;
-        // Shape only, here: four digits each. Equality and "already sealed" are the
-        // sealer's verdicts, so a mismatch is reported as the PIN rule, not as junk.
+        // Shape only, here: four digits each. Equality and "already set" are the
+        // Hub's verdicts, so a mismatch is reported as the PIN rule, not as junk.
         if (typeof pin !== "string" || !DEVICE_PIN_PATTERN.test(pin)) {
-            return refuse("PIN_MALFORMED", "A device PIN is exactly four digits.");
+            return refuse("PIN_MALFORMED", "A Terminal PIN is exactly four digits.");
         }
         if (typeof pinConfirmation !== "string" || !DEVICE_PIN_PATTERN.test(pinConfirmation)) {
             return refuse("PIN_MALFORMED", "The confirmation is exactly four digits.");
@@ -218,7 +218,10 @@ export async function handle(request, deps = {}) {
             case "pin.status":
                 return { ok: true, data: (deps.pinStatus ?? readDevicePinPosture)() };
             case "pin.setup": {
-                const outcome = (deps.pinSetup ?? sealDevicePin)({
+                // Straight to the Store Hub (the verifier) through the bridge; nothing
+                // about the PIN stays on the board. The Shell offers this only once the
+                // terminal is paired and SERVING (owner ruling 2026-09-19).
+                const outcome = await (deps.pinSetup ?? registerDevicePinWithHub)({
                     pin: request.pin,
                     pinConfirmation: request.pinConfirmation,
                 });
