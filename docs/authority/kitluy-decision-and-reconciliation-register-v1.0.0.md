@@ -5240,3 +5240,15 @@ Owner, 2026-09-19: "make this app working and service real data … based on kit
 
 **Slice 1 done** (handoff 52): cloud group 0233, `pnpm dev:catalog:load`, hub-sync catalog+money sections, terminal read of the verified configuration, the face over the delivered catalog. Slices 2–5 follow the plan.
 
+## KLD-2026-09-19-PIN-AFTER-PAIRING-001 — the Terminal PIN is created RIGHT AFTER pairing and activation, on the Store Hub; nothing at first boot (OWNER-DECIDED; amends KLD-2026-09-18-FIRST-BOOT-PIN-001)
+
+Owner, 2026-09-19, on being shown the first-boot flow the image implemented: "no bro. creating PIN is after we connect our Pi terminals to our store hub because PIN is stored on the server, not in first boot" → on the restated order: "similar but the PIN set up should happen right after we paired and successfully activated our Pi Terminals".
+
+**What changes.** KLD-2026-09-18-FIRST-BOOT-PIN-001 (PIN created at first boot, sealed on the board, registered at pairing) is SUPERSEDED. The Device Shell asks for the PIN only once the board is approved, paired and its terminal-edge link is SERVING with the Hub answering `setup_required`; the two entries go to the Hub's setup route through the bridge and nowhere else; then "Installing KitLuy"; then the terminal screen asks for that PIN. No seal, no hash, no digits on the board — the posture file keeps `absent | registered` for the screens only.
+
+**What stands.** KLD-2026-09-17-TERMINAL-PIN-DEVICE-CREDENTIAL-001 in full (the Hub is the verifier; one shared Terminal PIN; no staff login; 5-in-15 lock). The application's create-PIN face remains the fallback for a Hub-side reset.
+
+**Sequence on a fresh card.** Registers → admin approval → Partner pairing → the Hub provisions the terminal by itself (HUB-TERMINAL-SYNC-001) → create the PIN twice (Hub) → install → terminal screen → the same PIN → the counter.
+
+**Evidence.** `04f3b2d` (Device Shell screen order + broker `pin.setup` forwarding; agent device-pin 4 / device-config 26 / terminal-edge 22; Shell 169/169), overlays `5e16c5e`; Terminal image built from worktree `bf89766` (handoff 52 §6 once read back).
+

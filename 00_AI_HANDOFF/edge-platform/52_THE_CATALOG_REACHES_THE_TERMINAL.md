@@ -32,3 +32,8 @@ The designed price list (30 per-piece services in two families — Dry Clean, Wa
 - Slice 2 (a real Booking on the Hub: quote → confirm → cash KHR/USD → receipt record) needs the owner's KHR/USD rate (`pnpm dev:catalog:load --khr-per-usd <rate>` republishes the money contract; the Hub picks it up within a minute).
 - The old terminal `KL-1CB3577C26A7` keeps its previous release until assigned (auto-assign covers only terminals with nothing assigned).
 - Hub image rebuild (hub-sync + these bundles) still pending after the owner's first-boot scenario.
+
+## 6. Amendment the same day: the Terminal PIN moves to AFTER pairing (KLD-2026-09-19-PIN-AFTER-PAIRING-001)
+
+Before flashing, the owner corrected the first-boot flow: the PIN is created right after pairing and activation, on the Store Hub — not at first boot. Built as `04f3b2d` (+ overlays `5e16c5e`): the Device Shell shows the PIN screen only when APPROVED + PAIRED + edge `SERVING` + Hub `setup_required` (read from `terminal/edge-status.json`), then the install; the broker's `pin.setup` forwards the two entries to the Hub's setup route over the bridge and maps the Hub's verdicts; the sealed first-boot PIN and its registration at pairing are gone. The Terminal image is rebuilt from worktree `bf89766`; read-back and hashes follow in this section when done.
+
