@@ -30,7 +30,9 @@ The designed price list (30 per-piece services in two families — Dry Clean, Wa
 ## 5. Open / next
 
 - Slice 2 (a real Booking on the Hub: quote → confirm → cash KHR/USD → receipt record) needs the owner's KHR/USD rate (`pnpm dev:catalog:load --khr-per-usd <rate>` republishes the money contract; the Hub picks it up within a minute).
-- The old terminal `KL-1CB3577C26A7` keeps its previous release until assigned (auto-assign covers only terminals with nothing assigned).
+- ~~The old terminal `KL-1CB3577C26A7` keeps its previous release until assigned~~ — closed by `pnpm release:assign` (`9bbc938`); both running boards hold `0.1.0-catalog-202609191140`.
+- ~~The new board refuses the workstation's SSH key~~ — an address mix-up, not a key problem (§7: the board is 172.16.21.43).
+- Settings verbs (Wi-Fi, brightness) on the two running boards stay unreachable until they run the fixed agent (§7 cause 1) — reflash, or an agent release carrying `2354af3`.
 - Hub image rebuild (hub-sync + these bundles) still pending after the owner's first-boot scenario.
 
 ## 6. Amendment the same day: the Terminal PIN moves to AFTER pairing (KLD-2026-09-19-PIN-AFTER-PAIRING-001)
@@ -39,3 +41,35 @@ Before flashing, the owner corrected the first-boot flow: the PIN is created rig
 
 **Image read-back (2026-09-21, worktree `bf89766` = dev `04f3b2d` + overlays `5e16c5e`) — IMAGE VERIFIED, not boot-tested.** `deploy-v2.7.0/kitluy-pos-terminal-wayland-arm64.img.zst` sha256 `7d0a5e9e396e501d5a7105d00f4471fe49cb4b88bb21aa00b3125e19636a3900` (998 821 173 B); raw `.img` `df7e4875d77bddf5cde10b071aff827e2fb743fdd60219a67810c7b897820b3f`; `.img.sparse.zst` `fd0b44d3…`; IDP `9b2bab34…` — all four equal to the manifest. Overlay 112/112 (100 files + 12 links). In the image: `device-pin.js` carries no seal and `registerDevicePinWithHub` with the Hub setup route; `device-config.js` forwards; `terminal-edge.js` has no unseal; Shell `shell-state.js` gates on `setup_required` with no first-boot gate; `device-state-files.js` reads `edge-status.json`; bundle `index-D7HSXeik.js` carries "The Store Hub keeps this PIN"; Electron 38.8.6 present. Suites: rpi-image-gen 23/0/1, build-gates 67/0, environment-gating 20/0, systemd-runtime 245/0, image-contents 117/0/0, secret+binding scan 17/0. This supersedes the 2026-09-18 image (`41109b3d…`, first-boot PIN) for flashing.
 
+
+## 7. The first hardware run of the PIN-after-pairing image (2026-09-21) — what happened, and the fix (`ad68de1` + `2354af3`, overlays `4faf8b0` + `c740087`)
+
+The owner flashed `7d0a5e9e…` on a new card (board `KL-5CA5F71B726A`, hostname `pi5-wkhfdt`, **172.16.21.43** — not 172.16.30.242, which is an unrelated Raspberry Pi), paired it, and typed `1234` twice on the Shell's PIN screen. The Shell answered that the Store Hub did not accept / was not reached; a moment later the POS appeared; on the T1 screen `1234` did not unlock, an old PIN did.
+
+**Timeline from the board's own journals.** 09:48:13 terminal-edge `SERVING` (Hub `172.16.13.203:7443`, PIN state `setup_required` → the Shell shows the PIN screen). 09:48–09:50 the owner types the PIN twice; the bridge logs NOTHING in that window. 09:50:11 the update agent's poll installs the POS release; the Shell is stopped; the POS starts. 09:50:12 the POS's first bridge calls (`pin.status → 200`, still `setup_required` → the POS shows its create-PIN fallback face). 09:50:29 `pin.setup → 200` from the POS: the PIN the owner typed THERE is the one the Hub holds (`setAt 02:50:29Z`).
+
+**Root causes — two, both reproduced on the board, neither the flow.**
+
+1. **The Shell could never reach the broker.** `sudo -u kitluy-terminal node -e 'net.connect("/run/kitluy-device-config/socket")'` → `EACCES` on BOTH boards. The broker chowns its socket to `root:kitluy-terminal 0660`, but the `RuntimeDirectory` around it is `0750 root:root` (the unit has no `Group=`); the Shell's user cannot enter the directory, so `connect()` fails before the socket's mode is consulted. Every Settings verb (Wi-Fi, brightness) and the Terminal PIN failed on that leg since the first image; nobody had used Settings on a board, so it went unnoticed. The Shell's client reports `DEVICE_CONFIG_UNAVAILABLE` → "The Store Hub did not accept the PIN — …".
+2. **The setup call carried no `Idempotency-Key`.** The same POST driven from root through the bridge reached the Hub and was answered `422 VALIDATION_FAILED "an Idempotency-Key header is required"`. The broker's `bridgePinSetupCall` sent none (the POS's client mints `t1-pin-<verb>-<uuid>`), so even a reachable broker would have ended in `HUB_REFUSED`.
+
+**What was NOT the cause (recorded because `ad68de1` claimed it).** `ProtectSystem=strict` on the broker unit does not block `connect()` to the bridge socket: run under the unit's exact sandbox with `systemd-run`, the connect succeeded — the kernel exempts sockets from the read-only-filesystem write check. `ReadWritePaths=/run` was removed again in `2354af3`; `-/var/lib/kitluy` stays (the posture-file write under strict is real).
+
+**Fix.**
+
+| Where | Change | Commit |
+| --- | --- | --- |
+| `device-config-broker.ts` | `shareSocketWithGroup()`: the directory `0750` and the socket `0660`, both group-owned by `kitluy-terminal` — exactly as the terminal-edge bridge already does | `2354af3` |
+| `device-pin.ts` | every setup attempt carries `idempotency-key: shell-pin-setup-<uuid>` (Hub shape `/^[A-Za-z0-9_.:-]{1,96}$/`) | `2354af3` |
+| broker unit | `After=kitluy-terminal-edge.service`; `ReadWritePaths=-/var/lib/kitluy` (posture file) | `ad68de1`, corrected `2354af3` |
+| update agent | `terminalPinSetupPending()`: a FIRST install of `kitluy-terminal` waits while `edge-status.json` says `SERVING` + `setup_required` (`kitluy.update.waiting TERMINAL_PIN_SETUP_PENDING`); updates of an installed POS are never held | `ad68de1` |
+| Device Shell `electron/main.ts` | after a confirmed `pin.setup`, ask the agent for `update.check` | `ad68de1` |
+| `device-pin.ts` | posture write after the Hub's 200 is best-effort | `ad68de1` |
+
+Tests that would have caught it and now exist: the REAL bridge request over a unix socket (route, body, `Idempotency-Key` shape), the directory sharing, a missing bridge rejects (`device-pin.test.ts`, `device-config-broker.test.ts`); `terminalPinSetupPending` cases. Agent suite 910 passed (2 `.db.test` failures are the shared-DB fixture state); Device Shell 169; `systemd-runtime.test.sh` 245.
+
+**For the owner's current boards.** `KL-5CA5F71B726A`'s PIN is the one created on the POS face (the owner reports `1111`); the Hub, the catalog release and the seat are in order. To make it `1234`: the application's change-PIN action, or `hub-agent reset-terminal-pin` on the Hub and the create face again. Settings (Wi-Fi/brightness) on BOTH running boards stay unreachable until they carry the new agent — the fix ships in the image and in the next agent release; a runtime drop-in cannot fix a chown the process does at start.
+
+**SSH note.** The earlier "new board rejects the SSH key" was an address mix-up: `172.16.30.242` is an unrelated Pi (`raspberrypi`, docker/tailscale). The two terminals are `172.16.21.43` (`KL-5CA5F71B726A`, `pi5-wkhfdt`) and `172.16.30.241` (`KL-54A3320E1201`, `pi5-rsylze`); the Store Hub is `172.16.13.203` (`pi5-ivldvf`). The image's baked key works on both terminals.
+
+**Image read-back (2026-09-21 11:15, worktree `d474485` = dev `2354af3` + overlays `c740087`) — IMAGE VERIFIED, not boot-tested.** `deploy-v2.7.0/kitluy-pos-terminal-wayland-arm64.img.zst` sha256 `4a49860aa649e246f21b0189ddb96884ad2836a15cf1d54100d95d7f6d28ee0c` (998 841 919 B); `.img.sparse.zst` `e06b59af8b4c0a9bfd78da4336db3c8de6938556ee6202c221e5b4364e608a5d`; raw `.img` `4664e3bc…`; all equal to `kitluy-pi-terminal-dev-manifest.json`. Overlay 112/112 (100 files + 12 links) hashed equal to the committed overlay. Read out of the final erofs with the builder's `dump.erofs`: `device-config-broker.js` carries `shareSocketWithGroup`; `device-pin.js` sends `idempotency-key`; `update-bootstrap.js` carries `terminalPinSetupPending`; Shell `main.js` asks `update.check` after the PIN; the broker unit has `After=kitluy-terminal-edge.service`, `ReadWritePaths=-/var/lib/kitluy` and NO `ReadWritePaths=/run`; `/home/pi/.ssh/authorized_keys` on the persistent partition holds the workstation key. Suites: rpi-image-gen 23/0/1, build-gates 67/0, environment-gating 20/0, systemd-runtime 245/0, image-contents 117/0/0, secret+binding scan 17/0. **This supersedes `7d0a5e9e…` for flashing.** Expected on a fresh card: register → approve → pair → (Hub provisions) → Shell PIN screen → PIN twice → "Installing KitLuy" → T1 → the same PIN.
