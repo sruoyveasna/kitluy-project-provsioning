@@ -20,6 +20,8 @@ import {
   productsOnThisImage,
   resetTerminalClientStartForTests,
   startInstalledTerminalClientOnce,
+  PIN_HOLD_RECHECK_SECONDS,
+  POLL_SECONDS,
   terminalPinSetupPending,
   type SystemctlRunner,
 } from "../src/bin/update-bootstrap.js";
@@ -185,5 +187,12 @@ describe("the first install waits for the Terminal PIN (KLD-2026-09-19-PIN-AFTER
     expect(terminalPinSetupPending(edgeStatus({ phase: "SERVING" }))).toBe(false);
     expect(terminalPinSetupPending(join(root, "missing.json"))).toBe(false);
     expect(terminalPinSetupPending(edgeStatus("not json"))).toBe(false);
+  });
+
+  it("rechecks a PIN-held pass in seconds, not at the five-minute poll", () => {
+    // terminal-edge rewrites the edge status every 30 s; the agent must not
+    // make the person watch "Installing KitLuy" for five minutes after the PIN.
+    expect(PIN_HOLD_RECHECK_SECONDS).toBeLessThanOrEqual(30);
+    expect(PIN_HOLD_RECHECK_SECONDS).toBeLessThan(POLL_SECONDS);
   });
 });
