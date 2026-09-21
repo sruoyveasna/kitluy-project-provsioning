@@ -19,10 +19,17 @@
  * WHO MAY CONNECT
  * ===========================================================================
  * The socket is created 0660 root:kitluy-terminal inside the unit's
- * RuntimeDirectory, so the Shell's user can connect and nobody else on the
- * device can. There is no authentication beyond that, and there does not need to
- * be: a process already running as `kitluy-terminal` IS the Shell, and anything
- * that has become another local user has not gained a verb it could not reach by
+ * RuntimeDirectory, AND the directory itself is made 0750 root:kitluy-terminal,
+ * so the Shell's user can connect and nobody else on the device can. Both are
+ * needed: systemd creates the RuntimeDirectory root:root (the unit has no
+ * Group=), and a 0750 directory another group cannot enter makes the socket
+ * inside it unreachable however it is owned — connect() answers EACCES. That is
+ * exactly what happened on the first two Terminal boards (hardware, 2026-09-21):
+ * the socket was right, the directory was not, and every Shell verb — Wi-Fi,
+ * brightness, and the Terminal PIN — failed before it reached this process.
+ * There is no authentication beyond that, and there does not need to be: a
+ * process already running as `kitluy-terminal` IS the Shell, and anything that
+ * has become another local user has not gained a verb it could not reach by
  * being that user in the first place.
  *
  * ===========================================================================
@@ -35,6 +42,7 @@
 import { createServer } from "node:net";
 import { chownSync, chmodSync, existsSync, readFileSync, readdirSync, writeFileSync, unlinkSync, } from "node:fs";
 import { userInfo } from "node:os";
+import { dirname } from "node:path";
 import { MAX_REQUEST_BYTES, serve } from "../device-config.js";
 import { withoutNetwork, WPA_CONFIG_PATH } from "../network.js";
 export const SOCKET_PATH = "/run/kitluy-device-config/socket";
@@ -162,9 +170,9 @@ export async function main() {
     try {
         const { execFileSync } = await import("node:child_process");
         const gid = Number(execFileSync("/usr/bin/getent", ["group", CLIENT_GROUP], { encoding: "utf8" }).split(":")[2]);
-        if (Number.isFinite(gid))
-            chownSync(SOCKET_PATH, 0, gid);
-        chmodSync(SOCKET_PATH, 0o660);
+        if (!Number.isFinite(gid))
+            throw new Error("no such group");
+        shareSocketWithGroup(SOCKET_PATH, gid);
         log(`listening on ${SOCKET_PATH} for group ${CLIENT_GROUP}`);
     }
     catch {
@@ -173,6 +181,22 @@ export async function main() {
         chmodSync(SOCKET_PATH, 0o600);
         log(`listening on ${SOCKET_PATH} (group ${CLIENT_GROUP} not found; root only)`);
     }
+}
+/**
+ * Let ONE group reach the socket: the socket 0660 and its directory 0750, both
+ * group-owned by it. The directory matters as much as the socket — a unix
+ * socket is reached by path, and a path through a directory the caller may not
+ * enter ends in EACCES whatever the socket's own mode says. The owner stays
+ * whoever runs this (root on a device, the test user in a test); only the
+ * group changes, the same way the terminal-edge bridge shares its own socket.
+ */
+export function shareSocketWithGroup(socketPath, gid) {
+    const directory = dirname(socketPath);
+    const uid = process.getuid?.() ?? 0;
+    chownSync(directory, uid, gid);
+    chmodSync(directory, 0o750);
+    chownSync(socketPath, uid, gid);
+    chmodSync(socketPath, 0o660);
 }
 if (process.argv[1] !== undefined && process.argv[1].includes("device-config-broker")) {
     void main();
