@@ -24,6 +24,17 @@ Until this morning a newly paired Pi Terminal reached its Store Hub only after a
 - **Hub image static suites** build-gates 34/0, environment-gating 19/0, systemd-runtime 183/0.
 - **Hardware, development Store Hub `KL-CFADA8C75001` (172.16.13.203), 2026-09-19 09:28–09:33 +07:00.** Bundle from the clean worktree hot-deployed (`/var/lib/kitluy/hotfix-0bbc6ac/main.mjs` sha256 `8e210f029a6e9323546f75db7712bb94b88557e76e7d45d69cfdf7b1008395b3`, trust record beside it, runtime drop-in with `HUB_SYNC_URL=http://172.16.21.17:8792`). Producer log: `KL-CFADA8C75001: 2 terminal(s) [KL-1CB3577C26A7:t1+t2+t3+t4, KL-54A3320E1201:t2+t1]`. Hub: `terminal sync applied … terminals: [KL-1CB3577C26A7:unchanged, KL-54A3320E1201:unchanged], configuration: unchanged` — no needless snapshot v6; `hub_assignment` generation 1 → 5 (the cloud's), older generations ended; the stale `KL-1054DD1CCC8E` (purged from the cloud on 2026-09-18) retired by the fix `ed0e87d`. Both terminals `SERVING` afterwards (eligibility and configuration 200).
 
+### Second proof, from a purge (2026-09-21)
+
+The owner reflashed the offline terminal `KL-1CB3577C26A7` and asked for it to be gone from the development cloud so the card would register as a brand-new Pi. Reason it was needed: the board had already been reflashed four times and kept the SAME record each time — registration recognises the hardware by `soc_serial` / `mac_address` (`hardware_manifest_signals`), so a reflash alone never produces a new device.
+
+Purged with `scratchpad/purge-devices.sql` (`mode=plan` first, `keep_seats=''` — the owner chose to remove the seat as well): **214 rows across 31 tables**, all hanging off that one device, plus its seat `Pi HEllo` with 7 role grants and 16 events. Afterwards: no device with that tag, no signal carrying its MAC or SoC serial, no orphan release installation; the other two terminals keep their assignment, certificate, enrollment and release rows.
+
+Two operational notes worth keeping:
+
+- **`postgres` is not enough.** The first execute refused with `permission denied for table device_credentials` and rolled the whole transaction back (nothing deleted) — in a Supabase stack `postgres` is not a superuser and is not a member of `kitluy_credential_issuer`, which owns `device_credentials` and `device_credential_heads`. Re-run as `supabase_admin` inside the database container (its own `POSTGRES_PASSWORD`, never printed) and it commits. The refusal is the ownership model working, not a broken script.
+- **The Hub retired the terminal by itself in under 60 s**: `terminal-sync.json` went `v7 → v8` and the terminal left the list without anyone touching the Hub. Both running terminals stayed `SERVING` with their PIN state `set` across the configuration bump. This is HUB-TERMINAL-SYNC-001 proven a second time, now on removal rather than addition.
+
 ## 4. Open
 
 - **Hub image rebuild** with `--hub-sync-url http://172.16.21.17:8792` and the dev PKI (`KITLUY_DEV_PKI_DIR`): the hot-deploy vanishes at reboot. Planned after the owner's first-boot scenario run.
