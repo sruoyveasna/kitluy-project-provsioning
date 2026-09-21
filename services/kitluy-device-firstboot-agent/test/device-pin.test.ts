@@ -1,11 +1,12 @@
 /**
- * T1-FIRST-BOOT-PIN-001 — the first-boot device PIN: sealed under the device's
- * identity key, public posture only, registered with the Hub once, then gone.
+ * KLD-2026-09-19-PIN-AFTER-PAIRING-001 — the Terminal PIN is created on the
+ * Device Shell once the terminal is paired and connected, and it goes to the
+ * Store Hub and nowhere else: the broker forwards the two entries through the
+ * bridge, the Hub answers, the board keeps only the public posture.
  */
-import { generateKeyPairSync } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -13,98 +14,126 @@ import { parseRequest, serve, VERBS } from "../src/device-config.js";
 import {
   markDevicePinRegistered,
   readDevicePinPosture,
-  sealDevicePin,
-  unsealDevicePin,
+  registerDevicePinWithHub,
   type DevicePinPaths,
+  type HubPinSetupCall,
 } from "../src/device-pin.js";
 
 function paths(): DevicePinPaths {
   const dir = mkdtempSync(join(tmpdir(), "kitluy-device-pin-"));
-  return {
-    sealed: join(dir, "identity", "device-pin.sealed.json"),
-    posture: join(dir, "terminal", "device-pin.json"),
-    identityKey: join(dir, "identity", "device-identity.key.pem"),
+  return { posture: join(dir, "terminal", "device-pin.json"), bridgeSocket: join(dir, "no.sock") };
+}
+
+const hubSays =
+  (status: number, body: unknown, seen: { pin?: string; calls: number }): HubPinSetupCall =>
+  async (input) => {
+    seen.calls += 1;
+    seen.pin = input.pin;
+    return { status, body };
   };
-}
 
-/** A board with its own identity key, as firstboot leaves it (root 0600). */
-function withIdentity(p: DevicePinPaths): DevicePinPaths {
-  const { privateKey } = generateKeyPairSync("ed25519");
-  mkdirSync(dirname(p.identityKey), { recursive: true, mode: 0o700 });
-  writeFileSync(p.identityKey, privateKey.export({ type: "pkcs8", format: "pem" }), {
-    mode: 0o600,
-  });
-  return p;
-}
-
-describe("the first-boot device PIN", () => {
-  it("is absent on a fresh card, sealed after creation, and the seal reveals nothing", () => {
-    const p = withIdentity(paths());
+describe("the Terminal PIN goes to the Store Hub", () => {
+  it("is absent on a fresh card, and registered once the Hub confirmed it — nothing about the PIN on disk", async () => {
+    const p = paths();
     expect(readDevicePinPosture(p).state).toBe("absent");
-    const sealed = sealDevicePin(
+    const seen = { calls: 0 } as { pin?: string; calls: number };
+    const outcome = await registerDevicePinWithHub(
       { pin: "4812", pinConfirmation: "4812" },
-      p,
-      new Date("2026-09-18T10:00:00Z"),
+      {
+        call: hubSays(200, { result: "PIN_ESTABLISHED" }, seen),
+        paths: p,
+        now: new Date("2026-09-19T05:00:00Z"),
+      },
     );
-    expect(sealed.ok).toBe(true);
-    expect(readDevicePinPosture(p)).toEqual({
-      schema: "kitluy.device-pin-posture.v1",
-      state: "sealed",
-      sealedAt: "2026-09-18T10:00:00.000Z",
-      registeredAt: null,
+    expect(outcome).toEqual({
+      ok: true,
+      posture: {
+        schema: "kitluy.device-pin-posture.v1",
+        state: "registered",
+        registeredAt: "2026-09-19T05:00:00.000Z",
+      },
     });
-    const raw = readFileSync(p.sealed, "utf8");
+    expect(seen).toEqual({ calls: 1, pin: "4812" });
+    const raw = readFileSync(p.posture, "utf8");
     expect(raw).not.toContain("4812");
-    expect(JSON.parse(raw).schema).toBe("kitluy.device-pin.sealed.v1");
-    expect(statSync(p.sealed).mode & 0o777).toBe(0o600);
     expect(statSync(p.posture).mode & 0o777).toBe(0o644);
-    // Root unseals the same digits; another board's identity cannot.
-    expect(unsealDevicePin(p)).toBe("4812");
-    const other = withIdentity(paths());
-    expect(unsealDevicePin({ ...p, identityKey: other.identityKey })).toBeNull();
+    // The posture directory carries nothing else.
+    expect(existsSync(join(p.posture, "..", "device-pin.sealed.json"))).toBe(false);
+    expect(readDevicePinPosture(p).state).toBe("registered");
   });
 
-  it("refuses a malformed or mismatched entry, a second seal, and a seal after registration", () => {
-    const p = withIdentity(paths());
-    expect(sealDevicePin({ pin: "12a4", pinConfirmation: "12a4" }, p)).toEqual({
-      ok: false,
-      code: "PIN_MALFORMED",
-    });
-    expect(sealDevicePin({ pin: "1234", pinConfirmation: "1243" }, p)).toEqual({
-      ok: false,
-      code: "PIN_CONFIRMATION_MISMATCH",
-    });
+  it("answers an obvious mistake without a round trip, and maps the Hub's verdicts", async () => {
+    const p = paths();
+    const seen = { calls: 0 } as { pin?: string; calls: number };
+    expect(
+      await registerDevicePinWithHub(
+        { pin: "12a4", pinConfirmation: "12a4" },
+        { call: hubSays(200, {}, seen), paths: p },
+      ),
+    ).toEqual({ ok: false, code: "PIN_MALFORMED" });
+    expect(
+      await registerDevicePinWithHub(
+        { pin: "1234", pinConfirmation: "1243" },
+        { call: hubSays(200, {}, seen), paths: p },
+      ),
+    ).toEqual({ ok: false, code: "PIN_CONFIRMATION_MISMATCH" });
+    expect(seen.calls).toBe(0);
     expect(readDevicePinPosture(p).state).toBe("absent");
-    expect(sealDevicePin({ pin: "1234", pinConfirmation: "1234" }, p).ok).toBe(true);
-    expect(sealDevicePin({ pin: "9999", pinConfirmation: "9999" }, p)).toEqual({
+
+    const refused = { error: { details: { result: "PIN_ALREADY_SET" } } };
+    expect(
+      await registerDevicePinWithHub(
+        { pin: "1234", pinConfirmation: "1234" },
+        { call: hubSays(409, refused, seen), paths: p },
+      ),
+    ).toEqual({ ok: false, code: "PIN_ALREADY_SET" });
+    // The Hub holds one: the posture follows the Hub.
+    expect(readDevicePinPosture(p).state).toBe("registered");
+
+    const q = paths();
+    const down: HubPinSetupCall = async () => {
+      throw new Error("ECONNREFUSED");
+    };
+    expect(
+      await registerDevicePinWithHub(
+        { pin: "1234", pinConfirmation: "1234" },
+        { call: down, paths: q },
+      ),
+    ).toEqual({
       ok: false,
-      code: "PIN_ALREADY_SEALED",
+      code: "HUB_NOT_CONNECTED",
     });
-    markDevicePinRegistered(p, new Date("2026-09-18T11:00:00Z"));
-    expect(existsSync(p.sealed)).toBe(false);
-    expect(unsealDevicePin(p)).toBeNull();
+    expect(
+      await registerDevicePinWithHub(
+        { pin: "1234", pinConfirmation: "1234" },
+        { call: hubSays(503, {}, seen), paths: q },
+      ),
+    ).toEqual({ ok: false, code: "HUB_NOT_CONNECTED" });
+    expect(
+      await registerDevicePinWithHub(
+        { pin: "1234", pinConfirmation: "1234" },
+        {
+          call: hubSays(403, { error: { details: { result: "TERMINAL_NOT_ELIGIBLE" } } }, seen),
+          paths: q,
+        },
+      ),
+    ).toEqual({ ok: false, code: "HUB_REFUSED" });
+    expect(readDevicePinPosture(q).state).toBe("absent");
+  });
+
+  it("marks registered idempotently", () => {
+    const p = paths();
+    markDevicePinRegistered(p, new Date("2026-09-19T05:00:00Z"));
+    markDevicePinRegistered(p, new Date("2026-09-19T05:01:00Z"));
     expect(readDevicePinPosture(p)).toMatchObject({
       state: "registered",
-      registeredAt: "2026-09-18T11:00:00.000Z",
+      registeredAt: "2026-09-19T05:01:00.000Z",
     });
-    expect(sealDevicePin({ pin: "9999", pinConfirmation: "9999" }, p)).toEqual({
-      ok: false,
-      code: "PIN_ALREADY_REGISTERED",
-    });
-  });
-
-  it("cannot be sealed before the board has an identity", () => {
-    const p = paths();
-    expect(sealDevicePin({ pin: "1234", pinConfirmation: "1234" }, p)).toEqual({
-      ok: false,
-      code: "IDENTITY_KEY_UNAVAILABLE",
-    });
-    expect(readDevicePinPosture(p).state).toBe("absent");
   });
 });
 
 describe("the broker verbs", () => {
-  it("declares pin.status and pin.setup, shape-checks the digits, and never echoes them", async () => {
+  it("declares pin.status and pin.setup, shape-checks the digits, forwards to the Hub, and never echoes them", async () => {
     expect(VERBS).toContain("pin.status");
     expect(VERBS).toContain("pin.setup");
     const bad = parseRequest(
@@ -113,12 +142,12 @@ describe("the broker verbs", () => {
     expect(bad).toEqual({
       ok: false,
       code: "PIN_MALFORMED",
-      message: "A device PIN is exactly four digits.",
+      message: "A Terminal PIN is exactly four digits.",
     });
     const mismatch = await serve(
       JSON.stringify({ verb: "pin.setup", pin: "1234", pinConfirmation: "4321" }),
       {
-        pinSetup: () => ({ ok: false, code: "PIN_CONFIRMATION_MISMATCH" }),
+        pinSetup: async () => ({ ok: false, code: "PIN_CONFIRMATION_MISMATCH" }),
       },
     );
     expect(mismatch).toEqual({
@@ -127,26 +156,36 @@ describe("the broker verbs", () => {
       message: "The two entries differ. Try again.",
     });
     expect(JSON.stringify(mismatch)).not.toMatch(/1234|4321/u);
+    const notYet = await serve(
+      JSON.stringify({ verb: "pin.setup", pin: "1234", pinConfirmation: "1234" }),
+      {
+        pinSetup: async () => ({ ok: false, code: "HUB_NOT_CONNECTED" }),
+      },
+    );
+    expect(notYet).toMatchObject({ ok: false, code: "HUB_NOT_CONNECTED" });
+    let forwarded: string | undefined;
     const ok = await serve(
       JSON.stringify({ verb: "pin.setup", pin: "1234", pinConfirmation: "1234" }),
       {
-        pinSetup: () => ({
-          ok: true,
-          posture: {
-            schema: "kitluy.device-pin-posture.v1",
-            state: "sealed",
-            sealedAt: "x",
-            registeredAt: null,
-          },
-        }),
+        pinSetup: async (input) => {
+          forwarded = input.pin;
+          return {
+            ok: true,
+            posture: {
+              schema: "kitluy.device-pin-posture.v1",
+              state: "registered",
+              registeredAt: "x",
+            },
+          };
+        },
       },
     );
-    expect(ok).toMatchObject({ ok: true, data: { state: "sealed" } });
+    expect(forwarded).toBe("1234");
+    expect(ok).toMatchObject({ ok: true, data: { state: "registered" } });
     const status = await serve(JSON.stringify({ verb: "pin.status" }), {
       pinStatus: () => ({
         schema: "kitluy.device-pin-posture.v1",
         state: "absent",
-        sealedAt: null,
         registeredAt: null,
       }),
     });

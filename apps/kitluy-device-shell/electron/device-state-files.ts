@@ -24,6 +24,7 @@ import { readTerminalAssignment } from "./terminal-assignment.js";
 import type {
   ApplicationInstallView,
   DevicePinView,
+  EdgeLinkView,
   ReleaseView,
   AssignmentView,
   NetworkState,
@@ -279,15 +280,31 @@ export function readRelease(roots: DeviceRoots = DEFAULT_ROOTS): ReleaseView | n
 }
 
 /**
- * T1-FIRST-BOOT-PIN-001: the device PIN posture the root agent publishes at
- * `terminal/device-pin.json`. A missing or malformed file is `absent` — a fresh
- * card, or an image whose agent predates the PIN; either way the person must
- * create one before the board goes further.
+ * The Terminal PIN posture the root agent publishes at
+ * `terminal/device-pin.json`: `registered` once the Store Hub confirmed the
+ * PIN, `absent` otherwise (a fresh card, an older agent's `sealed`, or nothing).
  */
 export function readDevicePin(stateDir = DEFAULT_ROOTS.stateDir): DevicePinView {
   const raw = readJsonOrNull(join(stateDir, "terminal", "device-pin.json"));
-  const state = raw?.["state"];
-  return { state: state === "sealed" || state === "registered" ? state : "absent" };
+  return { state: raw?.["state"] === "registered" ? "registered" : "absent" };
+}
+
+/**
+ * The Store Hub link as terminal-edge publishes it at `terminal/edge-status.json`
+ * (root-written, world-readable): the phase and the Hub's Terminal PIN answer.
+ * Null until the edge has written once.
+ */
+export function readEdgeLink(stateDir = DEFAULT_ROOTS.stateDir): EdgeLinkView | null {
+  const raw = readJsonOrNull(join(stateDir, "terminal", "edge-status.json"));
+  if (raw === null || typeof raw["phase"] !== "string") return null;
+  const pin = raw["terminalPin"];
+  const state =
+    pin !== null && typeof pin === "object" ? (pin as Record<string, unknown>)["state"] : undefined;
+  return {
+    phase: raw["phase"],
+    terminalPinState:
+      state === "setup_required" || state === "set" || state === "reset_required" ? state : null,
+  };
 }
 
 /** The POS application's install journal, or null when the runtime has none yet. */
@@ -348,6 +365,7 @@ export function readSnapshot(roots: DeviceRoots = DEFAULT_ROOTS): ShellSnapshot 
     ...(deviceRecordId === undefined ? {} : { deviceRecordId }),
     release: readRelease(roots),
     devicePin: readDevicePin(roots.stateDir),
+    edge: readEdgeLink(roots.stateDir),
     application: readApplicationInstall(roots),
   };
 }

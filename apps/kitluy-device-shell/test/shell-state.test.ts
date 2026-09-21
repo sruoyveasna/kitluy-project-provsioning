@@ -19,7 +19,7 @@ function snapshot(over: Partial<ShellSnapshot>): ShellSnapshot {
     network: ONLINE,
     keyFingerprint: FINGERPRINT,
     deviceRecordId: "dev-1",
-    // A board past its first boot: the device PIN exists (T1-FIRST-BOOT-PIN-001).
+    // A board whose Hub already holds its PIN (KLD-2026-09-19-PIN-AFTER-PAIRING-001).
     devicePin: { state: "registered" },
     ...over,
   };
@@ -30,17 +30,16 @@ describe("deriveScreen", () => {
     expect(deriveScreen(null)).toEqual({ kind: "booting" });
   });
 
-  // T1-FIRST-BOOT-PIN-001 -----------------------------------------------------
-  it("a fresh board creates its device PIN before registration, approval and pairing", () => {
+  // KLD-2026-09-19-PIN-AFTER-PAIRING-001 -------------------------------------
+  it("a fresh board does NOT ask for a PIN before it is paired and connected", () => {
     for (const over of [
       { devicePin: { state: "absent" as const } },
       { devicePin: null },
       { devicePin: undefined },
     ]) {
-      expect(deriveScreen(snapshot({ registration: null, ...over }))).toEqual({
-        kind: "pin_setup",
-        deviceLabel: null,
-      });
+      expect(deriveScreen(snapshot({ registration: null, ...over })).kind).toBe(
+        "waiting_for_approval",
+      );
       expect(
         deriveScreen(
           snapshot({
@@ -48,20 +47,59 @@ describe("deriveScreen", () => {
             ...over,
           }),
         ).kind,
-      ).toBe("pin_setup");
+      ).toBe("approved_unassigned");
     }
-    // A sealed PIN (waiting for the Hub) is enough to go on.
-    expect(
-      deriveScreen(snapshot({ registration: null, devicePin: { state: "sealed" } })).kind,
-    ).toBe("waiting_for_approval");
   });
 
-  it("a halted board is halted even before its PIN", () => {
+  it("paired and SERVING with the Hub saying setup_required asks for the PIN — before the install", () => {
+    const paired = {
+      registration: { phase: "APPROVED" as const, deviceId: "dev-1", keyFingerprint: FINGERPRINT },
+      pairing: { phase: "PAIRED" as const, deviceRecordId: "dev-1" },
+      devicePin: { state: "absent" as const },
+      application: {
+        phase: "IDLE" as const,
+        installedVersion: null,
+        lastOutcome: null,
+        lastReason: null,
+      },
+    };
+    expect(
+      deriveScreen(
+        snapshot({ ...paired, edge: { phase: "SERVING", terminalPinState: "setup_required" } }),
+      ),
+    ).toMatchObject({ kind: "pin_setup" });
+    // Not yet connected: the install waits, no PIN screen (the Hub cannot take it).
+    expect(
+      deriveScreen(
+        snapshot({ ...paired, edge: { phase: "PAIRING_REQUIRED", terminalPinState: null } }),
+      ).kind,
+    ).toBe("installing");
+    expect(deriveScreen(snapshot({ ...paired, edge: null })).kind).toBe("installing");
+    // The Hub holds one already (a re-flashed board that recovered): straight on.
+    expect(
+      deriveScreen(snapshot({ ...paired, edge: { phase: "SERVING", terminalPinState: "set" } }))
+        .kind,
+    ).toBe("installing");
+    // Just registered: the board's posture bridges the seconds until the Hub's status is re-read.
+    expect(
+      deriveScreen(
+        snapshot({
+          ...paired,
+          devicePin: { state: "registered" },
+          edge: { phase: "SERVING", terminalPinState: "setup_required" },
+        }),
+      ).kind,
+    ).toBe("installing");
+  });
+
+  it("a halted board is halted even when the Hub would ask for a PIN", () => {
     expect(
       deriveScreen(
         snapshot({
           registration: { phase: "CONTAINED", deviceId: "dev-1", keyFingerprint: FINGERPRINT },
+          pairing: { phase: "PAIRED", deviceRecordId: "dev-1" },
           devicePin: { state: "absent" },
+          edge: { phase: "SERVING", terminalPinState: "setup_required" },
         }),
       ),
     ).toMatchObject({ kind: "halted", reason: "contained" });

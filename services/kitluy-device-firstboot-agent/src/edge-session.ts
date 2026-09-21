@@ -144,10 +144,6 @@ export interface EdgeAttemptOptions {
    * and a sealed PIN exists, this attempt performs the Hub's setup with it and
    * then destroys the seal (`onRegistered`). Never logged, never in the status.
    */
-  readonly devicePin?: {
-    readonly unseal: () => string | null;
-    readonly onRegistered: () => void;
-  };
   /**
    * Told the Hub endpoint this attempt VERIFIED and PINNED (its discovery record
    * accepted, its certificate fingerprint bound), or `null` when the attempt
@@ -444,30 +440,6 @@ async function attemptCandidate(
     if (response.status === 200) terminalPin = terminalPinFrom(response.body);
   } catch {
     // The PIN read reports; it never decides whether the link serves.
-  }
-
-  // THE FIRST-BOOT PIN REACHES THE HUB HERE. The person created it before the
-  // board had a Store; the Hub is the verifier from this moment on. One try per
-  // attempt; a refusal leaves the seal in place for the next attempt, and the
-  // POS shows "registering the device PIN" meanwhile, never a create screen.
-  if (terminalPin?.state === "setup_required" && options.devicePin !== undefined) {
-    const pin = options.devicePin.unseal();
-    if (pin !== null) {
-      try {
-        const response = await call({
-          ...pinned,
-          method: "POST",
-          path: TERMINAL_PIN_SETUP_PATH,
-          body: { pin, pinConfirmation: pin },
-        });
-        if (response.status === 200) {
-          options.devicePin.onRegistered();
-          terminalPin = terminalPinFrom(response.body) ?? terminalPin;
-        }
-      } catch {
-        // Next attempt. The seal stays; nothing about the PIN is written anywhere.
-      }
-    }
   }
 
   if (notRecognized) {

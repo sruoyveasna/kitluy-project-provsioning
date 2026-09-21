@@ -106,12 +106,25 @@ export interface ReleaseView {
 }
 
 /**
- * T1-FIRST-BOOT-PIN-001 — the device PIN's public posture, as the root agent
- * publishes it: `absent` (a fresh board must create one), `sealed` (created,
- * waiting for the Store Hub), `registered` (the Hub holds it). Never digits.
+ * The Terminal PIN's public posture, as the root agent publishes it: `absent`
+ * (no Hub has confirmed one for this board) or `registered` (the Store Hub
+ * holds it). Never digits. `sealed` is accepted from an older agent and read
+ * as `absent` (KLD-2026-09-19-PIN-AFTER-PAIRING-001: nothing waits on the
+ * board any more).
  */
 export interface DevicePinView {
-  readonly state: "absent" | "sealed" | "registered";
+  readonly state: "absent" | "registered";
+}
+
+/**
+ * The Store Hub link as terminal-edge publishes it (`terminal/edge-status.json`):
+ * the phase and the Hub's own answer about the Terminal PIN. `setup_required`
+ * from a SERVING Hub is what opens the PIN screen — the Hub is the verifier,
+ * so only the Hub's word starts the setup.
+ */
+export interface EdgeLinkView {
+  readonly phase: string;
+  readonly terminalPinState: "setup_required" | "set" | "reset_required" | null;
 }
 
 /**
@@ -131,6 +144,8 @@ export interface ShellSnapshot {
   readonly pairing: PairingView | null;
   /** Absent on an image whose agent predates the device PIN; reads as `absent`. */
   readonly devicePin?: DevicePinView | null;
+  /** The Store Hub link, once terminal-edge has written its status. */
+  readonly edge?: EdgeLinkView | null;
   /** The POS application's install journal, when the image carries a release runtime. */
   readonly application?: ApplicationInstallView | null;
   /** The terminal's own seat, absent until it pairs. */
@@ -312,13 +327,6 @@ export function deriveScreen(snapshot: ShellSnapshot | null): ShellScreen {
   if (phase === "TRUST_REVIEW_REQUIRED") {
     return { kind: "halted", reason: "trust_review", deviceLabel };
   }
-  // FIRST BOOT: the device PIN comes before registration, approval and pairing
-  // (owner decision 2026-09-18). An image whose agent publishes no posture reads
-  // as `absent` too — the agent and the shell ship together.
-  if ((snapshot.devicePin?.state ?? "absent") === "absent") {
-    return { kind: "pin_setup", deviceLabel };
-  }
-
   switch (phase) {
     case "APPROVED": {
       // TWO WAYS TO BE ASSIGNED, because two devices record it differently.
@@ -333,9 +341,22 @@ export function deriveScreen(snapshot: ShellSnapshot | null): ShellScreen {
           pairingBelongsTo(snapshot.pairing, snapshot.deviceRecordId)) ||
         assignmentBelongsTo(snapshot.assignment, snapshot.deviceRecordId);
       if (!paired) return { kind: "approved_unassigned", deviceLabel };
-      // Paired: the application is on its way. The shell shows the install
-      // (it is stopped the moment the POS unit takes the seat, so this is what
-      // a person sees between the code and the counter).
+      // PAIRED AND CONNECTED: the Terminal PIN is created NOW, on the Store Hub
+      // (owner ruling 2026-09-19 — "right after we paired and successfully
+      // activated"). The Hub says whether one is missing; the board's posture
+      // only bridges the seconds until the Hub's status is re-read.
+      const edge = snapshot.edge ?? null;
+      if (
+        edge !== null &&
+        edge.phase === "SERVING" &&
+        edge.terminalPinState === "setup_required" &&
+        (snapshot.devicePin?.state ?? "absent") !== "registered"
+      ) {
+        return { kind: "pin_setup", deviceLabel };
+      }
+      // Then the application is on its way. The shell shows the install (it is
+      // stopped the moment the POS unit takes the seat, so this is what a person
+      // sees between the PIN and the counter).
       const app = snapshot.application ?? null;
       if (app !== null && app.phase !== "COMMITTED") {
         return {

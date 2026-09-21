@@ -17,7 +17,6 @@
 import { readFileSync } from "node:fs";
 import { readImageEnv } from "../image-env.js";
 import { runEdgeAttempt, type EdgeStatus } from "../edge-session.js";
-import { markDevicePinRegistered, unsealDevicePin } from "../device-pin.js";
 import {
   startEdgeBridge,
   type BridgeTerminalFacts,
@@ -155,17 +154,6 @@ async function main(): Promise<void> {
               : { storeLocationId: seat.storeLocationId }),
           },
           profileCodes: seat.profileCodes,
-          // T1-FIRST-BOOT-PIN-001: the sealed first-boot PIN, registered with
-          // the Hub on its first `setup_required` answer and then destroyed.
-          devicePin: {
-            unseal: () => unsealDevicePin(),
-            onRegistered: () => {
-              markDevicePinRegistered();
-              console.error(
-                "[terminal-edge] the first-boot device PIN is now held by the Store Hub",
-              );
-            },
-          },
         }),
       );
     } catch (error) {

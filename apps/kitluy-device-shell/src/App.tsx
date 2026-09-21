@@ -139,9 +139,11 @@ export function App(): JSX.Element {
 
   const toggleLocale = useCallback(() => setLocale((current) => otherLocale(current)), []);
 
-  // --- T1-FIRST-BOOT-PIN-001: the device PIN, created twice, sealed by root ---
-  // The digits live in renderer state only until the confirmation is sent, and
-  // are dropped whatever the broker answers. Nothing here logs or shows them.
+  // --- The Terminal PIN, created twice once the Store Hub is connected
+  // (KLD-2026-09-19-PIN-AFTER-PAIRING-001); the root broker forwards it to the
+  // Hub, the verifier. The digits live in renderer state only until the
+  // confirmation is sent, and are dropped whatever the broker answers. Nothing
+  // here logs or shows them.
   const [pinStep, setPinStep] = useState<PinSetupStep>("create");
   const [pinEntry, setPinEntry] = useState("");
   const [pinFirst, setPinFirst] = useState<string | null>(null);
@@ -171,7 +173,7 @@ export function App(): JSX.Element {
           }
           const m = messagesFor(locale);
           setPinNotice(
-            result.code === "IDENTITY_KEY_UNAVAILABLE"
+            result.code === "HUB_NOT_CONNECTED"
               ? m.pinStarting
               : result.code === "PIN_CONFIRMATION_MISMATCH"
                 ? m.pinMismatch
