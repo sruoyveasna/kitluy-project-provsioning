@@ -41,6 +41,7 @@
     "release:pack": "node scripts/development/release-pack.mjs",
     "release:pack:check": "node scripts/development/release-pack.test.mjs",
     "release:publish": "node scripts/development/release-publish.mjs",
+    "release:assign": "node scripts/development/release-assign.mjs",
     "release:serve": "node scripts/development/release-service.mjs",
     "release:chain:check": "node scripts/development/release-chain.test.mjs",
     "release:verify:terminal": "node scripts/development/verify-terminal.mjs",
