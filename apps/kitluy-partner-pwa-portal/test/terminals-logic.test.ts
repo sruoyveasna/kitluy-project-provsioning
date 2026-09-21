@@ -242,19 +242,23 @@ describe("the ladder reports, never infers", () => {
     };
   }
 
-  it("has ten rungs in the owner's order", () => {
+  it("has ten rungs in the owner's order — the PIN right after the Hub link, before the application", () => {
+    // KLD-2026-09-19-PIN-AFTER-PAIRING-001: paired -> connected -> PIN on the
+    // Shell -> the POS installs. The update agent holds the first install while
+    // the Hub says setup_required, so this is the sequence a Partner watches.
     expect(LADDER_RUNGS).toEqual([
       "hubActive",
       "issued",
       "redeemed",
       "activated",
       "hubConnected",
+      "pinSet",
       "appInstalled",
       "appRunning",
       "configurationLoaded",
-      "pinSet",
       "active",
     ]);
+    expect(LADDER_RUNGS.indexOf("pinSet")).toBeLessThan(LADDER_RUNGS.indexOf("appInstalled"));
   });
 
   it("with no session: Hub done, issuing is next, the rest not reported", () => {

@@ -52,16 +52,35 @@ export function canOpenTerminalSession(
   }
 }
 
+/**
+ * THE OWNER'S ORDER, as the Terminal actually lives it.
+ *
+ * `pinSet` sits between `hubConnected` and `appInstalled` because that is when
+ * the PIN is created: right after the terminal is paired and its Store Hub link
+ * serves, on the Device Shell, before the application is installed
+ * (KLD-2026-09-19-PIN-AFTER-PAIRING-001, amending the first-boot ruling). The
+ * update agent enforces it — a FIRST install of the POS waits while the Hub
+ * answers `setup_required` — so a ladder that still listed the PIN last was
+ * describing a sequence the devices no longer follow.
+ *
+ * Proven on hardware 2026-09-21 (board KL-173B26D44330, a card flashed from
+ * scratch): `pin.setup -> 200` at 16:14:48, the install held with
+ * TERMINAL_PIN_SETUP_PENDING at 16:14:48 and 16:15:03, INSTALLED at 16:15:59.
+ *
+ * The order is display only. No rung is ever inferred from its neighbour —
+ * `deriveLadder` reads each from reported facts — so moving one changes what
+ * the reader is told to wait for, never what is claimed to be true.
+ */
 export const LADDER_RUNGS = [
   "hubActive",
   "issued",
   "redeemed",
   "activated",
   "hubConnected",
+  "pinSet",
   "appInstalled",
   "appRunning",
   "configurationLoaded",
-  "pinSet",
   "active",
 ] as const;
 export type RungKey = (typeof LADDER_RUNGS)[number];
