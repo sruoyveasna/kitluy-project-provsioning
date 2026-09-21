@@ -36,9 +36,23 @@ Wants=seatd.service
 # THE DISPLAY HAS ONE OWNER. Without these, the text screen and this one both
 # draw, and getty prints a login prompt over whichever wins — a login no one can
 # satisfy, because root is locked and `pi` is password-disabled by design.
-# The mirror of the POS unit's After=: when the POS hands the display back (a
-# failed release, OnFailure=), the shell starts only once the POS has stopped.
-After=kitluy-terminal-client.service
+# NO After=kitluy-terminal-client.service HERE, deliberately.
+#
+# The POS unit carries After=kitluy-device-shell.service, and that ONE edge
+# already orders BOTH hand-overs. systemd.unit(5): "given two units with any
+# ordering dependency between them, if one unit is shut down and the other is
+# started up, the shutdown is ordered before the start-up" — so the shell's
+# stop precedes the POS's start, and on a hand-back (a failed release,
+# OnFailure=) the POS's stop precedes the shell's start. The seat is free in
+# both directions from the single edge.
+#
+# Adding the mirror edge here made the two units order after EACH OTHER, and
+# with terminal-client -> terminal-edge -> operational-tls -> device-shell it
+# closed a four-unit loop. systemd broke the loop the only way it can: "Job
+# kitluy-device-shell.service/start deleted to break ordering cycle" — the
+# kiosk was silently dropped from the boot transaction and never ran, with not
+# one line in its own journal to say so. Hardware, 2026-09-21: a freshly
+# flashed board sat on a black screen through registration and approval.
 Conflicts=kitluy-bootstrap-screen.service
 Conflicts=getty@tty1.service
 # The same guard every unit in this tree carries: an image built before the

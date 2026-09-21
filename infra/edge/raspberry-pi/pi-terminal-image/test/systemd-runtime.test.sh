@@ -235,14 +235,80 @@ if [[ -f "$POS_UNIT" ]]; then
   # Conflicts= alone starts the POS while the shell is still stopping; seatd
   # refuses a second compositor on a seat that has an active client, libseat
   # falls back to a seat the POS user cannot open, and cage gives up
-  # (hardware, 2026-09-17). After= in BOTH directions orders each hand-over.
+  # (hardware, 2026-09-17). ONE After= on the POS orders BOTH hand-overs:
+  # systemd.unit(5) says that when one unit of an ordered pair is shut down
+  # while the other starts, the shutdown goes first — whichever way round.
+  # The mirror edge on the shell is therefore not needed, and it is FORBIDDEN:
+  # it made the two units order after each other and closed a four-unit loop
+  # (shell -> pos -> terminal-edge -> operational-tls -> shell) that systemd
+  # broke by deleting the shell's start job, leaving a black screen on a freshly
+  # flashed board (hardware, 2026-09-21).
   SHELL_UNIT_FOR_POS="${TERMINAL_OVERLAY}/etc/systemd/system/kitluy-device-shell.service"
   if grep -q '^After=kitluy-device-shell.service$' "$POS_UNIT" \
-     && grep -q '^After=kitluy-terminal-client.service$' "$SHELL_UNIT_FOR_POS"; then
-    ok "pos: the display hand-over is ordered both ways (After= beside Conflicts=)"
+     && ! grep -q '^After=kitluy-terminal-client.service$' "$SHELL_UNIT_FOR_POS"; then
+    ok "pos: the display hand-over is ordered once, on the POS (After= beside Conflicts=)"
   else
-    bad "pos: the display hand-over is ordered both ways (After= beside Conflicts=)" \
-        "the POS starts while the Device Shell still holds the seat; cage cannot open a DRM session and the POS never draws"
+    bad "pos: the display hand-over is ordered once, on the POS (After= beside Conflicts=)" \
+        "either the POS starts while the shell still holds the seat, or the two units order after each other and systemd drops one"
+  fi
+  # THE GENERAL GUARD. Any ordering cycle among the image's own units ends with
+  # systemd deleting a start job it chooses, and the unit it drops leaves no
+  # entry in its own journal. Build the After=/Before= graph across every unit
+  # in both overlays and refuse a cycle, whatever units it runs through.
+  CYCLE_REPORT="$(
+    python3 - "$BASE_OVERLAY/etc/systemd/system" "$TERMINAL_OVERLAY/etc/systemd/system" <<'PYCYCLE'
+import os, re, sys
+
+edges, units = {}, set()
+for root in sys.argv[1:]:
+    if not os.path.isdir(root):
+        continue
+    for name in os.listdir(root):
+        if not name.endswith(".service"):
+            continue
+        units.add(name)
+        after, before = [], []
+        for line in open(os.path.join(root, name), encoding="utf8", errors="replace"):
+            line = line.strip()
+            if line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            if key == "After":
+                after += value.split()
+            elif key == "Before":
+                before += value.split()
+        # one direction only: X must start after Y  ->  edge Y -> X
+        for y in after:
+            edges.setdefault(y, set()).add(name)
+        for y in before:
+            edges.setdefault(name, set()).add(y)
+
+# depth-first search over our own units; units we do not ship are leaves
+state, stack, found = {}, [], []
+def walk(node):
+    state[node] = 1
+    stack.append(node)
+    for nxt in sorted(edges.get(node, ())):
+        if nxt not in units:
+            continue
+        if state.get(nxt) == 1:
+            found.append(" -> ".join(stack[stack.index(nxt):] + [nxt]))
+        elif state.get(nxt, 0) == 0:
+            walk(nxt)
+    stack.pop()
+    state[node] = 2
+
+for unit in sorted(units):
+    if state.get(unit, 0) == 0:
+        walk(unit)
+print("; ".join(sorted(set(found))))
+PYCYCLE
+  )"
+  if [[ -z "$CYCLE_REPORT" ]]; then
+    ok "units: no ordering cycle among the image's own units"
+  else
+    bad "units: no ordering cycle among the image's own units" \
+        "systemd would delete one start job to break it: ${CYCLE_REPORT}"
   fi
   if grep -q '^OnFailure=kitluy-device-shell.service$' "$POS_UNIT" \
      && grep -q '^StartLimitBurst=' "$POS_UNIT" \

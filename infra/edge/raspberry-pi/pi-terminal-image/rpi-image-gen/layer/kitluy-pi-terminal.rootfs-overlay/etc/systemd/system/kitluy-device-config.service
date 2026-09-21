@@ -4,9 +4,15 @@ Description=KitLuy Terminal device-configuration broker (privileged verbs for Se
 # opens onto a socket that is not there yet and reports the device unreachable.
 Before=kitluy-device-shell.service
 After=systemd-networkd.service
-# The bridge the PIN travels through; not Requires= — the broker's other verbs
-# (Wi-Fi, brightness) must work on a board that has no Hub yet.
-After=kitluy-terminal-edge.service
+# NO After=kitluy-terminal-edge.service, though the PIN travels through that
+# unit's bridge. This broker starts Before=kitluy-device-shell.service, and
+# terminal-edge already sits behind the shell in the graph
+# (shell -> operational-tls -> terminal-edge), so ordering this unit after
+# terminal-edge closes the loop and systemd deletes one of the start jobs to
+# break it — the same silent failure that cost a whole board a screen on
+# 2026-09-21. It buys nothing either: the broker opens the bridge socket per
+# request, not at start, and answers HUB_NOT_CONNECTED while the bridge is
+# absent, which is exactly what the screens are built to show.
 ConditionPathExists=/usr/lib/kitluy/device-config-broker
 
 [Service]

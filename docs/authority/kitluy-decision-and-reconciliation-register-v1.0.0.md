@@ -5240,6 +5240,18 @@ Owner, 2026-09-19: "make this app working and service real data … based on kit
 
 **Slice 1 done** (handoff 52): cloud group 0233, `pnpm dev:catalog:load`, hub-sync catalog+money sections, terminal read of the verified configuration, the face over the delivered catalog. Slices 2–5 follow the plan.
 
+## KLREC-2026-09-21-DISPLAY-HANDOVER-ORDERING-001 — one After= orders both hand-overs; the mirror edge is a cycle (RECONCILED, corrects `d32a39c` and `ad68de1`)
+
+`d32a39c` fixed a real defect — `Conflicts=` alone starts the POS while the Device Shell still holds the seat, seatd refuses the second compositor and cage gives up — by adding `After=` in BOTH directions, POS after shell AND shell after POS, with a test asserting both.
+
+**The conflict.** `After=` is a static ordering relation, not a conditional one. Declaring each unit after the other is a cycle, and with the pre-existing `terminal-client -> terminal-edge -> operational-tls -> device-shell` chain it closed a four-unit loop. systemd resolves a loop by deleting a start job of its own choosing, and the dropped unit logs nothing in its own journal: `kitluy-operational-tls.service: Job kitluy-device-shell.service/start deleted to break ordering cycle`. On hardware (2026-09-21, board `KL-173B26D44330`, freshly flashed) the kiosk never ran — the owner watched a black screen through registration and approval and reported the board as stuck.
+
+**Resolution.** The mirror edge is removed and forbidden; the single `After=kitluy-device-shell.service` on the POS keeps `d32a39c`'s intent intact, because systemd.unit(5) states that when one unit of an ordered pair is shut down while the other starts, the shutdown is ordered first — whichever way round the hand-over goes. The higher-authority fact (the seat must be free before the next compositor starts) is preserved; only the mechanism changes.
+
+**The same defect in my own work.** The new cycle detector immediately found a SECOND loop, introduced by `ad68de1`: `device-config` (which starts `Before=kitluy-device-shell.service`) had been given `After=kitluy-terminal-edge.service`, closing `shell -> operational-tls -> terminal-edge -> device-config -> shell`. Removed for the same reason; the broker opens the bridge socket per request, never at start.
+
+**Guard.** `test/systemd-runtime.test.sh` now builds the `After=`/`Before=` graph across both overlays and fails on any cycle among the image's own units, naming the path. 246 passed, 0 failed.
+
 ## KLD-2026-09-19-PIN-AFTER-PAIRING-001 — the Terminal PIN is created RIGHT AFTER pairing and activation, on the Store Hub; nothing at first boot (OWNER-DECIDED; amends KLD-2026-09-18-FIRST-BOOT-PIN-001)
 
 Owner, 2026-09-19, on being shown the first-boot flow the image implemented: "no bro. creating PIN is after we connect our Pi terminals to our store hub because PIN is stored on the server, not in first boot" → on the restated order: "similar but the PIN set up should happen right after we paired and successfully activated our Pi Terminals".
