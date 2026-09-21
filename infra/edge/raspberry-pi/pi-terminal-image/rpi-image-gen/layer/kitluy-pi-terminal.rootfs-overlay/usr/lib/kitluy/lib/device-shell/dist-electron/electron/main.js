@@ -158,12 +158,30 @@ void app.whenReady().then(() => {
     ipcMain.handle(DEVICE_PIN_SETUP_CHANNEL, async (_event, pin, confirmation) => {
         const digits = /^[0-9]{4}$/u;
         if (typeof pin !== "string" || !digits.test(pin)) {
-            return { ok: false, code: "PIN_MALFORMED", message: "A device PIN is exactly four digits." };
+            return {
+                ok: false,
+                code: "PIN_MALFORMED",
+                message: "A Terminal PIN is exactly four digits.",
+            };
         }
         if (typeof confirmation !== "string" || !digits.test(confirmation)) {
-            return { ok: false, code: "PIN_MALFORMED", message: "A device PIN is exactly four digits." };
+            return {
+                ok: false,
+                code: "PIN_MALFORMED",
+                message: "A Terminal PIN is exactly four digits.",
+            };
         }
-        return requestDeviceConfig({ verb: "pin.setup", pin, pinConfirmation: confirmation });
+        const result = await requestDeviceConfig({
+            verb: "pin.setup",
+            pin,
+            pinConfirmation: confirmation,
+        });
+        // The PIN is on the Hub: the update agent may install and start the
+        // application now (it holds the install back while the Hub says
+        // setup_required, so the PIN screen is never pre-empted by the POS).
+        if (result.ok)
+            void requestDeviceConfig({ verb: "update.check" });
+        return result;
     });
     // --- Settings -------------------------------------------------------------
     // Every argument is re-checked HERE, in the trusted process, before it reaches

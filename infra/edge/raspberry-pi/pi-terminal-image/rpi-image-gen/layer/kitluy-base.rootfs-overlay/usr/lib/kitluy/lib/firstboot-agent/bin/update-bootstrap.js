@@ -44,6 +44,30 @@ import { activeReleaseId, PERMITTED_PRODUCTS, isPermittedProduct, readJournal, s
 import { composeInstallDependencies, RELEASE_PRODUCTS } from "../release-runtime.js";
 import { runInstallPass } from "../release-install.js";
 export const TRUST_ANCHOR_DIR = "/etc/kitluy/trust";
+/** terminal-edge's link status: the Hub's word on the Terminal PIN lives here. */
+export const EDGE_STATUS_PATH = "/var/lib/kitluy/terminal/edge-status.json";
+/**
+ * THE ORDER THE OWNER RULED (KLD-2026-09-19-PIN-AFTER-PAIRING-001): pair →
+ * create the Terminal PIN on the Store Hub → install and start the application.
+ * The first POS install used to race the PIN screen — the POS unit takes the
+ * seat the moment it starts, and on 2026-09-21 it took it while the person was
+ * still on the Shell's PIN screen, so the PIN ended up created in the
+ * application's fallback face instead. A FIRST install (nothing of this product
+ * installed yet) therefore waits while the Hub says `setup_required`; the Shell
+ * asks for a check the moment the Hub confirms the PIN. An update of a running
+ * POS is never held: the PIN exists by then. A board with no edge status, or an
+ * older Hub with no PIN answer, is not held either — only the Hub's explicit
+ * `setup_required` holds the door.
+ */
+export function terminalPinSetupPending(edgeStatusPath = EDGE_STATUS_PATH) {
+    try {
+        const raw = JSON.parse(readFileSync(edgeStatusPath, "utf8"));
+        return raw.phase === "SERVING" && raw.terminalPin?.state === "setup_required";
+    }
+    catch {
+        return false;
+    }
+}
 /**
  * The BAKED default, in the read-only rootfs. A bootstrap value, not the last
  * word — see `RELEASE_SOURCE_OVERRIDE_PATH`.
@@ -254,6 +278,18 @@ export async function runOnce(options = {}) {
             // every product, so it is said once.
             emit("kitluy.update.waiting", { reason: composed.refusal, detail: composed.detail });
             return;
+        }
+        if (product === TERMINAL_CLIENT_PRODUCT) {
+            const paths = storePaths(product, options.storeRoot);
+            const firstInstall = readJournal(paths).committed === null;
+            if (firstInstall && terminalPinSetupPending(options.edgeStatusPath)) {
+                emit("kitluy.update.waiting", {
+                    product,
+                    reason: "TERMINAL_PIN_SETUP_PENDING",
+                    detail: "the Store Hub says this terminal has no PIN yet; the application installs once it is created on the Shell",
+                });
+                continue;
+            }
         }
         const result = await runInstallPass(composed.deps);
         emit("kitluy.update.pass", { product, outcome: result.outcome, ...describeOutcome(result) });
