@@ -44,6 +44,30 @@ import { activeReleaseId, PERMITTED_PRODUCTS, isPermittedProduct, readJournal, s
 import { composeInstallDependencies, RELEASE_PRODUCTS } from "../release-runtime.js";
 import { runInstallPass } from "../release-install.js";
 export const TRUST_ANCHOR_DIR = "/etc/kitluy/trust";
+/** terminal-edge's link status: the Hub's word on the Terminal PIN lives here. */
+export const EDGE_STATUS_PATH = "/var/lib/kitluy/terminal/edge-status.json";
+/**
+ * THE ORDER THE OWNER RULED (KLD-2026-09-19-PIN-AFTER-PAIRING-001): pair →
+ * create the Terminal PIN on the Store Hub → install and start the application.
+ * The first POS install used to race the PIN screen — the POS unit takes the
+ * seat the moment it starts, and on 2026-09-21 it took it while the person was
+ * still on the Shell's PIN screen, so the PIN ended up created in the
+ * application's fallback face instead. A FIRST install (nothing of this product
+ * installed yet) therefore waits while the Hub says `setup_required`; the Shell
+ * asks for a check the moment the Hub confirms the PIN. An update of a running
+ * POS is never held: the PIN exists by then. A board with no edge status, or an
+ * older Hub with no PIN answer, is not held either — only the Hub's explicit
+ * `setup_required` holds the door.
+ */
+export function terminalPinSetupPending(edgeStatusPath = EDGE_STATUS_PATH) {
+    try {
+        const raw = JSON.parse(readFileSync(edgeStatusPath, "utf8"));
+        return raw.phase === "SERVING" && raw.terminalPin?.state === "setup_required";
+    }
+    catch {
+        return false;
+    }
+}
 /**
  * The BAKED default, in the read-only rootfs. A bootstrap value, not the last
  * word — see `RELEASE_SOURCE_OVERRIDE_PATH`.
@@ -79,6 +103,13 @@ export const RELEASE_CONFIG_PATH = "/etc/kitluy/release.env";
  */
 export const RELEASE_SOURCE_OVERRIDE_PATH = "/persistent/shared/kitluy/release-source.env";
 export const POLL_SECONDS = 300;
+/**
+ * While the ONLY thing between the board and its first application is the
+ * Terminal PIN, poll this often instead: terminal-edge rewrites the edge status
+ * every 30 s, so the Hub's "PIN set" can lag the person's entry by that much,
+ * and a five-minute wait on "Installing KitLuy" reads as a failure.
+ */
+export const PIN_HOLD_RECHECK_SECONDS = 15;
 /** Where an image defines its units. The overlay writes /etc; packages write /usr/lib. */
 export const UNIT_DIRECTORIES = [
     "/etc/systemd/system",
@@ -231,9 +262,10 @@ export function reportOnce(options = {}) {
  * existing only inside a `for(;;)` nobody can call.
  */
 export async function runOnce(options = {}) {
+    let heldForPin = false;
     const state = reportOnce(options);
     if (state.kind !== "ready")
-        return;
+        return { heldForPin };
     // One product at a time, Device Shell first: a POS pass holds the health gate
     // for up to five minutes, and the screen that recovers a board must not wait
     // behind the application it would recover.
@@ -253,11 +285,25 @@ export async function runOnce(options = {}) {
             // no reason given is what costs an afternoon. The refusal is the same for
             // every product, so it is said once.
             emit("kitluy.update.waiting", { reason: composed.refusal, detail: composed.detail });
-            return;
+            return { heldForPin };
+        }
+        if (product === TERMINAL_CLIENT_PRODUCT) {
+            const paths = storePaths(product, options.storeRoot);
+            const firstInstall = readJournal(paths).committed === null;
+            if (firstInstall && terminalPinSetupPending(options.edgeStatusPath)) {
+                emit("kitluy.update.waiting", {
+                    product,
+                    reason: "TERMINAL_PIN_SETUP_PENDING",
+                    detail: "the Store Hub says this terminal has no PIN yet; the application installs once it is created on the Shell",
+                });
+                heldForPin = true;
+                continue;
+            }
         }
         const result = await runInstallPass(composed.deps);
         emit("kitluy.update.pass", { product, outcome: result.outcome, ...describeOutcome(result) });
     }
+    return { heldForPin };
     if (productsOnThisImage(options.unitDirectories).includes(TERMINAL_CLIENT_PRODUCT)) {
         const started = startInstalledTerminalClientOnce({ storeRoot: options.storeRoot });
         if (started.action !== "NOT_NEEDED")
@@ -337,15 +383,18 @@ function describeOutcome(result) {
 }
 export async function main() {
     for (;;) {
+        let delaySeconds = POLL_SECONDS;
         try {
-            await runOnce();
+            const pass = await runOnce();
+            if (pass.heldForPin)
+                delaySeconds = PIN_HOLD_RECHECK_SECONDS;
         }
         catch (error) {
             // A fault in one pass must never stop the agent: the next poll may be the
             // one that installs something.
             emit("kitluy.update.error", { detail: String(error.message ?? error) });
         }
-        await new Promise((resolve) => setTimeout(resolve, POLL_SECONDS * 1000));
+        await new Promise((resolve) => setTimeout(resolve, delaySeconds * 1000));
     }
 }
 if (process.argv[1] !== undefined && process.argv[1].includes("update-bootstrap"))

@@ -1149,20 +1149,20 @@ var require_utils = __commonJS({
       }
       return config;
     }
-    var escapeIdentifier2 = function(str) {
-      return '"' + str.replace(/"/g, '""') + '"';
+    var escapeIdentifier2 = function(str2) {
+      return '"' + str2.replace(/"/g, '""') + '"';
     };
-    var escapeLiteral2 = function(str) {
+    var escapeLiteral2 = function(str2) {
       let hasBackslash = false;
       let escaped = "'";
-      if (str == null) {
+      if (str2 == null) {
         return "''";
       }
-      if (typeof str !== "string") {
+      if (typeof str2 !== "string") {
         return "''";
       }
-      for (let i = 0; i < str.length; i++) {
-        const c = str[i];
+      for (let i = 0; i < str2.length; i++) {
+        const c = str2[i];
         if (c === "'") {
           escaped += c + c;
         } else if (c === "\\") {
@@ -1195,7 +1195,7 @@ var require_utils2 = __commonJS({
     var nodeCrypto = __require("crypto");
     module.exports = {
       postgresMd5PasswordHash,
-      randomBytes: randomBytes4,
+      randomBytes: randomBytes5,
       deriveKey,
       sha256,
       hashByName,
@@ -1205,7 +1205,7 @@ var require_utils2 = __commonJS({
     var webCrypto = nodeCrypto.webcrypto || globalThis.crypto;
     var subtleCrypto = webCrypto.subtle;
     var textEncoder = new TextEncoder();
-    function randomBytes4(length) {
+    function randomBytes5(length) {
       return webCrypto.getRandomValues(Buffer.alloc(length));
     }
     async function md5(string) {
@@ -1577,22 +1577,22 @@ var require_type_overrides = __commonJS({
 var require_pg_connection_string = __commonJS({
   "../../node_modules/.pnpm/pg-connection-string@2.14.0/node_modules/pg-connection-string/index.js"(exports, module) {
     "use strict";
-    function parse(str, options = {}) {
-      if (str.charAt(0) === "/") {
-        const config2 = str.split(" ");
+    function parse(str2, options = {}) {
+      if (str2.charAt(0) === "/") {
+        const config2 = str2.split(" ");
         return { host: config2[0], database: config2[1] };
       }
       const config = /* @__PURE__ */ Object.create(null);
       let result;
       let dummyHost = false;
-      if (/ |%[^a-f0-9]|%[a-f0-9][^a-f0-9]/i.test(str)) {
-        str = encodeURI(str).replace(/%25(\d\d)/g, "%$1");
+      if (/ |%[^a-f0-9]|%[a-f0-9][^a-f0-9]/i.test(str2)) {
+        str2 = encodeURI(str2).replace(/%25(\d\d)/g, "%$1");
       }
       try {
         try {
-          result = new URL(str, "postgres://base");
+          result = new URL(str2, "postgres://base");
         } catch (e) {
-          result = new URL(str.replace("@/", "@___DUMMY___/"), "postgres://base");
+          result = new URL(str2.replace("@/", "@___DUMMY___/"), "postgres://base");
           dummyHost = true;
         }
       } catch (err) {
@@ -1738,8 +1738,8 @@ var require_pg_connection_string = __commonJS({
       }, /* @__PURE__ */ Object.create(null));
       return poolConfig;
     }
-    function parseIntoClientConfig(str) {
-      return toClientConfig(parse(str));
+    function parseIntoClientConfig(str2) {
+      return toClientConfig(parse(str2));
     }
     function deprecatedSslModeWarning(sslmode) {
       if (!deprecatedSslModeWarning.warned && typeof process !== "undefined" && process.emitWarning) {
@@ -4145,11 +4145,11 @@ var require_client = __commonJS({
       // escapeIdentifier and escapeLiteral moved to utility functions & exported
       // on PG
       // re-exported here for backwards compatibility
-      escapeIdentifier(str) {
-        return utils.escapeIdentifier(str);
+      escapeIdentifier(str2) {
+        return utils.escapeIdentifier(str2);
       }
-      escapeLiteral(str) {
-        return utils.escapeLiteral(str);
+      escapeLiteral(str2) {
+        return utils.escapeLiteral(str2);
       }
       _pulseQueryQueue() {
         if (this.readyForQuery === true) {
@@ -6283,7 +6283,7 @@ var init_dist = __esm({
 // src/hub/edge/runtime-bootstrap.ts
 import { createHash as createHash5, randomUUID as randomUUID5, scryptSync, timingSafeEqual } from "node:crypto";
 async function readAuthorityTime(pool) {
-  const instant = await withHubTransaction(
+  const instant2 = await withHubTransaction(
     pool,
     async (client) => {
       const result = await client.query(`select now() as now`);
@@ -6293,7 +6293,7 @@ async function readAuthorityTime(pool) {
     },
     HUB_RUNTIME_ROLE
   );
-  const iso = instant.toISOString();
+  const iso = instant2.toISOString();
   return {
     protocolVersion: RUNTIME_PROTOCOL_VERSION,
     authorityTime: iso,
@@ -6362,9 +6362,9 @@ async function readBlockingContainment(client, terminalDeviceId) {
   const directive = await readContainmentDirective(client, terminalDeviceId);
   return isBlockingContainment(directive) ? directive : null;
 }
-async function terminalHoldsCurrentT1Grant(client, terminalDeviceId) {
-  const grant = await client.query(
-    `select tpa.profile_code
+async function readCurrentProfileGrants(client, terminalDeviceId) {
+  const grants = await client.query(
+    `select tpa.id, tpa.profile_code
        from edge_config.terminal_profile_assignment tpa
        join edge_config.configuration_snapshot cs on cs.id = tpa.source_snapshot_id
       where tpa.terminal_device_id = $1::uuid
@@ -6372,11 +6372,23 @@ async function terminalHoldsCurrentT1Grant(client, terminalDeviceId) {
         and tpa.effective_from <= now()
         and (tpa.effective_until is null or tpa.effective_until > now())
         and cs.state = 'active'
-      order by tpa.assignment_version desc
-      limit 1`,
+        and tpa.assignment_version = (
+          select max(x.assignment_version)
+            from edge_config.terminal_profile_assignment x
+            join edge_config.configuration_snapshot xs on xs.id = x.source_snapshot_id
+           where x.terminal_device_id = tpa.terminal_device_id
+             and x.enabled
+             and x.effective_from <= now()
+             and (x.effective_until is null or x.effective_until > now())
+             and xs.state = 'active')
+      order by tpa.profile_code`,
     [terminalDeviceId]
   );
-  return grant.rows[0]?.profile_code === T1_PROFILE_CODE;
+  return grants.rows;
+}
+async function terminalHoldsCurrentT1Grant(client, terminalDeviceId) {
+  const grants = await readCurrentProfileGrants(client, terminalDeviceId);
+  return grants.some((grant) => grant.profile_code === T1_PROFILE_CODE);
 }
 async function deriveEligibility(client, terminalDeviceId, certificateSerial, environment) {
   const refuse = (refusal2, detail) => ({
@@ -6462,28 +6474,22 @@ async function deriveEligibility(client, terminalDeviceId, certificateSerial, en
       "the pairing receipt binds an earlier assignment generation; pair again at the current one"
     );
   }
-  const grant = await client.query(
-    `select tpa.id, tpa.profile_code
-       from edge_config.terminal_profile_assignment tpa
-       join edge_config.configuration_snapshot cs on cs.id = tpa.source_snapshot_id
-      where tpa.terminal_device_id = $1::uuid
-        and tpa.enabled
-        and tpa.effective_from <= now()
-        and (tpa.effective_until is null or tpa.effective_until > now())
-        and cs.state = 'active'
-      order by tpa.assignment_version desc
-      limit 1`,
-    [terminalDeviceId]
-  );
-  const grantRow = grant.rows[0];
-  if (grantRow === void 0) {
+  const grants = await readCurrentProfileGrants(client, terminalDeviceId);
+  if (grants.length === 0) {
     return refuse("PROFILE_NOT_GRANTED", "no enabled profile assignment exists");
   }
-  if (grantRow.profile_code !== T1_PROFILE_CODE) {
-    return refuse("PROFILE_NOT_T1", `the assigned profile is ${grantRow.profile_code}`);
+  const grantRow = grants.find((grant) => grant.profile_code === T1_PROFILE_CODE);
+  if (grantRow === void 0) {
+    return refuse(
+      "PROFILE_NOT_T1",
+      `the assigned profiles are ${grants.map((grant) => grant.profile_code).join(", ")}`
+    );
   }
-  if (receiptRow.terminal_profile_code !== grantRow.profile_code) {
-    return refuse("ASSIGNMENT_GENERATION_STALE", "the pairing receipt binds another profile");
+  if (!grants.some((grant) => grant.profile_code === receiptRow.terminal_profile_code)) {
+    return refuse(
+      "ASSIGNMENT_GENERATION_STALE",
+      "the pairing receipt binds a profile outside the terminal's current grants"
+    );
   }
   const directive = await readContainmentDirective(client, terminalDeviceId);
   if (isBlockingContainment(directive)) {
@@ -7159,20 +7165,20 @@ var require_index_umd = __commonJS({
       function hexCharCodesToInt(a, b) {
         return (a & 15) + (a >> 6 | a >> 3 & 8) << 4 | (b & 15) + (b >> 6 | b >> 3 & 8);
       }
-      function writeHexToUInt8(buf, str) {
-        const size = str.length >> 1;
+      function writeHexToUInt8(buf, str2) {
+        const size = str2.length >> 1;
         for (let i = 0; i < size; i++) {
           const index = i << 1;
-          buf[i] = hexCharCodesToInt(str.charCodeAt(index), str.charCodeAt(index + 1));
+          buf[i] = hexCharCodesToInt(str2.charCodeAt(index), str2.charCodeAt(index + 1));
         }
       }
-      function hexStringEqualsUInt8(str, buf) {
-        if (str.length !== buf.length * 2) {
+      function hexStringEqualsUInt8(str2, buf) {
+        if (str2.length !== buf.length * 2) {
           return false;
         }
         for (let i = 0; i < buf.length; i++) {
           const strIndex = i << 1;
-          if (buf[i] !== hexCharCodesToInt(str.charCodeAt(strIndex), str.charCodeAt(strIndex + 1))) {
+          if (buf[i] !== hexCharCodesToInt(str2.charCodeAt(strIndex), str2.charCodeAt(strIndex + 1))) {
             return false;
           }
         }
@@ -10213,6 +10219,12 @@ async function publishDevelopmentConfiguration(pool, input) {
           }))
         }
       };
+      const extra = (input.extraSections ?? []).filter((x) => x.sectionCode !== TERMINAL_PROFILES_SECTION).map((x) => ({
+        sectionCode: x.sectionCode,
+        sectionVersion: snapshotVersion,
+        required: x.required ?? false,
+        content: x.content
+      }));
       const unsigned = {
         snapshotId: randomUUID9(),
         tenantId: input.tenantId,
@@ -10224,7 +10236,7 @@ async function publishDevelopmentConfiguration(pool, input) {
         expiresAt: null,
         minimumHubVersion: "0.1.0",
         maximumHubVersion: null,
-        sections: [section]
+        sections: [section, ...extra]
       };
       const signature = signer.sign(
         snapshotManifest({
@@ -10254,6 +10266,15 @@ async function publishDevelopmentConfiguration(pool, input) {
         actorType: "service",
         healthCheck: { source: "development-configuration-publisher" }
       });
+      if (input.supersedeOpenGrants === true) {
+        await client.query(
+          `update edge_config.terminal_profile_assignment
+              set effective_until = $2::timestamptz
+            where location_id = $1::uuid and enabled and effective_until is null
+              and effective_from < $2::timestamptz`,
+          [input.locationId, now.toISOString()]
+        );
+      }
       let grantsWritten = 0;
       for (const grant of input.grants) {
         for (const profileCode of grant.profileCodes) {
@@ -14641,6 +14662,1076 @@ async function startDevelopmentListener(options) {
   return { port, close: () => server.close() };
 }
 
+// src/hub/terminal-sync/index.ts
+import { createPrivateKey as createPrivateKey3, createPublicKey as createPublicKey5, randomBytes as randomBytes4 } from "node:crypto";
+import { existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync as readFileSync4, writeFileSync as writeFileSync2 } from "node:fs";
+import { dirname as dirname2 } from "node:path";
+
+// src/hub/terminal-sync/apply.ts
+init_db();
+init_dev_configuration();
+import { X509Certificate, createHash as createHash11, createPublicKey as createPublicKey4 } from "node:crypto";
+
+// src/hub/terminal-sync/contract.ts
+import {
+  createHash as createHash10,
+  createPublicKey as createPublicKey3,
+  sign as edSign,
+  verify as edVerify
+} from "node:crypto";
+var HUB_SYNC_REQUEST_KIND = "kitluy.hub-sync.request.v1";
+var HUB_SYNC_ENVELOPE_KIND = "kitluy.hub-sync.terminal-projections.v1";
+var TERMINAL_PROJECTION_KIND = "kitluy.hub.development-terminal-projection.v1";
+var HUB_SYNC_TRUST_RECORD_KIND = "kitluy.hub-sync-trust-key.v1";
+var HUB_SYNC_SIGNING_PURPOSE = "transport_signing";
+var REQUEST_MAX_SKEW_SECONDS = 300;
+var UUID3 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+var HEX643 = /^[0-9a-f]{64}$/u;
+var SIGNATURE = /^[A-Za-z0-9_-]{86}$/u;
+var NONCE = /^[0-9a-f]{32}$/u;
+function hasControlCharacter(value) {
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    if (code < 32 || code === 127) return true;
+  }
+  return false;
+}
+function canonicalJson2(value) {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((v) => canonicalJson2(v)).join(",")}]`;
+  const record = value;
+  return `{${Object.keys(record).sort().map((k) => `${JSON.stringify(k)}:${canonicalJson2(record[k])}`).join(",")}}`;
+}
+function publicKeyFingerprint2(publicKeyPem) {
+  const der = createPublicKey3(publicKeyPem).export({ type: "spki", format: "der" });
+  return createHash10("sha256").update(der).digest("hex");
+}
+function hubSyncRequestBytes(input) {
+  if (!HEX643.test(input.identityPublicKeyFingerprint)) {
+    throw new Error(
+      "KLUY-HUB-SYNC-MALFORMED: the identity key fingerprint must be lowercase sha-256 hex"
+    );
+  }
+  if (!UUID3.test(input.hubDeviceId)) {
+    throw new Error("KLUY-HUB-SYNC-MALFORMED: hubDeviceId is not a uuid");
+  }
+  if (!NONCE.test(input.nonce)) {
+    throw new Error("KLUY-HUB-SYNC-MALFORMED: nonce must be 32 hex characters");
+  }
+  if (input.requestedAt.length > 64 || hasControlCharacter(input.requestedAt)) {
+    throw new Error("KLUY-HUB-SYNC-MALFORMED: requestedAt is invalid");
+  }
+  return Buffer.from(
+    [
+      HUB_SYNC_REQUEST_KIND,
+      input.identityPublicKeyFingerprint,
+      input.hubDeviceId.toLowerCase(),
+      input.requestedAt,
+      input.nonce
+    ].join("\n"),
+    "utf8"
+  );
+}
+function hubSyncEnvelopeBytes(envelope) {
+  if (envelope.kind !== HUB_SYNC_ENVELOPE_KIND) {
+    throw new Error("KLUY-HUB-SYNC-MALFORMED: the envelope declares the wrong kind");
+  }
+  const digest = createHash10("sha256").update(canonicalJson2(envelope), "utf8").digest("hex");
+  return Buffer.from([HUB_SYNC_ENVELOPE_KIND, digest].join("\n"), "utf8");
+}
+function signBytes(privateKey, bytes) {
+  return Buffer.from(edSign(null, bytes, privateKey)).toString("base64url");
+}
+function verifyBytes(publicKey, bytes, signature) {
+  if (!SIGNATURE.test(signature)) return false;
+  try {
+    return edVerify(null, bytes, publicKey, Buffer.from(signature, "base64url"));
+  } catch {
+    return false;
+  }
+}
+
+// src/hub/terminal-sync/apply.ts
+function parseCatalogSection(value) {
+  if (value === null || value === void 0) return null;
+  if (typeof value !== "object" || Array.isArray(value)) return null;
+  const r = value;
+  if (r["schema"] !== "kitluy.config.catalog.v1") return null;
+  if (typeof r["currency_code"] !== "string" || !/^[A-Z]{3}$/u.test(r["currency_code"]))
+    return null;
+  if (typeof r["content_hash"] !== "string" || !HEX643.test(r["content_hash"])) return null;
+  if (!Array.isArray(r["services"])) return null;
+  return r;
+}
+function parseMoneySection(value) {
+  if (value === null || value === void 0) return null;
+  if (typeof value !== "object" || Array.isArray(value)) return null;
+  const r = value;
+  if (r["schema"] !== "kitluy.config.money.v1") return null;
+  if (typeof r["currency_code"] !== "string" || !/^[A-Z]{3}$/u.test(r["currency_code"]))
+    return null;
+  if (typeof r["currency_exponent"] !== "number" || !Number.isInteger(r["currency_exponent"]))
+    return null;
+  return r;
+}
+var PROFILE3 = /^[a-z0-9_]+\.t[1-9][0-9]*\.[a-z0-9_]+$/u;
+var NAME = /^[A-Za-z0-9 ._:-]{1,80}$/u;
+var HARDWARE_PROFILE = /^[a-z0-9_.]{1,80}$/u;
+var SERIAL = /^[0-9a-f]{2,80}$/u;
+var LABEL = /^[A-Za-z0-9._:-]{1,120}$/u;
+function str(record, key, pattern) {
+  const value = record[key];
+  if (typeof value !== "string" || value === "") return void 0;
+  if (pattern !== void 0 && !pattern.test(value)) return void 0;
+  return value;
+}
+function instant(record, key) {
+  const value = record[key];
+  if (typeof value !== "string" || Number.isNaN(Date.parse(value))) return void 0;
+  return new Date(value).toISOString();
+}
+function parseTerminalDelivery(value) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return { ok: false, reason: "delivery is not an object" };
+  }
+  const d = value;
+  if (d["kind"] !== TERMINAL_PROJECTION_KIND) return { ok: false, reason: "wrong delivery kind" };
+  const terminalDeviceId = str(d, "terminalDeviceId", UUID3);
+  const credentialId = str(d, "credentialId", UUID3);
+  const tenantId = str(d, "tenantId", UUID3);
+  const digitalStoreId = str(d, "digitalStoreId", UUID3);
+  const storeLocationId = str(d, "storeLocationId", UUID3);
+  const installationId = str(d, "installationId", UUID3);
+  const terminalName = str(d, "terminalName", NAME);
+  const hardwareProfileCode = str(d, "hardwareProfileCode", HARDWARE_PROFILE);
+  const x509CertificateSerial = str(d, "x509CertificateSerial", SERIAL);
+  const credentialSerialLabel = str(d, "credentialSerialLabel", LABEL);
+  const publicKeyFingerprint3 = str(d, "publicKeyFingerprint", HEX643);
+  const issuer = str(d, "issuer");
+  const issuedAt = instant(d, "issuedAt");
+  const expiresAt = instant(d, "expiresAt");
+  const generation = d["assignmentGeneration"];
+  const certGeneration = d["certificateGeneration"];
+  const profiles = d["profileCodes"];
+  const identity = d["identityKeyFingerprint"];
+  const seat = d["seatLabel"];
+  for (const [name, present] of [
+    ["terminalDeviceId", terminalDeviceId],
+    ["credentialId", credentialId],
+    ["tenantId", tenantId],
+    ["digitalStoreId", digitalStoreId],
+    ["storeLocationId", storeLocationId],
+    ["installationId", installationId],
+    ["terminalName", terminalName],
+    ["hardwareProfileCode", hardwareProfileCode],
+    ["x509CertificateSerial", x509CertificateSerial],
+    ["credentialSerialLabel", credentialSerialLabel],
+    ["publicKeyFingerprint", publicKeyFingerprint3],
+    ["issuer", issuer],
+    ["issuedAt", issuedAt],
+    ["expiresAt", expiresAt]
+  ]) {
+    if (present === void 0) return { ok: false, reason: `${name} is missing or malformed` };
+  }
+  if (typeof issuer !== "string" || issuer.length > 200) {
+    return { ok: false, reason: "issuer is missing or too long" };
+  }
+  if (!Number.isInteger(generation) || generation < 1) {
+    return { ok: false, reason: "assignmentGeneration must be a positive integer" };
+  }
+  if (!Number.isInteger(certGeneration) || certGeneration < 1) {
+    return { ok: false, reason: "certificateGeneration must be a positive integer" };
+  }
+  if (!Array.isArray(profiles) || profiles.some((p) => typeof p !== "string" || !PROFILE3.test(p))) {
+    return { ok: false, reason: "profileCodes must be canonical dotted profiles" };
+  }
+  if (identity !== null && identity !== void 0 && (typeof identity !== "string" || !HEX643.test(identity))) {
+    return { ok: false, reason: "identityKeyFingerprint is not a sha256 hex digest" };
+  }
+  if (seat !== null && seat !== void 0 && (typeof seat !== "string" || seat.length > 120)) {
+    return { ok: false, reason: "seatLabel is malformed" };
+  }
+  if (Date.parse(expiresAt) <= Date.parse(issuedAt)) {
+    return { ok: false, reason: "the credential window is empty" };
+  }
+  return {
+    ok: true,
+    delivery: {
+      kind: TERMINAL_PROJECTION_KIND,
+      terminalDeviceId: terminalDeviceId.toLowerCase(),
+      terminalName,
+      hardwareProfileCode,
+      installationId: installationId.toLowerCase(),
+      tenantId: tenantId.toLowerCase(),
+      digitalStoreId: digitalStoreId.toLowerCase(),
+      storeLocationId: storeLocationId.toLowerCase(),
+      assignmentGeneration: generation,
+      profileCodes: [...new Set(profiles)],
+      seatLabel: typeof seat === "string" ? seat : null,
+      credentialId: credentialId.toLowerCase(),
+      certificateGeneration: certGeneration,
+      x509CertificateSerial: x509CertificateSerial.toLowerCase(),
+      identityKeyFingerprint: typeof identity === "string" ? identity : null,
+      credentialSerialLabel,
+      publicKeyFingerprint: publicKeyFingerprint3,
+      issuer,
+      issuedAt,
+      expiresAt
+    }
+  };
+}
+function sha256Hex4(input) {
+  return createHash11("sha256").update(input).digest("hex");
+}
+function md5Uuid(label) {
+  const hex = createHash11("md5").update(label).digest("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+function certificateFacts(pem) {
+  const cert = new X509Certificate(pem);
+  return {
+    serial: cert.serialNumber.toLowerCase(),
+    publicKeyFingerprint: sha256Hex4(cert.publicKey.export({ type: "spki", format: "der" })),
+    issuer: cert.issuer.replace(/\n/gu, ", ").slice(0, 180),
+    notBefore: new Date(cert.validFrom).toISOString(),
+    notAfter: new Date(cert.validTo).toISOString()
+  };
+}
+async function projectHubSelf(client, facts) {
+  const cert = certificateFacts(facts.operationalCertificatePem);
+  const identityFingerprint = facts.identityPublicKeyPem === null ? null : sha256Hex4(
+    createPublicKey4(facts.identityPublicKeyPem).export({ type: "spki", format: "der" })
+  );
+  await client.query(
+    `insert into edge_identity.hub_device
+       (id, asset_number, device_kind, lifecycle_status, trust_status,
+        board_serial_hash, factory_duid_hash, root_key_fingerprint,
+        manufacturing_cert_serial, created_at, updated_at)
+     values ($1::uuid, $6, 'store_hub', 'deployed', 'trusted',
+             $2, $3, $4, $5, now(), now())
+     on conflict (id) do update
+        set lifecycle_status = 'deployed',
+            trust_status = 'trusted',
+            manufacturing_cert_serial = excluded.manufacturing_cert_serial,
+            updated_at = now()`,
+    [
+      facts.hubDeviceId,
+      sha256Hex4(facts.boardSerial),
+      // Self-describing DEVELOPMENT placeholders, as the shell door wrote them:
+      // no factory DUID and no root key exist in this development cloud.
+      sha256Hex4(`kitluy.development-projection.factory-duid:${facts.hubDeviceId}`),
+      sha256Hex4(`kitluy.development-projection.root-key:${facts.hubDeviceId}`),
+      cert.serial,
+      // Unique per Hub (the column is unique): a board projected by the shell
+      // door keeps its 'KITLUY-DEV-HUB' — the update path leaves the number alone.
+      `KITLUY-DEV-HUB-${facts.hubDeviceId.slice(0, 8)}`
+    ]
+  );
+  await client.query(
+    `update edge_identity.hub_assignment
+        set status = 'ended', ended_at = now()
+      where hub_device_id = $1::uuid and id <> $2::uuid and status = 'active'`,
+    [facts.hubDeviceId, facts.assignmentId]
+  );
+  await client.query(
+    `insert into edge_identity.hub_assignment
+       (id, hub_device_id, tenant_id, digital_store_id, location_id,
+        assignment_generation, assigned_at, ended_at, status, operational_cert_serial)
+     values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6, now(), null, 'active', $7)
+     on conflict (id) do update
+        set ended_at = null,
+            status = 'active',
+            assignment_generation = excluded.assignment_generation,
+            operational_cert_serial = excluded.operational_cert_serial`,
+    [
+      facts.assignmentId,
+      facts.hubDeviceId,
+      facts.scope.tenantId,
+      facts.scope.digitalStoreId,
+      facts.scope.storeLocationId,
+      facts.assignmentGeneration,
+      cert.serial
+    ]
+  );
+  await upsertCredential(client, {
+    id: md5Uuid(`kitluy.hub-operational-credential:${cert.serial}`),
+    deviceId: facts.hubDeviceId,
+    type: "operational_tls",
+    fingerprint: cert.publicKeyFingerprint,
+    serial: cert.serial,
+    issuer: cert.issuer,
+    issuedAt: cert.notBefore,
+    expiresAt: cert.notAfter,
+    generation: 1
+  });
+  if (identityFingerprint !== null) {
+    await upsertCredential(client, {
+      id: md5Uuid(`kitluy.hub-identity-credential:${identityFingerprint}`),
+      deviceId: facts.hubDeviceId,
+      type: "device_identity",
+      fingerprint: identityFingerprint,
+      serial: identityFingerprint,
+      issuer: cert.issuer,
+      issuedAt: cert.notBefore,
+      expiresAt: cert.notAfter,
+      generation: 1
+    });
+  }
+  return { identityCredential: identityFingerprint !== null };
+}
+async function upsertCredential(client, c) {
+  await client.query(
+    `insert into edge_identity.device_credential
+       (id, device_id, credential_type, public_key_fingerprint, certificate_serial,
+        issuer, issued_at, expires_at, status, rotation_generation)
+     values ($1::uuid, $2::uuid, $3, $4, $5, $6, $7::timestamptz, $8::timestamptz, 'active', $9)
+     on conflict (id) do update
+        set certificate_serial = excluded.certificate_serial,
+            public_key_fingerprint = excluded.public_key_fingerprint,
+            expires_at = excluded.expires_at,
+            status = 'active',
+            revoked_at = null,
+            revocation_reason = null`,
+    [
+      c.id,
+      c.deviceId,
+      c.type,
+      c.fingerprint,
+      c.serial,
+      c.issuer,
+      c.issuedAt,
+      c.expiresAt,
+      c.generation
+    ]
+  );
+}
+async function projectTerminal(client, delivery, now = /* @__PURE__ */ new Date()) {
+  const base = { terminalName: delivery.terminalName, terminalDeviceId: delivery.terminalDeviceId };
+  if (Date.parse(delivery.expiresAt) <= now.getTime()) {
+    return { ...base, action: "refused", detail: "the credential has expired" };
+  }
+  const profile = await client.query(
+    `select id from edge_config.hardware_profile where profile_code = $1`,
+    [delivery.hardwareProfileCode]
+  );
+  const hardwareProfileId = profile.rows[0]?.id;
+  if (hardwareProfileId === void 0) {
+    return {
+      ...base,
+      action: "refused",
+      detail: `this Hub holds no hardware profile ${delivery.hardwareProfileCode}`
+    };
+  }
+  const existing = await client.query(
+    `select certificate_serial, assignment_generation, lifecycle_status, terminal_name
+       from edge_identity.terminal_device where id = $1::uuid`,
+    [delivery.terminalDeviceId]
+  );
+  const current = existing.rows[0];
+  const identityHeld = delivery.identityKeyFingerprint === null ? true : (await client.query(
+    `select 1 from edge_identity.device_credential
+              where device_id = $1::uuid and credential_type = 'device_identity'
+                and public_key_fingerprint = $2 and status = 'active'`,
+    [delivery.terminalDeviceId, delivery.identityKeyFingerprint]
+  )).rowCount === 1;
+  if (current !== void 0 && current.certificate_serial === delivery.x509CertificateSerial && current.assignment_generation === delivery.assignmentGeneration && current.lifecycle_status === "active" && current.terminal_name === delivery.terminalName && identityHeld) {
+    return { ...base, action: "unchanged" };
+  }
+  let retiredPrevious;
+  const sameName = await client.query(
+    `select id, lifecycle_status from edge_identity.terminal_device
+      where location_id = $1::uuid and terminal_name = $2 and id <> $3::uuid`,
+    [delivery.storeLocationId, delivery.terminalName, delivery.terminalDeviceId]
+  );
+  for (const row of sameName.rows) {
+    await client.query(
+      `update edge_identity.terminal_device
+          set lifecycle_status = 'retired',
+              terminal_name = $2,
+              updated_at = now()
+        where id = $1::uuid`,
+      [row.id, `${delivery.terminalName}~retired-${row.id.slice(0, 8)}`]
+    );
+    await client.query(
+      `update edge_identity.device_credential
+          set status = 'superseded'
+        where device_id = $1::uuid and status = 'active'`,
+      [row.id]
+    );
+    retiredPrevious = row.id;
+  }
+  await client.query(
+    `insert into edge_identity.terminal_device
+       (id, tenant_id, digital_store_id, location_id, terminal_name, hardware_profile_id,
+        installation_id, certificate_serial, assignment_generation, lifecycle_status,
+        last_client_sequence, last_seen_at, created_at, updated_at)
+     values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6::uuid, $7::uuid, $8, $9, 'active',
+             0, now(), now(), now())
+     on conflict (id) do update
+        set certificate_serial    = excluded.certificate_serial,
+            terminal_name         = excluded.terminal_name,
+            assignment_generation = excluded.assignment_generation,
+            lifecycle_status      = 'active',
+            updated_at            = now()`,
+    [
+      delivery.terminalDeviceId,
+      delivery.tenantId,
+      delivery.digitalStoreId,
+      delivery.storeLocationId,
+      delivery.terminalName,
+      hardwareProfileId,
+      delivery.installationId,
+      delivery.x509CertificateSerial,
+      delivery.assignmentGeneration
+    ]
+  );
+  await client.query(
+    `update edge_identity.device_credential
+        set status = 'superseded'
+      where device_id = $1::uuid and credential_type = 'operational_tls'
+        and id <> $2::uuid and status = 'active'`,
+    [delivery.terminalDeviceId, delivery.credentialId]
+  );
+  await upsertCredential(client, {
+    id: delivery.credentialId,
+    deviceId: delivery.terminalDeviceId,
+    type: "operational_tls",
+    fingerprint: delivery.publicKeyFingerprint,
+    serial: delivery.x509CertificateSerial,
+    issuer: delivery.issuer,
+    issuedAt: delivery.issuedAt,
+    expiresAt: delivery.expiresAt,
+    generation: delivery.assignmentGeneration
+  });
+  if (delivery.identityKeyFingerprint !== null) {
+    await upsertCredential(client, {
+      id: md5Uuid(`kitluy.terminal-identity-credential:${delivery.identityKeyFingerprint}`),
+      deviceId: delivery.terminalDeviceId,
+      type: "device_identity",
+      fingerprint: delivery.identityKeyFingerprint,
+      serial: delivery.identityKeyFingerprint,
+      issuer: delivery.issuer,
+      issuedAt: delivery.issuedAt,
+      expiresAt: delivery.expiresAt,
+      generation: delivery.assignmentGeneration
+    });
+  }
+  return {
+    ...base,
+    action: "projected",
+    ...retiredPrevious === void 0 ? {} : { retiredPrevious }
+  };
+}
+async function readActiveGrantSet(client, locationId) {
+  const { rows } = await client.query(
+    `select tpa.terminal_device_id, tpa.profile_code
+       from edge_config.terminal_profile_assignment tpa
+       join edge_config.configuration_snapshot cs on cs.id = tpa.source_snapshot_id
+      where tpa.location_id = $1::uuid
+        and tpa.enabled
+        and tpa.effective_from <= now()
+        and (tpa.effective_until is null or tpa.effective_until > now())
+        and cs.state = 'active'
+        and tpa.assignment_version = (
+          select max(x.assignment_version)
+            from edge_config.terminal_profile_assignment x
+            join edge_config.configuration_snapshot xs on xs.id = x.source_snapshot_id
+           where x.terminal_device_id = tpa.terminal_device_id
+             and x.enabled
+             and x.effective_from <= now()
+             and (x.effective_until is null or x.effective_until > now())
+             and xs.state = 'active')`,
+    [locationId]
+  );
+  const set = /* @__PURE__ */ new Map();
+  for (const row of rows) {
+    const list = set.get(row.terminal_device_id) ?? [];
+    list.push(row.profile_code);
+    set.set(row.terminal_device_id, list);
+  }
+  return new Map([...set].map(([k, v]) => [k, [...v].sort()]));
+}
+function desiredGrantSet(deliveries) {
+  const set = /* @__PURE__ */ new Map();
+  for (const d of deliveries) {
+    if (d.profileCodes.length > 0) set.set(d.terminalDeviceId, [...d.profileCodes].sort());
+  }
+  return set;
+}
+function grantSetsEqual(a, b) {
+  if (a.size !== b.size) return false;
+  for (const [terminal, profiles] of a) {
+    const other = b.get(terminal);
+    if (other === void 0 || other.length !== profiles.length) return false;
+    if (other.some((p, i) => p !== profiles[i])) return false;
+  }
+  return true;
+}
+async function readActiveSections(client, locationId) {
+  const { rows } = await client.query(
+    `select s.section_code, s.content_json
+       from edge_config.configuration_section s
+       join edge_config.active_configuration a on a.snapshot_id = s.snapshot_id
+      where a.location_id = $1::uuid and s.section_code in ('catalog', 'pricing')`,
+    [locationId]
+  );
+  const catalog = rows.find((r) => r.section_code === "catalog")?.content_json;
+  const pricing = rows.find((r) => r.section_code === "pricing")?.content_json ?? null;
+  const hash = catalog?.["content_hash"];
+  return { catalogHash: typeof hash === "string" ? hash : null, pricing };
+}
+async function applyEnvelope(pool, input) {
+  const now = input.now ?? /* @__PURE__ */ new Date();
+  const scope = input.self.scope;
+  const inScope = [];
+  const refusedScope = [];
+  for (const d of input.deliveries) {
+    if (d.tenantId !== scope.tenantId || d.digitalStoreId !== scope.digitalStoreId || d.storeLocationId !== scope.storeLocationId) {
+      refusedScope.push({
+        terminalName: d.terminalName,
+        terminalDeviceId: d.terminalDeviceId,
+        action: "refused",
+        detail: "the delivery names another Store's scope"
+      });
+    } else {
+      inScope.push(d);
+    }
+  }
+  const projected = await withHubTransaction(
+    pool,
+    async (client) => {
+      const self2 = await projectHubSelf(client, input.self);
+      const results = [];
+      for (const d of inScope) results.push(await projectTerminal(client, d, now));
+      const retiredAbsent = await retireAbsentTerminals(
+        client,
+        scope.storeLocationId,
+        inScope.map((d) => d.terminalDeviceId)
+      );
+      return { self: self2, results, retiredAbsent };
+    },
+    HUB_RUNTIME_ROLE
+  );
+  const live = inScope.filter((d) => {
+    const r = projected.results.find((x) => x.terminalDeviceId === d.terminalDeviceId);
+    return r !== void 0 && r.action !== "refused";
+  });
+  const desired = desiredGrantSet(live);
+  const current = await withHubTransaction(
+    pool,
+    (client) => readActiveGrantSet(client, scope.storeLocationId),
+    HUB_RUNTIME_ROLE
+  );
+  const held = await withHubTransaction(
+    pool,
+    (client) => readActiveSections(client, scope.storeLocationId),
+    HUB_RUNTIME_ROLE
+  );
+  const catalog = input.catalog ?? null;
+  const money = input.money ?? null;
+  const because = [];
+  if (!grantSetsEqual(desired, current)) because.push("grants");
+  if (catalog !== null && held.catalogHash !== catalog.content_hash) because.push("catalog");
+  if (money !== null && canonicalJson2(held.pricing) !== canonicalJson2(money)) because.push("money");
+  let configuration;
+  if (because.length === 0) {
+    configuration = { published: false, reason: "unchanged" };
+  } else if (desired.size === 0) {
+    const withdrawn = await withHubTransaction(
+      pool,
+      async (client) => {
+        const r = await client.query(
+          `update edge_config.terminal_profile_assignment
+              set effective_until = $2::timestamptz
+            where location_id = $1::uuid and enabled and effective_until is null`,
+          [scope.storeLocationId, now.toISOString()]
+        );
+        return r.rowCount ?? 0;
+      },
+      HUB_RUNTIME_ROLE
+    );
+    configuration = { published: false, reason: "no_grants", grantsWithdrawn: withdrawn };
+  } else {
+    const extraSections = [
+      ...money === null ? [] : [
+        {
+          sectionCode: "pricing",
+          content: money,
+          required: true
+        }
+      ],
+      ...catalog === null ? [] : [
+        {
+          sectionCode: "catalog",
+          content: catalog,
+          required: false
+        }
+      ]
+    ];
+    const outcome = await publishDevelopmentConfiguration(pool, {
+      tenantId: scope.tenantId,
+      digitalStoreId: scope.digitalStoreId,
+      locationId: scope.storeLocationId,
+      environment: input.environment,
+      grants: [...desired].map(([terminalDeviceId, profileCodes]) => ({
+        terminalDeviceId,
+        profileCodes
+      })),
+      supersedeOpenGrants: true,
+      now,
+      extraSections,
+      ...input.signer === void 0 ? {} : { signer: input.signer }
+    });
+    configuration = {
+      published: true,
+      snapshotVersion: outcome.snapshotVersion,
+      grantsWritten: outcome.grantsWritten,
+      sections: ["terminal_profiles", ...extraSections.map((x) => x.sectionCode)],
+      because
+    };
+  }
+  return {
+    hubProjected: true,
+    hubIdentityCredential: projected.self.identityCredential,
+    terminals: [...projected.results, ...refusedScope],
+    retiredAbsent: projected.retiredAbsent,
+    configuration
+  };
+}
+async function retireAbsentTerminals(client, locationId, deliveredIds) {
+  const { rows } = await client.query(
+    `update edge_identity.terminal_device
+        set lifecycle_status = 'retired', updated_at = now()
+      where location_id = $1::uuid
+        and lifecycle_status = 'active'
+        and not (id = any($2::uuid[]))
+      returning id, terminal_name`,
+    [locationId, deliveredIds]
+  );
+  for (const row of rows) {
+    await client.query(
+      `update edge_identity.device_credential
+          set status = 'superseded'
+        where device_id = $1::uuid and status = 'active'`,
+      [row.id]
+    );
+  }
+  return rows.map((r) => r.terminal_name);
+}
+
+// src/hub/terminal-sync/index.ts
+var HUB_SYNC_TRUST_PATH = "/etc/kitluy/hub-sync-trust.json";
+var HUB_SYNC_STATE_PATH = "/var/lib/kitluy/hub/terminal-sync.json";
+var HUB_IDENTITY_KEY_PATH = "/var/lib/kitluy/identity/device-identity.key.pem";
+var HUB_PAIRING_STATE_PATH = "/var/lib/kitluy/pairing-state.json";
+var HUB_BOARD_SERIAL_PATH = "/sys/firmware/devicetree/base/serial-number";
+var DEFAULT_SYNC_INTERVAL_SECONDS = 60;
+var SYNC_ROUTE = "/hub-sync/v1/terminal-projections";
+function terminalSyncConfigFromEnv(env = process.env) {
+  const url = (env.HUB_SYNC_URL ?? "").trim();
+  if (url === "") return { disabled: "HUB_SYNC_URL is not set" };
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return { disabled: "HUB_SYNC_URL is not a URL" };
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return { disabled: "HUB_SYNC_URL must be http or https" };
+  }
+  const interval = Number(env.HUB_SYNC_INTERVAL_SECONDS ?? DEFAULT_SYNC_INTERVAL_SECONDS);
+  return {
+    config: {
+      url: parsed.origin,
+      environment: env.KITLUY_ENVIRONMENT ?? "unknown",
+      trustPath: env.HUB_SYNC_TRUST_PATH ?? HUB_SYNC_TRUST_PATH,
+      statePath: env.HUB_SYNC_STATE_PATH ?? HUB_SYNC_STATE_PATH,
+      identityKeyPath: env.HUB_IDENTITY_KEY_PATH ?? HUB_IDENTITY_KEY_PATH,
+      pairingStatePath: env.HUB_PAIRING_STATE_PATH ?? HUB_PAIRING_STATE_PATH,
+      operationalCertificatePath: env.HUB_TLS_CERT_PATH ?? "/var/lib/kitluy/operational/operational-tls.crt.pem",
+      boardSerialPath: env.HUB_BOARD_SERIAL_PATH ?? HUB_BOARD_SERIAL_PATH,
+      intervalSeconds: Number.isFinite(interval) && interval >= 10 ? interval : DEFAULT_SYNC_INTERVAL_SECONDS
+    }
+  };
+}
+function loadHubSyncTrust(path, environment) {
+  if (!existsSync2(path)) return { ok: false, refusal: "TRUST_RECORD_MISSING", detail: path };
+  const contents = readFileSync4(path, "utf8");
+  if (contents.includes("PRIVATE KEY")) {
+    return { ok: false, refusal: "TRUST_RECORD_CARRIES_PRIVATE_KEY", detail: path };
+  }
+  let raw;
+  try {
+    raw = JSON.parse(contents);
+  } catch (error) {
+    return {
+      ok: false,
+      refusal: "TRUST_RECORD_UNPARSEABLE",
+      detail: String(error.message)
+    };
+  }
+  if (raw["kind"] !== HUB_SYNC_TRUST_RECORD_KIND) {
+    return { ok: false, refusal: "TRUST_RECORD_WRONG_KIND", detail: `kind=${String(raw["kind"])}` };
+  }
+  if (raw["purpose"] !== HUB_SYNC_SIGNING_PURPOSE) {
+    return {
+      ok: false,
+      refusal: "TRUST_RECORD_WRONG_PURPOSE",
+      detail: `purpose=${String(raw["purpose"])}`
+    };
+  }
+  if (raw["environment"] !== environment) {
+    return {
+      ok: false,
+      refusal: "TRUST_RECORD_WRONG_ENVIRONMENT",
+      detail: `record=${String(raw["environment"])}, hub=${environment}`
+    };
+  }
+  const keyId = raw["keyId"];
+  const keyVersion = raw["keyVersion"];
+  const pem = raw["publicKeyPem"];
+  if (typeof keyId !== "string" || typeof pem !== "string" || typeof keyVersion !== "number" || !Number.isInteger(keyVersion) || keyVersion < 1 || raw["algorithm"] !== "ed25519" || raw["state"] !== "current") {
+    return {
+      ok: false,
+      refusal: "TRUST_RECORD_MALFORMED",
+      detail: "keyId/keyVersion/publicKeyPem/algorithm/state"
+    };
+  }
+  let publicKey;
+  try {
+    publicKey = createPublicKey5(pem);
+  } catch {
+    return { ok: false, refusal: "TRUST_RECORD_MALFORMED", detail: "publicKeyPem does not parse" };
+  }
+  if (publicKey.asymmetricKeyType !== "ed25519" || publicKeyFingerprint2(pem) !== keyId) {
+    return {
+      ok: false,
+      refusal: "TRUST_RECORD_MALFORMED",
+      detail: "keyId is not the key's fingerprint"
+    };
+  }
+  return { ok: true, trust: { keyId, keyVersion, publicKey } };
+}
+function readBoardFacts(config) {
+  if (!existsSync2(config.pairingStatePath))
+    return { ok: false, reason: "this Hub has no pairing state; pair it with a Store first" };
+  let pairing;
+  try {
+    pairing = JSON.parse(readFileSync4(config.pairingStatePath, "utf8"));
+  } catch {
+    return { ok: false, reason: "the pairing state is not valid JSON" };
+  }
+  if (pairing["phase"] !== "PAIRED")
+    return { ok: false, reason: `this Hub is ${String(pairing["phase"])}, not PAIRED` };
+  const field = (key) => {
+    const v = pairing[key];
+    return typeof v === "string" && UUID3.test(v) ? v.toLowerCase() : void 0;
+  };
+  const hubDeviceId2 = field("deviceRecordId");
+  const assignmentId = field("assignmentId");
+  const tenantId = field("tenantId");
+  const digitalStoreId = field("digitalStoreId");
+  const storeLocationId = field("storeLocationId");
+  if (!hubDeviceId2 || !assignmentId || !tenantId || !digitalStoreId || !storeLocationId) {
+    return {
+      ok: false,
+      reason: "the pairing state lacks deviceRecordId/assignmentId/tenantId/digitalStoreId/storeLocationId"
+    };
+  }
+  const generationRaw = pairing["assignmentGeneration"];
+  const assignmentGeneration = typeof generationRaw === "number" && Number.isInteger(generationRaw) && generationRaw >= 1 ? generationRaw : 1;
+  if (!existsSync2(config.identityKeyPath))
+    return { ok: false, reason: "no device identity key on this board" };
+  let identityPrivateKey;
+  try {
+    identityPrivateKey = createPrivateKey3(readFileSync4(config.identityKeyPath, "utf8"));
+  } catch {
+    return { ok: false, reason: "the device identity key does not parse" };
+  }
+  if (identityPrivateKey.asymmetricKeyType !== "ed25519")
+    return { ok: false, reason: "the device identity key is not Ed25519" };
+  const identityPublicKeyPem = createPublicKey5(identityPrivateKey).export({ type: "spki", format: "pem" }).toString();
+  if (!existsSync2(config.operationalCertificatePath))
+    return { ok: false, reason: "this Hub has no operational certificate; it is not activated" };
+  const operationalCertificatePem = readFileSync4(config.operationalCertificatePath, "utf8");
+  if (!existsSync2(config.boardSerialPath))
+    return { ok: false, reason: `cannot read the board serial at ${config.boardSerialPath}` };
+  const boardSerial = readFileSync4(config.boardSerialPath).toString("utf8").replace(/\0/gu, "").trim();
+  if (boardSerial === "") return { ok: false, reason: "the board serial read back empty" };
+  return {
+    ok: true,
+    facts: {
+      self: {
+        hubDeviceId: hubDeviceId2,
+        assignmentId,
+        assignmentGeneration,
+        scope: { tenantId, digitalStoreId, storeLocationId },
+        boardSerial,
+        operationalCertificatePem,
+        identityPublicKeyPem
+      },
+      identityPrivateKey,
+      identityPublicKeyPem
+    }
+  };
+}
+function buildSyncRequest(facts, now = /* @__PURE__ */ new Date(), nonce = randomBytes4(16).toString("hex")) {
+  const requestedAt = now.toISOString();
+  const bytes = hubSyncRequestBytes({
+    identityPublicKeyFingerprint: publicKeyFingerprint2(facts.identityPublicKeyPem),
+    hubDeviceId: facts.hubDeviceId,
+    requestedAt,
+    nonce
+  });
+  return {
+    kind: HUB_SYNC_REQUEST_KIND,
+    hubDeviceId: facts.hubDeviceId,
+    identityPublicKeyPem: facts.identityPublicKeyPem,
+    requestedAt,
+    nonce,
+    signature: signBytes(facts.identityPrivateKey, bytes)
+  };
+}
+function verifySyncEnvelope(body, trust, expect, now = /* @__PURE__ */ new Date()) {
+  if (body === null || typeof body !== "object" || Array.isArray(body))
+    return { ok: false, refusal: "ENVELOPE_MALFORMED" };
+  const record = body;
+  const envelope = record["envelope"];
+  const signature = record["signature"];
+  if (envelope === null || typeof envelope !== "object" || Array.isArray(envelope))
+    return { ok: false, refusal: "ENVELOPE_MALFORMED" };
+  if (signature === null || typeof signature !== "object" || Array.isArray(signature))
+    return { ok: false, refusal: "ENVELOPE_MALFORMED" };
+  const env = envelope;
+  const sig = signature;
+  if (env["kind"] !== HUB_SYNC_ENVELOPE_KIND) return { ok: false, refusal: "ENVELOPE_WRONG_KIND" };
+  if (sig["algorithm"] !== "ed25519" || sig["keyId"] !== trust.keyId || sig["keyVersion"] !== trust.keyVersion) {
+    return { ok: false, refusal: "ENVELOPE_UNKNOWN_KEY", detail: `keyId=${String(sig["keyId"])}` };
+  }
+  const value = sig["value"];
+  if (typeof value !== "string" || !SIGNATURE.test(value))
+    return { ok: false, refusal: "ENVELOPE_MALFORMED" };
+  let bytes;
+  try {
+    bytes = hubSyncEnvelopeBytes(env);
+  } catch {
+    return { ok: false, refusal: "ENVELOPE_MALFORMED" };
+  }
+  if (!verifyBytes(trust.publicKey, bytes, value))
+    return { ok: false, refusal: "ENVELOPE_SIGNATURE_INVALID" };
+  const nonce = env["requestNonce"];
+  if (typeof nonce !== "string" || !NONCE.test(nonce) || nonce !== expect.nonce) {
+    return { ok: false, refusal: "ENVELOPE_NONCE_MISMATCH" };
+  }
+  const hub = env["hub"];
+  if (hub === null || typeof hub !== "object" || Array.isArray(hub))
+    return { ok: false, refusal: "ENVELOPE_MALFORMED" };
+  const h = hub;
+  if (typeof h["deviceId"] !== "string" || h["deviceId"].toLowerCase() !== expect.hubDeviceId) {
+    return { ok: false, refusal: "ENVELOPE_NOT_FOR_THIS_HUB" };
+  }
+  const scopeOf = (k) => typeof h[k] === "string" ? h[k].toLowerCase() : "";
+  if (scopeOf("tenantId") !== expect.scope.tenantId || scopeOf("digitalStoreId") !== expect.scope.digitalStoreId || scopeOf("storeLocationId") !== expect.scope.storeLocationId) {
+    return { ok: false, refusal: "ENVELOPE_WRONG_SCOPE" };
+  }
+  const producedAt = env["producedAt"];
+  if (typeof producedAt !== "string" || Number.isNaN(Date.parse(producedAt)))
+    return { ok: false, refusal: "ENVELOPE_MALFORMED" };
+  if (Math.abs(Date.parse(producedAt) - now.getTime()) / 1e3 > REQUEST_MAX_SKEW_SECONDS) {
+    return { ok: false, refusal: "ENVELOPE_STALE" };
+  }
+  const terminals = env["terminals"];
+  if (!Array.isArray(terminals)) return { ok: false, refusal: "ENVELOPE_MALFORMED" };
+  const deliveries = [];
+  const malformed = [];
+  for (const item of terminals) {
+    const parsed = parseTerminalDelivery(item);
+    if (parsed.ok) deliveries.push(parsed.delivery);
+    else {
+      const name = item !== null && typeof item === "object" ? item["terminalName"] : void 0;
+      malformed.push(`${typeof name === "string" ? name : "?"}: ${parsed.reason}`);
+    }
+  }
+  const catalog = parseCatalogSection(env["catalog"]);
+  if (env["catalog"] !== void 0 && env["catalog"] !== null && catalog === null) {
+    return { ok: false, refusal: "ENVELOPE_MALFORMED", detail: "catalog" };
+  }
+  const money = parseMoneySection(env["money"]);
+  if (env["money"] !== void 0 && env["money"] !== null && money === null) {
+    return { ok: false, refusal: "ENVELOPE_MALFORMED", detail: "money" };
+  }
+  return {
+    ok: true,
+    envelope: {
+      producedAt,
+      hubAssetTag: typeof h["assetTag"] === "string" ? h["assetTag"] : "",
+      deliveries,
+      malformed,
+      catalog,
+      money
+    }
+  };
+}
+function writeState(path, previous, next, success) {
+  const state = {
+    schema: "kitluy.hub-terminal-sync-state.v1",
+    ...next,
+    lastSuccessAt: success ? next.lastAttemptAt : previous?.lastSuccessAt ?? null
+  };
+  try {
+    mkdirSync2(dirname2(path), { recursive: true });
+    writeFileSync2(path, `${JSON.stringify(state, null, 2)}
+`, { mode: 420 });
+  } catch {
+  }
+}
+function readState(path) {
+  try {
+    return JSON.parse(readFileSync4(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+async function runTerminalSyncOnce(deps) {
+  const now = deps.now ?? (() => /* @__PURE__ */ new Date());
+  const { config, log: log2 } = deps;
+  const previous = readState(config.statePath);
+  const attemptAt = now().toISOString();
+  const finish = (outcome2, extra = {}) => {
+    writeState(
+      config.statePath,
+      previous,
+      {
+        lastAttemptAt: attemptAt,
+        outcome: outcome2.kind === "applied" ? "applied" : outcome2.kind === "refused" ? outcome2.code : "unreachable",
+        detail: outcome2.kind === "applied" ? null : outcome2.detail ?? null,
+        terminals: extra.terminals ?? [],
+        configurationVersion: extra.configurationVersion ?? previous?.configurationVersion ?? null
+      },
+      outcome2.kind === "applied"
+    );
+    return outcome2;
+  };
+  if (config.environment !== "development") {
+    return finish({
+      kind: "refused",
+      code: "SYNC_ENVIRONMENT",
+      detail: `this Hub declares '${config.environment}'`
+    });
+  }
+  const trust = loadHubSyncTrust(config.trustPath, config.environment);
+  if (!trust.ok) return finish({ kind: "refused", code: trust.refusal, detail: trust.detail });
+  const board = readBoardFacts(config);
+  if (!board.ok) return finish({ kind: "refused", code: "BOARD_NOT_READY", detail: board.reason });
+  const request = buildSyncRequest(
+    { ...board.facts, hubDeviceId: board.facts.self.hubDeviceId },
+    now()
+  );
+  const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
+  let status;
+  let body;
+  try {
+    const response = await fetchImpl(`${config.url}${SYNC_ROUTE}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify(request),
+      signal: AbortSignal.timeout(15e3)
+    });
+    status = response.status;
+    body = await response.json().catch(() => void 0);
+  } catch (error) {
+    return finish({
+      kind: "unreachable",
+      detail: error instanceof Error ? error.message : String(error)
+    });
+  }
+  if (status !== 200) {
+    const code = body !== null && typeof body === "object" ? String(body["code"] ?? status) : String(status);
+    return finish({ kind: "refused", code: `PRODUCER_${code}`, detail: `HTTP ${String(status)}` });
+  }
+  const verified = verifySyncEnvelope(
+    body,
+    trust.trust,
+    {
+      nonce: request.nonce,
+      hubDeviceId: board.facts.self.hubDeviceId,
+      scope: board.facts.self.scope
+    },
+    now()
+  );
+  if (!verified.ok)
+    return finish({ kind: "refused", code: verified.refusal, detail: verified.detail });
+  let outcome;
+  try {
+    outcome = await applyEnvelope(deps.pool, {
+      self: board.facts.self,
+      deliveries: verified.envelope.deliveries,
+      environment: config.environment,
+      now: now(),
+      catalog: verified.envelope.catalog,
+      money: verified.envelope.money
+    });
+  } catch (error) {
+    return finish({
+      kind: "refused",
+      code: "APPLY_FAILED",
+      detail: error instanceof Error ? error.message : String(error)
+    });
+  }
+  for (const m of verified.envelope.malformed)
+    log2.warn?.("terminal sync: a delivery did not parse", { delivery: m });
+  const summary = {
+    terminals: outcome.terminals.map((t) => ({ name: t.terminalName, action: t.action })),
+    configurationVersion: outcome.configuration.published ? outcome.configuration.snapshotVersion : void 0
+  };
+  return finish(
+    {
+      kind: "applied",
+      outcome,
+      hubAssetTag: verified.envelope.hubAssetTag,
+      malformed: verified.envelope.malformed
+    },
+    summary
+  );
+}
+function startTerminalSyncLoop(deps) {
+  let stopped = false;
+  let timer;
+  const { log: log2, config } = deps;
+  const tick = async () => {
+    if (stopped) return;
+    const result = await runTerminalSyncOnce(deps);
+    if (result.kind === "applied") {
+      const changed = result.outcome.terminals.filter((t) => t.action !== "unchanged");
+      const fields = {
+        hub: result.hubAssetTag,
+        terminals: result.outcome.terminals.length,
+        changed: changed.map(
+          (t) => `${t.terminalName}:${t.action}${t.retiredPrevious ? "(previous retired)" : ""}${t.detail ? ` ${t.detail}` : ""}`
+        ),
+        configuration: result.outcome.configuration.published ? `v${result.outcome.configuration.snapshotVersion} (${String(result.outcome.configuration.grantsWritten)} grants; ${result.outcome.configuration.sections.join("+")}; because ${result.outcome.configuration.because.join(",")})` : result.outcome.configuration.reason,
+        malformed: result.malformed.length
+      };
+      if (changed.length > 0 || result.outcome.configuration.published || result.malformed.length > 0) {
+        log2.info("terminal sync applied", fields);
+      }
+    } else if (result.kind === "refused") {
+      log2.warn?.("terminal sync refused", {
+        code: result.code,
+        ...result.detail ? { detail: result.detail } : {}
+      });
+    } else {
+      log2.warn?.("terminal sync: producer unreachable", { detail: result.detail, url: config.url });
+    }
+    if (!stopped) timer = setTimeout(() => void tick(), config.intervalSeconds * 1e3);
+  };
+  void tick();
+  return () => {
+    stopped = true;
+    if (timer !== void 0) clearTimeout(timer);
+  };
+}
+
 // src/bin/hub-agent.ts
 var log = createLogger(SERVICE_NAME);
 async function expectedMigrations() {
@@ -14784,18 +15875,38 @@ async function main() {
     hubDeviceId: composition.identity.hubDeviceId,
     storeLocationId: composition.identity.storeLocationId
   });
+  const syncConfig = terminalSyncConfigFromEnv();
+  let stopSync;
+  if ("disabled" in syncConfig) {
+    log.info("terminal sync not started", { reason: syncConfig.disabled });
+  } else {
+    stopSync = startTerminalSyncLoop({
+      pool,
+      config: syncConfig.config,
+      log: {
+        info: (message, fields) => log.info(message, fields ?? {}),
+        warn: (message, fields) => log.warn(message, fields ?? {})
+      }
+    });
+    log.info("terminal sync started", {
+      url: syncConfig.config.url,
+      intervalSeconds: syncConfig.config.intervalSeconds,
+      trust: syncConfig.config.trustPath
+    });
+  }
   const shutdown = (signal) => {
     log.info("Store Hub is stopping", { signal });
+    stopSync?.();
     void listener.close().catch(() => void 0).then(() => pool?.end().catch(() => void 0)).then(() => process.exit(0));
   };
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT", () => shutdown("SIGINT"));
 }
 async function publishDevelopmentConfigurationCommand(path) {
-  const { readFileSync: readFileSync4 } = await import("node:fs");
+  const { readFileSync: readFileSync5 } = await import("node:fs");
   const { publishDevelopmentConfiguration: publishDevelopmentConfiguration2 } = await Promise.resolve().then(() => (init_dev_configuration(), dev_configuration_exports));
   const environment = process.env.KITLUY_ENVIRONMENT ?? "unknown";
-  const delivery = JSON.parse(readFileSync4(path, "utf8"));
+  const delivery = JSON.parse(readFileSync5(path, "utf8"));
   const required = ["terminalDeviceId", "tenantId", "digitalStoreId", "storeLocationId"];
   for (const field of required) {
     if (typeof delivery[field] !== "string" || delivery[field] === "") {
@@ -14866,8 +15977,45 @@ async function resetTerminalPinCommand(args) {
     await pool.end().catch(() => void 0);
   }
 }
+async function syncTerminalsCommand() {
+  const syncConfig = terminalSyncConfigFromEnv();
+  if ("disabled" in syncConfig) throw new Error(syncConfig.disabled);
+  const pool = createHubPool();
+  try {
+    const result = await runTerminalSyncOnce({
+      pool,
+      config: syncConfig.config,
+      log: {
+        info: (message, fields) => log.info(message, fields ?? {}),
+        warn: (message, fields) => log.warn(message, fields ?? {})
+      }
+    });
+    if (result.kind !== "applied") {
+      throw new Error(
+        `${result.kind === "refused" ? result.code : "PRODUCER_UNREACHABLE"}: ${result.detail ?? ""}`
+      );
+    }
+    log.info("terminal sync applied", {
+      hub: result.hubAssetTag,
+      terminals: result.outcome.terminals.map(
+        (t) => `${t.terminalName}:${t.action}${t.detail ? ` (${t.detail})` : ""}`
+      ),
+      configuration: result.outcome.configuration.published ? `v${result.outcome.configuration.snapshotVersion} (${String(result.outcome.configuration.grantsWritten)} grants; ${result.outcome.configuration.sections.join("+")}; because ${result.outcome.configuration.because.join(",")})` : result.outcome.configuration.reason,
+      malformed: result.malformed
+    });
+  } finally {
+    await pool.end().catch(() => void 0);
+  }
+}
 var subcommand = process.argv[2];
-if (subcommand === "reset-terminal-pin") {
+if (subcommand === "sync-terminals") {
+  syncTerminalsCommand().catch((error) => {
+    log.error("terminal sync did NOT apply", {
+      error: error instanceof Error ? error.message : String(error)
+    });
+    process.exit(1);
+  });
+} else if (subcommand === "reset-terminal-pin") {
   resetTerminalPinCommand(process.argv.slice(3)).catch((error) => {
     log.error("Terminal PIN reset was REFUSED", {
       error: error instanceof Error ? error.message : String(error)
