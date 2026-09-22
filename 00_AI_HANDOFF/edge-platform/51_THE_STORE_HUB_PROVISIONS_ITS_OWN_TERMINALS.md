@@ -45,6 +45,20 @@ Fixed in `c2fc0d5`: the Hub builder gains `--release-source` and bakes the PUBLI
 
 ## 4. Open
 
+**Hub image read-back (2026-09-22 15:16, worktree `wt-pin-image` at `6b986a8`) — IMAGE VERIFIED, not boot-tested.** `deploy-v2.7.0/kitluy-storehub-os-arm64.img.zst` sha256 `8fc5b32dbc3d69fd68c9f9b4673612a87cc5a2a45f6456576fd3c46689b0e728` (660 410 706 B, 630 MiB); `.img.sparse.zst` `bc4aa54eec08e08620de267a05f5aac4db70a35e942b8bf32f008b1ff3a4bcc0`; raw `.img` `d41d9c8db535de9f23fe9f3fe68e6aab40cda516cb1ee8ea1d6aa21e17a7881f` — all equal to `kitluy-store-hub-dev-manifest.json`. Overlay **138/138** (124 files + 14 links) against the commit; the first read-back showed 3 differing files (the build's own packaging step had regenerated them), which is what the overlay-refresh commit `732e860`/`6b986a8` records — the image now matches a commit exactly.
+
+Read out of the final erofs with the builder's `dump.erofs`:
+
+| In the image | Value |
+| --- | --- |
+| `/etc/kitluy/trust/release-signing.json` | keyId `bfccb44e064bf824…`, purpose `release_signing`, environment `development`, `productionEligible false`, no private-key block |
+| `/etc/kitluy/release.env` | `KITLUY_RELEASE_SOURCE=http://172.16.21.17:8791` |
+| `/etc/kitluy/hub.env` | `HUB_SYNC_URL=http://172.16.21.17:8792`, `HUB_SYNC_TRUST_PATH=/etc/kitluy/hub-sync-trust.json`, `HUB_SYNC_INTERVAL_SECONDS=60` |
+| `/etc/kitluy/hub-sync-trust.json` | kind `kitluy.hub-sync-trust-key.v1`, purpose `transport_signing`, environment `development` |
+| `/usr/lib/kitluy/lib/hub-agent/main.mjs` | terminal-sync present (**7** markers) — no hot-deploy needed |
+
+Suites: rpi-image-gen 22/0/1, build-gates 34/0, environment-gating 19/0, systemd-runtime 183/0, storage-posture 33/0, image-contents 62/0/0 (including the new §5c), secret+binding scan 17/0.
+
 - **Hub image rebuilt 2026-09-22** from `19dbb3c` with `--hub-sync-url http://172.16.21.17:8792`, `--release-source http://172.16.21.17:8791` and the dev PKI: hub-sync is baked (the agent bundle carries terminal-sync natively, 775 730 B — byte-identical in size to the hot-deploy proven on hardware) and the release anchor is baked, so this is intended to be the LAST Hub reflash. Read-back below once verified. **Flashing it wipes `/persistent` — the Store Hub database (pairing state, terminal records, Store data). The owner decides when, and the three terminals re-pair afterwards.**
 - **Until it is flashed, do not reboot the Store Hub** without telling the session: the `/run` drop-in disappears and terminal auto-provisioning stops silently. Re-applying it takes seconds.
 - **KLREC-2026-09-19-ASSIGNMENT-GENERATION-SEMANTICS-001 (recorded, not resolved):** `hub/authorization.ts` (command layer) requires `terminal_device.assignment_generation === hub_assignment.assignment_generation`, treating the two as one Store-wide counter; the cloud keeps a generation PER DEVICE (Hub 5, terminals 1 and 4) and the pairing/eligibility paths keep them apart. With the Hub now projected at its true generation, the command layer would refuse a terminal whose own generation differs. Nothing in the T1 intake path uses that check today (Booking Drafts and customers go through `t1-intake.ts`); the WS-12 command pipeline will hit it. Owner/architecture decision needed before Booking lines land.
