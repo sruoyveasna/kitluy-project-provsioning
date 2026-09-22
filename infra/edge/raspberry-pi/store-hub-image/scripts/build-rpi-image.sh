@@ -60,6 +60,11 @@ Usage: build-rpi-image.sh --profile <store-hub> [options]
   --enrollment-url <url>  bake the fleet enrollment endpoint into the image,
                           e.g. http://172.16.21.17:8787 . Without it the card
                           boots and reports that no endpoint is configured.
+  --release-source <url>  bake the release service the Hub's update agent polls,
+                          so a Hub change can arrive as a governed release
+                          instead of a reflash (a DEFAULT; the device may
+                          override it at /persistent/shared/kitluy/
+                          release-source.env)
   --hub-sync-url <url>    bake the development hub-sync producer the Hub pulls
                           its terminal projections from, e.g.
                           http://172.16.21.17:8792 (HUB-TERMINAL-SYNC-001).
@@ -102,6 +107,7 @@ while [[ $# -gt 0 ]]; do
     # not serve it, and deriving one address from another is how a device ends
     # up talking to whatever answers.
     --hub-sync-url)    HUB_SYNC_URL="${2:-}"; shift 2 ;;
+    --release-source)  RELEASE_SOURCE="${2:-}"; shift 2 ;;
     --allow-unconfigured-image) ALLOW_UNCONFIGURED="yes"; shift ;;
     # A stable hardware profile KEY (never a UUID) so the image stays generic.
     --hardware-profile-key) HARDWARE_PROFILE_KEY="${2:-}"; shift 2 ;;
@@ -218,6 +224,7 @@ mkdir -p "$BUILD_DIR"
 RIG_OVERRIDES=()
 ENROLLMENT_URL="${ENROLLMENT_URL:-${KITLUY_ENROLLMENT_BASE_URL:-}}"
 HUB_SYNC_URL="${HUB_SYNC_URL:-${KITLUY_HUB_SYNC_URL:-}}"
+RELEASE_SOURCE="${RELEASE_SOURCE:-${KITLUY_RELEASE_SOURCE:-}}"
 REGISTRATION_URL="${REGISTRATION_URL:-${KITLUY_REGISTRATION_URL:-}}"
 ALLOW_UNCONFIGURED="${ALLOW_UNCONFIGURED:-no}"
 HARDWARE_PROFILE_KEY="${HARDWARE_PROFILE_KEY:-${KITLUY_HARDWARE_PROFILE_KEY:-}}"
@@ -435,6 +442,39 @@ fi
 # The record is compacted to one line because rpi-image-gen refuses an override
 # containing a newline; the JSON is identical. ABSENT IS SAFE: with either one
 # missing the sync says so once at start and does nothing.
+# ---------------------------------------------------------------------------
+# THE RELEASE TRUST ANCHOR — why a Store Hub needs one as much as a Terminal.
+# ---------------------------------------------------------------------------
+# This image has always shipped the update agent and never given it anything to
+# trust, so on the owner's Hub it woke every five minutes and refused to look at
+# any payload ("no public release trust anchor in /etc/kitluy/trust"). The price
+# was a reflash for every Hub change — and a Hub reflash wipes /persistent, the
+# Store's own database. With the anchor, a Hub fix travels the same governed
+# path as a Terminal's: signed release, verified digest, A/B install.
+if [[ -n "${KITLUY_DEV_PKI_DIR:-}" && -f "${KITLUY_DEV_PKI_DIR}/dev-release-signing.json" ]]; then
+  # Compacted to one line: rpi-image-gen refuses an override containing a
+  # newline, and the record on disk is pretty-printed. Same JSON, less space.
+  RELEASE_TRUST_RECORD="$(node -e 'process.stdout.write(JSON.stringify(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))))' "${KITLUY_DEV_PKI_DIR}/dev-release-signing.json")"
+  if grep -q "PRIVATE KEY" <<<"$RELEASE_TRUST_RECORD"; then
+    die "${KITLUY_DEV_PKI_DIR}/dev-release-signing.json contains a PRIVATE KEY block. A device carries public material only."
+  fi
+  RIG_OVERRIDES+=("IGconf_kitluy_release_trust_record=${RELEASE_TRUST_RECORD}")
+  RELEASE_KEY_ID="$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).keyId)' "${KITLUY_DEV_PKI_DIR}/dev-release-signing.json")"
+  log "release trust anchor baked: ${RELEASE_KEY_ID:0:16}... (release_signing, development)"
+else
+  warn "no release trust anchor: this Hub REFUSES every release payload, so every"
+  warn "  Hub change costs a reflash — and a reflash wipes the Store database."
+  warn "  Run: pnpm pki:bootstrap-dev --dir \$KITLUY_DEV_PKI_DIR --release-key-only"
+fi
+
+if [[ -n "$RELEASE_SOURCE" ]]; then
+  RIG_OVERRIDES+=("IGconf_kitluy_release_source=${RELEASE_SOURCE}")
+  log "release source default: ${RELEASE_SOURCE} (overridable on the device)"
+else
+  warn "no --release-source: the image bakes an empty default. Set one on the"
+  warn "  device at /persistent/shared/kitluy/release-source.env, or rebuild."
+fi
+
 if [[ -n "$HUB_SYNC_URL" ]]; then
   RIG_OVERRIDES+=("IGconf_kitluy_hub_sync_url=${HUB_SYNC_URL}")
   log "hub-sync producer baked: ${HUB_SYNC_URL}"

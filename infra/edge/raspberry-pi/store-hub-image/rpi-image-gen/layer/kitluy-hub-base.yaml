@@ -304,6 +304,51 @@ mmdebstrap:
         # development PKI, which is every CI runner.
         echo "kitluy: no development root pin supplied; the Hub will refuse to adopt a certificate" >&2
       fi
+
+    - |
+      # =======================================================================
+      # THE RELEASE TRUST ANCHOR AND THE RELEASE SOURCE — WHY A HUB NEEDS THEM
+      # =======================================================================
+      # This image has shipped `kitluy-update-agent.service` and its code since
+      # it existed, and the builder never gave it anything to trust. The agent
+      # therefore woke every five minutes on the owner's Store Hub and said
+      # "no public release trust anchor in /etc/kitluy/trust; refusing to
+      # consider any payload" — for days (hardware, 2026-09-22).
+      #
+      # The cost of that gap is not a missing feature, it is a REFLASH PER
+      # CHANGE. HUB-TERMINAL-SYNC-001 had to be hot-deployed into /run, which
+      # vanishes at reboot; the only durable alternative was writing a new card,
+      # and a new card wipes /persistent — the Store Hub's own database. A Hub
+      # that can take a governed release takes the fix instead, over the LAN,
+      # with its database untouched.
+      #
+      # Same material and same rules as the Terminal image: the PUBLIC half of
+      # the development release-signing key, and a source address that is a
+      # DEFAULT the device may override. ABSENT IS SAFE and deliberately not
+      # fatal — the agent refuses payloads without an anchor, so an image built
+      # on a machine with no development PKI (every CI runner) is inert here
+      # rather than dangerous.
+      mkdir -p "$1/etc/kitluy/trust"
+      chmod 0755 "$1/etc/kitluy/trust"
+      if [ -n "${IGconf_kitluy_release_trust_record:-}" ]; then
+        printf '%s\n' "${IGconf_kitluy_release_trust_record}" \
+          > "$1/etc/kitluy/trust/release-signing.json"
+        chmod 0644 "$1/etc/kitluy/trust/release-signing.json"
+        if grep -q "PRIVATE KEY" "$1/etc/kitluy/trust/release-signing.json"; then
+          echo "REFUSED: the release trust record contains a PRIVATE KEY block" >&2
+          exit 1
+        fi
+      else
+        echo "kitluy: no release trust anchor supplied; the update agent will refuse every payload" >&2
+      fi
+      if [ -n "${IGconf_kitluy_release_source:-}" ]; then
+        printf 'KITLUY_RELEASE_SOURCE=%s\n' "${IGconf_kitluy_release_source}" \
+          > "$1/etc/kitluy/release.env"
+      else
+        printf 'KITLUY_RELEASE_SOURCE=\n' > "$1/etc/kitluy/release.env"
+        echo "kitluy: no release source baked; set one at runtime in /persistent/shared/kitluy/release-source.env" >&2
+      fi
+      chmod 0644 "$1/etc/kitluy/release.env"
     # =========================================================================
     # THE APPLIANCE CLOCK READS Asia/Phnom_Penh, AND NOBODY IS ASKED.
     # =========================================================================

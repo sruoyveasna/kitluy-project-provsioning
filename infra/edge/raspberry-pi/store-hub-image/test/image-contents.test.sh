@@ -303,6 +303,58 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 5c. The Hub can RECEIVE A FIX WITHOUT A REFLASH
+# ---------------------------------------------------------------------------
+# This image has shipped kitluy-update-agent.service and its code since it
+# existed, and the builder gave it nothing to trust. On the owner's Store Hub
+# the agent therefore woke every five minutes for days and said "no public
+# release trust anchor in /etc/kitluy/trust; refusing to consider any payload"
+# (hardware, 2026-09-22) — which is why HUB-TERMINAL-SYNC-001 had to be
+# hot-deployed into /run, where it dies at the next reboot.
+#
+# The price of the gap is a REFLASH PER HUB CHANGE, and a Hub reflash wipes
+# /persistent — the Store's own database. An agent that ships without an anchor
+# is not a small omission; it is the difference between a fix that travels over
+# the LAN and one that costs the Store its local data. So: if the unit is in the
+# image, the anchor must be too.
+UPDATE_UNIT="${ROOTFS}/etc/systemd/system/kitluy-update-agent.service"
+RELEASE_ANCHOR="${ROOTFS}/etc/kitluy/trust/release-signing.json"
+if [[ -f "$UPDATE_UNIT" ]]; then
+  if [[ -f "$RELEASE_ANCHOR" ]]; then
+    if grep -q "PRIVATE KEY" "$RELEASE_ANCHOR"; then
+      bad "the release trust anchor is public material only" "a PRIVATE KEY block is in the image"
+    elif node -e '
+      const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+      const ok = r.purpose === "release_signing" && r.environment === "development"
+        && r.algorithm === "ed25519" && typeof r.publicKeyPem === "string"
+        && r.productionEligible === false;
+      process.exit(ok ? 0 : 1);
+    ' "$RELEASE_ANCHOR" 2>/dev/null; then
+      ok "the Hub carries a release trust anchor, so a fix can arrive without a reflash"
+    else
+      bad "the Hub carries a release trust anchor, so a fix can arrive without a reflash" \
+          "wrong purpose, environment, algorithm, or productionEligible is not false"
+    fi
+  else
+    skip "the Hub carries a release trust anchor" \
+         "no dev PKI at build time: this Hub refuses every payload and every change costs a reflash"
+  fi
+  RELEASE_ENV="${ROOTFS}/etc/kitluy/release.env"
+  if [[ -f "$RELEASE_ENV" ]]; then
+    if grep -qE '^KITLUY_RELEASE_SOURCE=https?://' "$RELEASE_ENV"; then
+      ok "the Hub knows where to poll for releases ($(grep -E '^KITLUY_RELEASE_SOURCE=' "$RELEASE_ENV" | cut -d= -f2-))"
+    else
+      skip "the Hub knows where to poll for releases" \
+           "built without --release-source: set one at /persistent/shared/kitluy/release-source.env"
+    fi
+  else
+    bad "the Hub carries /etc/kitluy/release.env" "the layer did not write it"
+  fi
+else
+  skip "the Hub carries a release trust anchor" "this image ships no update agent"
+fi
+
+# ---------------------------------------------------------------------------
 # 6. The built image boots without an ordering cycle
 # ---------------------------------------------------------------------------
 # Hardware 2026-09-16 (handoff 46 §5): var-lib-kitluy-hub.mount was implicitly
