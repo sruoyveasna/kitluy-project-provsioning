@@ -207,8 +207,12 @@ export async function executeHubCommand(
         if (reservation.outcome !== "accepted") {
           // A retry after a lost response, or a genuinely concurrent duplicate.
           // The ORIGINAL committed result is returned and NOTHING new is
-          // written (offline §19 rows 1-2; §12 acceptance test 2).
-          return storedResult(definition, request, reservation, requestId);
+          // written (offline §19 rows 1-2; §12 acceptance test 2). The stored
+          // `result_json` rides along so a terminal that lost the first answer
+          // learns the SAME booking number, receipt and change — not just that
+          // "something" was replayed.
+          const stored = await loadStoredResultJson(client, request.idempotencyKey);
+          return storedResult(definition, request, reservation, requestId, stored);
         }
 
         const recorder = new HubEventRecorder(client, {
@@ -218,6 +222,7 @@ export async function executeHubCommand(
           hubDeviceId: auth.hubDeviceId,
           originDeviceId: request.device.terminalDeviceId,
           actorId: request.device.actorId,
+          actorType: auth.actorType === "terminal_device" ? "device" : "user",
           assignmentGeneration: auth.assignmentGeneration,
           businessDate: request.businessDate,
           correlationId,
@@ -257,7 +262,7 @@ export async function executeHubCommand(
           digitalStoreId: request.device.digitalStoreId,
           locationId: request.device.locationId,
           eventCode: definition.auditEvent,
-          actorType: "staff",
+          actorType: auth.actorType,
           actorId: request.device.actorId,
           requesterId: request.approval?.request.requestedBy ?? null,
           approverId: request.approval?.decision.approvedBy ?? null,
@@ -331,6 +336,19 @@ export async function executeHubCommand(
   }
 }
 
+/** The committed command's own `result_json`, for a duplicate answer. */
+async function loadStoredResultJson(
+  client: HubClient,
+  idempotencyKey: string,
+): Promise<Readonly<Record<string, unknown>> | null> {
+  const found = await client.query<{ result_json: Record<string, unknown>; commit_status: string }>(
+    `select result_json, commit_status from edge_sync.command_result where idempotency_key = $1`,
+    [idempotencyKey],
+  );
+  const row = found.rows[0];
+  return row !== undefined && row.commit_status === "committed" ? row.result_json : null;
+}
+
 function storedResult(
   definition: HubCommandDefinition,
   request: HubCommandRequest,
@@ -343,6 +361,7 @@ function storedResult(
     outcome: string;
   },
   requestId: string,
+  stored: Readonly<Record<string, unknown>> | null = null,
 ): HubCommandResult {
   return {
     outcome: reservation.outcome === "in_progress" ? "in_progress" : "duplicate",
@@ -356,7 +375,7 @@ function storedResult(
     hubSequenceLast: reservation.hub_sequence_last,
     syncState: "committed_locally",
     wireSyncState: syncRepo.WS09_WIRE_SYNC_STATE,
-    result: { replayed: true },
+    result: { ...(stored ?? {}), replayed: true },
   };
 }
 

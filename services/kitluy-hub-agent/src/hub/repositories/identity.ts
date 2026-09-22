@@ -109,6 +109,8 @@ export interface TerminalSessionRow {
   closed_at: Date | null;
   session_generation: number;
   status: string;
+  /** `staff`, or `terminal_pin` when the Terminal PIN opened it (0043: actor = the terminal). */
+  credential_kind: string;
 }
 
 export async function findTerminalSession(
@@ -118,7 +120,7 @@ export async function findTerminalSession(
   const result = await client.query<TerminalSessionRow>(
     `select id, tenant_id, digital_store_id, location_id, terminal_device_id,
             actor_id, profile_code, opened_at, expires_at, closed_at,
-            session_generation, status
+            session_generation, status, credential_kind
        from edge_identity.terminal_session where id = $1`,
     [sessionId],
   );

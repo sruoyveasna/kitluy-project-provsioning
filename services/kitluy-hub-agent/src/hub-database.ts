@@ -407,6 +407,15 @@ export const HUB_MIGRATION_ORDER = [
   // PIN's Argon2id verifier and durable attempt state, and the credential kind
   // of a terminal session.
   "0043_terminal_pin.sql",
+  // TERMINAL-APPLICATION-ASSIGNMENT-001 requirement 3 (KLREQ-VERTICAL-ENVELOPE-001):
+  // the Digital Store's EXPLICIT primary vertical on the Hub assignment, signed
+  // into every terminal configuration delivery instead of being derived from a
+  // terminal-profile prefix. The file shipped with `1bd4a50` without this entry,
+  // so the canonical order no longer matched the directory; registered here.
+  "0044_hub_assignment_primary_vertical.sql",
+  // T1-REAL-OPERATIONS-001 slice 2 (KLD-2026-09-19-T1-REAL-OPERATIONS-001
+  // decision 1): a converted Booking Draft names the Booking it became.
+  "0045_booking_draft_conversion.sql",
 ] as const;
 
 /**

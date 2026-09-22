@@ -204,6 +204,8 @@ export interface RuntimeEligibilityWire {
   readonly containmentState: string;
   readonly hubReplacementState: string;
   readonly requiredConfigurationVersion: number | null;
+  /** The Hub's expected next command sequence for this terminal (slice 2); absent on older Hubs. */
+  readonly nextClientSequence?: string;
   readonly authorityTime: string;
 }
 

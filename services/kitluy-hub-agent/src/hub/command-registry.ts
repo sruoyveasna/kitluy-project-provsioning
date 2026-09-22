@@ -217,6 +217,13 @@ const DEFINITIONS: readonly HubCommandDefinition[] = [
     auditEvent: "laundry_booking.container_assigned",
   }),
   fromRoute("laundry.booking.confirm_intake", "laundry-booking-confirm-intake", "booking"),
+  // T1-REAL-OPERATIONS-001 slice 2 (KLD-2026-09-19-T1-REAL-OPERATIONS-001
+  // decision 1): the SAME approved route, served with `{id}` = the WS-12-T002
+  // Booking Draft. One command converts the draft, prices and writes the
+  // lines, records the cash tender, issues the receipt record and queues its
+  // print. Route metadata (permission, profiles, risk class, audit event) is
+  // read from the registry exactly as for confirm_intake — nothing restated.
+  fromRoute("laundry.booking.confirm_from_draft", "laundry-booking-confirm-intake", "booking"),
 
   // ------------------------------------------------------------ Ready (T3)
   fromRoute("laundry.ready.open_session", "laundry-ready-session-open", "ready_session"),

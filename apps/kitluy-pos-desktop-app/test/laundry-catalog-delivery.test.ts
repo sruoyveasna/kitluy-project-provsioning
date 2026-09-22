@@ -226,6 +226,9 @@ describe("the face's catalog answer", () => {
     expect(answer.families[0]?.nameKm).toBe("បោកបត់");
     expect(answer.perWeight).toEqual([
       {
+        // The delivered service id travels with the offering so the Hub can
+        // price the weighed load by it (slice 2).
+        serviceId: expect.stringMatching(/^00000000-0000-4000-8000-0000000010[0-9]{2}$/u) as string,
         serviceCode: "WF-KG",
         name: "Wash & Fold (per kg)",
         rateKhr: 4000,

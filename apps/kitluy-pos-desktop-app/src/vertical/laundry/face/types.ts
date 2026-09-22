@@ -46,12 +46,15 @@ export interface CartItem {
   name: string;
   icon: string;
   /** Unit price in KHR (integer; KHR has no minor unit) — the delivered
-   * effective price. Display until the Hub prices the Booking (slice 2). */
+   * effective price. A PREVIEW: the Booking price is the Store Hub's quote
+   * (slice 2), computed by the same engine over the same delivered sections. */
   price: number;
   /** Pieces for a per-piece line; whole kilograms for the per-kg line. */
   qty: number;
   svc: ServiceType;
   stain?: boolean;
+  /** The delivered `service_id` the Hub prices this line by. */
+  serviceId?: string;
   serviceCode?: string;
   familyCode?: string;
   familyName?: string;
@@ -90,6 +93,7 @@ export interface LaundryItemCategory {
 
 /** The per-kg service the weight panel prices against. */
 export interface WfKgOffering {
+  serviceId: string;
   serviceCode: string;
   name: string;
   /** Rate per kilogram in KHR. */

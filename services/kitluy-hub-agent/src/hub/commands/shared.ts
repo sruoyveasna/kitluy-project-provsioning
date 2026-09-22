@@ -68,9 +68,25 @@ export async function loadStoreMoneyContract(
   };
 }
 
-/** Refuse rather than guess a display code (Appendix B). */
+/**
+ * Refuse rather than guess a display code (Appendix B).
+ *
+ * SHAPE (KLREC-2026-09-21-LOCATION-CODE-SHAPE-001, recorded not silently
+ * resolved): Appendix B bounds the code at 3-8 alphanumerics, while the
+ * owner-approved money contract (KLD-2026-09-19-T1-REAL-OPERATIONS-001
+ * decision 3) names `store_locations.location_code` — `DEMO-PP-01` on the
+ * development Store — as THE code in `KLB-{LOCATION_CODE}-{YYMMDD}-{SEQ}`.
+ * The later, more specific owner decision wins for the code's SOURCE; this
+ * check accepts that cloud shape (uppercase alphanumerics and hyphens, 3-16,
+ * never starting or ending on a hyphen) and still refuses anything else.
+ * `edge_core.format_display_number` upper-cases and never re-validates.
+ */
 export function requireLocationCode(value: unknown): string {
-  if (typeof value !== "string" || !/^[A-Za-z0-9]{3,8}$/.test(value)) {
+  if (
+    typeof value !== "string" ||
+    !/^[A-Za-z0-9](?:[A-Za-z0-9-]{1,14})?[A-Za-z0-9]$/.test(value) ||
+    value.length < 3
+  ) {
     throw new HubCommandError("EDGE_REQUIRED_VALUE_MISSING", REQUIRED_LOCATION_CODE, {
       field: "location_code",
     });

@@ -58,8 +58,10 @@ export const BRIDGE_STATUS_PATH = "/bridge/v1/status";
 export const MAX_BRIDGE_REQUEST_BYTES = 64 * 1024;
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 /**
- * THE CLOSED LIST. The runtime bootstrap reads, the Terminal PIN, and the T1
- * intake routes (WS-12-T001 / T002) — nothing else.
+ * THE CLOSED LIST. The runtime bootstrap reads, the Terminal PIN, the T1
+ * intake routes (WS-12-T001 / T002) and the T1 Store operations of
+ * T1-REAL-OPERATIONS-001 slice 2 (quote, confirm-intake, recent Bookings) —
+ * nothing else.
  *
  * The STAFF session routes are gone from it on purpose
  * (KLD-2026-09-17-TERMINAL-PIN-DEVICE-CREDENTIAL-001): a Pi Terminal has no
@@ -111,6 +113,24 @@ export const BRIDGE_ROUTES = [
         name: "drafts.cancel",
         method: "POST",
         pattern: new RegExp(`^/edge/v1/laundry/bookings/drafts/${UUID}/cancel$`, "u"),
+    },
+    // T1-REAL-OPERATIONS-001 slice 2 (KLD-2026-09-19 decision 1): the Hub
+    // prices a draft's lines; the approved confirm-intake route with {id} = the
+    // draft; today's Bookings for the Orders view.
+    {
+        name: "drafts.quote",
+        method: "POST",
+        pattern: new RegExp(`^/edge/v1/laundry/bookings/drafts/${UUID}/quote$`, "u"),
+    },
+    {
+        name: "bookings.confirm",
+        method: "POST",
+        pattern: new RegExp(`^/edge/v1/laundry/bookings/${UUID}/confirm-intake$`, "u"),
+    },
+    {
+        name: "bookings.recent",
+        method: "GET",
+        pattern: /^\/edge\/v1\/laundry\/bookings\/recent$/u,
     },
 ];
 /** Request headers the Hub routes read. Every other header is dropped. */

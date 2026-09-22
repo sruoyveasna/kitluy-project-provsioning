@@ -1,7 +1,8 @@
 /**
- * T1 intake IPC boundary — WS-12-T002-P02 §5.
+ * T1 intake IPC boundary — WS-12-T002-P02 §5, extended by
+ * T1-REAL-OPERATIONS-001 slice 2 (quote, confirm-intake, recent Bookings).
  *
- * Exactly eight named channels, each mapping to ONE IntakeOperations
+ * Exactly eleven named channels, each mapping to ONE IntakeOperations
  * method. The renderer supplies operation-specific PUBLIC input only —
  * every request is validated HERE in the main process before any adapter
  * runs, and there is structurally no way to: name a route or URL, choose
@@ -14,7 +15,7 @@
  * `invalid_input` result — a compromised renderer learns nothing and
  * changes nothing.
  */
-import type { IntakeOperations, IntakeResult } from "../src/intake/ports.js";
+import type { IntakeLineInput, IntakeOperations, IntakeResult } from "../src/intake/ports.js";
 
 export const INTAKE_CHANNELS = {
   searchCustomers: "kitluy:t1:intake:search-customers",
@@ -25,7 +26,16 @@ export const INTAKE_CHANNELS = {
   readDraft: "kitluy:t1:intake:read-draft",
   updateDraft: "kitluy:t1:intake:update-draft",
   cancelDraft: "kitluy:t1:intake:cancel-draft",
+  // T1-REAL-OPERATIONS-001 slice 2
+  quote: "kitluy:t1:intake:quote",
+  confirmIntake: "kitluy:t1:intake:confirm-intake",
+  listRecentBookings: "kitluy:t1:intake:list-recent-bookings",
 } as const;
+
+/** Route-level bound mirrored from the Hub (MAX_INTAKE_LINES). */
+export const MAX_INTAKE_LINES = 200;
+/** Whole minor units as a decimal string (§1) — never a float across IPC. */
+const MONEY_STRING = /^[0-9]{1,18}$/u;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const LOCALES = new Set(["km-KH", "en-US"]);
@@ -244,6 +254,104 @@ export const INTAKE_VALIDATORS = {
     if (typeof reasonCode !== "string" || !CANCEL_REASONS.has(reasonCode)) return null;
     return { draftId, reasonCode };
   },
+  /** The cart lines: a service id and exactly one quantity kind, bounded. */
+  lines(value: unknown): readonly IntakeLineInput[] | null {
+    if (!Array.isArray(value) || value.length > MAX_INTAKE_LINES) return null;
+    const lines: IntakeLineInput[] = [];
+    for (const raw of value) {
+      const line = record(raw);
+      if (line === null || !onlyKeys(line, ["serviceId", "pieceCount", "weighedGrams"]))
+        return null;
+      const serviceId = line["serviceId"];
+      if (typeof serviceId !== "string" || !UUID.test(serviceId)) return null;
+      const pieceCount = line["pieceCount"];
+      const weighedGrams = line["weighedGrams"];
+      if ((pieceCount !== undefined) === (weighedGrams !== undefined)) return null;
+      if (pieceCount !== undefined) {
+        if (typeof pieceCount !== "number" || !Number.isInteger(pieceCount) || pieceCount < 1)
+          return null;
+        lines.push({ serviceId: serviceId.toLowerCase(), pieceCount });
+      } else {
+        if (typeof weighedGrams !== "number" || !Number.isInteger(weighedGrams) || weighedGrams < 1)
+          return null;
+        lines.push({ serviceId: serviceId.toLowerCase(), weighedGrams });
+      }
+    }
+    return lines;
+  },
+  quote(
+    value: unknown,
+  ): { draftId: string; lines: readonly IntakeLineInput[]; express: boolean } | null {
+    const body = record(value);
+    if (body === null || !onlyKeys(body, ["draftId", "lines", "express"])) return null;
+    const draftId = body["draftId"];
+    if (typeof draftId !== "string" || !UUID.test(draftId)) return null;
+    const lines = INTAKE_VALIDATORS.lines(body["lines"]);
+    if (lines === null) return null;
+    const express = body["express"] ?? false;
+    if (typeof express !== "boolean") return null;
+    return { draftId, lines, express };
+  },
+  confirmIntake(value: unknown): {
+    draftId: string;
+    expectedVersion: number;
+    lines: readonly IntakeLineInput[];
+    express: boolean;
+    displayedTotalMinor: string;
+    tender: { localMinor: string; usdCents: string };
+  } | null {
+    const body = record(value);
+    if (
+      body === null ||
+      !onlyKeys(body, [
+        "draftId",
+        "expectedVersion",
+        "lines",
+        "express",
+        "displayedTotalMinor",
+        "tender",
+      ])
+    )
+      return null;
+    const draftId = body["draftId"];
+    if (typeof draftId !== "string" || !UUID.test(draftId)) return null;
+    const expectedVersion = body["expectedVersion"];
+    if (
+      typeof expectedVersion !== "number" ||
+      !Number.isInteger(expectedVersion) ||
+      expectedVersion < 1
+    )
+      return null;
+    const lines = INTAKE_VALIDATORS.lines(body["lines"]);
+    if (lines === null || lines.length === 0) return null;
+    const express = body["express"] ?? false;
+    if (typeof express !== "boolean") return null;
+    const displayedTotalMinor = body["displayedTotalMinor"];
+    if (typeof displayedTotalMinor !== "string" || !MONEY_STRING.test(displayedTotalMinor))
+      return null;
+    const tender = record(body["tender"]);
+    if (tender === null || !onlyKeys(tender, ["localMinor", "usdCents"])) return null;
+    const localMinor = tender["localMinor"] ?? "0";
+    const usdCents = tender["usdCents"] ?? "0";
+    if (typeof localMinor !== "string" || !MONEY_STRING.test(localMinor)) return null;
+    if (typeof usdCents !== "string" || !MONEY_STRING.test(usdCents)) return null;
+    // Cash is the ONLY tender at intake (owner decision 2026-09-19); no type
+    // field crosses this boundary at all.
+    return {
+      draftId,
+      expectedVersion,
+      lines,
+      express,
+      displayedTotalMinor,
+      tender: { localMinor, usdCents },
+    };
+  },
+  listRecentBookings(value: unknown): Record<string, never> | null {
+    if (value === undefined || value === null) return {};
+    const body = record(value);
+    if (body === null || Object.keys(body).length > 0) return null;
+    return {};
+  },
 } as const;
 
 interface IpcMainLike {
@@ -251,7 +359,7 @@ interface IpcMainLike {
 }
 
 /**
- * Register the eight handlers. `getOperations` returns null until the
+ * Register the eleven handlers. `getOperations` returns null until the
  * bootstrap reached ready/offline_ready with a staff session — before
  * that, every intake request answers `unavailable` (fail closed).
  */
@@ -303,5 +411,20 @@ export function registerIntakeIpc(
     const input = INTAKE_VALIDATORS.cancelDraft(payload);
     if (input === null) return invalid;
     return (await getOperations()?.cancelDraft(input)) ?? unavailable;
+  });
+  ipc.handle(INTAKE_CHANNELS.quote, async (_event, payload) => {
+    const input = INTAKE_VALIDATORS.quote(payload);
+    if (input === null) return invalid;
+    return (await getOperations()?.quote(input)) ?? unavailable;
+  });
+  ipc.handle(INTAKE_CHANNELS.confirmIntake, async (_event, payload) => {
+    const input = INTAKE_VALIDATORS.confirmIntake(payload);
+    if (input === null) return invalid;
+    return (await getOperations()?.confirmIntake(input)) ?? unavailable;
+  });
+  ipc.handle(INTAKE_CHANNELS.listRecentBookings, async (_event, payload) => {
+    const input = INTAKE_VALIDATORS.listRecentBookings(payload);
+    if (input === null) return invalid;
+    return (await getOperations()?.listRecentBookings()) ?? unavailable;
   });
 }

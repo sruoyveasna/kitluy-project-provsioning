@@ -170,3 +170,36 @@ export const EDGE_T002_INTAKE_ROUTES = [
     permission: "laundry.bookings.create",
   },
 ] as const;
+
+// ---------------------------------------------------------------------------
+// T1 Store operations — T1-REAL-OPERATIONS-001 slice 2
+//
+// OWNER-APPROVED by KLD-2026-09-19-T1-REAL-OPERATIONS-001 decision 1: the
+// APPROVED route `EDGE_ROUTE_LAUNDRY_BOOKING_CONFIRM_INTAKE` is served with
+// `{id}` = the WS-12-T002 Booking Draft, in one Hub command that prices the
+// lines, converts the draft, records the cash tender and issues the receipt
+// record; a companion READ prices the draft's lines first ("quote", no write);
+// the Orders view reads today's Bookings. Held OUTSIDE `EDGE_ROUTES` like the
+// T002 surface so the Group 1 approved-route count stays exact. The draft
+// routes' permission (`laundry.bookings.create`) covers pricing the draft
+// toward a Booking; the read reuses `laundry.bookings.read`.
+// ---------------------------------------------------------------------------
+
+export const EDGE_ROUTE_BOOKING_DRAFT_QUOTE_TEMPLATE =
+  "/edge/v1/laundry/bookings/drafts/{draftId}/quote";
+export const EDGE_ROUTE_BOOKINGS_RECENT = "/edge/v1/laundry/bookings/recent";
+
+/** The slice-2 T1 Store-operation surface (decision 1). */
+export const EDGE_T1_STORE_OPERATION_ROUTES = [
+  {
+    method: "POST",
+    path: EDGE_ROUTE_BOOKING_DRAFT_QUOTE_TEMPLATE,
+    permission: "laundry.bookings.create",
+  },
+  {
+    method: "POST",
+    path: EDGE_ROUTE_LAUNDRY_BOOKING_CONFIRM_INTAKE,
+    permission: "laundry.bookings.create",
+  },
+  { method: "GET", path: EDGE_ROUTE_BOOKINGS_RECENT, permission: "laundry.bookings.read" },
+] as const;

@@ -17,6 +17,8 @@ export * from "./custody-events.js";
 export * from "./pricing.js";
 export * from "./booking-lifecycle.js";
 export * from "./production-state-machine.js";
+export * from "./catalog-section.js";
+export * from "./intake-quote.js";
 
 /**
  * The former PRODUCTION_STAGE_VOCABULARY placeholder is replaced by the

@@ -39,7 +39,11 @@ import type { T1BootstrapReport } from "../src/bootstrap/states.js";
 import type { IntakeOperations } from "../src/intake/ports.js";
 import { bridgeCall, readBridgeStatus } from "./edge-bridge-client.js";
 import { createEdgeOperationsSession, type HubCall } from "./edge-operations-session.js";
-import { createIntakeOperationsWithCall } from "./t1-intake-client.js";
+import {
+  createHubSeededCommandSequence,
+  createIntakeOperationsWithCall,
+  type CommandSequence,
+} from "./t1-intake-client.js";
 import {
   createTerminalPinClient,
   type TerminalPinClient,
@@ -157,6 +161,12 @@ export class PiTerminalRuntime {
   #pinPosture: T1BootstrapReport["pin"] | undefined = undefined;
   #listeners = new Set<(report: T1BootstrapReport) => void>();
   #running: Promise<T1BootstrapReport> | null = null;
+  /**
+   * The terminal's Hub-command keys (T1-REAL-OPERATIONS-001 slice 2): seeded
+   * from the Hub's eligibility answer (`nextClientSequence`), advanced per
+   * accepted command, re-seeded on a sequence refusal. In memory only.
+   */
+  readonly #commandSequence: CommandSequence;
 
   constructor(options: PiTerminalRuntimeOptions) {
     this.#options = options;
@@ -164,6 +174,16 @@ export class PiTerminalRuntime {
     this.#hub = createEdgeOperationsSession(this.#call);
     this.#pin = createTerminalPinClient(this.#call);
     this.#monotonic = options.monotonicNow ?? (() => performance.now());
+    this.#commandSequence = createHubSeededCommandSequence({
+      terminalDeviceId: () => this.#report?.staff?.actorId ?? null,
+      readNextClientSequence: async () => {
+        // Hub truth for THIS terminal, read fresh — never a remembered value.
+        const answer = await this.#hub.fetchEligibility();
+        if (answer.outcome !== "eligible") return null;
+        const next = (answer.eligibility as { nextClientSequence?: unknown }).nextClientSequence;
+        return typeof next === "string" ? next : null;
+      },
+    });
   }
 
   get report(): T1BootstrapReport | null {
@@ -405,7 +425,11 @@ export class PiTerminalRuntime {
     const session = this.#session;
     if (report === null || session === null) return null;
     if (report.state !== "ready" && report.state !== "offline_ready") return null;
-    return createIntakeOperationsWithCall({ call: this.#call, sessionId: session.sessionId });
+    return createIntakeOperationsWithCall({
+      call: this.#call,
+      sessionId: session.sessionId,
+      commandSequence: this.#commandSequence,
+    });
   }
 
   /** The Hub's PIN answer, with the DEVICE's posture beside it (T1-FIRST-BOOT-PIN-001). */

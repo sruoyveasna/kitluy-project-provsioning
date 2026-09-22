@@ -3,7 +3,8 @@
  *
  * PROVENANCE: donor `T1POS.tsx` (kitluy-laundry-pos-desk-app@8b2f107). The
  * swipe-tabs, the T2 publisher and the six donor views are gone; `new_order`
- * is the one built experience and every other view renders `NotAvailable`.
+ * and, since slice 2, `orders` (today's Bookings from the Store Hub) are the
+ * built experiences; every other view renders `NotAvailable`.
  */
 import { useAppState } from "@face/app/useAppState";
 import { ToastBar } from "@face/components/common/ToastBar";
@@ -14,6 +15,7 @@ import { KIOSK } from "@face/styles/kiosk";
 import { LaundryTopBar, type TerminalFacts } from "./laundry-savor/LaundryTopBar";
 import { NewOrder } from "./new-order/NewOrder";
 import { NotAvailable } from "./NotAvailable";
+import { OrdersView } from "./orders/OrdersView";
 
 export const T1POS = ({ terminal }: { readonly terminal: TerminalFacts }) => {
   const { view, toast } = useAppState();
@@ -48,7 +50,13 @@ export const T1POS = ({ terminal }: { readonly terminal: TerminalFacts }) => {
                 : {}),
             }}
           >
-            {view === "new_order" ? <NewOrder /> : <NotAvailable view={view} />}
+            {view === "new_order" ? (
+              <NewOrder />
+            ) : view === "orders" ? (
+              <OrdersView />
+            ) : (
+              <NotAvailable view={view} />
+            )}
           </div>
         </main>
         <ToastBar message={toast} />

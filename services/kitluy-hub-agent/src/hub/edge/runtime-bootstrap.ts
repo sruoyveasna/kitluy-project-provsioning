@@ -165,6 +165,14 @@ export interface RuntimeEligibilityPayload {
   readonly containmentState: string;
   readonly hubReplacementState: string;
   readonly requiredConfigurationVersion: number | null;
+  /**
+   * The client sequence the Hub expects on this terminal's NEXT command
+   * (`terminal_device.last_client_sequence + 1`, offline contract §4 step 2),
+   * as a decimal string. The terminal mints `kl1.{terminal}.{sequence}` keys
+   * from Hub truth instead of a counter it could lose across a restart or a
+   * reflash (T1-REAL-OPERATIONS-001 slice 2).
+   */
+  readonly nextClientSequence: string;
   readonly authorityTime: string;
 }
 
@@ -178,6 +186,7 @@ interface TerminalRow extends Record<string, unknown> {
   readonly location_id: string;
   readonly assignment_generation: number;
   readonly lifecycle_status: string;
+  readonly last_client_sequence: string | number | bigint;
 }
 
 export async function readRuntimeEligibility(
@@ -285,7 +294,7 @@ function isBlockingContainment(directive: string): boolean {
   );
 }
 
-async function readBlockingContainment(
+export async function readBlockingContainment(
   client: HubClient,
   terminalDeviceId: string,
 ): Promise<string | null> {
@@ -404,7 +413,8 @@ export async function deriveEligibility(
 
   // Terminal scope and generation, from the projection the credential names.
   const terminal = await client.query<TerminalRow>(
-    `select tenant_id, digital_store_id, location_id, assignment_generation, lifecycle_status
+    `select tenant_id, digital_store_id, location_id, assignment_generation, lifecycle_status,
+            last_client_sequence::text as last_client_sequence
        from edge_identity.terminal_device
       where id = $1::uuid`,
     [terminalDeviceId],
@@ -565,6 +575,7 @@ export async function deriveEligibility(
       containmentState,
       hubReplacementState: mode,
       requiredConfigurationVersion: requiredVersion === undefined ? null : Number(requiredVersion),
+      nextClientSequence: (BigInt(terminalRow.last_client_sequence) + 1n).toString(),
       authorityTime: authorityTime.toISOString(),
     },
   };

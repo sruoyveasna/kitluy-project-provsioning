@@ -24,9 +24,11 @@ contextBridge.exposeInMainWorld("kitluyT1", {
   },
 });
 
-// WS-12-T002-P02 §5: exactly eight NAMED intake operations. No channel
-// pass-through, no route/method/scope input — every payload is re-validated
-// in the main process (electron/intake-ipc.ts) before any adapter runs.
+// WS-12-T002-P02 §5: exactly eight NAMED intake operations, plus the three
+// T1 Store operations of T1-REAL-OPERATIONS-001 slice 2 (quote, confirm-intake,
+// recent Bookings). No channel pass-through, no route/method/scope input —
+// every payload is re-validated in the main process (electron/intake-ipc.ts)
+// before any adapter runs; the command key is minted there, never here.
 contextBridge.exposeInMainWorld("kitluyT1Intake", {
   searchCustomers: (payload: unknown): Promise<unknown> =>
     ipcRenderer.invoke("kitluy:t1:intake:search-customers", payload),
@@ -44,6 +46,12 @@ contextBridge.exposeInMainWorld("kitluyT1Intake", {
     ipcRenderer.invoke("kitluy:t1:intake:update-draft", payload),
   cancelDraft: (payload: unknown): Promise<unknown> =>
     ipcRenderer.invoke("kitluy:t1:intake:cancel-draft", payload),
+  quote: (payload: unknown): Promise<unknown> =>
+    ipcRenderer.invoke("kitluy:t1:intake:quote", payload),
+  confirmIntake: (payload: unknown): Promise<unknown> =>
+    ipcRenderer.invoke("kitluy:t1:intake:confirm-intake", payload),
+  listRecentBookings: (): Promise<unknown> =>
+    ipcRenderer.invoke("kitluy:t1:intake:list-recent-bookings"),
 });
 
 // TERMINAL-PIN-AND-REAL-POS-AUTH-001: exactly four NAMED Terminal PIN

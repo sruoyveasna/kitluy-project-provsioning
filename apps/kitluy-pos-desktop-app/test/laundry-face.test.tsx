@@ -18,6 +18,7 @@ import type { IntakeCustomer } from "../src/intake/ports.js";
 import { AppStateProvider } from "../src/vertical/laundry/face/app/AppContext.js";
 import { ThemeProvider } from "../src/vertical/laundry/face/app/ThemeProvider.js";
 import { Step1Items } from "../src/vertical/laundry/face/features/t1-pos/new-order/Step1Items.js";
+import { Step2Pricing } from "../src/vertical/laundry/face/features/t1-pos/new-order/Step2Pricing.js";
 import { Step3Review } from "../src/vertical/laundry/face/features/t1-pos/new-order/Step3Review.js";
 import {
   useSearchCustomers,
@@ -73,6 +74,9 @@ const PORTS: FacePorts = {
   createDraft: never,
   updateDraft: never,
   cancelDraft: never,
+  quote: never,
+  confirmIntake: never,
+  listRecentBookings: never,
   readCatalog: () =>
     Promise.resolve({ status: "not_delivered", reason: CATALOG_NOT_DELIVERED_REASON }),
   lockTerminal: () => Promise.resolve(),
@@ -247,24 +251,46 @@ describe("the wizard steps", () => {
     expect(html).not.toContain("data-service-card");
   });
 
-  it("Review: opens a Booking DRAFT, labelled as such, lines not saved", () => {
+  it("Pricing: without the Hub's quote there is no price, no USD lane, and Review is not offered a figure", () => {
+    const main = renderToString(
+      <Harness>
+        <Step2Pricing layout="main" />
+      </Harness>,
+    );
+    expect(main).toContain('data-pricing="pending"');
+    expect(main).toContain("priced by the Store Hub");
+    expect(main).not.toContain("data-quote-lines");
+    const panel = renderToString(
+      <Harness>
+        <Step2Pricing layout="panel" />
+      </Harness>,
+    );
+    expect(panel).toContain("Total to pay");
+    expect(panel).toContain('data-tender-lane="khr"');
+    // No delivered rate: the USD lane does not exist.
+    expect(panel).toContain('data-tender-lane="usd-unavailable"');
+    expect(panel).not.toContain('data-tender-lane="usd"');
+  });
+
+  it("Review: confirms ONE Hub command, disabled until the Hub priced the cart and the cash covers it", () => {
     const main = renderToString(
       <Harness>
         <Step3Review layout="main" />
       </Harness>,
     );
-    expect(main).toContain("Review &amp; open the draft");
+    expect(main).toContain("Review &amp; confirm");
     expect(main).toContain("Walk-in");
-    expect(main).toContain("WS-12-T005");
+    expect(main).toContain("No lines — add a service on the Items step.");
     const panel = renderToString(
       <Harness>
         <Step3Review layout="panel" />
       </Harness>,
     );
-    expect(panel).toContain('data-action="open-draft"');
-    expect(panel).toContain("Open Booking Draft");
-    expect(panel).toContain("not a Booking price");
-    expect(panel).not.toMatch(/Confirm &amp; Print|Total to pay/u);
+    expect(panel).toContain('data-action="confirm-intake"');
+    expect(panel).toMatch(/<button[^>]*disabled=""[^>]*data-action="confirm-intake"/u);
+    expect(panel).toContain("Confirm &amp; Print");
+    expect(panel).toContain("not priced by the Store Hub yet");
+    expect(panel).not.toContain('data-action="open-draft"');
   });
 });
 

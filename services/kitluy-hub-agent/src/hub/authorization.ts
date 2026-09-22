@@ -32,6 +32,26 @@
  * An empty presented set denies. The missing projection is reported as
  * `[REQUIRED: Hub-local permission-grant projection, or an approved Hub session
  * grant-claim contract, for registry keys without a terminal_role constraint]`.
+ *
+ * TERMINAL PIN SESSIONS (KLD-2026-09-17-TERMINAL-PIN-DEVICE-CREDENTIAL-001;
+ * T1-REAL-OPERATIONS-001 slice 2). On a Pi Terminal there is no staff login:
+ * the session the Terminal PIN opens names the TERMINAL DEVICE as its actor
+ * (asserted by 0043's CHECK). Such an actor has no `staff_cache` row and no
+ * grants of its own; what authorizes it is the terminal's own T1 profile grant
+ * from the ACTIVE snapshot (dimension 4, re-read per request), the absence of a
+ * blocking containment, and the CLOSED T1 terminal surface
+ * (`T1_TERMINAL_PIN_PERMISSIONS`) as the permission dimension — the same stack
+ * `authorizeT1IntakeSession` applies to the T002 routes. Nothing is widened:
+ * a key outside that surface denies, whatever the command declares.
+ *
+ * ASSIGNMENT GENERATION (KLREC-2026-09-19-ASSIGNMENT-GENERATION-SEMANTICS-001,
+ * resolved by KLD-2026-09-19-T1-REAL-OPERATIONS-001 decision 2): the presented
+ * generation is compared with the TERMINAL's own projected
+ * `terminal_device.assignment_generation` only. The Hub's
+ * `hub_assignment.assignment_generation` is a separate device counter (the
+ * Hub's own seat generation, which the pairing and eligibility paths already
+ * treat as such) and is used here only as the ordering namespace of the events
+ * this Hub emits (offline contract §5.1), never as the terminal's expected value.
  */
 import { assertFourEyes, type ApprovalDecision, type ApprovalRequest } from "@kitluy/approvals";
 import { hasPermission, isCanonicalPermissionKey, type PermissionGrant } from "@kitluy/rbac";
@@ -50,6 +70,7 @@ import {
   isDeviceRevokedOfflineWithin,
 } from "./revocation-trust.js";
 import { isUuid } from "./uuid.js";
+import { T1_TERMINAL_PIN_PERMISSIONS, readBlockingContainment } from "./edge/runtime-bootstrap.js";
 
 export const PERMISSION_GAP_HUB_GRANT_PROJECTION =
   "[REQUIRED: Hub-local permission-grant projection, or an approved Hub session grant-claim contract, for registry keys without a terminal_role constraint]";
@@ -126,7 +147,13 @@ export interface AuthorizedCommandContext {
   readonly actorDisplayName: string;
   readonly permission: string;
   /** How the permission dimension was satisfied — recorded in the audit event. */
-  readonly permissionSource: "profile_derived" | "session_presented";
+  readonly permissionSource: "profile_derived" | "session_presented" | "terminal_pin";
+  /**
+   * Who the actor IS: a cached staff member, or the terminal device itself
+   * under its Terminal PIN session. Recorded on the audit event and carried
+   * as the event envelope's actor class.
+   */
+  readonly actorType: "staff" | "terminal_device";
   readonly scope: ResourceScope;
   readonly approval?: HubApprovalEvidence;
 }
@@ -298,19 +325,20 @@ export async function authorizeHubCommand(
       );
     }
   }
-  if (
-    terminal.assignment_generation !== assignment.assignment_generation ||
-    device.assignmentGeneration !== assignment.assignment_generation
-  ) {
-    // A replacement Hub receives a NEW generation; a terminal still holding the
-    // previous one must resynchronise before it may mutate (offline §5.1).
+  if (device.assignmentGeneration !== terminal.assignment_generation) {
+    // Decision 2 (KLREC-2026-09-19-ASSIGNMENT-GENERATION-SEMANTICS-001): the
+    // terminal's expected value is ITS OWN projected seat generation — the one
+    // the cloud assigned it and the one it paired at. A terminal re-assigned
+    // in the cloud still holding the previous generation must resynchronise
+    // before it may mutate (offline §5.1). The Hub's own generation is a
+    // different device's counter and is not compared here.
     deny(
       "EDGE_ASSIGNMENT_GENERATION_MISMATCH",
-      `assignment_generation ${device.assignmentGeneration} does not match the active generation ${assignment.assignment_generation}.`,
+      `assignment_generation ${device.assignmentGeneration} does not match the terminal's projected generation ${terminal.assignment_generation}.`,
       {
         presented: device.assignmentGeneration,
         deviceGeneration: terminal.assignment_generation,
-        active: assignment.assignment_generation,
+        hubGeneration: assignment.assignment_generation,
       },
     );
   }
@@ -328,6 +356,15 @@ export async function authorizeHubCommand(
   }
   if (session.actor_id !== device.actorId) {
     deny("EDGE_SESSION_INVALID", `session ${session.id} is bound to a different actor.`);
+  }
+  // A Terminal PIN session's actor IS the terminal (0043 CHECK) — re-asserted
+  // here so a projection edit could never let a PIN session name a person.
+  const pinSession = session.credential_kind === "terminal_pin";
+  if (pinSession && (session.actor_id !== terminal.id || device.actorId !== terminal.id)) {
+    deny(
+      "EDGE_SESSION_INVALID",
+      `Terminal PIN session ${session.id} must name its terminal as actor.`,
+    );
   }
   const now = await currentDatabaseTime(client);
   if (session.expires_at.getTime() <= now.getTime()) {
@@ -372,31 +409,12 @@ export async function authorizeHubCommand(
   }
 
   // 5 -------------------------------------------------------- permission key
-  const staff = await identityRepo.findStaffCache(client, device.actorId);
-  if (!staff) {
-    deny("EDGE_PERMISSION_DENIED", `actor ${device.actorId} has no cached permission projection.`, {
-      actorId: device.actorId,
-    });
-  }
-  if (staff.disabled) {
-    deny("EDGE_PERMISSION_DENIED", `actor ${device.actorId} is disabled.`, {
-      actorId: device.actorId,
-    });
-  }
-  if (staff.offline_valid_until.getTime() <= now.getTime()) {
-    deny(
-      "EDGE_PERMISSION_DENIED",
-      `actor ${device.actorId} permission projection expired at ${staff.offline_valid_until.toISOString()}.`,
-      { actorId: device.actorId },
-    );
-  }
   const scope: ResourceScope = {
     level: "store_location",
     resourceId: device.locationId,
     environment: device.environment,
   };
   const required = [definition.permission, ...(options.requiredConditionalPermissions ?? [])];
-  let source: AuthorizedCommandContext["permissionSource"] = "profile_derived";
   for (const permission of required) {
     if (!isCanonicalPermissionKey(permission)) {
       deny(
@@ -405,15 +423,73 @@ export async function authorizeHubCommand(
         { permission },
       );
     }
-    const outcome = evaluatePermission(permission, staff.profile_codes, device, scope);
-    if (outcome === "denied") {
-      deny("EDGE_PERMISSION_DENIED", `actor ${device.actorId} does not hold '${permission}'.`, {
+  }
+  let source: AuthorizedCommandContext["permissionSource"] = "profile_derived";
+  let actorType: AuthorizedCommandContext["actorType"] = "staff";
+  let actorDisplayName = "";
+  let staff: Awaited<ReturnType<typeof identityRepo.findStaffCache>> = undefined;
+  if (pinSession) {
+    // THE DEVICE IS THE ACTOR. No staff projection exists for it and none is
+    // invented: the terminal's T1 grant (dimension 4 above) plus the closed
+    // T1 terminal surface is the whole permission dimension, and a blocking
+    // containment directive closes it — exactly the T002 intake stack.
+    if ((await readBlockingContainment(client, terminal.id)) !== null) {
+      deny(
+        "EDGE_DEVICE_REVOKED",
+        `terminal ${terminal.id} is under a blocking containment directive.`,
+        {
+          terminalDeviceId: terminal.id,
+          source: "CONTAINMENT_DIRECTIVE",
+        },
+      );
+    }
+    for (const permission of required) {
+      if (!T1_TERMINAL_PIN_PERMISSIONS.includes(permission)) {
+        deny(
+          "EDGE_PERMISSION_DENIED",
+          `'${permission}' is not part of the T1 terminal surface a Terminal PIN session may exercise.`,
+          { actorId: device.actorId, permission, credentialKind: "terminal_pin" },
+        );
+      }
+    }
+    source = "terminal_pin";
+    actorType = "terminal_device";
+    actorDisplayName = terminal.terminal_name;
+  } else {
+    staff = await identityRepo.findStaffCache(client, device.actorId);
+    if (!staff) {
+      deny(
+        "EDGE_PERMISSION_DENIED",
+        `actor ${device.actorId} has no cached permission projection.`,
+        {
+          actorId: device.actorId,
+        },
+      );
+    }
+    if (staff.disabled) {
+      deny("EDGE_PERMISSION_DENIED", `actor ${device.actorId} is disabled.`, {
         actorId: device.actorId,
-        permission,
-        heldProfiles: staff.profile_codes,
       });
     }
-    if (outcome === "session_presented") source = "session_presented";
+    if (staff.offline_valid_until.getTime() <= now.getTime()) {
+      deny(
+        "EDGE_PERMISSION_DENIED",
+        `actor ${device.actorId} permission projection expired at ${staff.offline_valid_until.toISOString()}.`,
+        { actorId: device.actorId },
+      );
+    }
+    for (const permission of required) {
+      const outcome = evaluatePermission(permission, staff.profile_codes, device, scope);
+      if (outcome === "denied") {
+        deny("EDGE_PERMISSION_DENIED", `actor ${device.actorId} does not hold '${permission}'.`, {
+          actorId: device.actorId,
+          permission,
+          heldProfiles: staff.profile_codes,
+        });
+      }
+      if (outcome === "session_presented") source = "session_presented";
+    }
+    actorDisplayName = staff.display_name;
   }
 
   // 6 -------------------------------------------------------- resource scope
@@ -433,8 +509,10 @@ export async function authorizeHubCommand(
   if (terminal.location_id !== scopeTuple.location) mismatches.push("terminal_device.location_id");
   if (session.tenant_id !== scopeTuple.tenant) mismatches.push("terminal_session.tenant_id");
   if (session.location_id !== scopeTuple.location) mismatches.push("terminal_session.location_id");
-  if (staff.tenant_id !== scopeTuple.tenant) mismatches.push("staff_cache.tenant_id");
-  if (staff.location_id !== scopeTuple.location) mismatches.push("staff_cache.location_id");
+  if (staff !== undefined) {
+    if (staff.tenant_id !== scopeTuple.tenant) mismatches.push("staff_cache.tenant_id");
+    if (staff.location_id !== scopeTuple.location) mismatches.push("staff_cache.location_id");
+  }
   if (options.targetScope) {
     if (options.targetScope.tenantId !== scopeTuple.tenant) mismatches.push("target.tenant_id");
     if (options.targetScope.digitalStoreId !== scopeTuple.store)
@@ -493,10 +571,12 @@ export async function authorizeHubCommand(
     device,
     profile,
     hubDeviceId: assignment.hub_device_id,
+    // The ordering namespace of everything this Hub emits (offline §5.1).
     assignmentGeneration: assignment.assignment_generation,
-    actorDisplayName: staff.display_name,
+    actorDisplayName,
     permission: definition.permission,
     permissionSource: source,
+    actorType,
     scope,
     ...(options.approval ? { approval: options.approval } : {}),
   };

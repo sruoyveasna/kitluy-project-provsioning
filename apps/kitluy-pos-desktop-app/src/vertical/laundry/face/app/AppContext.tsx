@@ -28,7 +28,13 @@ import {
   WF_KG_CART_ID,
   WF_KG_WHEEL_MAX,
 } from "@face/features/t1-pos/laundry-savor/wfKgConstants";
-import type { FacePorts, IntakeDraft } from "@face/ports";
+import type {
+  FacePorts,
+  IntakeConfirmation,
+  IntakeDraft,
+  IntakeLineInput,
+  IntakeQuote,
+} from "@face/ports";
 import type { CartItem, Customer, PreferredLanguage, ServiceType, T1View } from "@face/types";
 
 import { AppStateContext } from "./context";
@@ -109,6 +115,25 @@ export interface AppState {
   bookingDraft: DraftContext | null;
   setBookingDraft: SetState<DraftContext | null>;
 
+  // T1-REAL-OPERATIONS-001 slice 2 — the Hub's price and the cash tender
+  /** The cart as the Hub prices it: one line per service, one quantity kind each. */
+  cartLines: readonly IntakeLineInput[];
+  /** The Store Hub's quote for `cartLines` + `express`; null until answered. */
+  quote: IntakeQuote | null;
+  setQuote: SetState<IntakeQuote | null>;
+  quoteFailure: string | null;
+  setQuoteFailure: SetState<string | null>;
+  express: boolean;
+  setExpress: SetState<boolean>;
+  /** Cash handed over: whole riel, and whole US dollars (only with a delivered rate). */
+  tenderKhrDigits: string;
+  setTenderKhrDigits: SetState<string>;
+  tenderUsdDigits: string;
+  setTenderUsdDigits: SetState<string>;
+  /** What the Hub committed (or replayed) for this booking; null until confirmed. */
+  confirmation: IntakeConfirmation | null;
+  setConfirmation: SetState<IntakeConfirmation | null>;
+
   t1WizardScrollRatio: number;
   setT1WizardScrollRatio: SetState<number>;
 
@@ -160,6 +185,29 @@ export const AppStateProvider = ({
 
   const [bookingDraft, setBookingDraft] = useState<DraftContext | null>(null);
   const [t1WizardScrollRatio, setT1WizardScrollRatio] = useState(0);
+
+  const [quote, setQuote] = useState<IntakeQuote | null>(null);
+  const [quoteFailure, setQuoteFailure] = useState<string | null>(null);
+  const [express, setExpress] = useState(false);
+  const [tenderKhrDigits, setTenderKhrDigits] = useState("");
+  const [tenderUsdDigits, setTenderUsdDigits] = useState("");
+  const [confirmation, setConfirmation] = useState<IntakeConfirmation | null>(null);
+
+  // The lines the Hub prices: per-piece services by count (a stain-flagged
+  // entry is the same service, priced the same), the weighed load in grams.
+  // A cart entry without a delivered service id cannot be priced and is
+  // left out — the Items step never creates one from a delivered catalog.
+  const cartLines = useMemo<readonly IntakeLineInput[]>(
+    () =>
+      cart.flatMap((c): IntakeLineInput[] => {
+        if (c.serviceId === undefined || c.qty <= 0) return [];
+        if (c.svc === "wf") {
+          return [{ serviceId: c.serviceId, weighedGrams: Math.round(c.qty * 1000) }];
+        }
+        return [{ serviceId: c.serviceId, pieceCount: c.qty }];
+      }),
+    [cart],
+  );
 
   // Integer KHR arithmetic on a display preview. The Booking's price is NOT
   // computed here (WS-12-T004 / vertical pricing authority, @kitluy/money).
@@ -247,6 +295,12 @@ export const AppStateProvider = ({
     setWfKgDigits("");
     setBookingDraft(null);
     setT1WizardScrollRatio(0);
+    setQuote(null);
+    setQuoteFailure(null);
+    setExpress(false);
+    setTenderKhrDigits("");
+    setTenderUsdDigits("");
+    setConfirmation(null);
   }, []);
 
   const value = useMemo<AppState>(
@@ -297,6 +351,19 @@ export const AppStateProvider = ({
       bookingLineCount,
       bookingDraft,
       setBookingDraft,
+      cartLines,
+      quote,
+      setQuote,
+      quoteFailure,
+      setQuoteFailure,
+      express,
+      setExpress,
+      tenderKhrDigits,
+      setTenderKhrDigits,
+      tenderUsdDigits,
+      setTenderUsdDigits,
+      confirmation,
+      setConfirmation,
       t1WizardScrollRatio,
       setT1WizardScrollRatio,
       addToCart,
@@ -333,6 +400,13 @@ export const AppStateProvider = ({
       cartCount,
       bookingLineCount,
       bookingDraft,
+      cartLines,
+      quote,
+      quoteFailure,
+      express,
+      tenderKhrDigits,
+      tenderUsdDigits,
+      confirmation,
       t1WizardScrollRatio,
       addToCart,
       updateQty,

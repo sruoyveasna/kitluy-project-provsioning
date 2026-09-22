@@ -3,10 +3,10 @@
  * two-column laundry workspace.
  *
  * PROVENANCE: donor `NewOrder.tsx` (kitluy-laundry-pos-desk-app@8b2f107).
- * The payment-readiness gate, PayWay polling and USD parity are gone with the
- * Pricing step (GATED WS-12-T004/T005). A booking may reach Review with no
- * lines: while no catalog is delivered, the Items step is informational and a
- * Booking Draft is opened without lines (WS-12-T002 has none).
+ * The card/QR gateway polling and the hard-coded USD parity are gone; the
+ * payment-readiness gate is back in slice 2 as the Store Hub's quote: Review
+ * opens only once the Hub has priced the cart and the cash covers it
+ * (T1-REAL-OPERATIONS-001).
  */
 import { useEffect } from "react";
 
@@ -19,7 +19,7 @@ import { LaundryBookingPanel } from "../laundry-savor/LaundryBookingPanel";
 import { LaundryBookingWorkspace } from "../laundry-savor/LaundryBookingWorkspace";
 import { Step0Customer } from "./Step0Customer";
 import { Step1Items } from "./Step1Items";
-import { Step2Pricing } from "./Step2Pricing";
+import { Step2Pricing, tenderedKhr } from "./Step2Pricing";
 import { Step3Review } from "./Step3Review";
 
 export const NewOrder = () => {
@@ -31,6 +31,10 @@ export const NewOrder = () => {
     setSelServiceType,
     setSelFamilyCode,
     setT1WizardScrollRatio,
+    quote,
+    tenderKhrDigits,
+    tenderUsdDigits,
+    confirmation,
   } = useAppState();
 
   const onWizardScroll = useT1WizardScrollReporter();
@@ -62,9 +66,15 @@ export const NewOrder = () => {
   const panelNextLabel =
     wizStep === 0 ? "Next: Customer" : wizStep === 1 ? "Next: Pricing" : "Next: Review";
 
-  // A chosen Hub customer, a typed new-customer name, or a walk-in all pass:
-  // WS-12-T002 opens a draft for a walk-in, so no step blocks the counter.
-  const panelNextDisabled = false;
+  // A chosen Hub customer, a typed new-customer name, or a walk-in all pass
+  // into Pricing (WS-12-T002 opens a draft for a walk-in). Review opens only
+  // once the Store Hub priced the cart and the cash covers its total — the
+  // Hub would refuse the confirm otherwise (TENDER_INSUFFICIENT).
+  const covered =
+    quote !== null &&
+    tenderedKhr(tenderKhrDigits, tenderUsdDigits, quote.khrPerUsd).total >=
+      BigInt(quote.totalMinor);
+  const panelNextDisabled = wizStep === 2 ? !covered : false;
 
   return (
     <div
@@ -102,7 +112,7 @@ export const NewOrder = () => {
           <LaundryBookingPanel
             wizStep={wizStep}
             onBack={panelBack}
-            onNext={wizStep < 3 ? panelNext : undefined}
+            onNext={wizStep < 3 && confirmation === null ? panelNext : undefined}
             backLabel={wizStep === 0 && !selServiceType ? "Clear" : "Back"}
             nextLabel={panelNextLabel}
             nextDisabled={panelNextDisabled}

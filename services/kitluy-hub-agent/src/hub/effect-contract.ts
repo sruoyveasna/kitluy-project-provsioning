@@ -58,6 +58,19 @@ export const ADDITIONAL_COMMAND_EFFECTS: Readonly<Record<string, readonly string
   // Confirm-intake takes custody of every registered unit and may settle a
   // deposit in the same command (Hub spec §8; laundry T1).
   "laundry.booking.confirm_intake": ["garment.custody_recorded", "payment.recorded"],
+  // Confirm FROM A DRAFT (slice 2): the Booking fact (audit event, slot 0),
+  // the cash payment, one fact per tender leg (KHR, USD), the drawer
+  // movement when a shift is open, the receipt record, and the draft's own
+  // conversion receipt for the cloud draft projection (T002 §8 census).
+  // `payment.tender_recorded` and `document.receipt_issued` are PROPOSED
+  // names (recorded in the slice-2 handoff for registration before release).
+  "laundry.booking.confirm_from_draft": [
+    "payment.recorded",
+    "payment.tender_recorded",
+    "cash.movement_recorded",
+    "document.receipt_issued",
+    "laundry.booking_draft_recorded",
+  ],
   // T3: custody is taken at STORAGE ASSIGNMENT, not at the scan — the unit is
   // in Hub custody once it has a storage position, which is where
   // assignReadyStorage writes it.

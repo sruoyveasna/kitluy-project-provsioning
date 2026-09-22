@@ -10,14 +10,10 @@
 import { useThemeColors } from "@face/app/ThemeProvider";
 import type { T1View } from "@face/types";
 
-const REASONS: Record<Exclude<T1View, "new_order">, { title: string; body: string }> = {
+const REASONS: Record<Exclude<T1View, "new_order" | "orders">, { title: string; body: string }> = {
   dashboard: {
     title: "Dashboard",
     body: "Today's bookings and ready-for-pickup counts come from the Store Hub's Booking queries (WS-12-T003/T007). Nothing is queued on this terminal yet.",
-  },
-  orders: {
-    title: "Order queue",
-    body: "The Booking queue is read from the Store Hub once Booking lines and lifecycle exist on a terminal (WS-12-T003). Until then this list would be invented.",
   },
   handoff: {
     title: "Handoff",
@@ -33,7 +29,7 @@ const REASONS: Record<Exclude<T1View, "new_order">, { title: string; body: strin
   },
 };
 
-export const NotAvailable = ({ view }: { view: Exclude<T1View, "new_order"> }) => {
+export const NotAvailable = ({ view }: { view: Exclude<T1View, "new_order" | "orders"> }) => {
   const C = useThemeColors();
   const r = REASONS[view];
   return (

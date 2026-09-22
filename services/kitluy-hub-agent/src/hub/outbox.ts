@@ -18,7 +18,11 @@
  * cloud acknowledgement and no reconciliation here — WS-10 owns all three.
  */
 import { createHash } from "node:crypto";
-import { assertValidEnvelope, type DomainEventEnvelope } from "@kitluy/event-contracts";
+import {
+  assertValidEnvelope,
+  type DomainEventEnvelope,
+  type EventActorType,
+} from "@kitluy/event-contracts";
 import { asId } from "@kitluy/shared-types";
 import { canonicalJson } from "../hub-database.js";
 import { SERVICE_NAME, SERVICE_VERSION } from "../index.js";
@@ -44,6 +48,9 @@ export interface HubEventContext {
   /** Terminal that originated the command (`local_event.origin_device_id`). */
   readonly originDeviceId: string;
   readonly actorId: string | null;
+  /** The envelope's actor class; `user` (a staff member) unless the command
+   * says otherwise — a Terminal PIN session's actor is the `device` itself. */
+  readonly actorType?: EventActorType;
   readonly assignmentGeneration: number;
   readonly businessDate: string;
   readonly correlationId: string;
@@ -167,7 +174,7 @@ export class HubEventRecorder {
       actor:
         this.context.actorId === null
           ? null
-          : { actor_type: "user", actor_id: this.context.actorId },
+          : { actor_type: this.context.actorType ?? "user", actor_id: this.context.actorId },
       correlation_id: asId.correlationId(this.context.correlationId),
       causation_id: input.causationId ?? this.recorded.at(-1)?.eventId ?? null,
       idempotency_key: asId.idempotencyKey(idempotencyKey),

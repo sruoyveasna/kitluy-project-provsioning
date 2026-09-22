@@ -100,11 +100,20 @@ export const WfWeightPanel = () => {
           price: rateKhr,
           qty: kg,
           svc: "wf" as const,
+          ...(offering?.serviceId ? { serviceId: offering.serviceId } : {}),
           serviceCode: offering?.serviceCode,
         },
       ];
     });
-  }, [kg, rateKhr, serviceName, offering?.serviceCode, setCart, selServiceType]);
+  }, [
+    kg,
+    rateKhr,
+    serviceName,
+    offering?.serviceId,
+    offering?.serviceCode,
+    setCart,
+    selServiceType,
+  ]);
 
   const setKg = (next: number, exitTyping = false) => {
     if (exitTyping) setWfKgInputActive(false);

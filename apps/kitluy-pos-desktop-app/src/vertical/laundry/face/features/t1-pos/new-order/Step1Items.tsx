@@ -296,6 +296,7 @@ export const Step1Items = () => {
             qty: v,
             svc: "pp" as const,
             stain,
+            serviceId: it.id,
             serviceCode: it.code,
             ...(it.familyCode ? { familyCode: it.familyCode } : {}),
             ...(it.familyName ? { familyName: it.familyName } : {}),

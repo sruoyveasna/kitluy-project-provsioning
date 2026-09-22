@@ -50,6 +50,9 @@ function operations(overrides: Partial<IntakeOperations> = {}): IntakeOperations
     readDraft: async () => ({ ok: false, kind: "not_found", detail: "none" }),
     updateDraft: async () => ({ ok: false, kind: "stale_version", detail: "stale" }),
     cancelDraft: async () => ({ ok: false, kind: "not_found", detail: "none" }),
+    quote: async () => ({ ok: false, kind: "configuration_missing", detail: "none" }),
+    confirmIntake: async () => ({ ok: false, kind: "unavailable", detail: "none" }),
+    listRecentBookings: async () => ok([]),
     ...overrides,
   };
 }

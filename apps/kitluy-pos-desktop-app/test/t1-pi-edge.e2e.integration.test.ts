@@ -13,6 +13,10 @@
  *   -> LOCKED (PIN setup required) -> Terminal PIN created twice -> READY
  *   -> customer created locally -> Laundry Booking Draft created, edited,
  *      reopened -> rows in the Hub database -> sync facts in the Hub outbox
+ *   -> THE STORE OPERATION (T1-REAL-OPERATIONS-001 slice 2): the Hub quotes
+ *      the cart from its delivered catalog -> confirm-intake with cash
+ *      (KHR + USD) under the terminal's own kl1 command key -> Booking,
+ *      lines, payment, receipt on the Hub; draft converted; Orders view
  *   -> locked -> wrong PIN refused -> unlocked
  *
  * No staff record, no grant row and no passcode exist anywhere in this run: the
@@ -77,6 +81,52 @@ const T1 = "laundry.t1.intake_cashier";
 
 const live = await isHubDatabaseReachable();
 if (!live) console.warn("SKIPPED: T1 Pi edge e2e — local Hub database unreachable");
+
+// The delivered sections for the run (slice 2): the fixture Location's ACTIVE
+// snapshot gets a KHR money contract (restored afterwards) and a catalog
+// (upserted; sections are append-only on the Hub).
+const SUIT = "0a000000-0000-4000-8000-00000000e002";
+const KG = "0a000000-0000-4000-8000-00000000e001";
+const E2E_CATALOG = {
+  schema: "kitluy.config.catalog.v1",
+  currency_code: "KHR",
+  content_hash: "e".repeat(64),
+  families: [
+    { code: "WASH_FOLD", lane: "per_weight", name: "Wash & Fold", sort_order: 1 },
+    { code: "DRY_CLEAN", lane: "per_piece", name: "Dry Clean", sort_order: 2 },
+  ],
+  categories: [],
+  services: [
+    {
+      service_id: KG,
+      service_code: "WF-KG",
+      family_code: "WASH_FOLD",
+      name: "Wash & Fold per kg",
+      pricing_mode: "PER_WEIGHT",
+      currency_code: "KHR",
+      unit_price_minor: 4000,
+    },
+    {
+      service_id: SUIT,
+      service_code: "DC-SUIT_2PC",
+      family_code: "DRY_CLEAN",
+      name: "Suit (2 pc)",
+      pricing_mode: "PER_PIECE",
+      currency_code: "KHR",
+      unit_price_minor: 25000,
+    },
+  ],
+  garment_types: [],
+};
+const E2E_MONEY = {
+  schema: "kitluy.config.money.v1",
+  currency_code: "KHR",
+  currency_exponent: 0,
+  money_rounding: "round_half_up_minor_unit",
+  weight_rule: { unit: "kg", increment: 1, rounding: "up", minimum: 1 },
+  location_code: "DEMO-PP-01",
+  fx: { USD: { khr_per_usd: 4100, effective_from: "2026-09-19T00:00:00Z" } },
+};
 
 const keys = new DevelopmentDeviceKeyProvider();
 const logger: SafeLogger = { info: () => undefined };
@@ -149,11 +199,32 @@ describe.skipIf(!live)(
     let bridge: Server | null = null;
     let hubPort = 0;
     let work = "";
+    let originalPricing: unknown;
 
     beforeAll(async () => {
       if (!live) return;
       pool = createHubPool(process.env, 6);
       work = mkdtempSync(join(tmpdir(), "kitluy-pi-edge-"));
+      const savedPricing = await pool.query<{ content_json: unknown }>(
+        `select content_json from edge_config.configuration_section
+          where snapshot_id = $1 and section_code = 'pricing'`,
+        [ACTIVE_SNAPSHOT],
+      );
+      originalPricing = savedPricing.rows[0]?.content_json;
+      await pool.query(
+        `update edge_config.configuration_section set content_json = $2::jsonb
+          where snapshot_id = $1 and section_code = 'pricing'`,
+        [ACTIVE_SNAPSHOT, JSON.stringify(E2E_MONEY)],
+      );
+      await pool.query(
+        `insert into edge_config.configuration_section
+           (id, snapshot_id, section_code, section_version, content_sha256, content_json,
+            required, validation_state, validation_error)
+         values ($1, $2, 'catalog', 7, encode(sha256(convert_to($3::text, 'UTF8')), 'hex'), $3::jsonb, false, 'valid', null)
+         on conflict (snapshot_id, section_code) do update
+           set content_json = excluded.content_json, content_sha256 = excluded.content_sha256`,
+        [randomUUID(), ACTIVE_SNAPSHOT, JSON.stringify(E2E_CATALOG)],
+      );
 
       const hubKeyRef = `piedge-hub-${RUN}` as DeviceRecordId;
       await keys.generateDeviceKey(hubKeyRef, "development");
@@ -188,6 +259,13 @@ describe.skipIf(!live)(
       if (!live) return;
       if (bridge !== null) await new Promise<void>((r) => bridge?.close(() => r()));
       if (closeHub !== null) await closeHub();
+      if (originalPricing !== undefined) {
+        await pool.query(
+          `update edge_config.configuration_section set content_json = $2::jsonb
+            where snapshot_id = $1 and section_code = 'pricing'`,
+          [ACTIVE_SNAPSHOT, JSON.stringify(originalPricing)],
+        );
+      }
       if (originalHubFingerprint !== "") {
         await pool.query(
           `update edge_identity.device_credential
@@ -204,7 +282,7 @@ describe.skipIf(!live)(
       rmSync(work, { recursive: true, force: true });
     }, 120_000);
 
-    it("pairs, serves, sets up and unlocks the Terminal PIN into T1, and commits a Booking Draft on the Hub with its outbox facts", async () => {
+    it("pairs, serves, sets up and unlocks the Terminal PIN into T1, commits a Booking Draft, and CONFIRMS a paid Booking on the Hub with its receipt", async () => {
       // ----------------------------------------------------------------- Hub
       const hubKeyRef = `piedge-hub-${RUN}` as DeviceRecordId;
       const hubPem = keys.publicKeyPem(hubKeyRef) ?? "";
@@ -500,6 +578,152 @@ describe.skipIf(!live)(
         { event_type: "laundry.booking_draft_recorded", delivery_state: "pending" },
       ]);
 
+      // ---------------------- THE STORE OPERATION (slice 2): quote → confirm
+      const cart = [
+        { serviceId: SUIT, pieceCount: 1 },
+        { serviceId: KG, weighedGrams: 2400 }, // 3 kg billable
+      ];
+      const quoted = await ops.quote({ draftId: draft.value.draftId, lines: cart, express: false });
+      expect(quoted.ok, JSON.stringify(quoted)).toBe(true);
+      if (!quoted.ok) return;
+      expect(quoted.value).toMatchObject({
+        currencyCode: "KHR",
+        subtotalMinor: "37000",
+        totalMinor: "37000",
+        khrPerUsd: 4100,
+        locationCode: "DEMO-PP-01",
+      });
+      expect(
+        quoted.value.lines.map((l) => [l.serviceCode, l.quantity, l.lineSubtotalMinor]),
+      ).toEqual([
+        ["DC-SUIT_2PC", "1.0000", "25000"],
+        ["WF-KG", "3.0000", "12000"],
+      ]);
+      // The Hub refuses a displayed total that is not its own; nothing is written.
+      const priceMismatch = await ops.confirmIntake({
+        draftId: draft.value.draftId,
+        expectedVersion: 2,
+        lines: cart,
+        express: false,
+        displayedTotalMinor: "36000",
+        tender: { localMinor: "40000", usdCents: "0" },
+      });
+      expect(priceMismatch).toMatchObject({
+        ok: false,
+        kind: "price_mismatch",
+        detail: "PRICE_MISMATCH",
+      });
+      // Cash in full: 10 000 riel + 10 dollars at the delivered rate; change 14 000.
+      const confirmedResult = await ops.confirmIntake({
+        draftId: draft.value.draftId,
+        expectedVersion: 2,
+        lines: cart,
+        express: false,
+        displayedTotalMinor: quoted.value.totalMinor,
+        tender: { localMinor: "10000", usdCents: "1000" },
+      });
+      expect(confirmedResult.ok, JSON.stringify(confirmedResult)).toBe(true);
+      if (!confirmedResult.ok) return;
+      const confirmed = confirmedResult.value;
+      expect(confirmed.outcome).toBe("confirmed");
+      expect(confirmed.booking).toMatchObject({
+        status: "intake_confirmed",
+        total_minor: "37000",
+        paid_minor: "37000",
+        balance_minor: "0",
+        line_count: 2,
+      });
+      expect(confirmed.booking.booking_number).toMatch(/^KLB-DEMO-PP-01-\d{6}-\d{6}$/);
+      expect(confirmed.payment).toMatchObject({
+        tendered_minor: "51000",
+        change_due_minor: "14000",
+      });
+      expect(confirmed.payment?.legs.map((l) => [l.currency_code, l.amount_minor])).toEqual([
+        ["KHR", "10000"],
+        ["USD", "1000"],
+      ]);
+      expect(confirmed.receipt.receipt_number).toMatch(/^KLR-DEMO-PP-01-/);
+      expect(confirmed.receipt.payload["total_minor"]).toBe("37000");
+      expect(confirmed.draft).toEqual({
+        draft_id: draft.value.draftId,
+        lifecycle: "converted",
+        version: 3,
+        converted_booking_id: confirmed.booking.booking_id,
+      });
+      // The command was keyed by THIS terminal's own sequence, seeded from the
+      // Hub's eligibility answer: kl1.{device}.1 — and the Hub now expects 2.
+      const { rows: command } = await pool.query<{
+        idempotency_key: string;
+        commit_status: string;
+        actor_id: string;
+      }>(
+        `select idempotency_key, commit_status, actor_id from edge_sync.command_result
+          where aggregate_id = $1`,
+        [confirmed.booking.booking_id],
+      );
+      expect(command).toEqual([
+        { idempotency_key: `kl1.${deviceId}.1`, commit_status: "committed", actor_id: deviceId },
+      ]);
+      const { rows: seq } = await pool.query<{ last_client_sequence: string }>(
+        `select last_client_sequence::text from edge_identity.terminal_device where id = $1`,
+        [deviceId],
+      );
+      expect(seq[0]?.last_client_sequence).toBe("1");
+      const { rows: bookingRows } = await pool.query<Record<string, unknown>>(
+        `select b.status, b.customer_id, b.paid_minor::text as paid,
+                (select count(*)::text from edge_laundry.booking_line l where l.booking_id = b.id) as lines,
+                (select count(*)::text from edge_payments.tender_leg t join edge_payments.payment p on p.id = t.payment_id where p.booking_id = b.id) as legs,
+                (select r.receipt_number from edge_documents.receipt r where r.booking_id = b.id) as receipt
+           from edge_laundry.booking b where b.id = $1`,
+        [confirmed.booking.booking_id],
+      );
+      expect(bookingRows[0]).toEqual({
+        status: "intake_confirmed",
+        customer_id: created.value.customerId,
+        paid: "37000",
+        lines: "2",
+        legs: "2",
+        receipt: confirmed.receipt.receipt_number,
+      });
+      const { rows: bookingFacts } = await pool.query<{ event_type: string; actor: string }>(
+        `select e.event_type, e.payload -> 'actor' ->> 'actor_type' as actor
+           from edge_sync.local_event e where e.aggregate_id in ($1, $2, $3) and e.hub_sequence > $4
+          order by e.hub_sequence`,
+        [confirmed.booking.booking_id, confirmed.payment?.payment_id, draft.value.draftId, 0],
+      );
+      expect(bookingFacts.map((f) => f.event_type)).toEqual([
+        "laundry.booking_draft_recorded",
+        "laundry.booking_draft_recorded",
+        "laundry_booking.created",
+        "payment.recorded",
+        "payment.tender_recorded",
+        "payment.tender_recorded",
+        "document.receipt_issued",
+        "laundry.booking_draft_recorded",
+      ]);
+      expect(bookingFacts.slice(2).every((f) => f.actor === "device")).toBe(true);
+      // A converted draft cannot be confirmed again (a fresh key is minted;
+      // the Hub answers DRAFT_NOT_OPEN and names the Booking).
+      const twice = await ops.confirmIntake({
+        draftId: draft.value.draftId,
+        expectedVersion: 3,
+        lines: cart,
+        express: false,
+        displayedTotalMinor: "37000",
+        tender: { localMinor: "37000", usdCents: "0" },
+      });
+      expect(twice).toMatchObject({ ok: false, kind: "conflict", detail: "DRAFT_NOT_OPEN" });
+      // The Orders view lists it, from the Hub.
+      const recent = await ops.listRecentBookings();
+      expect(
+        recent.ok && recent.value.find((b) => b.bookingId === confirmed.booking.booking_id),
+      ).toMatchObject({
+        bookingNumber: confirmed.booking.booking_number,
+        customerDisplayName: "Pi Edge Customer",
+        walkIn: false,
+        receiptNumber: confirmed.receipt.receipt_number,
+      });
+
       // ------------------------------ lock, wrong PIN, unlock again
       await pos.lock();
       expect(pos.report?.state).toBe("staff_authentication_required");
@@ -524,7 +748,8 @@ describe.skipIf(!live)(
       const ops2 = pos.intakeOperations();
       expect(ops2).not.toBeNull();
       const reread = await ops2?.readDraft(draft.value.draftId);
-      expect(reread?.ok && reread.value.version).toBe(2);
+      expect(reread?.ok && reread.value.version).toBe(3);
+      expect(reread?.ok && reread.value.lifecycle).toBe("converted");
 
       // --------------------------- the bridge is still a narrow door
       const staffDoor = await bridgeCall(socketPath)("POST", "/edge/v1/sessions/open", {

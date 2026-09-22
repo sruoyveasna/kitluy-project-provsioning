@@ -24,14 +24,16 @@ export const LaundryBookingPanel = ({
   nextDisabled?: boolean;
   extraActions?: ReactNode;
 }) => {
-  const { bookingLineCount, bookingDraft, wfKgInputActive, selServiceType } = useAppState();
+  const { bookingLineCount, confirmation, wfKgInputActive, selServiceType } = useAppState();
 
   const showCartLines = wizStep === 0;
   const showWfKgNumpad = showCartLines && wfKgInputActive && selServiceType === "wf";
   const showCustomerPanel = wizStep === 1;
   const showPricingPanel = wizStep === 2;
   const showReviewPanel = wizStep === 3;
-  const hideCtaRow = bookingDraft !== null;
+  // The draft exists from the Pricing step on; the wizard closes only once
+  // the Store Hub confirmed the Booking (slice 2).
+  const hideCtaRow = confirmation !== null;
 
   return (
     <div className="sv-od" data-wiz-step={wizStep}>

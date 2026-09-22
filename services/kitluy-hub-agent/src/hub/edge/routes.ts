@@ -97,6 +97,15 @@ import {
   updateBookingDraft,
 } from "../t1-intake.js";
 import { normalizeCambodianPhone } from "@kitluy/localization";
+import type { KitluyEnvironment } from "@kitluy/shared-types";
+import type { IntakeLineRequest } from "@kitluy-verticals/phase1-laundry";
+import { HubCommandError } from "../errors.js";
+import { MAX_INTAKE_LINES } from "../commands/confirm-from-draft.js";
+import {
+  confirmDraftIntakeForTerminal,
+  listRecentBookings,
+  quoteDraftIntake,
+} from "./t1-operations.js";
 import type { EdgeDiscoveryAuthority } from "./discovery.js";
 import type { EdgeRequest, EdgeResponse, EdgeRequestHandler } from "./transport.js";
 
@@ -147,6 +156,17 @@ export const EDGE_CUSTOMERS_PATH = "/edge/v1/customers";
 export const EDGE_BOOKING_DRAFTS_PATH = "/edge/v1/laundry/bookings/drafts";
 /** Route-level bound: intake bodies are small structured text. */
 export const MAX_INTAKE_BODY_BYTES = 8 * 1024;
+
+// T1 Store operations (T1-REAL-OPERATIONS-001 slice 2; KLD-2026-09-19
+// decision 1). The confirm path IS the approved route
+// `/edge/v1/laundry/bookings/{id}/confirm-intake` with {id} = the draft;
+// quote and recent are its companion reads. Session-authorized like T002;
+// confirm additionally runs the canonical command pipeline.
+export const EDGE_BOOKING_DRAFT_QUOTE_SUFFIX = "/quote";
+export const EDGE_BOOKING_CONFIRM_INTAKE_SUFFIX = "/confirm-intake";
+export const EDGE_BOOKINGS_RECENT_PATH = "/edge/v1/laundry/bookings/recent";
+/** A cart of up to MAX_INTAKE_LINES lines with money strings fits well within this. */
+export const MAX_OPERATION_BODY_BYTES = 32 * 1024;
 /** The header carrying the staff session id on every T002 intake request. */
 export const INTAKE_SESSION_HEADER = "x-kitluy-session-id";
 
@@ -323,6 +343,51 @@ const CANONICAL_ERROR: Readonly<Record<string, KitluyErrorCode>> = {
   PIN_INCORRECT: "AUTHENTICATION_REQUIRED",
   PIN_LOCKED: "RATE_LIMITED",
   TERMINAL_UNKNOWN: "DEVICE_NOT_ASSIGNED",
+  // T1 Store operations (slice 2): what the Hub could not price or settle,
+  // and the canonical command pipeline's own refusals (hub/errors.ts).
+  CATALOG_NOT_DELIVERED: "DEPENDENCY_UNAVAILABLE",
+  MONEY_CONTRACT_MISSING: "DEPENDENCY_UNAVAILABLE",
+  NO_LINES: "VALIDATION_FAILED",
+  SERVICE_UNKNOWN: "VALIDATION_FAILED",
+  PRICING_MODE_MISMATCH: "VALIDATION_FAILED",
+  QUANTITY_INVALID: "VALIDATION_FAILED",
+  CURRENCY_MISMATCH: "DEPENDENCY_UNAVAILABLE",
+  WEIGHT_RULE_MISSING: "DEPENDENCY_UNAVAILABLE",
+  MONEY_ROUNDING_UNKNOWN: "DEPENDENCY_UNAVAILABLE",
+  EXPRESS_NOT_CONFIGURED: "VALIDATION_FAILED",
+  PRICE_MISMATCH: "RESOURCE_VERSION_CONFLICT",
+  TENDER_INVALID: "VALIDATION_FAILED",
+  FX_RATE_UNAVAILABLE: "DEPENDENCY_UNAVAILABLE",
+  TENDER_INSUFFICIENT: "VALIDATION_FAILED",
+  EDGE_IDEMPOTENCY_KEY_MALFORMED: "VALIDATION_FAILED",
+  EDGE_IDEMPOTENCY_PAYLOAD_MISMATCH: "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST",
+  IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST: "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST",
+  EDGE_SEQUENCE_REPLAY_REJECTED: "RESOURCE_VERSION_CONFLICT",
+  EDGE_SEQUENCE_GAP: "RESOURCE_VERSION_CONFLICT",
+  EDGE_AGGREGATE_VERSION_CONFLICT: "RESOURCE_VERSION_CONFLICT",
+  EDGE_SCOPE_MISMATCH: "SCOPE_PERMISSION_DENIED",
+  EDGE_TERMINAL_UNKNOWN: "DEVICE_NOT_ASSIGNED",
+  EDGE_DEVICE_CONTEXT_INVALID: "VALIDATION_FAILED",
+  EDGE_DEVICE_NOT_ASSIGNED: "DEVICE_NOT_ASSIGNED",
+  EDGE_DEVICE_REVOKED: "DEVICE_NOT_ASSIGNED",
+  EDGE_ASSIGNMENT_GENERATION_MISMATCH: "RESOURCE_VERSION_CONFLICT",
+  EDGE_SESSION_INVALID: "AUTHENTICATION_REQUIRED",
+  EDGE_SESSION_EXPIRED: "AUTHENTICATION_REQUIRED",
+  EDGE_PROFILE_NOT_AUTHORIZED: "PROFILE_NOT_ALLOWED",
+  EDGE_PERMISSION_DENIED: "SCOPE_PERMISSION_DENIED",
+  EDGE_PERMISSION_KEY_UNREGISTERED: "SCOPE_PERMISSION_DENIED",
+  EDGE_RESOURCE_SCOPE_DENIED: "SCOPE_PERMISSION_DENIED",
+  EDGE_ENVIRONMENT_DENIED: "SCOPE_PERMISSION_DENIED",
+  EDGE_APPROVAL_REQUIRED: "SCOPE_PERMISSION_DENIED",
+  EDGE_SELF_APPROVAL_FORBIDDEN: "SCOPE_PERMISSION_DENIED",
+  EDGE_AGGREGATE_NOT_FOUND: "RESOURCE_NOT_FOUND",
+  EDGE_INVALID_TRANSITION: "RESOURCE_VERSION_CONFLICT",
+  EDGE_PAYMENT_GATE_BLOCKED: "RESOURCE_VERSION_CONFLICT",
+  EDGE_CUSTODY_GATE_BLOCKED: "RESOURCE_VERSION_CONFLICT",
+  EDGE_CONFIGURATION_MISSING: "DEPENDENCY_UNAVAILABLE",
+  EDGE_REQUIRED_VALUE_MISSING: "VALIDATION_FAILED",
+  EDGE_COMMAND_UNKNOWN: "INTERNAL_ERROR",
+  EDGE_COMMAND_INACTIVE: "SCOPE_PERMISSION_DENIED",
 };
 
 const CANONICAL_MESSAGE: Readonly<Partial<Record<KitluyErrorCode, string>>> = {
@@ -588,7 +653,9 @@ type Matched =
   | {
       readonly route: "drafts-read" | "drafts-update" | "drafts-cancel";
       readonly draftId: string;
-    };
+    }
+  | { readonly route: "drafts-quote" | "bookings-confirm"; readonly draftId: string }
+  | { readonly route: "bookings-recent" };
 
 function matchRoute(method: string, path: string): Matched | "METHOD_NOT_ALLOWED" | null {
   const clean = path.split("?")[0]?.replace(/\/+$/, "") ?? "";
@@ -659,16 +726,29 @@ function matchRoute(method: string, path: string): Matched | "METHOD_NOT_ALLOWED
   if (clean === EDGE_BOOKING_DRAFTS_PATH) {
     return method === "POST" ? { route: "drafts-create" } : "METHOD_NOT_ALLOWED";
   }
-  const draft = /^\/edge\/v1\/laundry\/bookings\/drafts\/([^/]+)(?:\/(cancel))?$/.exec(clean);
+  if (clean === EDGE_BOOKINGS_RECENT_PATH) {
+    return method === "GET" ? { route: "bookings-recent" } : "METHOD_NOT_ALLOWED";
+  }
+  const draft = /^\/edge\/v1\/laundry\/bookings\/drafts\/([^/]+)(?:\/(cancel|quote))?$/.exec(clean);
   if (draft !== null) {
     const draftId = draft[1] ?? "";
     if (!UUID.test(draftId)) return null;
     if (draft[2] === "cancel") {
       return method === "POST" ? { route: "drafts-cancel", draftId } : "METHOD_NOT_ALLOWED";
     }
+    if (draft[2] === "quote") {
+      return method === "POST" ? { route: "drafts-quote", draftId } : "METHOD_NOT_ALLOWED";
+    }
     if (method === "GET") return { route: "drafts-read", draftId };
     if (method === "PATCH") return { route: "drafts-update", draftId };
     return "METHOD_NOT_ALLOWED";
+  }
+  // The approved confirm-intake route, {id} = the Booking Draft (decision 1).
+  const confirm = /^\/edge\/v1\/laundry\/bookings\/([^/]+)\/confirm-intake$/.exec(clean);
+  if (confirm !== null) {
+    const draftId = confirm[1] ?? "";
+    if (!UUID.test(draftId)) return null;
+    return method === "POST" ? { route: "bookings-confirm", draftId } : "METHOD_NOT_ALLOWED";
   }
   const sub =
     /^\/edge\/v1\/terminal-pairing\/sessions\/([^/]+)\/(terminal-proof|complete|receipt)$/.exec(
@@ -787,6 +867,9 @@ export function createEdgeTerminalRouter(deps: EdgeTerminalRouterDeps): EdgeRequ
         "drafts-read",
         "drafts-update",
         "drafts-cancel",
+        "drafts-quote",
+        "bookings-confirm",
+        "bookings-recent",
       ];
       if (QUERYLESS_ROUTES.includes(matched.route) && queryString !== "") {
         return finish(
@@ -1027,6 +1110,14 @@ export function createEdgeTerminalRouter(deps: EdgeTerminalRouterDeps): EdgeRequ
                 queryString,
                 correlationId,
               ),
+              "HANDLED",
+            );
+          case "drafts-quote":
+          case "bookings-confirm":
+          case "bookings-recent":
+            return finish(
+              operation,
+              await handleT1Operations(deps, terminal, matched, request, body, correlationId),
               "HANDLED",
             );
           case "activation-challenges":
@@ -2084,6 +2175,230 @@ async function handleT1Intake(
     if (error instanceof IntakeRefusalError) {
       return refusal(error.refusal, correlationId);
     }
+    throw error;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// T1-REAL-OPERATIONS-001 slice 2 — quote, confirm-intake, recent Bookings.
+// ---------------------------------------------------------------------------
+
+const OPERATION_ROUTE_PERMISSION: Readonly<Record<string, string>> = {
+  // Pricing the draft's lines is shaping the draft toward a Booking — the
+  // draft-workspace permission the T002 draft routes already reuse.
+  "drafts-quote": PERMISSION_BOOKINGS_CREATE,
+  // The approved route's registered permission (edge-contracts registry).
+  "bookings-confirm": PERMISSION_BOOKINGS_CREATE,
+  "bookings-recent": PERMISSION_BOOKINGS_READ,
+};
+
+/** Whole minor units on the wire: a decimal string, never a float (§1). */
+const MONEY_STRING = /^[0-9]{1,18}$/;
+
+/**
+ * The closed line shape: one service, exactly one quantity kind. Bounds are
+ * route-level; the Hub's pricing engine applies the business rules.
+ */
+function parseIntakeLines(value: unknown): readonly IntakeLineRequest[] | null {
+  if (!Array.isArray(value) || value.length > MAX_INTAKE_LINES) return null;
+  const lines: IntakeLineRequest[] = [];
+  for (const raw of value) {
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+    const line = raw as Record<string, unknown>;
+    if (unknownFields(line, ["serviceId", "pieceCount", "weighedGrams"]).length > 0) return null;
+    const serviceId = line["serviceId"];
+    if (typeof serviceId !== "string" || !UUID.test(serviceId)) return null;
+    const pieceCount = line["pieceCount"];
+    const weighedGrams = line["weighedGrams"];
+    const hasPieces = pieceCount !== undefined;
+    const hasWeight = weighedGrams !== undefined;
+    if (hasPieces === hasWeight) return null;
+    if (hasPieces) {
+      if (typeof pieceCount !== "number" || !Number.isInteger(pieceCount) || pieceCount < 1)
+        return null;
+      lines.push({ serviceId: serviceId.toLowerCase(), pieceCount });
+    } else {
+      if (typeof weighedGrams !== "number" || !Number.isInteger(weighedGrams) || weighedGrams < 1)
+        return null;
+      lines.push({ serviceId: serviceId.toLowerCase(), weighedGrams });
+    }
+  }
+  return lines;
+}
+
+/** A pipeline refusal → the wire: its own `details.result` when it names one. */
+function commandRefusal(error: HubCommandError, correlationId: string): EdgeResponse {
+  const named = error.details["result"];
+  const result = typeof named === "string" && named !== "" ? named : error.code;
+  const code = CANONICAL_ERROR[result] ?? CANONICAL_ERROR[error.code] ?? "INTERNAL_ERROR";
+  const { result: _omitted, ...rest } = error.details;
+  void _omitted;
+  return {
+    status: httpStatusFor(code),
+    body: errorEnvelope(code, CANONICAL_MESSAGE[code] ?? "the request was refused", {
+      correlationId,
+      details: { result, retryable: isRetryable(code), ...redactDetails(rest) },
+    }),
+  };
+}
+
+/** Only scalar, non-secret evidence crosses the wire (amounts, ids, codes). */
+function redactDetails(details: Readonly<Record<string, unknown>>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(details)) {
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      out[key] = value;
+    } else if (value === null) {
+      out[key] = null;
+    }
+  }
+  return out;
+}
+
+async function handleT1Operations(
+  deps: EdgeTerminalRouterDeps,
+  terminal: { readonly terminalDeviceId: string; readonly activated: boolean },
+  matched:
+    | { readonly route: "drafts-quote" | "bookings-confirm"; readonly draftId: string }
+    | { readonly route: "bookings-recent" },
+  request: EdgeRequest,
+  body: Record<string, unknown> | null,
+  correlationId: string,
+): Promise<EdgeResponse> {
+  if (!terminal.activated) return refusal("ACTIVATION_REQUIRED", correlationId);
+  if (Buffer.byteLength(request.rawBody ?? "", "utf8") > MAX_OPERATION_BODY_BYTES) {
+    return invalid(correlationId, "the request body exceeds the operation bound");
+  }
+  const sessionHeader = request.headers[INTAKE_SESSION_HEADER];
+  const sessionId = typeof sessionHeader === "string" ? sessionHeader : "";
+  if (!UUID.test(sessionId)) {
+    return invalid(correlationId, `a ${INTAKE_SESSION_HEADER} header is required`);
+  }
+  const routePermission = OPERATION_ROUTE_PERMISSION[matched.route];
+  if (routePermission === undefined) return refusal("INTERNAL_ERROR", correlationId);
+
+  const authorization = await withHubTransaction(
+    deps.pool,
+    (client) =>
+      authorizeT1IntakeSession(client, {
+        terminalDeviceId: terminal.terminalDeviceId,
+        sessionId,
+        routePermission,
+      }),
+    HUB_RUNTIME_ROLE,
+  );
+  if (!authorization.ok) return refusal(authorization.refusal, correlationId);
+  const authority: T1IntakeAuthority = authorization.authority;
+  const operationBody: Record<string, unknown> = body ?? {};
+  const environment = (deps.environment ?? "development") as KitluyEnvironment;
+
+  try {
+    switch (matched.route) {
+      case "bookings-recent": {
+        if (request.rawBody !== "") return invalid(correlationId, "a GET carries no body");
+        const bookings = await listRecentBookings(deps.pool, authority);
+        return { status: 200, body: { result: "RECENT_BOOKINGS", correlationId, bookings } };
+      }
+      case "drafts-quote": {
+        const unknown = unknownFields(operationBody, ["lines", "express"]);
+        if (unknown.length > 0) return invalid(correlationId, "unknown fields", unknown);
+        const lines = parseIntakeLines(operationBody["lines"]);
+        if (lines === null)
+          return invalid(correlationId, "lines must be a bounded list of priced lines");
+        const express = operationBody["express"] === true;
+        const quote = await quoteDraftIntake(deps.pool, authority, {
+          draftId: matched.draftId,
+          lines,
+          express,
+        });
+        return { status: 200, body: { result: "QUOTE", correlationId, quote } };
+      }
+      case "bookings-confirm": {
+        // The terminal's own command key (offline contract §2): required, and
+        // it must be the canonical shape — the pipeline verifies the sequence.
+        const key = idempotencyKeyFrom(request.headers);
+        if (key === null) return invalid(correlationId, "an Idempotency-Key header is required");
+        const unknown = unknownFields(operationBody, [
+          "expectedVersion",
+          "lines",
+          "express",
+          "displayedTotalMinor",
+          "tender",
+        ]);
+        if (unknown.length > 0) return invalid(correlationId, "unknown fields", unknown);
+        const expectedVersion = operationBody["expectedVersion"];
+        if (
+          typeof expectedVersion !== "number" ||
+          !Number.isInteger(expectedVersion) ||
+          expectedVersion < 1
+        ) {
+          return invalid(correlationId, "expectedVersion must be a positive integer");
+        }
+        const lines = parseIntakeLines(operationBody["lines"]);
+        if (lines === null || lines.length === 0) {
+          return invalid(correlationId, "lines must be a non-empty bounded list of priced lines");
+        }
+        const express = operationBody["express"] === true;
+        const displayed = operationBody["displayedTotalMinor"];
+        if (typeof displayed !== "string" || !MONEY_STRING.test(displayed)) {
+          return invalid(correlationId, "displayedTotalMinor must be a decimal minor-unit string");
+        }
+        const tender = operationBody["tender"];
+        if (typeof tender !== "object" || tender === null || Array.isArray(tender)) {
+          return invalid(correlationId, "tender is required");
+        }
+        const tenderBody = tender as Record<string, unknown>;
+        const unknownTender = unknownFields(tenderBody, ["type", "localMinor", "usdCents"]);
+        if (unknownTender.length > 0)
+          return invalid(correlationId, "unknown fields", unknownTender);
+        if (tenderBody["type"] !== "cash") {
+          return invalid(correlationId, "tender.type must be cash (owner decision 2026-09-19)");
+        }
+        const localMinor = tenderBody["localMinor"] ?? "0";
+        const usdCents = tenderBody["usdCents"] ?? "0";
+        if (
+          typeof localMinor !== "string" ||
+          !MONEY_STRING.test(localMinor) ||
+          typeof usdCents !== "string" ||
+          !MONEY_STRING.test(usdCents)
+        ) {
+          return invalid(correlationId, "tender amounts must be decimal minor-unit strings");
+        }
+        const outcome = await confirmDraftIntakeForTerminal(deps.pool, {
+          terminalDeviceId: terminal.terminalDeviceId,
+          authority,
+          environment,
+          idempotencyKey: key,
+          correlationId,
+          draftId: matched.draftId,
+          expectedVersion,
+          lines,
+          express,
+          displayedTotalMinor: BigInt(displayed),
+          tender: { localMinor: BigInt(localMinor), usdCents: BigInt(usdCents) },
+        });
+        if (outcome.outcome === "in_progress") {
+          return {
+            status: 202,
+            body: { result: "BOOKING_CONFIRM_IN_PROGRESS", correlationId, ...outcome.result },
+          };
+        }
+        return {
+          status: 200,
+          body: {
+            result:
+              outcome.outcome === "duplicate" ? "BOOKING_CONFIRMED_REPLAYED" : "BOOKING_CONFIRMED",
+            correlationId,
+            commandOutcome: outcome.outcome,
+            aggregateId: outcome.aggregateId,
+            syncState: outcome.wireSyncState,
+            ...outcome.result,
+          },
+        };
+      }
+    }
+  } catch (error) {
+    if (error instanceof HubCommandError) return commandRefusal(error, correlationId);
     throw error;
   }
 }

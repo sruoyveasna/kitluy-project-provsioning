@@ -60,6 +60,10 @@ describe("the closed route list", () => {
     ["GET", `/edge/v1/laundry/bookings/drafts/${CUSTOMER}`],
     ["PATCH", `/edge/v1/laundry/bookings/drafts/${CUSTOMER}`],
     ["POST", `/edge/v1/laundry/bookings/drafts/${CUSTOMER}/cancel`],
+    // T1-REAL-OPERATIONS-001 slice 2
+    ["POST", `/edge/v1/laundry/bookings/drafts/${CUSTOMER}/quote`],
+    ["POST", `/edge/v1/laundry/bookings/${CUSTOMER}/confirm-intake`],
+    ["GET", "/edge/v1/laundry/bookings/recent"],
   ])("forwards %s %s", (method, url) => {
     expect(matchBridgeRoute(method, url).ok).toBe(true);
   });
@@ -84,6 +88,13 @@ describe("the closed route list", () => {
     ["POST", "/edge/v1/terminal-pin/status"],
     ["POST", "/edge/v1/terminal-pin/reset"],
     ["DELETE", `/edge/v1/laundry/bookings/drafts/${CUSTOMER}`],
+    // The confirm route takes a draft id only; no other Booking verb crosses.
+    ["GET", `/edge/v1/laundry/bookings/${CUSTOMER}`],
+    ["POST", `/edge/v1/laundry/bookings/${CUSTOMER}/payments`],
+    ["POST", `/edge/v1/laundry/bookings/${CUSTOMER}/refunds`],
+    ["POST", `/edge/v1/laundry/bookings/${CUSTOMER}/voids`],
+    ["POST", "/edge/v1/laundry/bookings/recent"],
+    ["GET", `/edge/v1/laundry/bookings/drafts/${CUSTOMER}/quote`],
     ["POST", "/edge/v1/runtime/eligibility"],
     ["GET", "/edge/v1/customers/../terminal-pairing/sessions"],
     ["GET", "/edge/v1/customers/not-a-uuid"],

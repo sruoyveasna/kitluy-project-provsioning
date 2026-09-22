@@ -20,7 +20,15 @@ import {
   type T1ConfigurationRead,
   type T1PinBridge,
 } from "../../../bootstrap/bridge-types.js";
-import type { IntakeCustomer, IntakeDraft, IntakeResult } from "../../../intake/ports.js";
+import type {
+  IntakeBookingSummary,
+  IntakeConfirmation,
+  IntakeCustomer,
+  IntakeDraft,
+  IntakeLineInput,
+  IntakeQuote,
+  IntakeResult,
+} from "../../../intake/ports.js";
 import {
   parseLaundryCatalogSection,
   parseLaundryMoneySection,
@@ -38,7 +46,14 @@ import type {
   WfKgOffering,
 } from "./types";
 
-export type { IntakeDraft, IntakeResult };
+export type {
+  IntakeBookingSummary,
+  IntakeConfirmation,
+  IntakeDraft,
+  IntakeLineInput,
+  IntakeQuote,
+  IntakeResult,
+};
 
 /** The renderer-visible intake bridge, exactly as `intake-ipc.ts` exposes it. */
 export interface IntakeBridge {
@@ -63,6 +78,21 @@ export interface IntakeBridge {
     staffNotes?: string;
   }): Promise<IntakeResult<IntakeDraft>>;
   cancelDraft(p: { draftId: string; reasonCode: string }): Promise<IntakeResult<IntakeDraft>>;
+  // T1-REAL-OPERATIONS-001 slice 2
+  quote(p: {
+    draftId: string;
+    lines: readonly IntakeLineInput[];
+    express: boolean;
+  }): Promise<IntakeResult<IntakeQuote>>;
+  confirmIntake(p: {
+    draftId: string;
+    expectedVersion: number;
+    lines: readonly IntakeLineInput[];
+    express: boolean;
+    displayedTotalMinor: string;
+    tender: { localMinor: string; usdCents: string };
+  }): Promise<IntakeResult<IntakeConfirmation>>;
+  listRecentBookings(): Promise<IntakeResult<readonly IntakeBookingSummary[]>>;
 }
 
 /** What the Items step can know about the catalog. */
@@ -109,6 +139,23 @@ export interface FacePorts {
     readonly reasonCode: string;
   }): Promise<IntakeResult<IntakeDraft>>;
   readCatalog(): Promise<CatalogAnswer>;
+  /** The Store Hub prices the cart (no write) — the only Booking price the face shows. */
+  quote(input: {
+    readonly draftId: string;
+    readonly lines: readonly IntakeLineInput[];
+    readonly express: boolean;
+  }): Promise<IntakeResult<IntakeQuote>>;
+  /** ONE Hub command: draft → Booking, priced by the Hub, paid in cash, receipt issued. */
+  confirmIntake(input: {
+    readonly draftId: string;
+    readonly expectedVersion: number;
+    readonly lines: readonly IntakeLineInput[];
+    readonly express: boolean;
+    readonly displayedTotalMinor: string;
+    readonly tender: { readonly localMinor: string; readonly usdCents: string };
+  }): Promise<IntakeResult<IntakeConfirmation>>;
+  /** Today's Bookings at this Location (the Orders view). */
+  listRecentBookings(): Promise<IntakeResult<readonly IntakeBookingSummary[]>>;
   /** Closes the Terminal PIN session; the runtime report then shows the PIN screen. */
   lockTerminal(): Promise<void>;
 }
@@ -163,6 +210,7 @@ export function catalogAnswerFromSections(read: T1ConfigurationRead): CatalogAns
     if (s.currencyCode !== "KHR") continue; // the face shows whole riel only
     if (s.pricingMode === "PER_WEIGHT") {
       perWeight.push({
+        serviceId: s.serviceId,
         serviceCode: s.serviceCode,
         name: s.displayName,
         rateKhr: s.unitPriceMinor,
@@ -274,6 +322,9 @@ export function bridgeFacePorts(): FacePorts | undefined {
     createDraft: (input) => intake.createDraft(input),
     updateDraft: (input) => intake.updateDraft(input),
     cancelDraft: (input) => intake.cancelDraft(input),
+    quote: (input) => intake.quote(input),
+    confirmIntake: (input) => intake.confirmIntake(input),
+    listRecentBookings: () => intake.listRecentBookings(),
     // The catalog is a section of the configuration the main process VERIFIED
     // against the Hub's signed envelope; an application without that bridge
     // (an older preload) still says "not delivered" rather than guessing.
