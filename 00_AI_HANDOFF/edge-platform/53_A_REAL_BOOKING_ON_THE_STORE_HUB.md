@@ -1,6 +1,6 @@
 # 53 — A real Booking on the Store Hub, paid in cash, with a receipt record (T1-REAL-OPERATIONS-001, slice 2)
 
-**Date** 2026-09-21 · **Area** edge-platform / laundry · **Status** IMPLEMENTED · TESTED · INTEGRATED (real-parts e2e: real Hub DB + real mTLS router + real terminal-edge pairing + real edge bridge + real POS runtime) · **NOT RELEASED · IMAGE NOT REBUILT · HARDWARE NOT VERIFIED · END-TO-END NOT VERIFIED on a board** · **COMMITTED as `6cee466` on `fix/t1-grant-pick`** in worktree `worktrees/kitluy-ecosystem/wt-t1-face-release` (base `91d1bb9`, code-parity with `dev` `54c123d`) — **NOT YET ON `dev`**, see §5. Plan: `docs/decisions/kitluy-t1-real-operations-plan-owner-decision-v1.0.0.md` (KLD-2026-09-19-T1-REAL-OPERATIONS-001) §4 slice 2.
+**Date** 2026-09-21 · **Area** edge-platform / laundry · **Status** IMPLEMENTED · TESTED · INTEGRATED (real-parts e2e: real Hub DB + real mTLS router + real terminal-edge pairing + real edge bridge + real POS runtime) · **NOT RELEASED · IMAGE NOT REBUILT · HARDWARE NOT VERIFIED · END-TO-END NOT VERIFIED on a board** · **ON `dev` as `662438a`** (2026-09-22), cherry-picked from `6cee466` on `fix/t1-grant-pick` and re-verified on the merged tree — see §6. Plan: `docs/decisions/kitluy-t1-real-operations-plan-owner-decision-v1.0.0.md` (KLD-2026-09-19-T1-REAL-OPERATIONS-001) §4 slice 2.
 
 ## 1. Mission read-back, and what was actually missing
 
@@ -20,7 +20,7 @@ The owner mission asked to "complete the integration of the KitLuy POS applicati
 
 Nothing about the email/password model had to be "adapted": the standalone POS's Supabase auth never reached this repository (T1-FACE-PORT-001 rejected it), and the Pi path's boundary test (`pi-terminal-boundaries.test.ts`) still refuses `password|email|sessions/open` in Pi-path code. The device credential + Terminal PIN **is** the credential for this slice, exactly as KLD-2026-09-17 ruled.
 
-## 2. What exists now (worktree commit `6cee466`; not yet on `dev`)
+## 2. What exists now (`dev` `662438a`)
 
 ### Shared vertical contracts — `verticals/phase1-laundry`
 
@@ -84,6 +84,18 @@ Three routes added to the CLOSED list (`drafts.quote`, `bookings.confirm`, `book
 
 ## 5. Next
 
-1. **Bring `6cee466` to `dev` — BLOCKED, not attempted.** Three files it changes (`apps/kitluy-pos-desktop-app/src/bootstrap/ports.ts`, `services/kitluy-hub-agent/src/hub/edge/runtime-bootstrap.ts`, `verticals/phase1-laundry/src/index.ts`) are also uncommitted in the main tree from the parallel TERMINAL-APPLICATION-ASSIGNMENT-001 session; a merge or cherry-pick there would refuse or overwrite that work. The merge waits until that session commits, and then belongs to whoever can reconcile both sets of edits in those three files. Afterwards: release `kitluy-terminal` (`pnpm --filter @kitluy-apps/kitluy-pos-desktop-app build:release-payload` first — handoff 52 §4) and hot-deploy the Hub bundle; **rebuild the Pi Terminal image** (bridge routes) and the Store Hub image.
+1. **On `dev` since 2026-09-22 (§6).** Next: release `kitluy-terminal` (`pnpm --filter @kitluy-apps/kitluy-pos-desktop-app build:release-payload` first — handoff 52 §4) and hot-deploy the Hub bundle; **rebuild the Pi Terminal image** (bridge routes) and the Store Hub image.
 2. Hardware: `pnpm dev:catalog:load --khr-per-usd <owner rate>`; a real booking on the Pi with the owner's cash; rows on the Hub; the Orders view.
 3. Slice 3 — the receipt prints on the Pi's USB ESC/POS printer from the Hub's receipt payload.
+
+## 6. The merge onto `dev` (2026-09-22, `662438a`)
+
+**A merge was the wrong instrument.** `fix/t1-grant-pick` diverged from `dev` at `9dbe2ac` and carried 15 commits, 14 of which are the release worktree's duplicates of work that reached `dev` by its own commits (the PIN fixes, the overlay repackagings). `git merge` therefore opened nine conflicts, four of them in files this work never touched (`50_LAUNDRY_T1_FACE_ON_PI.md`, the broker systemd unit, the Store Hub image build script and its contents test) — conflicts between two recordings of the same change, which is not a thing to resolve by hand. The merge was aborted and **`6cee466` was cherry-picked**: only this work's 48-file diff, which applied with **no conflicts at all**.
+
+**Both sides survived the auto-merge**, checked rather than assumed: the eligibility payload now carries the seat work's `primaryVertical` AND this work's `nextClientSequence`; `RuntimeEligibilityWire` carries both; the vertical's barrel exports `applications.js` (theirs) beside `catalog-section.js` and `intake-quote.js` (this work's); `laundry-face.test.tsx` holds their waiting-terminal tests beside the rewritten wizard tests.
+
+**One defect found and fixed in passing.** `1bd4a50` (the seat session's WIP commit) shipped `hub/migrations/0044_hub_assignment_primary_vertical.sql` **without registering it in `HUB_MIGRATION_ORDER`**, so the canonical order stopped matching the directory and `hub-database.test.ts`'s order assertion could not pass on `dev`. `0044` is now registered between `0043` and `0045`, with its authority named.
+
+**Local development Hub database.** `kitluy_hub_local` had `0045` applied (from the worktree, where `0044` did not exist) and `0044` pending — which `pnpm hub:db:apply` correctly REFUSES as a backwards step ("pending 0044 sorts before the applied 0045; the set is forward-only"). `0044` was applied by hand (`psql -1 -v ON_ERROR_STOP=1`) and journalled **only after psql exited 0**; `pnpm hub:db:apply` then reports 46/46 up to date. A fresh Hub applies `0044` then `0045` in order — the two are independent columns on different tables, so the file set itself was never out of order. The live fixture `hub_assignment` was given `primary_vertical_code = 'laundry'` (the seed sets it for new rows; the existing row predates the column and `on conflict do nothing` would not have updated it) — without it `deriveEligibility` fails closed with `VERTICAL_UNAVAILABLE` and every terminal read refuses.
+
+**Re-verified on the merged tree** (not carried over from the worktree run): `pnpm build` 77/77, `pnpm typecheck` 105/105, vertical 89, edge-contracts 45, hub-agent 504 passed / 1 pre-existing, firstboot 920 passed / 1 pre-existing DB-fixture, POS app 190 passed / 1 pre-existing — including the real-parts Pi e2e (quote → PRICE_MISMATCH → confirm 10 000 ៛ + $10 → `KLB-DEMO-PP-01-…`, change 14 000, receipt, rows and facts on the Hub). Every failure is the same one that failed before this work, in the same place.
