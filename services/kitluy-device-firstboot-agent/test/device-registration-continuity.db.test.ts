@@ -385,6 +385,208 @@ describe.skipIf(!ready)("0197: permanent board identity across reflash (plan §8
  * and because the fifth is the one an implementation gets wrong: the clone must
  * not be able to lock the LEGITIMATE board out.
  */
+describe.skipIf(!ready)(
+  "0234: a same-board reflash releases itself for re-pairing, in development only",
+  () => {
+    /**
+     * The owner's rule (KLD-2026-09-23-DEVICE-CONTINUITY-RULE-001) makes a
+     * re-flashed board a RECOVERY of the same device. Identity already survives
+     * (TEST A above); what did not was the board's ability to go back to work:
+     * it returns holding a live assignment, and the Hub pairing door admits
+     * `enrolled` only, so an operator had to run dev:device:unassign by hand
+     * after every development reflash.
+     */
+    /** A real Store scope: `device_assignments` has foreign keys and means it. */
+    async function scope(db: Client): Promise<{ t: string; s: string; l: string }> {
+      const { rows } = await db.query<{ t: string; s: string; l: string }>(
+        `select t.id::text as t, s.id::text as s, l.id::text as l
+           from kitluy_core.tenants t
+           join kitluy_core.digital_stores s on s.tenant_id = t.id
+           join kitluy_core.store_locations l on l.digital_store_id = s.id
+          limit 1`,
+      );
+      const row = rows[0];
+      if (row === undefined) throw new Error("no Store scope in this database");
+      return row;
+    }
+
+    async function reflashedDeviceHoldingAnAssignment(db: Client): Promise<string> {
+      const profile = await profileId(db);
+      const board = newBoard();
+      const first = await register(db, {
+        board,
+        profile,
+        key: hex(32),
+        hostname: "hub-first-boot",
+        installation: { installationId: hex(16), storageSerial: hex(8) },
+      });
+      const deviceId = first.device_id;
+      await approve(db, deviceId);
+      // The reflash: same board, new card, new key, new hostname.
+      await register(db, {
+        board,
+        profile,
+        key: hex(32),
+        hostname: "hub-after-reflash",
+        installation: { installationId: hex(16), storageSerial: hex(8) },
+      });
+      // Give it a live assignment, the state a working Hub comes back in.
+      const where = await scope(db);
+      await db.query(
+        `insert into kitluy_devices.device_assignments
+           (id, device_id, tenant_id, digital_store_id, store_location_id,
+            assignment_generation, state, valid_from, activated_at, created_by_operator_ref)
+         values (gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid, $4::uuid,
+                 1, 'active', now(), now(), 'suite')`,
+        [deviceId, where.t, where.s, where.l],
+      );
+      await db.query(
+        `update kitluy_devices.devices
+            set assignment_generation = 1, lifecycle_state = 'awaiting_trust'
+          where id = $1::uuid`,
+        [deviceId],
+      );
+      return deviceId;
+    }
+
+    async function release(
+      db: Client,
+      deviceId: string,
+      environment: string,
+    ): Promise<Record<string, unknown>> {
+      const { rows } = await db.query<{ r: Record<string, unknown> }>(
+        `select kitluy_devices.release_reflashed_device_for_repair_v1($1::uuid, $2::text, 'suite') as r`,
+        [deviceId, environment],
+      );
+      return rows[0]?.r ?? {};
+    }
+
+    it("releases the SAME board in development, keeping its device_record_id", async () => {
+      const db = await connect();
+      try {
+        const deviceId = await reflashedDeviceHoldingAnAssignment(db);
+        const answer = await release(db, deviceId, "development");
+        expect(answer["released"]).toBe(true);
+        expect(answer["device_record_id"]).toBe(deviceId);
+
+        // Released for re-pairing: generation 0, back to `enrolled` — the state
+        // the Hub pairing door (0194) admits — and the device row is the SAME.
+        expect(await lifecycle(db, deviceId)).toBe("enrolled");
+        const generation = await scalar(
+          db,
+          `select assignment_generation::int as n from kitluy_devices.devices where id = $1::uuid`,
+          [deviceId],
+        );
+        expect(generation).toBe(0);
+        const live = await scalar(
+          db,
+          `select count(*)::int as n from kitluy_devices.device_assignments
+            where device_id = $1::uuid and state in ('pending_trust','active')`,
+          [deviceId],
+        );
+        expect(live).toBe(0);
+      } finally {
+        await db.end();
+      }
+    });
+
+    it("refuses in every environment that is not development", async () => {
+      const db = await connect();
+      try {
+        const deviceId = await reflashedDeviceHoldingAnAssignment(db);
+        for (const environment of ["production", "pilot", "staging", "local", "unknown"]) {
+          const answer = await release(db, deviceId, environment);
+          expect(answer["released"]).toBe(false);
+          expect(answer["reason"]).toBe("KLUY-REFLASH-RELEASE-NOT-DEVELOPMENT");
+        }
+        // Untouched: still holding its assignment.
+        expect(await lifecycle(db, deviceId)).toBe("awaiting_trust");
+      } finally {
+        await db.end();
+      }
+    });
+
+    it("never takes a working device out of service: no reflash evidence, no release", async () => {
+      const db = await connect();
+      try {
+        const profile = await profileId(db);
+        const board = newBoard();
+        const first = await register(db, {
+          board,
+          profile,
+          key: hex(32),
+          hostname: "hub-never-reflashed",
+          installation: { installationId: hex(16), storageSerial: hex(8) },
+        });
+        await approve(db, first.device_id);
+        const where = await scope(db);
+        await db.query(
+          `insert into kitluy_devices.device_assignments
+             (id, device_id, tenant_id, digital_store_id, store_location_id,
+              assignment_generation, state, valid_from, activated_at, created_by_operator_ref)
+           values (gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid, $4::uuid,
+                   1, 'active', now(), now(), 'suite')`,
+          [first.device_id, where.t, where.s, where.l],
+        );
+        await db.query(
+          `update kitluy_devices.devices set assignment_generation = 1, lifecycle_state = 'awaiting_trust'
+            where id = $1::uuid`,
+          [first.device_id],
+        );
+
+        const answer = await release(db, first.device_id, "development");
+        expect(answer["released"]).toBe(false);
+        expect(answer["reason"]).toBe("KLUY-REFLASH-RELEASE-NO-REFLASH-EVIDENCE");
+        expect(await lifecycle(db, first.device_id)).toBe("awaiting_trust");
+      } finally {
+        await db.end();
+      }
+    });
+
+    it("refuses a contained board, and one carrying an open trust incident", async () => {
+      const db = await connect();
+      try {
+        const contained = await reflashedDeviceHoldingAnAssignment(db);
+        await db.query(
+          `update kitluy_devices.devices
+              set lifecycle_state = 'quarantined', quarantined_at = now()
+            where id = $1::uuid`,
+          [contained],
+        );
+        const first = await release(db, contained, "development");
+        expect(first["reason"]).toBe("KLUY-REFLASH-RELEASE-DEVICE-CONTAINED");
+
+        const flagged = await reflashedDeviceHoldingAnAssignment(db);
+        await db.query(
+          `insert into kitluy_devices.device_trust_incidents
+             (id, device_id, incident_type, severity, detail, detected_at, detected_by)
+           values (gen_random_uuid(), $1::uuid, 'credential_reuse_detected', 'CRITICAL', '{}'::jsonb, now(), 'suite')`,
+          [flagged],
+        );
+        const second = await release(db, flagged, "development");
+        expect(second["reason"]).toBe("KLUY-REFLASH-RELEASE-OPEN-TRUST-INCIDENT");
+        expect(await lifecycle(db, flagged)).toBe("awaiting_trust");
+      } finally {
+        await db.end();
+      }
+    });
+
+    it("is idempotent: a second call has nothing left to release", async () => {
+      const db = await connect();
+      try {
+        const deviceId = await reflashedDeviceHoldingAnAssignment(db);
+        expect((await release(db, deviceId, "development"))["released"]).toBe(true);
+        const again = await release(db, deviceId, "development");
+        expect(again["released"]).toBe(false);
+        expect(again["reason"]).toBe("KLUY-REFLASH-RELEASE-NOTHING-TO-RELEASE");
+        expect(await lifecycle(db, deviceId)).toBe("enrolled");
+      } finally {
+        await db.end();
+      }
+    });
+  },
+);
+
 describe.skipIf(!ready)("0197: credential reuse on a second board", () => {
   it("gives the clone its own untrusted identity, an incident, and no path to trust", async () => {
     const db = await connect();

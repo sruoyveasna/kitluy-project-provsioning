@@ -5252,6 +5252,34 @@ Owner, 2026-09-19: "make this app working and service real data … based on kit
 
 **Guard.** `test/systemd-runtime.test.sh` now builds the `After=`/`Before=` graph across both overlays and fails on any cycle among the image's own units, naming the path. 246 passed, 0 failed.
 
+## KLD-2026-09-23-DEVICE-CONTINUITY-RULE-001 — a KitLuy device is the physical Raspberry Pi, not its SD card (OWNER-LOCKED)
+
+Owner ruling, 2026-09-23.
+
+**The rule.** A KitLuy device represents the physical Raspberry Pi, not its removable SD card or operating-system installation. Reflashing the same Raspberry Pi, or replacing its SD card, PRESERVES the existing permanent `device_record_id` and — where security policy permits — its business assignment. A reflash CREATES a new installation and enrollment and rotates the installation-bound cryptographic material. A DIFFERENT Raspberry Pi is a replacement device and must never silently inherit an existing device identity.
+
+```
+Physical Raspberry Pi
+  └── permanent device_record_id            (kitluy_devices.devices.id, a UUID)
+        ├── installation 1 → enrollment 1 → key 1 → certificate 1
+        ├── installation 2 → enrollment 2 → key 2 → certificate 2   (after a reflash)
+        └── installation 3 → …
+```
+
+**What a reflash preserves:** the `device_record_id`, the asset tag, the device class, the Digital Store and Store Location assignment, the Store Hub role or Terminal seat, the business configuration, and the Store Hub's NVMe data.
+
+**What a reflash necessarily replaces:** the installation generation, the enrollment, the device's private key, its operational key where applicable, and the certificate/credential generation. **Old private keys are NEVER copied to a new SD card to preserve identity** — identity is the cloud record, not the key material. Superseded credentials follow the existing lifecycle (`supersedes_enrollment_id`, credential supersede/revoke), and history is append-only.
+
+**Hardware evidence is recognition, not identity.** `soc_serial`, `board_serial` and `mac_address` are how a returning board is RECOGNISED and bound. They are not the permanent identity and must not replace `device_record_id`, which stays a UUID minted once per physical board.
+
+**Factory reset is a different operation.** Deliberately purging a device (as the development fleet was purged on 2026-09-23, handoff 51) makes the system FORGET the board; its next registration mints a NEW `device_record_id`. Purge tooling stays explicit and destructive, and must never run as part of reflash recovery.
+
+**Clone safety is not relaxed by this rule.** A copied SD card in a DIFFERENT Pi must fail closed, not inherit the original identity.
+
+**Scope of the automatic behaviour.** The zero-touch parts of this rule — in particular automatic same-board Store Hub storage recovery — are DEVELOPMENT ONLY. Production and every other environment continue to fail closed. This decision programs no OTP fuses, and does not make the board serial a production secret.
+
+**Status.** The permanent-identity model, installation/enrollment generations and reflash credential recovery already exist (`KLD-2026-09-14-REFLASH-CREDENTIAL-RECOVERY-001`, handoffs 39 and 43; `allow_reflash_credential_recovery = true` in the development renewal policy). This decision states the product rule they serve and authorises the development-only convenience around it. Per-scope verification classification is in the handoff.
+
 ## KLD-2026-09-23-HUB-STORAGE-DEVELOPMENT-UNBOUND-IN-IMAGE-001 — a DEVELOPMENT Hub image may authorize the unbound data-volume key; production is unchanged (OWNER-DECIDED)
 
 Owner, 2026-09-23, after a freshly flashed Store Hub refused to start: "this is the reason I don't want to encrypt my nvme anymore".
