@@ -4,6 +4,15 @@ Read the newest relevant handoff before starting work. Naming:
 `YYYY-MM-DD__<AREA>__<TASK-ID>__<SLUG>__AI-HANDOFF.md` under the matching
 subfolder (repository/ shared/ apps/ services/ data/ infrastructure/ reviews/).
 
+## SAME-PI REFLASH CONTINUITY — a KitLuy device is the physical Pi, not its SD card (2026-09-23)
+
+Record: [`edge-platform/54_SAME_PI_REFLASH_CONTINUITY.md`](edge-platform/54_SAME_PI_REFLASH_CONTINUITY.md) · owner decision `KLD-2026-09-23-DEVICE-CONTINUITY-RULE-001`
+· **IMPLEMENTED · TESTED · INTEGRATED (cloud + image; Scope E not yet called by the registry service) · IMAGE VERIFIED only for the storage authorization (`8fc5b32d…`) · HARDWARE: Cycle A baseline recorded, Cycle B NOT RUN · END-TO-END NOT VERIFIED**
+
+**What exists now.** Identity continuity was already built (0197 recognises the board by `board_serial`, keeps `device_record_id`, opens a new installation and a superseding enrollment) and is preserved, not rewritten. Four things were missing and are fixed: a reflashed Hub left the PREVIOUS Hub identity ACTIVE beside its own, so the Hub refused its own terminal (`7bae332`); development storage needed a hand-made marker that every reflash wiped (`c84be16`); the provisioner could `mkfs` an already-unlocked volume whose superblock was merely corrupt, and had no refusal for "this key does not open this volume" (`6c9298b`); and every development reflash needed `dev:device:unassign`, now automated for a same-board reflash in development only by `0234` — which never re-assigns, because recognition is a self-reported serial and the pairing code stays the trust transition. Recovery states reuse the existing `BootClassification` / `StoragePosture` vocabulary; runtime report v3 adds the address a terminal tried and why it failed.
+
+**Not done:** Cycle B hardware proof; wiring 0234 into the registration flow; revoking the incumbent credential on recovery (handoff 39 §9 — mission requirement B-6 unmet).
+
 ## T1-REAL-OPERATIONS-001 — slice 2: a real Booking on the Store Hub, paid in cash, with a receipt record (2026-09-21)
 
 Record: [`edge-platform/53_A_REAL_BOOKING_ON_THE_STORE_HUB.md`](edge-platform/53_A_REAL_BOOKING_ON_THE_STORE_HUB.md) · plan [`docs/decisions/kitluy-t1-real-operations-plan-owner-decision-v1.0.0.md`](../docs/decisions/kitluy-t1-real-operations-plan-owner-decision-v1.0.0.md) §4 slice 2
