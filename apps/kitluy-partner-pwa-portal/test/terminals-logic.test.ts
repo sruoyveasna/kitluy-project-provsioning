@@ -604,6 +604,50 @@ describe("the ladder reports, never infers", () => {
       }
     }
   });
+
+  // 2026-09-23: a Store Hub whose volume would not unlock never started its edge
+  // API, and this ladder said "Connected to the Store Hub — Next" and no more —
+  // so a Hub that was DOWN read exactly like a terminal that could not FIND one.
+  // The board knew the difference and had nowhere to say it.
+  it("says WHERE and WHY while the Hub rung is not done, and goes quiet once it serves", () => {
+    const refused = deriveLadder(
+      {
+        hub: active,
+        terminal: terminal({
+          boundDevice: activeDevice,
+          runtime: runtime({
+            hubLink: {
+              phase: "NO_HUB_FOUND",
+              hubDeviceId: null,
+              checkedAt: "2026-09-04T09:59:20Z",
+              terminalPin: null,
+              endpoint: { host: "172.16.13.204", port: 7443 },
+              detail: "did not complete a mutual-TLS handshake (connect ECONNREFUSED)",
+            },
+          }),
+        }),
+        session: null,
+      },
+      NOW,
+    );
+    const stuck = refused.find((r) => r.key === "hubConnected");
+    expect(stuck?.state).not.toBe("done");
+    expect(stuck?.detail).toContain("172.16.13.204:7443");
+    expect(stuck?.detail).toContain("mutual-TLS");
+
+    // Serving: the address is noise on a till that works.
+    const serving = deriveLadder(
+      {
+        hub: active,
+        terminal: terminal({ boundDevice: activeDevice, runtime: runtime() }),
+        session: null,
+      },
+      NOW,
+    );
+    const ok = serving.find((r) => r.key === "hubConnected");
+    expect(ok?.state).toBe("done");
+    expect(ok?.detail).toBeUndefined();
+  });
 });
 
 describe("the code panel's face", () => {

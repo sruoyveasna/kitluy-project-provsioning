@@ -139,6 +139,21 @@ export function collectRuntimeReport(sources: RuntimeReportSources = {}): Record
       typeof hub?.["hubDeviceId"] === "string" && UUID.test(hub["hubDeviceId"])
         ? hub["hubDeviceId"]
         : null;
+    // WHERE it was talking to, and WHY it went as it did (report v3).
+    // A Partner watching a stuck rung could previously see only the phase, so a
+    // Hub that would not start looked exactly like a terminal that could not
+    // find one — and the address the terminal had already resolved stayed on
+    // the board (2026-09-23: "172.16.13.204:7443 did not complete a mutual-TLS
+    // handshake (connect ECONNREFUSED)" was known here and shown nowhere).
+    const host = typeof hub?.["host"] === "string" ? clean(hub["host"], 64) : null;
+    const portValue = hub?.["port"];
+    const port =
+      typeof portValue === "number" &&
+      Number.isInteger(portValue) &&
+      portValue >= 1 &&
+      portValue <= 65535
+        ? portValue
+        : null;
     hubLink = {
       phase: edge["phase"],
       hubDeviceId,
@@ -152,6 +167,8 @@ export function collectRuntimeReport(sources: RuntimeReportSources = {}): Record
               configuration: clean(reads["configuration"], 80) ?? "-",
             },
       terminalPin: terminalPinOf(edge["terminalPin"]),
+      endpoint: host !== null && port !== null ? { host, port } : null,
+      detail: typeof edge["detail"] === "string" ? clean(edge["detail"], 160) : null,
     };
   }
 

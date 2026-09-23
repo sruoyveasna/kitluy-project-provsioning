@@ -247,6 +247,28 @@ export function deriveLadder(
     detail.redeemed = bound.deviceReference;
     if (done.activated) detail.activated = bound.deviceReference;
   }
+  // WHY THE HUB RUNG IS WHERE IT IS.
+  //
+  // On 2026-09-23 a Store Hub whose data volume would not unlock never started
+  // its edge API. The Partner ladder said "Connected to the Store Hub — Next"
+  // and nothing more, so a Hub that was DOWN looked exactly like a terminal
+  // that could not FIND one. The owner spent an hour on the wrong fault and
+  // concluded the Hub's IP must have changed — while the terminal had already
+  // found the new address and was reporting, in its own log, "172.16.13.204:7443
+  // did not complete a mutual-TLS handshake (connect ECONNREFUSED)".
+  //
+  // That sentence and that address now travel in the runtime report (v3), so
+  // the rung says which address was tried and how it went. Shown while the rung
+  // is NOT done — once the link serves, the address is noise on a working till.
+  const hubEndpoint = fresh ? (runtime.hubLink?.endpoint ?? null) : null;
+  const hubDetail = fresh ? (runtime.hubLink?.detail ?? null) : null;
+  if (!done.hubConnected) {
+    const where = hubEndpoint === null ? null : `${hubEndpoint.host}:${String(hubEndpoint.port)}`;
+    const why = hubDetail === null || hubDetail === "" ? null : hubDetail;
+    const line =
+      where !== null && why !== null && !why.includes(where) ? `${where} — ${why}` : (why ?? where);
+    if (line !== null) detail.hubConnected = line;
+  }
   if (done.appInstalled && app?.installedVersion) detail.appInstalled = app.installedVersion;
   if (done.appRunning && app?.installedVersion) detail.appRunning = app.installedVersion;
   if (done.configurationLoaded && pos !== null) {
@@ -266,38 +288,42 @@ export function deriveLadder(
     }
     const n = note[key];
     const noted = n === undefined ? {} : { note: n };
+    // A rung that is NOT done may carry a detail too, and that is the whole
+    // point of the 2026-09-23 change: "Connected to the Store Hub — Next" told
+    // an owner nothing for an hour, while the terminal's own report said which
+    // address it tried and how the attempt failed. Only `done` rungs used to
+    // show a detail, so the explanation was collected and then dropped here.
+    const d = detail[key];
+    const detailed = d === undefined ? {} : { detail: d };
     if (done[key]) {
-      const d = detail[key];
       const source = RUNTIME_RUNGS.has(key) ? { source: "device_reported" as const } : {};
-      return d === undefined
-        ? { key, state: "done", ...source, ...noted }
-        : { key, state: "done", detail: d, ...source, ...noted };
+      return { key, state: "done", ...detailed, ...source, ...noted };
     }
     if (stale && RUNTIME_RUNGS.has(key)) {
       // Something WAS reported, too long ago to still be true: neither done nor
       // "nothing reported yet". The first such rung is the one to look at.
       nextMarked = true;
-      return { key, state: "stale", source: "device_reported" };
+      return { key, state: "stale", source: "device_reported", ...detailed };
     }
     if (!nextMarked && n !== undefined) {
       // A reported posture on the rung itself (a locked PIN, a reset): the step
       // to look at, said in words, not "nothing reported".
       nextMarked = true;
-      return { key, state: "current", source: "device_reported", ...noted };
+      return { key, state: "current", source: "device_reported", ...detailed, ...noted };
     }
     if (key === "hubActive") {
       nextMarked = true;
       return gate.allowed
-        ? { key, state: "current" }
+        ? { key, state: "current", ...detailed }
         : { key, state: "blocked", reason: gate.reason };
     }
     if (!nextMarked) {
       nextMarked = true;
       return gate.allowed
-        ? { key, state: "current" }
+        ? { key, state: "current", ...detailed }
         : { key, state: "blocked", reason: gate.reason };
     }
-    return { key, state: "not_reported" };
+    return { key, state: "not_reported", ...detailed };
   });
 }
 

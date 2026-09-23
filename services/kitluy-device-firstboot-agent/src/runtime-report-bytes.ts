@@ -8,10 +8,11 @@
  */
 import { createHash } from "node:crypto";
 
-/** The kind this agent signs (v2: Terminal PIN evidence). */
-export const DEVICE_RUNTIME_REPORT_KIND = "kitluy.device-runtime-report.v2" as const;
+/** The kind this agent signs (v3: where the Hub was, and how the attempt went). */
+export const DEVICE_RUNTIME_REPORT_KIND = "kitluy.device-runtime-report.v3" as const;
 const KNOWN_KINDS: readonly string[] = [
   "kitluy.device-runtime-report.v1",
+  "kitluy.device-runtime-report.v2",
   DEVICE_RUNTIME_REPORT_KIND,
 ];
 

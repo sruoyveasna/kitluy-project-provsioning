@@ -137,7 +137,42 @@ describe("hubLink and pos copy the owners, and drop what is not in the vocabular
       reads: { authorityTime: "ok", eligibility: "ok", configuration: "ok" },
       // No PIN read recorded (an older Hub, or not reached): null, never guessed.
       terminalPin: null,
+      // This status named no host/port, so there is nothing to report.
+      endpoint: null,
+      detail: null,
     });
+  });
+
+  // 2026-09-23: a Hub that would not start looked, in the Partner Portal,
+  // exactly like a terminal that could not find one. The board knew the
+  // difference and had no field to say it in.
+  it("reports WHERE it was talking to and HOW it went, so a stuck rung explains itself", () => {
+    writeFileSync(
+      join(dir, "edge-status.json"),
+      JSON.stringify({
+        phase: "NO_HUB_FOUND",
+        checkedAt: "2026-09-23T03:12:29.000Z",
+        detail: "172.16.13.204:7443 did not complete a mutual-TLS handshake (connect ECONNREFUSED)",
+        hub: { hubDeviceId: null, host: "172.16.13.204", port: 7443 },
+      }),
+    );
+    expect(collect()["hubLink"]).toMatchObject({
+      phase: "NO_HUB_FOUND",
+      endpoint: { host: "172.16.13.204", port: 7443 },
+      detail: "172.16.13.204:7443 did not complete a mutual-TLS handshake (connect ECONNREFUSED)",
+    });
+  });
+
+  it("refuses a nonsense port rather than reporting it", () => {
+    writeFileSync(
+      join(dir, "edge-status.json"),
+      JSON.stringify({
+        phase: "NO_HUB_FOUND",
+        checkedAt: "2026-09-23T03:12:29.000Z",
+        hub: { hubDeviceId: null, host: "172.16.13.204", port: 99999 },
+      }),
+    );
+    expect(collect()["hubLink"]).toMatchObject({ endpoint: null });
   });
 
   it("carries the Store Hub's Terminal PIN answer, and nothing else about the PIN", () => {

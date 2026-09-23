@@ -59,9 +59,11 @@ export const DEVICE_RUNTIME_REPORT_KIND_V1 = "kitluy.device-runtime-report.v1" a
  * The CURRENT kind: domain separator AND the report's `schema` value. The device
  * copy MUST match. The signed bytes bind whichever kind the report declares.
  */
-export const DEVICE_RUNTIME_REPORT_KIND = "kitluy.device-runtime-report.v2" as const;
+export const DEVICE_RUNTIME_REPORT_KIND_V2 = "kitluy.device-runtime-report.v2" as const;
+export const DEVICE_RUNTIME_REPORT_KIND = "kitluy.device-runtime-report.v3" as const;
 export const DEVICE_RUNTIME_REPORT_KINDS = [
   DEVICE_RUNTIME_REPORT_KIND_V1,
+  DEVICE_RUNTIME_REPORT_KIND_V2,
   DEVICE_RUNTIME_REPORT_KIND,
 ] as const;
 
@@ -122,6 +124,26 @@ interface RuntimeHubLinkV1 {
   } | null;
 }
 
+/**
+ * WHERE the terminal was talking to, and WHY it did not work.
+ *
+ * Added v3 (2026-09-23) because a Store Hub that would not start left the owner
+ * with a Partner ladder that said "Connected to the Store Hub — Next" and
+ * nothing else, for an hour. The board knew precisely what was wrong —
+ * "172.16.13.204:7443 did not complete a mutual-TLS handshake (connect
+ * ECONNREFUSED)" — and had no way to say it. A rung that cannot explain itself
+ * sends people looking for the wrong fault; the owner reasonably concluded the
+ * Hub's IP had changed, when the terminal had already found the new one.
+ *
+ * `host` is a LAN address and `port` the edge port: shop-network facts, not
+ * secrets, and the terminal trusts neither — the Hub's certificate and its
+ * signed discovery record do that, exactly as before.
+ */
+export interface RuntimeHubEndpoint {
+  readonly host: string;
+  readonly port: number;
+}
+
 /** The Terminal PIN as the Store Hub answered it. Never a PIN or a verifier. */
 export interface RuntimeTerminalPin {
   readonly state: (typeof RUNTIME_TERMINAL_PIN_STATES)[number];
@@ -161,7 +183,7 @@ export interface DeviceRuntimeReportV1 {
 }
 
 export interface DeviceRuntimeReportV2 {
-  readonly schema: typeof DEVICE_RUNTIME_REPORT_KIND;
+  readonly schema: typeof DEVICE_RUNTIME_REPORT_KIND_V2;
   readonly deviceClass: "terminal";
   readonly imageVersion: string | null;
   readonly agentVersion: string;
@@ -170,7 +192,30 @@ export interface DeviceRuntimeReportV2 {
   readonly pos: (RuntimePosCommon & { readonly terminalUnlocked: boolean }) | null;
 }
 
-export type DeviceRuntimeReport = DeviceRuntimeReportV1 | DeviceRuntimeReportV2;
+/**
+ * v3 adds `hubLink.endpoint` and `hubLink.detail`: the address the terminal
+ * actually tried and the one bounded sentence saying how it went. `detail` is a
+ * REFUSAL REASON in the same sense as `application.lastReason` — bounded, from
+ * the agent's own vocabulary, never Store or customer data.
+ */
+export interface DeviceRuntimeReportV3 {
+  readonly schema: typeof DEVICE_RUNTIME_REPORT_KIND;
+  readonly deviceClass: "terminal";
+  readonly imageVersion: string | null;
+  readonly agentVersion: string;
+  readonly hubLink:
+    | (RuntimeHubLinkV1 & {
+        readonly terminalPin: RuntimeTerminalPin | null;
+        readonly endpoint: RuntimeHubEndpoint | null;
+        readonly detail: string | null;
+      })
+    | null;
+  readonly application: RuntimeApplication | null;
+  readonly pos: (RuntimePosCommon & { readonly terminalUnlocked: boolean }) | null;
+}
+
+export type DeviceRuntimeReport =
+  DeviceRuntimeReportV1 | DeviceRuntimeReportV2 | DeviceRuntimeReportV3;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const HEX64 = /^[0-9a-f]{64}$/u;
@@ -281,7 +326,9 @@ export function parseDeviceRuntimeReport(value: unknown): Parsed<DeviceRuntimeRe
     "report",
   );
   if (typeof top === "string") return fail(top);
-  const v2 = top["schema"] === DEVICE_RUNTIME_REPORT_KIND;
+  // v3 is a superset of v2; both carry terminalPin, only v3 says where and why.
+  const v3 = top["schema"] === DEVICE_RUNTIME_REPORT_KIND;
+  const v2 = v3 || top["schema"] === DEVICE_RUNTIME_REPORT_KIND_V2;
   if (!v2 && top["schema"] !== DEVICE_RUNTIME_REPORT_KIND_V1) {
     return fail("report.schema is not a known runtime report kind");
   }
@@ -294,9 +341,11 @@ export function parseDeviceRuntimeReport(value: unknown): Parsed<DeviceRuntimeRe
   if (top["hubLink"] !== null) {
     const hub = exactKeys(
       top["hubLink"],
-      v2
-        ? ["phase", "hubDeviceId", "checkedAt", "reads", "terminalPin"]
-        : ["phase", "hubDeviceId", "checkedAt", "reads"],
+      v3
+        ? ["phase", "hubDeviceId", "checkedAt", "reads", "terminalPin", "endpoint", "detail"]
+        : v2
+          ? ["phase", "hubDeviceId", "checkedAt", "reads", "terminalPin"]
+          : ["phase", "hubDeviceId", "checkedAt", "reads"],
       "report.hubLink",
     );
     if (typeof hub === "string") return fail(hub);
@@ -332,6 +381,26 @@ export function parseDeviceRuntimeReport(value: unknown): Parsed<DeviceRuntimeRe
       }
       if (!(pin["lockedUntil"] === null || instant(pin["lockedUntil"]))) {
         return fail("report.hubLink.terminalPin.lockedUntil is invalid");
+      }
+    }
+    if (v3) {
+      if (hub["endpoint"] !== null) {
+        const endpoint = exactKeys(hub["endpoint"], ["host", "port"], "report.hubLink.endpoint");
+        if (typeof endpoint === "string") return fail(endpoint);
+        // A LAN address, bounded: an IPv4/IPv6 literal or a hostname. Not
+        // parsed into meaning here — nothing trusts it; it is shown to a human.
+        if (!boundedString(endpoint["host"], 64)) {
+          return fail("report.hubLink.endpoint.host is invalid");
+        }
+        const port = endpoint["port"];
+        if (typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65535) {
+          return fail("report.hubLink.endpoint.port is invalid");
+        }
+      }
+      // The agent's own sentence, bounded like application.lastReason. It says
+      // how the attempt went; it never carries Store or customer data.
+      if (!(hub["detail"] === null || boundedString(hub["detail"], 160))) {
+        return fail("report.hubLink.detail is invalid");
       }
     }
   }

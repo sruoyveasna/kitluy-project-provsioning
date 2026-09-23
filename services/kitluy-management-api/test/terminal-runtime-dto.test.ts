@@ -40,6 +40,10 @@ function row(overrides: Record<string, unknown> = {}) {
         checkedAt: "2026-09-17T03:00:00.000Z",
         reads: { authorityTime: "ok", eligibility: "ok", configuration: "ok" },
         terminalPin: { state: "set", setAt: "2026-09-17T02:58:00.000Z", lockedUntil: null },
+        // v3: this report named no endpoint and no detail, so the Partner is
+        // shown nothing rather than something invented.
+        endpoint: null,
+        detail: null,
       },
       application: {
         product: "kitluy-terminal",
@@ -92,6 +96,32 @@ describe("the runtime a Partner sees", () => {
     );
   });
 
+  // 2026-09-23: a Store Hub that would not start read, in the Partner Portal,
+  // exactly like a terminal that could not find one — the reason lived on the
+  // board and stopped there. It travels now, and it is still only ever shown.
+  it("carries WHERE the terminal was talking to and HOW it went, and refuses a nonsense port", async () => {
+    const withEndpoint = row();
+    const report = (withEndpoint as { runtime_report: Record<string, unknown> }).runtime_report;
+    (report["hubLink"] as Record<string, unknown>)["endpoint"] = {
+      host: "172.16.13.204",
+      port: 7443,
+    };
+    (report["hubLink"] as Record<string, unknown>)["detail"] =
+      "did not complete a mutual-TLS handshake (connect ECONNREFUSED)";
+    const [terminal] = await listPhysicalTerminals(pool([withEndpoint]).deps, STORE);
+    expect(terminal?.runtime?.hubLink?.endpoint).toEqual({ host: "172.16.13.204", port: 7443 });
+    expect(terminal?.runtime?.hubLink?.detail).toContain("ECONNREFUSED");
+
+    const bogus = row();
+    const bogusReport = (bogus as { runtime_report: Record<string, unknown> }).runtime_report;
+    (bogusReport["hubLink"] as Record<string, unknown>)["endpoint"] = {
+      host: "172.16.13.204",
+      port: 99999,
+    };
+    const [other] = await listPhysicalTerminals(pool([bogus]).deps, STORE);
+    expect(other?.runtime?.hubLink?.endpoint).toBeNull();
+  });
+
   it("copies the facts, labels them device-reported, ages them by the cloud clock", async () => {
     const p = pool([row()]);
     const [terminal] = await listPhysicalTerminals(p.deps, STORE);
@@ -104,6 +134,9 @@ describe("the runtime a Partner sees", () => {
         hubDeviceId: "549a41c6-21e9-4838-8b48-34a3878ba290",
         checkedAt: "2026-09-17T03:00:00.000Z",
         terminalPin: { state: "set", setAt: "2026-09-17T02:58:00.000Z", lockedUntil: null },
+        // v3 fields, carried through exactly as reported.
+        endpoint: null,
+        detail: null,
       },
       application: {
         product: "kitluy-terminal",

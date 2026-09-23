@@ -42,7 +42,9 @@ export interface TerminalProvisioningDeps {
    * Injected by the composition root; this module never names a vertical.
    * The Partner sees the DERIVED desired state, never a chosen one.
    */
-  readonly seatDerivation: SeatRegistries & { readonly productBindings: readonly ProductApplicationBinding[] };
+  readonly seatDerivation: SeatRegistries & {
+    readonly productBindings: readonly ProductApplicationBinding[];
+  };
 }
 
 export interface PhysicalTerminalDto {
@@ -66,7 +68,14 @@ export interface PhysicalTerminalDto {
    * seat cannot be derived, the refusal is shown instead of a guess.
    */
   readonly desired:
-    | { readonly kind: "derived"; readonly applications: readonly string[]; readonly derivation: readonly { readonly applicationId: string; readonly byProfileCodes: readonly string[] }[] }
+    | {
+        readonly kind: "derived";
+        readonly applications: readonly string[];
+        readonly derivation: readonly {
+          readonly applicationId: string;
+          readonly byProfileCodes: readonly string[];
+        }[];
+      }
     | { readonly kind: "not_derivable"; readonly code: string; readonly detail: string };
   /**
    * Desired vs Actual, from the device-reported runtime (0229) read through
@@ -117,6 +126,13 @@ export interface TerminalRuntimeDto {
       readonly setAt: string | null;
       readonly lockedUntil: string | null;
     };
+    /**
+     * WHERE the terminal was talking to and HOW it went (report v3), so a stuck
+     * rung can say why. Null from a v1/v2 terminal. A LAN address and the
+     * agent's own bounded sentence: nothing here is trusted or secret.
+     */
+    readonly endpoint: null | { readonly host: string; readonly port: number };
+    readonly detail: string | null;
   };
   readonly application: null | {
     readonly product: string;
@@ -310,10 +326,21 @@ function runtimeApplicationEvidence(value: unknown): RuntimeApplicationEvidence 
   const a = value as Record<string, unknown>;
   const phase = text(a["journalPhase"]);
   const outcome = text(a["lastOutcome"]);
-  const PHASES = ["IDLE", "ACTIVATING", "HEALTH_PENDING", "COMMITTED", "ROLLED_BACK", "FAILED"] as const;
+  const PHASES = [
+    "IDLE",
+    "ACTIVATING",
+    "HEALTH_PENDING",
+    "COMMITTED",
+    "ROLLED_BACK",
+    "FAILED",
+  ] as const;
   const OUTCOMES = ["INSTALLED", "ROLLED_BACK", "REFUSED", "INTERRUPTED"] as const;
-  const journalPhase = (PHASES as readonly string[]).includes(phase ?? "") ? (phase as (typeof PHASES)[number]) : "IDLE";
-  const lastOutcome = (OUTCOMES as readonly string[]).includes(outcome ?? "") ? (outcome as (typeof OUTCOMES)[number]) : null;
+  const journalPhase = (PHASES as readonly string[]).includes(phase ?? "")
+    ? (phase as (typeof PHASES)[number])
+    : "IDLE";
+  const lastOutcome = (OUTCOMES as readonly string[]).includes(outcome ?? "")
+    ? (outcome as (typeof OUTCOMES)[number])
+    : null;
   return {
     product: text(a["product"]) ?? "unknown",
     installedVersion: text(a["installedVersion"]),
@@ -325,11 +352,14 @@ function runtimeApplicationEvidence(value: unknown): RuntimeApplicationEvidence 
   };
 }
 
-function runtimePosEvidence(value: unknown): { readonly configurationVersion: number | null; readonly observedAt: string } | null {
+function runtimePosEvidence(
+  value: unknown,
+): { readonly configurationVersion: number | null; readonly observedAt: string } | null {
   if (value === null || typeof value !== "object") return null;
   const p = value as Record<string, unknown>;
   return {
-    configurationVersion: typeof p["configurationVersion"] === "number" ? p["configurationVersion"] : null,
+    configurationVersion:
+      typeof p["configurationVersion"] === "number" ? p["configurationVersion"] : null,
     observedAt: text(p["observedAt"]) ?? "",
   };
 }
@@ -359,6 +389,8 @@ function toRuntimeDto(row: TerminalRow): TerminalRuntimeDto | null {
             hubDeviceId: text(hub["hubDeviceId"]),
             checkedAt: text(hub["checkedAt"]) ?? "",
             terminalPin: terminalPinDto(hub["terminalPin"]),
+            endpoint: hubEndpointDto(hub["endpoint"]),
+            detail: text(hub["detail"]),
           },
     application:
       app === null || app === undefined
@@ -385,6 +417,21 @@ function toRuntimeDto(row: TerminalRow): TerminalRuntimeDto | null {
             terminalUnlocked: pos["terminalUnlocked"] === true || pos["staffSignedIn"] === true,
           },
   };
+}
+
+/**
+ * The address the terminal tried. Refused rather than guessed: a host must be a
+ * bounded string and a port a real port, or the Partner is shown nothing at all
+ * instead of something invented.
+ */
+function hubEndpointDto(value: unknown): { readonly host: string; readonly port: number } | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const host = text(record["host"]);
+  const port = record["port"];
+  if (host === null || typeof port !== "number" || !Number.isInteger(port)) return null;
+  if (port < 1 || port > 65535) return null;
+  return { host, port };
 }
 
 function terminalPinDto(value: unknown): NonNullable<TerminalRuntimeDto["hubLink"]>["terminalPin"] {
@@ -415,7 +462,10 @@ function toTerminalDto(row: TerminalRow, deps: TerminalProvisioningDeps): Physic
     ? {
         kind: "derived",
         applications: derived.value.desiredApplications,
-        derivation: derived.value.derivation.map((d) => ({ applicationId: d.applicationId, byProfileCodes: d.byProfileCodes })),
+        derivation: derived.value.derivation.map((d) => ({
+          applicationId: d.applicationId,
+          byProfileCodes: d.byProfileCodes,
+        })),
       }
     : { kind: "not_derivable", code: derived.error.code, detail: derived.error.message };
 
@@ -707,19 +757,24 @@ export async function setPhysicalTerminalAllowedSurfaces(
   }
   try {
     const result = await asIssuer(deps, (client) =>
-      callDoor(client, "kitluy_devices.set_physical_terminal_allowed_surfaces_v1($1::uuid, $2::text[], $3)", [
-        input.physicalTerminalId,
-        [...known.value],
-        input.operatorRef,
-      ]),
+      callDoor(
+        client,
+        "kitluy_devices.set_physical_terminal_allowed_surfaces_v1($1::uuid, $2::text[], $3)",
+        [input.physicalTerminalId, [...known.value], input.operatorRef],
+      ),
     );
-    if (result.outcome !== "SURFACES_SET") return refusalOf(result, "KLUY-PHYSTERM-SURFACES-NOT-SET");
+    if (result.outcome !== "SURFACES_SET")
+      return refusalOf(result, "KLUY-PHYSTERM-SURFACES-NOT-SET");
   } catch {
     return { kind: "refused", code: "KLUY-PHYSTERM-SURFACES-NOT-SET", detail: UNMAPPED_DETAIL };
   }
   const terminal = await readPhysicalTerminal(deps, input.physicalTerminalId);
   if (terminal === null) {
-    return { kind: "refused", code: "KLUY-PHYSTERM-NOT-FOUND", detail: "no such physical terminal" };
+    return {
+      kind: "refused",
+      code: "KLUY-PHYSTERM-NOT-FOUND",
+      detail: "no such physical terminal",
+    };
   }
   return { kind: "set", terminal };
 }

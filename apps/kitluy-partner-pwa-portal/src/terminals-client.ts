@@ -51,6 +51,13 @@ export interface TerminalRuntime {
       readonly setAt: string | null;
       readonly lockedUntil: string | null;
     };
+    /**
+     * WHERE the Terminal was talking to, and HOW it went. Optional for the same
+     * reason as `terminalPin`: an older API or an older Terminal sends neither,
+     * and a rung with no reason is exactly the state this exists to end.
+     */
+    readonly endpoint?: null | { readonly host: string; readonly port: number };
+    readonly detail?: string | null;
   };
   readonly application: null | {
     readonly product: string;
@@ -92,13 +99,25 @@ export interface PhysicalTerminal {
   readonly primaryVertical?: string;
   readonly allowedSurfaces?: readonly string[];
   readonly desired?:
-    | { readonly kind: "derived"; readonly applications: readonly string[]; readonly derivation: readonly { readonly applicationId: string; readonly byProfileCodes: readonly string[] }[] }
+    | {
+        readonly kind: "derived";
+        readonly applications: readonly string[];
+        readonly derivation: readonly {
+          readonly applicationId: string;
+          readonly byProfileCodes: readonly string[];
+        }[];
+      }
     | { readonly kind: "not_derivable"; readonly code: string; readonly detail: string };
   readonly desiredVsActual?: {
     readonly hasReport: boolean;
     readonly reportIsStale: boolean;
     readonly reportedAt: string | null;
-    readonly applications: readonly { readonly applicationId: string; readonly status: string; readonly reportedVersion: string | null; readonly reason?: string }[];
+    readonly applications: readonly {
+      readonly applicationId: string;
+      readonly status: string;
+      readonly reportedVersion: string | null;
+      readonly reason?: string;
+    }[];
     readonly surfaces: readonly { readonly surfaceId: string; readonly status: string }[];
   } | null;
   readonly createdAt: string;
