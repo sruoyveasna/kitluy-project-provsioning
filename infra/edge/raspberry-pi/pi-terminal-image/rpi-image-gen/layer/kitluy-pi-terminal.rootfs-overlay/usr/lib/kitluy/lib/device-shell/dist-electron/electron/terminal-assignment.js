@@ -72,10 +72,18 @@ export function readTerminalAssignment(path = TERMINAL_ASSIGNMENT_PATH) {
         if (parsed === null || typeof parsed !== "object")
             return null;
         const candidate = parsed;
-        return typeof candidate.deviceRecordId === "string" &&
-            typeof candidate.assignmentId === "string"
-            ? parsed
-            : null;
+        if (typeof candidate.deviceRecordId !== "string" || typeof candidate.assignmentId !== "string") {
+            return null;
+        }
+        // A pre-v2 file carries none of the seat fields; they read as null
+        // (unknown), not as empty (known-empty). Display state only.
+        const list = (v) => Array.isArray(v) && v.every((x) => typeof x === "string") ? v : null;
+        return {
+            ...parsed,
+            primaryVertical: typeof candidate.primaryVertical === "string" ? candidate.primaryVertical : null,
+            desiredApplications: list(candidate.desiredApplications),
+            allowedSurfaces: list(candidate.allowedSurfaces),
+        };
     }
     catch {
         return null;

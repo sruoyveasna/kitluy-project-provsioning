@@ -1,5 +1,8 @@
+import { validateGrantedSeat } from "./seat-validation.js";
 export const NOT_REGISTERED = "NO_DEVICE_RECORD";
 export const PERSIST_FAILED = "PAIRING_NOT_RECORDED";
+/** The cloud granted a seat this board cannot install as described. Not recorded. */
+export const SEAT_NOT_INSTALLABLE = "SEAT_NOT_INSTALLABLE";
 /**
  * Present a code and, if the cloud accepts it, record the seat it granted.
  *
@@ -22,6 +25,22 @@ export async function submitPairingCode(code, deps) {
     if (result.kind === "refused") {
         return { status: result.result, retryable: result.retryable, message: result.message };
     }
+    // The seat is server-derived; the board only checks it is one it can
+    // install. Vertical, profiles, applications and surfaces must all be
+    // present and coherent, or the seat is NOT recorded (fail closed).
+    const validated = validateGrantedSeat({
+        vertical: result.context.vertical,
+        terminalProfileKeys: result.context.terminalProfileKeys,
+        desiredApplications: result.context.desiredApplications,
+        allowedSurfaces: result.context.allowedSurfaces,
+    });
+    if (!validated.ok) {
+        return {
+            status: SEAT_NOT_INSTALLABLE,
+            retryable: false,
+            message: `the seat cannot be installed on this board: ${validated.detail}`,
+        };
+    }
     const now = (deps.now ?? (() => new Date()))();
     try {
         deps.persist({
@@ -32,7 +51,10 @@ export async function submitPairingCode(code, deps) {
             digitalStoreReference: result.context.digitalStoreReference,
             storeLocationReference: result.context.storeLocationReference,
             physicalTerminalLabel: result.context.physicalTerminalLabel,
-            terminalProfileKeys: result.context.terminalProfileKeys,
+            terminalProfileKeys: validated.seat.terminalProfileKeys,
+            primaryVertical: validated.seat.primaryVertical,
+            desiredApplications: validated.seat.desiredApplications,
+            allowedSurfaces: validated.seat.allowedSurfaces,
             updatedAt: now.toISOString(),
         });
     }
