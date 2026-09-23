@@ -97,6 +97,120 @@ A continuity probe was written **inside the encrypted volume** so Cycle B can pr
 
 **NOT VERIFIED anywhere in this cycle:** any claim that a reflashed board comes back operational without an operator. That is Cycle B.
 
+## 7b. FINALIZATION (2026-09-23, mission SAME-PI-REFLASH-CONTINUITY-FINALIZATION-001)
+
+The three gaps §7/§8 left open before Cycle B are closed.
+
+### GAP 1 — 0234 is now called by the real flow (`0235`, `00b3dd2`)
+
+`release_reflashed_device_for_repair_auto_v1` is called by the
+**device-registration edge function**, on the one boot that opens a new
+installation.
+
+The environment is **not** a parameter and **not** a deployment variable. That
+route is unauthenticated — a board reaches it before it holds any credential —
+so an environment flag there would put a production fleet one mis-set variable
+away from releasing Store assignments automatically. The door resolves the
+environment from the device's own governed records (its assignment projection,
+else its credential head) and **fails closed** when it cannot prove
+`development`.
+
+Four gates before the door is even called: a new installation was created (so
+not the 60-second poll a waiting board makes, and not a normal boot), the status
+is KNOWN_DEVICE (so not a first installation, and not a different board, which
+answer PENDING_APPROVAL / TRUST_REVIEW_REQUIRED), no credential reuse was
+detected, and a failed release never fails a registration. 0234's own gates
+still stand.
+
+**Proven through the real route**, not by SQL: a test signs the real
+`kitluy.device-registration-request.v1` bytes with a real Ed25519 key per
+install and POSTs to the live edge function — first boot, then a reflash of the
+same board — then reads back that the board kept its `device_record_id`, opened
+a new installation, and came back `enrolled` at generation 0 with no live
+assignment. Two more prove the gates. **3 passed.** The suite is OPT-IN
+(`KITLUY_ROUTE_TESTS=1`) because the only stack serving that route is the one
+the hardware registers against, and assignment history there is append-only, so
+a run cannot fully tidy up after itself.
+
+### GAP 2 — a recovery grants the previous credential no overlap (`0236`, `5d32b86`)
+
+**Invalidated, not revoked — and the distinction is the point.** Owner decision
+§2.5 is a CHECK constraint, not a convention:
+
+```
+credential_revocation_policy_no_machine_chk check (machine_initiated_revocation_permitted = false)
+"a worker may detect, record and escalate; it may not decide to revoke"
+```
+
+Every revocation reason also requires four eyes, and none of the nine approved
+reasons names a re-flash. A machine revoking here would take a decision the owner
+reserved for people. So the existing lifecycle does the work: on a **recovery**
+the head grants no overlap, and `certificate-validity` accepts a previous
+generation *only* while the head grants one. The certificate on the replaced card
+stops verifying the instant the new one is finalized; its audit row is untouched;
+its artifact was already `superseded` by 0224's trigger; and the four-eyes
+revocation door remains available to a person.
+
+A BEFORE-UPDATE trigger on `device_credential_heads`, not a re-created
+`finalize_device_credential_issuance_v1` (~300 lines of governed issuance).
+Editing `NEW` in place needs no second UPDATE, so it cannot disturb the rule that
+every head write moves the version by exactly one; the trigger is named to sort
+**after** `trg_device_heads_overlap`, so that trigger still validates what
+finalize proposed before this one withdraws it. Recovery is identified by the
+recovery **evidence** row that `classify_operational_certificate_request_v1`
+already treats as the marker — never by `renewal_mode`, which is only a
+policy-dependent proxy.
+
+Ordinary renewal is untouched: **94 passed** across credential-lifecycle,
+certificate-renewal and certificate-validity, every overlap-boundary case
+included. Adversarial recovery suite **19/19**, with a new verifier-level proof:
+after recovery `credential_verification_state_v1` offers no previous generation,
+no overlap end and no previous key — and reports `revoked = false`, because this
+is invalidation. Full registry-service suite: **zero** failures that are not
+already failing without the change (10 vs 13 at baseline).
+
+### GAP 3 — the final Cycle-B image
+
+Built from `c42b7d5` in `worktrees/kitluy-ecosystem/wt-pin-image`, detached and
+clean, with the runtime rebuilt and repackaged first so the overlay reproduces
+the commit byte-for-byte before the build started. Identity and read-back below.
+
+### The final Cycle-B image — IMAGE VERIFIED
+
+| | |
+| --- | --- |
+| Source commit | **`c42b7d5`** (worktree `wt-pin-image`, detached and clean; overlay repackaged and `git status` clean BEFORE the build started) |
+| Path | `worktrees/kitluy-ecosystem/wt-pin-image/infra/edge/raspberry-pi/store-hub-image/build/work/deploy-v2.7.0/kitluy-storehub-os-arm64.img.zst` |
+| Compressed bytes | **660 476 191** (630 MiB) |
+| sha256 (compressed) | **`7f887229c1e3dda8a46f6751257b6cc4ff152fad68300816761115fd2d6ac17c`** |
+| sha256 (raw `.img`, 17 490 268 160 B) | `d98f0373392ebc9f9488031083807cebd575bd245fe1591566d2a3ade4d77aaa` |
+| sha256 (`.img.sparse.zst`) | `74c7a98c7588c8f7b84eb2d220ea953676a76c8f566824a9e3d3c3f0841c05c5` |
+| Manifest | `build/work/kitluy-store-hub-dev-manifest.json`, builderCommit `a7b6d480…` (rpi-image-gen v2.7.0); all five artifact digests equal |
+| Overlay read-back | **140 entries, 126 files + 14 links, 0 DIFFERS** against `c42b7d5` |
+| Secret scan (image) | 17 passed, 0 failed |
+
+Read out of the finished erofs with the builder's own `dump.erofs`:
+
+| Fix | Evidence in the image |
+| --- | --- |
+| `c84be16` automatic development storage | `hub.env`: `KITLUY_HUB_STORAGE_DEVELOPMENT_UNBOUND=authorized` |
+| `6c9298b` non-destructive storage recovery | `hub-storage-provision` carries `STORAGE_KEY_MISMATCH`, `STORAGE_LEGACY_KEY_MISSING`, `STORAGE_FILESYSTEM_UNREADABLE` |
+| `7bae332` previous-Hub reconciliation | the shipped agent bundle contains `where status = 'active' and id <> $1::uuid`, and is **byte-identical** to the bundle built from this commit |
+| terminal-sync runtime | `HUB_SYNC_URL=http://172.16.21.17:8792`, trust anchor `3c4a5cea…` (`transport_signing`, development) |
+| release/update trust | `release.env` → `:8791`; `/etc/kitluy/trust/release-signing.json` → `bfccb44e…`, `release_signing`, development |
+
+Suites against this build: rpi-image-gen 22/0/1, build-gates 34/0, environment-gating 19/0, systemd-runtime 183/0, storage-posture 46/0, image-contents 62/0/0.
+
+### Cycle B — the owner's instruction
+
+1. Flash **a different, fresh SD card** with the image above (verify the sha256 first).
+2. Put it in the **same physical Store Hub**, with the **same NVMe** still fitted.
+3. **Do not** purge cloud state, wipe the NVMe, reset the data volume, or delete the probe row.
+4. Power on.
+5. **The one manual step:** when the Partner Portal shows the Hub waiting to pair, enter **one pairing code**. Nothing else — no `dev:device:unassign`, no SQL, no storage authorization, no SSH repair.
+
+Expected: same `device_record_id` `4cfc40b4-da47-4578-8219-42d54468f028`; a new installation, enrollment, key and certificate generation; the previous credential no longer able to authenticate (no overlap granted); the LUKS volume unlocked automatically; `edge_ops.reflash_continuity_probe` cycle `A` still present; exactly one active hub assignment after pairing; the agent serving on `:7443`; terminals reconnecting.
+
 ## 8. Open, and deliberately not done
 
 - **Cycle B hardware proof** — the acceptance test. Needs the owner.
