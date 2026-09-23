@@ -7,10 +7,11 @@
  * `test/runtime-report-drift.test.ts` fails if they differ by one byte.
  */
 import { createHash } from "node:crypto";
-/** The kind this agent signs (v2: Terminal PIN evidence). */
-export const DEVICE_RUNTIME_REPORT_KIND = "kitluy.device-runtime-report.v2";
+/** The kind this agent signs (v3: where the Hub was, and how the attempt went). */
+export const DEVICE_RUNTIME_REPORT_KIND = "kitluy.device-runtime-report.v3";
 const KNOWN_KINDS = [
     "kitluy.device-runtime-report.v1",
+    "kitluy.device-runtime-report.v2",
     DEVICE_RUNTIME_REPORT_KIND,
 ];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;

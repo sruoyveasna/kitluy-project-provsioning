@@ -1149,20 +1149,20 @@ var require_utils = __commonJS({
       }
       return config;
     }
-    var escapeIdentifier2 = function(str2) {
-      return '"' + str2.replace(/"/g, '""') + '"';
+    var escapeIdentifier2 = function(str3) {
+      return '"' + str3.replace(/"/g, '""') + '"';
     };
-    var escapeLiteral2 = function(str2) {
+    var escapeLiteral2 = function(str3) {
       let hasBackslash = false;
       let escaped = "'";
-      if (str2 == null) {
+      if (str3 == null) {
         return "''";
       }
-      if (typeof str2 !== "string") {
+      if (typeof str3 !== "string") {
         return "''";
       }
-      for (let i = 0; i < str2.length; i++) {
-        const c = str2[i];
+      for (let i = 0; i < str3.length; i++) {
+        const c = str3[i];
         if (c === "'") {
           escaped += c + c;
         } else if (c === "\\") {
@@ -1195,7 +1195,7 @@ var require_utils2 = __commonJS({
     var nodeCrypto = __require("crypto");
     module.exports = {
       postgresMd5PasswordHash,
-      randomBytes: randomBytes5,
+      randomBytes: randomBytes6,
       deriveKey,
       sha256,
       hashByName,
@@ -1205,7 +1205,7 @@ var require_utils2 = __commonJS({
     var webCrypto = nodeCrypto.webcrypto || globalThis.crypto;
     var subtleCrypto = webCrypto.subtle;
     var textEncoder = new TextEncoder();
-    function randomBytes5(length) {
+    function randomBytes6(length) {
       return webCrypto.getRandomValues(Buffer.alloc(length));
     }
     async function md5(string) {
@@ -1577,22 +1577,22 @@ var require_type_overrides = __commonJS({
 var require_pg_connection_string = __commonJS({
   "../../node_modules/.pnpm/pg-connection-string@2.14.0/node_modules/pg-connection-string/index.js"(exports, module) {
     "use strict";
-    function parse(str2, options = {}) {
-      if (str2.charAt(0) === "/") {
-        const config2 = str2.split(" ");
+    function parse(str3, options = {}) {
+      if (str3.charAt(0) === "/") {
+        const config2 = str3.split(" ");
         return { host: config2[0], database: config2[1] };
       }
       const config = /* @__PURE__ */ Object.create(null);
       let result;
       let dummyHost = false;
-      if (/ |%[^a-f0-9]|%[a-f0-9][^a-f0-9]/i.test(str2)) {
-        str2 = encodeURI(str2).replace(/%25(\d\d)/g, "%$1");
+      if (/ |%[^a-f0-9]|%[a-f0-9][^a-f0-9]/i.test(str3)) {
+        str3 = encodeURI(str3).replace(/%25(\d\d)/g, "%$1");
       }
       try {
         try {
-          result = new URL(str2, "postgres://base");
+          result = new URL(str3, "postgres://base");
         } catch (e) {
-          result = new URL(str2.replace("@/", "@___DUMMY___/"), "postgres://base");
+          result = new URL(str3.replace("@/", "@___DUMMY___/"), "postgres://base");
           dummyHost = true;
         }
       } catch (err) {
@@ -1738,8 +1738,8 @@ var require_pg_connection_string = __commonJS({
       }, /* @__PURE__ */ Object.create(null));
       return poolConfig;
     }
-    function parseIntoClientConfig(str2) {
-      return toClientConfig(parse(str2));
+    function parseIntoClientConfig(str3) {
+      return toClientConfig(parse(str3));
     }
     function deprecatedSslModeWarning(sslmode) {
       if (!deprecatedSslModeWarning.warned && typeof process !== "undefined" && process.emitWarning) {
@@ -1797,7 +1797,7 @@ var require_connection_parameters = __commonJS({
     var quoteParamValue = function(value) {
       return "'" + ("" + value).replace(/\\/g, "\\\\").replace(/'/g, "\\'") + "'";
     };
-    var add = function(params, config, paramName) {
+    var add2 = function(params, config, paramName) {
       const value = config[paramName];
       if (value !== void 0 && value !== null) {
         params.push(paramName + "=" + quoteParamValue(value));
@@ -1872,20 +1872,20 @@ var require_connection_parameters = __commonJS({
       }
       getLibpqConnectionString(cb) {
         const params = [];
-        add(params, this, "user");
-        add(params, this, "password");
-        add(params, this, "port");
-        add(params, this, "application_name");
-        add(params, this, "fallback_application_name");
-        add(params, this, "connect_timeout");
-        add(params, this, "options");
+        add2(params, this, "user");
+        add2(params, this, "password");
+        add2(params, this, "port");
+        add2(params, this, "application_name");
+        add2(params, this, "fallback_application_name");
+        add2(params, this, "connect_timeout");
+        add2(params, this, "options");
         const ssl = typeof this.ssl === "object" ? this.ssl : this.ssl ? { sslmode: this.ssl } : {};
-        add(params, ssl, "sslmode");
-        add(params, ssl, "sslca");
-        add(params, ssl, "sslkey");
-        add(params, ssl, "sslcert");
-        add(params, ssl, "sslrootcert");
-        add(params, this, "sslnegotiation");
+        add2(params, ssl, "sslmode");
+        add2(params, ssl, "sslca");
+        add2(params, ssl, "sslkey");
+        add2(params, ssl, "sslcert");
+        add2(params, ssl, "sslrootcert");
+        add2(params, this, "sslnegotiation");
         if (this.database) {
           params.push("dbname=" + quoteParamValue(this.database));
         }
@@ -4145,11 +4145,11 @@ var require_client = __commonJS({
       // escapeIdentifier and escapeLiteral moved to utility functions & exported
       // on PG
       // re-exported here for backwards compatibility
-      escapeIdentifier(str2) {
-        return utils.escapeIdentifier(str2);
+      escapeIdentifier(str3) {
+        return utils.escapeIdentifier(str3);
       }
-      escapeLiteral(str2) {
-        return utils.escapeLiteral(str2);
+      escapeLiteral(str3) {
+        return utils.escapeLiteral(str3);
       }
       _pulseQueryQueue() {
         if (this.readyForQuery === true) {
@@ -5211,6 +5211,7 @@ var init_esm = __esm({
 });
 
 // src/hub-database.ts
+import { createHash } from "node:crypto";
 function hubDatabaseUrl(env = process.env) {
   const url = env[HUB_DB_URL_ENV];
   if (url === void 0 || url.trim() === "") {
@@ -5224,6 +5225,18 @@ function hubDatabaseUrl(env = process.env) {
     );
   }
   return url;
+}
+function isCanonicalIdempotencyKey(key) {
+  return CANONICAL_IDEMPOTENCY_KEY_REGEX.test(key);
+}
+function parseIdempotencyKey(key) {
+  const match = CANONICAL_IDEMPOTENCY_KEY_REGEX.exec(key);
+  if (!match || match[1] === void 0 || match[2] === void 0) {
+    throw new Error(
+      `${HUB_IDEMPOTENCY_ERRORS.keyMalformed}: '${key}' is not kl1.{terminal_device_uuid}.{client_sequence}.`
+    );
+  }
+  return { terminalDeviceId: match[1], clientSequence: BigInt(match[2]) };
 }
 function canonicalJson(value) {
   if (value === null) return "null";
@@ -5250,11 +5263,31 @@ function canonicalJson(value) {
       throw new Error(`Canonical JSON cannot represent ${typeof value}.`);
   }
 }
-var HUB_DB_URL_ENV, UUID_PATTERN, CANONICAL_IDEMPOTENCY_KEY_REGEX;
+function canonicalRequestHash(request) {
+  const material = [
+    request.method.toUpperCase(),
+    request.routeTemplate,
+    canonicalJson(request.body),
+    request.terminalDeviceId,
+    request.sessionId,
+    request.profileCode
+  ].join("\n");
+  return createHash("sha256").update(material, "utf8").digest("hex");
+}
+var HUB_DB_URL_ENV, HUB_IDEMPOTENCY_ERRORS, UUID_PATTERN, CANONICAL_IDEMPOTENCY_KEY_REGEX;
 var init_hub_database = __esm({
   "src/hub-database.ts"() {
     "use strict";
     HUB_DB_URL_ENV = "KITLUY_HUB_DB_URL";
+    HUB_IDEMPOTENCY_ERRORS = {
+      payloadMismatch: "EDGE_IDEMPOTENCY_PAYLOAD_MISMATCH",
+      keyMalformed: "EDGE_IDEMPOTENCY_KEY_MALFORMED",
+      replayRejected: "EDGE_SEQUENCE_REPLAY_REJECTED",
+      sequenceGap: "EDGE_SEQUENCE_GAP",
+      versionConflict: "EDGE_AGGREGATE_VERSION_CONFLICT",
+      scopeMismatch: "EDGE_SCOPE_MISMATCH",
+      terminalUnknown: "EDGE_TERMINAL_UNKNOWN"
+    };
     UUID_PATTERN = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}";
     CANONICAL_IDEMPOTENCY_KEY_REGEX = new RegExp(`^kl1\\.(${UUID_PATTERN})\\.([0-9]{1,20})$`);
   }
@@ -5320,6 +5353,10 @@ async function withHubTransaction(pool, fn, role = HUB_RUNTIME_ROLE) {
 async function withSerializableHubTransaction(pool, fn, role = HUB_RUNTIME_ROLE) {
   return runInTransaction(pool, "begin isolation level serializable", fn, role);
 }
+function isSerializationFailure(error) {
+  const code = error?.code;
+  return code === "40001" || code === "40P01";
+}
 var HUB_RUNTIME_ROLE, roleFallbackWarned;
 var init_db = __esm({
   "src/hub/db.ts"() {
@@ -5333,6 +5370,13 @@ var init_db = __esm({
 });
 
 // src/hub/repositories/audit.ts
+var audit_exports = {};
+__export(audit_exports, {
+  appendAuditEvent: () => appendAuditEvent,
+  countSecurityEvents: () => countSecurityEvents,
+  listAuditEventsForResource: () => listAuditEventsForResource,
+  recordSecurityEvent: () => recordSecurityEvent
+});
 async function appendAuditEvent(client, input) {
   await client.query(
     `insert into edge_audit.audit_event
@@ -5365,6 +5409,15 @@ async function appendAuditEvent(client, input) {
     ]
   );
 }
+async function listAuditEventsForResource(client, resourceId) {
+  const result = await client.query(
+    `select id, event_code, actor_id, requester_id, approver_id, resource_type,
+            resource_id, correlation_id, local_sequence, details_json
+       from edge_audit.audit_event where resource_id = $1 order by local_sequence`,
+    [resourceId]
+  );
+  return result.rows;
+}
 async function recordSecurityEvent(client, input) {
   await client.query(
     `insert into edge_audit.security_event
@@ -5384,6 +5437,13 @@ async function recordSecurityEvent(client, input) {
     ]
   );
 }
+async function countSecurityEvents(client, eventCode) {
+  const result = await client.query(
+    `select count(*)::text as count from edge_audit.security_event where event_code = $1`,
+    [eventCode]
+  );
+  return Number(result.rows[0]?.count ?? "0");
+}
 var init_audit = __esm({
   "src/hub/repositories/audit.ts"() {
     "use strict";
@@ -5391,10 +5451,56 @@ var init_audit = __esm({
 });
 
 // src/hub/errors.ts
-var HubCommandError;
+function fromDatabaseError(error) {
+  const message = error?.message;
+  if (typeof message !== "string") return void 0;
+  for (const code of HUB_COMMAND_ERROR_CODES) {
+    if (message.startsWith(`${code}:`)) {
+      return new HubCommandError(code, message.slice(code.length + 1).trim());
+    }
+  }
+  return void 0;
+}
+var HUB_COMMAND_ERROR_CODES, HubCommandError;
 var init_errors = __esm({
   "src/hub/errors.ts"() {
     "use strict";
+    HUB_COMMAND_ERROR_CODES = [
+      // --- offline contract §19 -------------------------------------------------
+      "EDGE_IDEMPOTENCY_KEY_MALFORMED",
+      "EDGE_IDEMPOTENCY_PAYLOAD_MISMATCH",
+      /** WS-09-T004 vocabulary for the same fact as EDGE_IDEMPOTENCY_PAYLOAD_MISMATCH. */
+      "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST",
+      "EDGE_SEQUENCE_REPLAY_REJECTED",
+      "EDGE_SEQUENCE_GAP",
+      "EDGE_AGGREGATE_VERSION_CONFLICT",
+      "EDGE_SCOPE_MISMATCH",
+      "EDGE_TERMINAL_UNKNOWN",
+      // --- authorisation dimensions (fail closed, one code per dimension) -------
+      "EDGE_DEVICE_CONTEXT_INVALID",
+      "EDGE_DEVICE_NOT_ASSIGNED",
+      "EDGE_DEVICE_REVOKED",
+      "EDGE_ASSIGNMENT_GENERATION_MISMATCH",
+      "EDGE_SESSION_INVALID",
+      "EDGE_SESSION_EXPIRED",
+      "EDGE_PROFILE_NOT_AUTHORIZED",
+      "EDGE_PERMISSION_DENIED",
+      /** KLREQ-015: the route carries a `[REQUIRED: ...]` marker and stays INACTIVE. */
+      "EDGE_PERMISSION_KEY_UNREGISTERED",
+      "EDGE_RESOURCE_SCOPE_DENIED",
+      "EDGE_ENVIRONMENT_DENIED",
+      "EDGE_APPROVAL_REQUIRED",
+      "EDGE_SELF_APPROVAL_FORBIDDEN",
+      // --- business/engine refusals --------------------------------------------
+      "EDGE_AGGREGATE_NOT_FOUND",
+      "EDGE_INVALID_TRANSITION",
+      "EDGE_PAYMENT_GATE_BLOCKED",
+      "EDGE_CUSTODY_GATE_BLOCKED",
+      "EDGE_CONFIGURATION_MISSING",
+      "EDGE_REQUIRED_VALUE_MISSING",
+      "EDGE_COMMAND_UNKNOWN",
+      "EDGE_COMMAND_INACTIVE"
+    ];
     HubCommandError = class extends Error {
       constructor(code, message, details = {}) {
         super(`${code}: ${message}`);
@@ -5594,7 +5700,7 @@ var init_trusted_time = __esm({
 
 // ../../packages/device-identity/dist/dev-crypto.js
 import { createPrivateKey, createPublicKey, generateKeyPairSync, sign, verify } from "node:crypto";
-import { createHash as createHash2, randomUUID } from "node:crypto";
+import { createHash as createHash3, randomUUID } from "node:crypto";
 function publicKeyFingerprint(publicKeyPem) {
   const der = createPublicKey(publicKeyPem).export({ type: "spki", format: "der" });
   return sha256Hex(new Uint8Array(der));
@@ -5615,7 +5721,7 @@ var init_dev_crypto = __esm({
     "use strict";
     init_environments();
     init_errors2();
-    sha256Hex = (data) => createHash2("sha256").update(typeof data === "string" ? Buffer.from(data, "utf8") : data).digest("hex");
+    sha256Hex = (data) => createHash3("sha256").update(typeof data === "string" ? Buffer.from(data, "utf8") : data).digest("hex");
     PrivateKeyVault = class {
       #keys = /* @__PURE__ */ new Map();
       store(handle, privateKeyPem) {
@@ -5745,7 +5851,7 @@ var init_activation_ack = __esm({
 });
 
 // ../../packages/device-identity/dist/pairing.js
-import { createHash as createHash3 } from "node:crypto";
+import { createHash as createHash4 } from "node:crypto";
 function transcriptFields(t) {
   return [
     t.pairingSessionId,
@@ -5774,7 +5880,7 @@ function pairingTranscriptBytes(t) {
   return Buffer.from([PAIRING_TRANSCRIPT_KIND, ...transcriptFields(t)].join("\n"), "utf8");
 }
 function pairingTranscriptHash(t) {
-  return createHash3("sha256").update(Buffer.from(pairingTranscriptBytes(t))).digest("hex");
+  return createHash4("sha256").update(Buffer.from(pairingTranscriptBytes(t))).digest("hex");
 }
 function terminalPairingProofBytes(t) {
   return Buffer.from([PAIRING_TERMINAL_PROOF_KIND, ...transcriptFields(t)].join("\n"), "utf8");
@@ -6190,6 +6296,7 @@ function terminalConfigurationDeliveryBytes(d) {
     d.terminalDeviceId,
     String(d.assignmentGeneration),
     d.terminalProfileCode,
+    d.primaryVertical,
     d.minimumApplicationVersion,
     d.maximumApplicationVersion === null ? "-" : d.maximumApplicationVersion,
     d.issuedAt.toISOString(),
@@ -6206,7 +6313,7 @@ var init_terminal_configuration_delivery = __esm({
   "../../packages/device-identity/dist/terminal-configuration-delivery.js"() {
     "use strict";
     init_dev_crypto();
-    TERMINAL_CONFIGURATION_DELIVERY_KIND = "kitluy.terminal-configuration-delivery.v1";
+    TERMINAL_CONFIGURATION_DELIVERY_KIND = "kitluy.terminal-configuration-delivery.v2";
   }
 });
 
@@ -6281,7 +6388,7 @@ var init_dist = __esm({
 });
 
 // src/hub/edge/runtime-bootstrap.ts
-import { createHash as createHash5, randomUUID as randomUUID5, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHash as createHash6, randomUUID as randomUUID5, scryptSync, timingSafeEqual } from "node:crypto";
 async function readAuthorityTime(pool) {
   const instant2 = await withHubTransaction(
     pool,
@@ -6409,7 +6516,8 @@ async function deriveEligibility(client, terminalDeviceId, certificateSerial, en
     return mode === "retired_rejected" ? refuse("HUB_RETIRED", "this Store Hub is locally retired") : refuse("HUB_REPLACEMENT_BLOCKED", `hub replacement state is ${mode}`);
   }
   const hubAssignment = await client.query(
-    `select hub_device_id, tenant_id, digital_store_id, location_id, assignment_generation
+    `select hub_device_id, tenant_id, digital_store_id, location_id, assignment_generation,
+            primary_vertical_code
        from edge_identity.hub_assignment
       where hub_device_id = $1 and ended_at is null
       order by assignment_generation desc
@@ -6420,8 +6528,16 @@ async function deriveEligibility(client, terminalDeviceId, certificateSerial, en
   if (scope === void 0) {
     return refuse("HUB_ASSIGNMENT_MISSING", "this Store Hub has no active assignment");
   }
+  const primaryVertical = scope.primary_vertical_code?.trim() ?? "";
+  if (primaryVertical.length === 0) {
+    return refuse(
+      "VERTICAL_UNAVAILABLE",
+      "this Store Hub's assignment carries no primary vertical; nothing can be signed for the terminal"
+    );
+  }
   const terminal = await client.query(
-    `select tenant_id, digital_store_id, location_id, assignment_generation, lifecycle_status
+    `select tenant_id, digital_store_id, location_id, assignment_generation, lifecycle_status,
+            last_client_sequence::text as last_client_sequence
        from edge_identity.terminal_device
       where id = $1::uuid`,
     [terminalDeviceId]
@@ -6518,6 +6634,7 @@ async function deriveEligibility(client, terminalDeviceId, certificateSerial, en
       assignmentId: grantRow.id,
       assignmentGeneration: terminalRow.assignment_generation,
       terminalProfileCode: grantRow.profile_code,
+      primaryVertical,
       credentialId: credentialRow.id,
       credentialGeneration: credentialRow.rotation_generation,
       credentialEligibility: "eligible",
@@ -6527,6 +6644,7 @@ async function deriveEligibility(client, terminalDeviceId, certificateSerial, en
       containmentState,
       hubReplacementState: mode,
       requiredConfigurationVersion: requiredVersion === void 0 ? null : Number(requiredVersion),
+      nextClientSequence: (BigInt(terminalRow.last_client_sequence) + 1n).toString(),
       authorityTime: authorityTime.toISOString()
     }
   };
@@ -6574,7 +6692,7 @@ async function readCurrentConfigurationDelivery(pool, terminalDeviceId, certific
       const payload = {};
       for (const row of sections.rows) payload[row.section_code] = row.content_json;
       const payloadJson = canonicalJson(payload);
-      const payloadSha256 = createHash5("sha256").update(Buffer.from(payloadJson, "utf8")).digest("hex");
+      const payloadSha256 = createHash6("sha256").update(Buffer.from(payloadJson, "utf8")).digest("hex");
       const profilesSection = payload["terminal_profiles"];
       const compatibility = profilesSection?.application_compatibility;
       const minimumApplicationVersion = typeof compatibility?.["minimum_application_version"] === "string" ? compatibility["minimum_application_version"] : "0.0.0";
@@ -6603,6 +6721,7 @@ async function readCurrentConfigurationDelivery(pool, terminalDeviceId, certific
         terminalDeviceId,
         assignmentGeneration: scope.assignmentGeneration,
         terminalProfileCode: scope.terminalProfileCode,
+        primaryVertical: scope.primaryVertical,
         minimumApplicationVersion,
         maximumApplicationVersion,
         issuedAt: snapshotRow.created_at,
@@ -7165,20 +7284,20 @@ var require_index_umd = __commonJS({
       function hexCharCodesToInt(a, b) {
         return (a & 15) + (a >> 6 | a >> 3 & 8) << 4 | (b & 15) + (b >> 6 | b >> 3 & 8);
       }
-      function writeHexToUInt8(buf, str2) {
-        const size = str2.length >> 1;
+      function writeHexToUInt8(buf, str3) {
+        const size = str3.length >> 1;
         for (let i = 0; i < size; i++) {
           const index = i << 1;
-          buf[i] = hexCharCodesToInt(str2.charCodeAt(index), str2.charCodeAt(index + 1));
+          buf[i] = hexCharCodesToInt(str3.charCodeAt(index), str3.charCodeAt(index + 1));
         }
       }
-      function hexStringEqualsUInt8(str2, buf) {
-        if (str2.length !== buf.length * 2) {
+      function hexStringEqualsUInt8(str3, buf) {
+        if (str3.length !== buf.length * 2) {
           return false;
         }
         for (let i = 0; i < buf.length; i++) {
           const strIndex = i << 1;
-          if (buf[i] !== hexCharCodesToInt(str2.charCodeAt(strIndex), str2.charCodeAt(strIndex + 1))) {
+          if (buf[i] !== hexCharCodesToInt(str3.charCodeAt(strIndex), str3.charCodeAt(strIndex + 1))) {
             return false;
           }
         }
@@ -9439,8 +9558,8 @@ __export(terminal_pin_exports, {
   unlockTerminalWithPin: () => unlockTerminalWithPin,
   verifyTerminalPin: () => verifyTerminalPin
 });
-import { createHash as createHash6, randomBytes as randomBytes2, randomUUID as randomUUID6 } from "node:crypto";
-async function terminalPinVerifier(pin, salt = randomBytes2(TERMINAL_PIN_ARGON2.saltLength)) {
+import { createHash as createHash7, randomBytes as randomBytes3, randomUUID as randomUUID6 } from "node:crypto";
+async function terminalPinVerifier(pin, salt = randomBytes3(TERMINAL_PIN_ARGON2.saltLength)) {
   if (!TERMINAL_PIN_PATTERN.test(pin)) {
     throw new Error("KLUY-TERMINAL-PIN-FORMAT: a Terminal PIN is exactly four digits");
   }
@@ -9535,7 +9654,7 @@ async function audit(client, terminal, input) {
     resourceId: terminal.id,
     reasonCode: input.reasonCode,
     correlationId: input.correlationId,
-    payloadSha256: createHash6("sha256").update(payload, "utf8").digest("hex"),
+    payloadSha256: createHash7("sha256").update(payload, "utf8").digest("hex"),
     details: input.details,
     localSequence: await allocateHubSequence(client)
   });
@@ -9992,7 +10111,7 @@ var init_errors3 = __esm({
 });
 
 // src/hub/sync/configuration.ts
-import { createHash as createHash9 } from "node:crypto";
+import { createHash as createHash10 } from "node:crypto";
 function snapshotManifest(snapshot) {
   return canonicalJson({
     snapshot_id: snapshot.snapshotId,
@@ -10005,19 +10124,19 @@ function snapshotManifest(snapshot) {
     expires_at: snapshot.expiresAt?.toISOString() ?? null,
     minimum_hub_version: snapshot.minimumHubVersion,
     maximum_hub_version: snapshot.maximumHubVersion,
-    sections: [...snapshot.sections].map((s) => ({
-      section_code: s.sectionCode,
-      section_version: s.sectionVersion.toString(),
-      required: s.required,
-      content_sha256: sectionDigest(s)
+    sections: [...snapshot.sections].map((s3) => ({
+      section_code: s3.sectionCode,
+      section_version: s3.sectionVersion.toString(),
+      required: s3.required,
+      content_sha256: sectionDigest(s3)
     })).sort((a, b) => a.section_code < b.section_code ? -1 : 1)
   });
 }
 function sectionDigest(section) {
-  return createHash9("sha256").update(canonicalJson(section.content), "utf8").digest("hex");
+  return createHash10("sha256").update(canonicalJson(section.content), "utf8").digest("hex");
 }
 function snapshotManifestSha256(snapshot) {
-  return createHash9("sha256").update(snapshotManifest(snapshot), "utf8").digest("hex");
+  return createHash10("sha256").update(snapshotManifest(snapshot), "utf8").digest("hex");
 }
 async function recordDownloadedSnapshot(client, snapshot) {
   await client.query(
@@ -10168,7 +10287,7 @@ __export(dev_configuration_exports, {
   loadOrCreateDevelopmentSigner: () => loadOrCreateDevelopmentSigner,
   publishDevelopmentConfiguration: () => publishDevelopmentConfiguration
 });
-import { randomBytes as randomBytes3, randomUUID as randomUUID9 } from "node:crypto";
+import { randomBytes as randomBytes4, randomUUID as randomUUID9 } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync as readFileSync3, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 function loadOrCreateDevelopmentSigner(path = DEV_CONFIGURATION_KEY_PATH) {
@@ -10176,7 +10295,7 @@ function loadOrCreateDevelopmentSigner(path = DEV_CONFIGURATION_KEY_PATH) {
   try {
     secret = Buffer.from(readFileSync3(path, "utf8").trim(), "base64");
   } catch {
-    secret = randomBytes3(32);
+    secret = randomBytes4(32);
     mkdirSync(dirname(path), { recursive: true, mode: 448 });
     writeFileSync(path, `${secret.toString("base64")}
 `, { mode: 384 });
@@ -10359,6 +10478,12 @@ function createLogger(service, bound = {}, sink = (line) => {
 }
 
 // ../../verticals/phase1-laundry/dist/terminal-profiles.js
+var LAUNDRY_TERMINAL_PROFILES = [
+  "laundry.t1.intake_cashier",
+  "laundry.t2.customer_display",
+  "laundry.t3.ready_scan_in",
+  "laundry.t4.pickup_scan_out"
+];
 var RETIRED_TERMINAL_IDENTIFIERS = ["t2_scan_in", "t3_scan_out"];
 var PRE_RENAME_TERMINAL_IDENTIFIERS = [
   "t1_intake_cashier",
@@ -10370,6 +10495,498 @@ var REJECTED_TERMINAL_IDENTIFIERS = [
   ...RETIRED_TERMINAL_IDENTIFIERS,
   ...PRE_RENAME_TERMINAL_IDENTIFIERS
 ];
+function isLaundryTerminalProfile(value) {
+  return LAUNDRY_TERMINAL_PROFILES.includes(value);
+}
+
+// ../../packages/money/dist/index.js
+var CURRENCIES = {
+  /** Cambodian riel — zero minor-unit digits (whole riel). */
+  KHR: { code: "KHR", minorUnitDigits: 0 },
+  /** United States dollar — two minor-unit digits (cents). */
+  USD: { code: "USD", minorUnitDigits: 2 }
+};
+var MoneyError = class extends Error {
+  code;
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+    this.name = "MoneyError";
+  }
+};
+function money(currency, minorUnits) {
+  if (!(currency in CURRENCIES)) {
+    throw new MoneyError("UNKNOWN_CURRENCY", `Unknown currency: ${String(currency)}`);
+  }
+  if (typeof minorUnits === "number") {
+    if (!Number.isSafeInteger(minorUnits)) {
+      throw new MoneyError("NON_INTEGER_AMOUNT", `Money requires integer minor units, got ${minorUnits}. Floating-point money is prohibited (RB v4 \xA79.4).`);
+    }
+    minorUnits = BigInt(minorUnits);
+  }
+  return { currency, minorUnits };
+}
+function multiplyByQuantity(a, quantity) {
+  if (typeof quantity === "number" && !Number.isSafeInteger(quantity)) {
+    throw new MoneyError("NON_INTEGER_AMOUNT", "multiplyByQuantity takes integer quantities; fractional quantities (e.g. weight) must go through an approved pricing calculation with an explicit rounding rule.");
+  }
+  return { currency: a.currency, minorUnits: a.minorUnits * BigInt(quantity) };
+}
+var isNegative = (a) => a.minorUnits < 0n;
+
+// ../../verticals/phase1-laundry/dist/pricing.js
+function pricePerPieceLine(line) {
+  if (!Number.isSafeInteger(line.pieceCount) || line.pieceCount <= 0) {
+    throw new Error("pieceCount must be a positive integer.");
+  }
+  if (isNegative(line.unitPriceSnapshot))
+    throw new Error("Unit price cannot be negative.");
+  return multiplyByQuantity(line.unitPriceSnapshot, line.pieceCount);
+}
+function pricePerWeightLine(line, rule) {
+  if (!Number.isSafeInteger(line.weightGrams) || line.weightGrams <= 0) {
+    throw new Error("weightGrams must be a positive integer (scale capture).");
+  }
+  if (isNegative(line.pricePerKgSnapshot))
+    throw new Error("Price cannot be negative.");
+  const numerator = line.pricePerKgSnapshot.minorUnits * BigInt(line.weightGrams);
+  const denominator = 1000n;
+  const quotient = numerator / denominator;
+  const remainder = numerator % denominator;
+  let minorUnits = quotient;
+  if (remainder > 0n) {
+    if (rule === "round_up_minor_unit")
+      minorUnits += 1n;
+    else if (remainder * 2n >= denominator)
+      minorUnits += 1n;
+  }
+  return { currency: line.pricePerKgSnapshot.currency, minorUnits };
+}
+
+// ../../verticals/phase1-laundry/dist/booking-lifecycle.js
+var BOOKING_LIFECYCLE_TRANSITIONS = {
+  DRAFT: ["CONFIRMED/FINALIZED", "EXPIRED"],
+  "CONFIRMED/FINALIZED": ["IN_PROGRESS", "CANCELLED", "VOIDED"],
+  IN_PROGRESS: ["PARTIALLY_FULFILLED", "ISSUE_HOLD", "RETURN/REFUND"],
+  PARTIALLY_FULFILLED: ["FULFILLED/COMPLETED"],
+  "FULFILLED/COMPLETED": [],
+  EXPIRED: [],
+  CANCELLED: [],
+  VOIDED: [],
+  ISSUE_HOLD: [],
+  "RETURN/REFUND": []
+};
+var BookingLifecycleTransitionError = class extends Error {
+  constructor(from, to) {
+    super(`Illegal Booking lifecycle transition ${from} \u2192 ${to} (kitluy-transaction-and-booking-lifecycle-v1.0.0.md \xA74).`);
+    this.name = "BookingLifecycleTransitionError";
+  }
+};
+function canBookingTransition(from, to) {
+  return BOOKING_LIFECYCLE_TRANSITIONS[from].includes(to);
+}
+function transitionBooking(from, to) {
+  if (!canBookingTransition(from, to))
+    throw new BookingLifecycleTransitionError(from, to);
+  return to;
+}
+
+// ../../verticals/phase1-laundry/dist/production-state-machine.js
+var PRODUCTION_STATES = [
+  "RECEIVED",
+  "WASHING",
+  "DRYING",
+  "PRESSING",
+  "QA_PACKAGING",
+  "READY",
+  "PICKED_UP"
+];
+
+// ../../verticals/phase1-laundry/dist/catalog-section.js
+var LAUNDRY_CATALOG_SCHEMA = "kitluy.config.catalog.v1";
+var LAUNDRY_MONEY_SCHEMA = "kitluy.config.money.v1";
+var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+var HEX64 = /^[0-9a-f]{64}$/u;
+var CODE = /^[A-Z][A-Z0-9_-]{1,39}$/u;
+function rec(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+function str(r, key) {
+  const v = r[key];
+  return typeof v === "string" && v.length > 0 && v.length <= 200 ? v : null;
+}
+function int(r, key) {
+  const v = r[key];
+  return typeof v === "number" && Number.isInteger(v) ? v : null;
+}
+function codes(r, key) {
+  const v = r[key];
+  if (v === void 0 || v === null)
+    return [];
+  if (!Array.isArray(v) || v.some((x) => typeof x !== "string" || !CODE.test(x)))
+    return null;
+  return v;
+}
+function parseLaundryCatalogSection(value) {
+  const r = rec(value);
+  if (r === null || r["schema"] !== LAUNDRY_CATALOG_SCHEMA)
+    return null;
+  const currencyCode = str(r, "currency_code");
+  const contentHash = str(r, "content_hash");
+  if (currencyCode === null || !/^[A-Z]{3}$/u.test(currencyCode))
+    return null;
+  if (contentHash === null || !HEX64.test(contentHash))
+    return null;
+  const families = [];
+  for (const raw of Array.isArray(r["families"]) ? r["families"] : []) {
+    const f = rec(raw);
+    const code = f === null ? null : str(f, "code");
+    const name = f === null ? null : str(f, "name");
+    const lane = f?.["lane"];
+    if (f === null || code === null || !CODE.test(code) || name === null)
+      return null;
+    if (lane !== "per_weight" && lane !== "per_piece")
+      return null;
+    families.push({
+      code,
+      lane,
+      name,
+      nameKm: str(f, "name_km"),
+      sortOrder: int(f, "sort_order") ?? 0
+    });
+  }
+  const categories = [];
+  for (const raw of Array.isArray(r["categories"]) ? r["categories"] : []) {
+    const c = rec(raw);
+    const code = c === null ? null : str(c, "code");
+    const name = c === null ? null : str(c, "name");
+    const familyCodes = c === null ? null : codes(c, "family_codes");
+    if (c === null || code === null || !CODE.test(code) || name === null || familyCodes === null)
+      return null;
+    categories.push({
+      code,
+      name,
+      nameKm: str(c, "name_km"),
+      sortOrder: int(c, "sort_order") ?? 0,
+      familyCodes
+    });
+  }
+  const services = [];
+  for (const raw of Array.isArray(r["services"]) ? r["services"] : []) {
+    const s3 = rec(raw);
+    if (s3 === null)
+      return null;
+    const serviceId = str(s3, "service_id");
+    const serviceCode = str(s3, "service_code");
+    const name = str(s3, "name");
+    const pricingMode = s3["pricing_mode"];
+    const unitPriceMinor = int(s3, "unit_price_minor");
+    const currency = str(s3, "currency_code");
+    if (serviceId === null || !UUID.test(serviceId) || serviceCode === null || !CODE.test(serviceCode))
+      return null;
+    if (name === null || pricingMode !== "PER_PIECE" && pricingMode !== "PER_WEIGHT")
+      return null;
+    if (unitPriceMinor === null || unitPriceMinor < 0 || currency === null)
+      return null;
+    const familyCode = str(s3, "family_code");
+    if (familyCode !== null && !CODE.test(familyCode))
+      return null;
+    services.push({
+      serviceId: serviceId.toLowerCase(),
+      serviceCode,
+      familyCode,
+      name,
+      displayName: str(s3, "display_name") ?? name,
+      nameKm: str(s3, "name_km"),
+      garmentCode: str(s3, "garment_code"),
+      categoryCode: str(s3, "category_code"),
+      iconKey: str(s3, "icon_key"),
+      sortOrder: int(s3, "sort_order") ?? 0,
+      pricingMode,
+      currencyCode: currency,
+      unitPriceMinor,
+      minChargeMinor: int(s3, "min_charge_minor"),
+      locationPrice: s3["location_price"] === true,
+      serviceVersion: Math.max(1, int(s3, "service_version") ?? 1)
+    });
+  }
+  const garmentTypes = [];
+  for (const raw of Array.isArray(r["garment_types"]) ? r["garment_types"] : []) {
+    const g = rec(raw);
+    const code = g === null ? null : str(g, "code");
+    const name = g === null ? null : str(g, "name");
+    const familyCodes = g === null ? null : codes(g, "family_codes");
+    if (g === null || code === null || !CODE.test(code) || name === null || familyCodes === null)
+      return null;
+    garmentTypes.push({
+      code,
+      name,
+      nameKm: str(g, "name_km"),
+      categoryCode: str(g, "category_code"),
+      sortOrder: int(g, "sort_order") ?? 0,
+      familyCodes
+    });
+  }
+  return {
+    schema: LAUNDRY_CATALOG_SCHEMA,
+    currencyCode,
+    contentHash,
+    families,
+    categories,
+    services,
+    garmentTypes
+  };
+}
+function parseLaundryMoneySection(value) {
+  const r = rec(value);
+  if (r === null || r["schema"] !== LAUNDRY_MONEY_SCHEMA)
+    return null;
+  const currencyCode = str(r, "currency_code");
+  const currencyExponent = int(r, "currency_exponent");
+  if (currencyCode === null || !/^[A-Z]{3}$/u.test(currencyCode))
+    return null;
+  if (currencyExponent === null || currencyExponent < 0 || currencyExponent > 4)
+    return null;
+  let weightRule = null;
+  const w = rec(r["weight_rule"]);
+  if (w !== null) {
+    const increment = w["increment"];
+    const minimum = w["minimum"];
+    const rounding = w["rounding"];
+    if (w["unit"] !== "kg" || typeof increment !== "number" || !(increment > 0) || typeof minimum !== "number" || !(minimum >= 0) || rounding !== "up" && rounding !== "nearest") {
+      return null;
+    }
+    weightRule = { unit: "kg", increment, rounding, minimum };
+  }
+  let khrPerUsd = null;
+  const usd = rec(rec(r["fx"])?.["USD"]);
+  if (usd !== null) {
+    const rate = int(usd, "khr_per_usd");
+    if (rate === null || rate < 1)
+      return null;
+    khrPerUsd = rate;
+  }
+  const express = r["express_surcharge_bps"];
+  const expressSurchargeBps = express === void 0 || express === null ? null : typeof express === "number" && Number.isInteger(express) && express >= 0 ? express : NaN;
+  if (Number.isNaN(expressSurchargeBps))
+    return null;
+  return {
+    schema: LAUNDRY_MONEY_SCHEMA,
+    currencyCode,
+    currencyExponent,
+    moneyRounding: str(r, "money_rounding") ?? "round_half_up_minor_unit",
+    weightRule,
+    locationCode: str(r, "location_code"),
+    khrPerUsd,
+    expressSurchargeBps
+  };
+}
+function billableKilograms(weighedKg, rule) {
+  if (!(weighedKg > 0))
+    return 0;
+  const steps = weighedKg / rule.increment;
+  const rounded = rule.rounding === "up" ? Math.ceil(steps - 1e-9) : Math.round(steps);
+  return Math.max(rule.minimum, rounded * rule.increment);
+}
+
+// ../../verticals/phase1-laundry/dist/intake-quote.js
+function weightRoundingRuleOf(moneyRounding) {
+  if (moneyRounding === "round_half_up_minor_unit")
+    return "round_half_up_minor_unit";
+  if (moneyRounding === "round_up_minor_unit")
+    return "round_up_minor_unit";
+  return null;
+}
+function basisPoints(value, bps) {
+  if (!Number.isInteger(bps) || bps < 0)
+    throw new Error("bps must be a non-negative integer.");
+  const numerator = value * BigInt(bps);
+  const quotient = numerator / 10000n;
+  const remainder = numerator % 10000n;
+  return remainder * 2n >= 10000n ? quotient + 1n : quotient;
+}
+function fourDecimals(value) {
+  return value.toFixed(4);
+}
+function quoteIntakeLines(catalog, moneyContract, lines, options = {}) {
+  if (lines.length === 0)
+    return { ok: false, refusal: { code: "NO_LINES" } };
+  const currency = moneyContract.currencyCode;
+  const rounding = weightRoundingRuleOf(moneyContract.moneyRounding);
+  if (rounding === null) {
+    return {
+      ok: false,
+      refusal: { code: "MONEY_ROUNDING_UNKNOWN", moneyRounding: moneyContract.moneyRounding }
+    };
+  }
+  const byId = new Map(catalog.services.map((service) => [service.serviceId.toLowerCase(), service]));
+  const quoted = [];
+  let subtotal = 0n;
+  for (const line of lines) {
+    const service = byId.get(line.serviceId.toLowerCase());
+    if (service === void 0) {
+      return { ok: false, refusal: { code: "SERVICE_UNKNOWN", serviceId: line.serviceId } };
+    }
+    if (service.currencyCode !== currency) {
+      return { ok: false, refusal: { code: "CURRENCY_MISMATCH", serviceId: line.serviceId } };
+    }
+    const hasPieces = line.pieceCount !== void 0;
+    const hasWeight = line.weighedGrams !== void 0;
+    if (hasPieces === hasWeight) {
+      return { ok: false, refusal: { code: "QUANTITY_INVALID", serviceId: line.serviceId } };
+    }
+    const unitPrice = money(currency, BigInt(service.unitPriceMinor));
+    if (service.pricingMode === "PER_PIECE") {
+      if (!hasPieces) {
+        return { ok: false, refusal: { code: "PRICING_MODE_MISMATCH", serviceId: line.serviceId } };
+      }
+      const pieceCount = line.pieceCount ?? 0;
+      if (!Number.isSafeInteger(pieceCount) || pieceCount <= 0 || pieceCount > 9999) {
+        return { ok: false, refusal: { code: "QUANTITY_INVALID", serviceId: line.serviceId } };
+      }
+      const priced2 = pricePerPieceLine({
+        kind: "per_piece",
+        serviceCode: service.serviceCode,
+        unitPriceSnapshot: unitPrice,
+        pieceCount
+      });
+      quoted.push({
+        serviceId: service.serviceId,
+        serviceCode: service.serviceCode,
+        serviceVersion: service.serviceVersion,
+        displayName: service.displayName,
+        familyCode: service.familyCode,
+        pricingMethod: "per_piece",
+        unitCode: "piece",
+        unitPriceMinor: unitPrice.minorUnits,
+        quantity: fourDecimals(pieceCount),
+        pieceCount,
+        weighedGrams: null,
+        billableGrams: null,
+        lineSubtotalMinor: priced2.minorUnits
+      });
+      subtotal += priced2.minorUnits;
+      continue;
+    }
+    if (!hasWeight) {
+      return { ok: false, refusal: { code: "PRICING_MODE_MISMATCH", serviceId: line.serviceId } };
+    }
+    const weighedGrams = line.weighedGrams ?? 0;
+    if (!Number.isSafeInteger(weighedGrams) || weighedGrams <= 0 || weighedGrams > 9999e3) {
+      return { ok: false, refusal: { code: "QUANTITY_INVALID", serviceId: line.serviceId } };
+    }
+    if (moneyContract.weightRule === null) {
+      return { ok: false, refusal: { code: "WEIGHT_RULE_MISSING" } };
+    }
+    const billableKg = billableKilograms(weighedGrams / 1e3, moneyContract.weightRule);
+    const billableGrams = Math.round(billableKg * 1e3);
+    if (billableGrams <= 0) {
+      return { ok: false, refusal: { code: "QUANTITY_INVALID", serviceId: line.serviceId } };
+    }
+    const priced = pricePerWeightLine({
+      kind: "per_weight",
+      serviceCode: service.serviceCode,
+      pricePerKgSnapshot: unitPrice,
+      weightGrams: billableGrams
+    }, rounding);
+    quoted.push({
+      serviceId: service.serviceId,
+      serviceCode: service.serviceCode,
+      serviceVersion: service.serviceVersion,
+      displayName: service.displayName,
+      familyCode: service.familyCode,
+      pricingMethod: "per_weight",
+      unitCode: "kg",
+      unitPriceMinor: unitPrice.minorUnits,
+      quantity: fourDecimals(billableGrams / 1e3),
+      pieceCount: null,
+      weighedGrams,
+      billableGrams,
+      lineSubtotalMinor: priced.minorUnits
+    });
+    subtotal += priced.minorUnits;
+  }
+  const express = options.express === true;
+  let expressSurcharge = 0n;
+  if (express) {
+    if (moneyContract.expressSurchargeBps === null) {
+      return { ok: false, refusal: { code: "EXPRESS_NOT_CONFIGURED" } };
+    }
+    expressSurcharge = basisPoints(subtotal, moneyContract.expressSurchargeBps);
+  }
+  return {
+    ok: true,
+    quote: {
+      currencyCode: currency,
+      currencyExponent: moneyContract.currencyExponent,
+      lines: quoted,
+      subtotalMinor: subtotal,
+      express,
+      expressSurchargeBps: moneyContract.expressSurchargeBps,
+      expressSurchargeMinor: expressSurcharge,
+      totalMinor: subtotal + expressSurcharge
+    }
+  };
+}
+function usdCentsToKhr(usdCents, khrPerUsd) {
+  if (!Number.isInteger(khrPerUsd) || khrPerUsd < 1)
+    throw new Error("khrPerUsd must be >= 1.");
+  const numerator = usdCents * BigInt(khrPerUsd);
+  const quotient = numerator / 100n;
+  const remainder = numerator % 100n;
+  return remainder * 2n >= 100n ? quotient + 1n : quotient;
+}
+function settleCashTender(totalMinor, moneyContract, tender) {
+  const currency = moneyContract.currencyCode;
+  if (tender.localMinor < 0n || tender.usdCents < 0n || totalMinor < 0n) {
+    return { ok: false, refusal: { code: "TENDER_INVALID" } };
+  }
+  const legs = [];
+  let tendered = 0n;
+  if (tender.localMinor > 0n) {
+    legs.push({
+      tenderType: "cash",
+      currencyCode: currency,
+      currencyExponent: moneyContract.currencyExponent,
+      amountMinor: tender.localMinor,
+      localEquivalentMinor: tender.localMinor,
+      khrPerUsd: null
+    });
+    tendered += tender.localMinor;
+  }
+  if (tender.usdCents > 0n) {
+    if (currency !== "KHR" || moneyContract.khrPerUsd === null) {
+      return { ok: false, refusal: { code: "FX_RATE_UNAVAILABLE" } };
+    }
+    const equivalent = usdCentsToKhr(tender.usdCents, moneyContract.khrPerUsd);
+    legs.push({
+      tenderType: "cash",
+      currencyCode: "USD",
+      currencyExponent: 2,
+      amountMinor: tender.usdCents,
+      localEquivalentMinor: equivalent,
+      khrPerUsd: moneyContract.khrPerUsd
+    });
+    tendered += equivalent;
+  }
+  if (tendered < totalMinor) {
+    return {
+      ok: false,
+      refusal: { code: "TENDER_INSUFFICIENT", shortMinor: totalMinor - tendered }
+    };
+  }
+  return {
+    ok: true,
+    settlement: {
+      currencyCode: currency,
+      currencyExponent: moneyContract.currencyExponent,
+      tenderedMinor: tendered,
+      appliedMinor: totalMinor,
+      changeDueMinor: tendered - totalMinor,
+      legs
+    }
+  };
+}
 
 // src/index.ts
 var SERVICE_NAME = "kitluy-hub-agent";
@@ -10544,11 +11161,969 @@ function errorEnvelope(code, message, extras) {
 // src/hub/repositories/index.ts
 init_audit();
 
+// src/hub/repositories/config.ts
+var config_exports = {};
+__export(config_exports, {
+  findActiveConfiguration: () => findActiveConfiguration,
+  findActiveProfileAssignment: () => findActiveProfileAssignment,
+  findConfigurationSection: () => findConfigurationSection,
+  findPeripheralBinding: () => findPeripheralBinding
+});
+async function findActiveConfiguration(client, locationId) {
+  const result = await client.query(
+    `select snapshot_id, tenant_id, digital_store_id, location_id, snapshot_version,
+            schema_version, manifest_sha256, signing_key_id, not_before, expires_at,
+            activated_at
+       from edge_config.active_configuration where location_id = $1`,
+    [locationId]
+  );
+  return result.rows[0];
+}
+async function findConfigurationSection(client, snapshotId, sectionCode) {
+  const result = await client.query(
+    `select id, snapshot_id, section_code, section_version, content_sha256,
+            content_json, required, validation_state
+       from edge_config.configuration_section
+      where snapshot_id = $1 and section_code = $2`,
+    [snapshotId, sectionCode]
+  );
+  return result.rows[0];
+}
+async function findActiveProfileAssignment(client, terminalDeviceId, profileCode) {
+  const result = await client.query(
+    `select id, tenant_id, digital_store_id, location_id, terminal_device_id,
+            profile_code, assignment_version, enabled, effective_from,
+            effective_until, source_snapshot_id
+       from edge_config.terminal_profile_assignment
+      where terminal_device_id = $1 and profile_code = $2
+        and enabled and effective_until is null`,
+    [terminalDeviceId, profileCode]
+  );
+  return result.rows[0];
+}
+async function findPeripheralBinding(client, locationId, logicalRole) {
+  const result = await client.query(
+    `select id, location_id, logical_role, connection_uri, terminal_device_id,
+            fallback_priority, enabled
+       from edge_config.peripheral_binding
+      where location_id = $1 and logical_role = $2 and enabled
+      order by fallback_priority asc
+      limit 1`,
+    [locationId, logicalRole]
+  );
+  return result.rows[0];
+}
+
+// src/hub/repositories/documents.ts
+var documents_exports = {};
+__export(documents_exports, {
+  buildSuppressionKey: () => buildSuppressionKey,
+  countQueuedPrintJobs: () => countQueuedPrintJobs,
+  enqueuePrintJob: () => enqueuePrintJob,
+  findPrintJobBySuppressionKey: () => findPrintJobBySuppressionKey,
+  insertReceipt: () => insertReceipt
+});
+function buildSuppressionKey(documentId, documentVersion, printerBindingId, copyIndex) {
+  return `print1.${documentId}.${documentVersion.toString()}.${printerBindingId}.${copyIndex}`;
+}
+async function insertReceipt(client, input) {
+  await client.query(
+    `insert into edge_documents.receipt
+       (id, tenant_id, digital_store_id, location_id, booking_id, payment_id,
+        receipt_number, document_type, template_version, content_sha256, issued_at,
+        issued_by, event_id)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now(), $11, $12)`,
+    [
+      input.id,
+      input.tenantId,
+      input.digitalStoreId,
+      input.locationId,
+      input.bookingId,
+      input.paymentId,
+      input.receiptNumber,
+      input.documentType,
+      input.templateVersion.toString(),
+      input.contentSha256,
+      input.issuedBy,
+      input.eventId
+    ]
+  );
+}
+async function findPrintJobBySuppressionKey(client, suppressionKey) {
+  const result = await client.query(
+    `select id, document_type, document_id, printer_binding_id, payload_sha256,
+            duplicate_suppression_key, state, attempt_count
+       from edge_documents.print_job where duplicate_suppression_key = $1`,
+    [suppressionKey]
+  );
+  return result.rows[0];
+}
+async function enqueuePrintJob(client, input) {
+  const suppressionKey = buildSuppressionKey(
+    input.documentId,
+    input.templateVersion,
+    input.printerBindingId,
+    input.copyIndex
+  );
+  const existing = await findPrintJobBySuppressionKey(client, suppressionKey);
+  if (existing) return existing.id;
+  await client.query(
+    `insert into edge_documents.print_job
+       (id, tenant_id, digital_store_id, location_id, document_type, document_id,
+        printer_binding_id, template_version, payload_sha256, copies,
+        duplicate_suppression_key, state, priority, created_at, next_attempt_at,
+        attempt_count, created_by, terminal_device_id)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+             'queued'::edge_documents.print_state, $12, now(), now(), 0, $13, $14)`,
+    [
+      input.id,
+      input.tenantId,
+      input.digitalStoreId,
+      input.locationId,
+      input.documentType,
+      input.documentId,
+      input.printerBindingId,
+      input.templateVersion.toString(),
+      input.payloadSha256,
+      input.copies,
+      suppressionKey,
+      input.priority,
+      input.createdBy,
+      input.terminalDeviceId
+    ]
+  );
+  return input.id;
+}
+async function countQueuedPrintJobs(client, locationId) {
+  const result = await client.query(
+    `select count(*)::text as count from edge_documents.print_job
+      where location_id = $1 and state = 'queued'`,
+    [locationId]
+  );
+  return Number(result.rows[0]?.count ?? "0");
+}
+
 // src/hub/repositories/files.ts
 init_errors();
 
+// src/hub/repositories/identity.ts
+var identity_exports = {};
+__export(identity_exports, {
+  findActiveHubAssignment: () => findActiveHubAssignment,
+  findDeviceCredentials: () => findDeviceCredentials,
+  findStaffCache: () => findStaffCache,
+  findTerminalDevice: () => findTerminalDevice,
+  findTerminalSession: () => findTerminalSession
+});
+async function findActiveHubAssignment(client) {
+  const result = await client.query(
+    `select id, hub_device_id, tenant_id, digital_store_id, location_id,
+            assignment_generation, status, ended_at
+       from edge_identity.hub_assignment
+      where ended_at is null`
+  );
+  return result.rows[0];
+}
+async function findTerminalDevice(client, terminalDeviceId) {
+  const result = await client.query(
+    `select id, tenant_id, digital_store_id, location_id, terminal_name,
+            assignment_generation, lifecycle_status, certificate_serial,
+            last_client_sequence
+       from edge_identity.terminal_device where id = $1`,
+    [terminalDeviceId]
+  );
+  return result.rows[0];
+}
+async function findDeviceCredentials(client, deviceId) {
+  const result = await client.query(
+    `select id, device_id, certificate_serial, status, expires_at, revoked_at, revocation_reason
+       from edge_identity.device_credential where device_id = $1`,
+    [deviceId]
+  );
+  return result.rows;
+}
+async function findTerminalSession(client, sessionId) {
+  const result = await client.query(
+    `select id, tenant_id, digital_store_id, location_id, terminal_device_id,
+            actor_id, profile_code, opened_at, expires_at, closed_at,
+            session_generation, status, credential_kind
+       from edge_identity.terminal_session where id = $1`,
+    [sessionId]
+  );
+  return result.rows[0];
+}
+async function findStaffCache(client, actorId) {
+  const result = await client.query(
+    `select actor_id, tenant_id, digital_store_id, location_id, display_name,
+            permission_snapshot_version, profile_codes, offline_valid_until,
+            disabled
+       from edge_identity.staff_cache where actor_id = $1`,
+    [actorId]
+  );
+  return result.rows[0];
+}
+
+// src/hub/repositories/laundry.ts
+var laundry_exports = {};
+__export(laundry_exports, {
+  allocateBusinessNumber: () => allocateBusinessNumber,
+  appendCustodyEvent: () => appendCustodyEvent,
+  appendStatusEvent: () => appendStatusEvent,
+  clearStorageAssignments: () => clearStorageAssignments,
+  countBlockingExceptions: () => countBlockingExceptions,
+  deleteDraftBookingLines: () => deleteDraftBookingLines,
+  findBooking: () => findBooking,
+  findStoragePosition: () => findStoragePosition,
+  formatDisplayNumber: () => formatDisplayNumber,
+  insertBag: () => insertBag,
+  insertBooking: () => insertBooking,
+  insertBookingLine: () => insertBookingLine,
+  insertException: () => insertException,
+  insertGarment: () => insertGarment,
+  insertPickupSession: () => insertPickupSession,
+  insertReadyScanSession: () => insertReadyScanSession,
+  insertStorageAssignment: () => insertStorageAssignment,
+  insertTag: () => insertTag,
+  listActiveStorageAssignments: () => listActiveStorageAssignments,
+  listBookingLines: () => listBookingLines,
+  listGarments: () => listGarments,
+  loadBookingForUpdate: () => loadBookingForUpdate,
+  loadPickupSessionForUpdate: () => loadPickupSessionForUpdate,
+  loadReadyScanSessionForUpdate: () => loadReadyScanSessionForUpdate,
+  nextBookingLocalSequence: () => nextBookingLocalSequence,
+  setBagCustodyState: () => setBagCustodyState,
+  setGarmentCustodyState: () => setGarmentCustodyState,
+  updateBookingProjection: () => updateBookingProjection,
+  updatePickupSession: () => updatePickupSession,
+  updateReadyScanSession: () => updateReadyScanSession,
+  voidTag: () => voidTag
+});
+var BOOKING_COLUMNS = `id, tenant_id, digital_store_id, location_id, booking_number,
+  customer_id, status, to_char(business_date, 'YYYY-MM-DD') as business_date,
+  currency_code, currency_exponent, subtotal_minor, discount_minor, tax_minor,
+  total_minor, paid_minor, refunded_minor, balance_minor, due_at, pickup_method,
+  config_snapshot_id, aggregate_version`;
+async function loadBookingForUpdate(client, bookingId) {
+  const result = await client.query(
+    `select ${BOOKING_COLUMNS} from edge_laundry.booking where id = $1 for update`,
+    [bookingId]
+  );
+  return result.rows[0];
+}
+async function findBooking(client, bookingId) {
+  const result = await client.query(
+    `select ${BOOKING_COLUMNS} from edge_laundry.booking where id = $1`,
+    [bookingId]
+  );
+  return result.rows[0];
+}
+async function insertBooking(client, input) {
+  await client.query(
+    `insert into edge_laundry.booking
+       (id, tenant_id, digital_store_id, location_id, booking_number, customer_id,
+        status, business_date, currency_code, currency_exponent, subtotal_minor,
+        discount_minor, tax_minor, total_minor, paid_minor, refunded_minor,
+        balance_minor, due_at, pickup_method, config_snapshot_id, aggregate_version,
+        created_at, updated_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10, $11, $12, $13, $14,
+             0, 0, $14, $15, $16, $17, 1, now(), now())`,
+    [
+      input.id,
+      input.tenantId,
+      input.digitalStoreId,
+      input.locationId,
+      input.bookingNumber,
+      input.customerId,
+      input.status,
+      input.businessDate,
+      input.currencyCode,
+      input.currencyExponent,
+      input.subtotalMinor.toString(),
+      input.discountMinor.toString(),
+      input.taxMinor.toString(),
+      input.totalMinor.toString(),
+      input.dueAt,
+      input.pickupMethod,
+      input.configSnapshotId
+    ]
+  );
+}
+async function updateBookingProjection(client, input) {
+  const result = await client.query(
+    `update edge_laundry.booking
+        set status         = coalesce($3, status),
+            subtotal_minor = coalesce($4::bigint, subtotal_minor),
+            discount_minor = coalesce($5::bigint, discount_minor),
+            tax_minor      = coalesce($6::bigint, tax_minor),
+            total_minor    = coalesce($7::bigint, total_minor),
+            paid_minor     = coalesce($8::bigint, paid_minor),
+            refunded_minor = coalesce($9::bigint, refunded_minor),
+            due_at         = coalesce($10::timestamptz, due_at),
+            balance_minor  = coalesce($7::bigint, total_minor)
+                             - coalesce($8::bigint, paid_minor)
+                             + coalesce($9::bigint, refunded_minor),
+            aggregate_version = aggregate_version + 1
+      where id = $1 and aggregate_version = $2
+      returning aggregate_version`,
+    [
+      input.bookingId,
+      input.expectedVersion.toString(),
+      input.status ?? null,
+      input.subtotalMinor?.toString() ?? null,
+      input.discountMinor?.toString() ?? null,
+      input.taxMinor?.toString() ?? null,
+      input.totalMinor?.toString() ?? null,
+      input.paidMinor?.toString() ?? null,
+      input.refundedMinor?.toString() ?? null,
+      input.dueAt ?? null
+    ]
+  );
+  return result.rows[0]?.aggregate_version;
+}
+async function listBookingLines(client, bookingId) {
+  const result = await client.query(
+    `select id, booking_id, service_id, service_version, display_name, pricing_method,
+            unit_price_minor, currency_code, currency_exponent, quantity::text as quantity,
+            unit_code, line_subtotal_minor, discount_minor, tax_minor, line_total_minor
+       from edge_laundry.booking_line where booking_id = $1 order by created_at, id`,
+    [bookingId]
+  );
+  return result.rows;
+}
+async function insertBookingLine(client, input) {
+  await client.query(
+    `insert into edge_laundry.booking_line
+       (id, tenant_id, digital_store_id, location_id, booking_id, service_id,
+        service_version, display_name, pricing_method, unit_price_minor,
+        currency_code, currency_exponent, quantity, unit_code, line_subtotal_minor,
+        discount_minor, tax_minor, line_total_minor, addon_snapshot_json,
+        source_config_version, created_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::numeric,
+             $14, $15, $16, $17, $18, $19::jsonb, $20, now())`,
+    [
+      input.id,
+      input.tenantId,
+      input.digitalStoreId,
+      input.locationId,
+      input.bookingId,
+      input.serviceId,
+      input.serviceVersion.toString(),
+      input.displayName,
+      input.pricingMethod,
+      input.unitPriceMinor.toString(),
+      input.currencyCode,
+      input.currencyExponent,
+      input.quantity,
+      input.unitCode,
+      input.lineSubtotalMinor.toString(),
+      input.discountMinor.toString(),
+      input.taxMinor.toString(),
+      input.lineTotalMinor.toString(),
+      JSON.stringify(input.addonSnapshot),
+      input.sourceConfigVersion.toString()
+    ]
+  );
+}
+async function deleteDraftBookingLines() {
+  throw new Error(
+    "edge_laundry.booking_line rows are never deleted (schema contract \xA71); supersede the draft instead."
+  );
+}
+async function insertGarment(client, input) {
+  await client.query(
+    `insert into edge_laundry.garment
+       (id, tenant_id, digital_store_id, location_id, booking_id, booking_line_id,
+        garment_code, garment_type, color, condition_code, special_handling,
+        current_custody_state, created_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now())`,
+    [
+      input.id,
+      input.tenantId,
+      input.digitalStoreId,
+      input.locationId,
+      input.bookingId,
+      input.bookingLineId,
+      input.garmentCode,
+      input.garmentType,
+      input.color,
+      input.conditionCode,
+      input.specialHandling,
+      input.custodyState
+    ]
+  );
+}
+async function listGarments(client, bookingId) {
+  const result = await client.query(
+    `select id, booking_id, garment_code, current_custody_state
+       from edge_laundry.garment where booking_id = $1 order by created_at, id`,
+    [bookingId]
+  );
+  return result.rows;
+}
+async function setGarmentCustodyState(client, garmentId, custodyState) {
+  await client.query(`update edge_laundry.garment set current_custody_state = $2 where id = $1`, [
+    garmentId,
+    custodyState
+  ]);
+}
+async function insertBag(client, input) {
+  await client.query(
+    `insert into edge_laundry.bag
+       (id, tenant_id, digital_store_id, location_id, booking_id, bag_code,
+        expected_piece_count, current_piece_count, current_custody_state, created_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())`,
+    [
+      input.id,
+      input.tenantId,
+      input.digitalStoreId,
+      input.locationId,
+      input.bookingId,
+      input.bagCode,
+      input.expectedPieceCount,
+      input.currentPieceCount,
+      input.custodyState
+    ]
+  );
+}
+async function setBagCustodyState(client, bagId, custodyState) {
+  await client.query(`update edge_laundry.bag set current_custody_state = $2 where id = $1`, [
+    bagId,
+    custodyState
+  ]);
+}
+async function insertTag(client, input) {
+  await client.query(
+    `insert into edge_laundry.tag
+       (id, tenant_id, digital_store_id, location_id, booking_id, garment_id, bag_id,
+        tag_code, tag_type, issued_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())`,
+    [
+      input.id,
+      input.tenantId,
+      input.digitalStoreId,
+      input.locationId,
+      input.bookingId,
+      input.garmentId,
+      input.bagId,
+      input.tagCode,
+      input.tagType
+    ]
+  );
+}
+async function voidTag(client, tagId, voidReason) {
+  await client.query(
+    `update edge_laundry.tag set voided_at = now(), void_reason = $2
+      where id = $1 and voided_at is null`,
+    [tagId, voidReason]
+  );
+}
+async function appendStatusEvent(client, input) {
+  await client.query(
+    `insert into edge_laundry.status_event
+       (id, tenant_id, digital_store_id, location_id, booking_id, from_status,
+        to_status, reason_code, actor_id, terminal_device_id, occurred_at,
+        local_sequence, event_id)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now(), $11, $12)`,
+    [
+      input.id,
+      input.tenantId,
+      input.digitalStoreId,
+      input.locationId,
+      input.bookingId,
+      input.fromStatus,
+      input.toStatus,
+      input.reasonCode,
+      input.actorId,
+      input.terminalDeviceId,
+      input.localSequence.toString(),
+      input.eventId
+    ]
+  );
+}
+async function appendCustodyEvent(client, input) {
+  await client.query(
+    `insert into edge_laundry.custody_event
+       (id, tenant_id, digital_store_id, location_id, booking_id, garment_id, bag_id,
+        event_type, from_custody_state, to_custody_state, storage_position_id,
+        actor_id, terminal_device_id, session_id, occurred_at, local_sequence,
+        reason_code, payload_sha256, event_id)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now(),
+             $15, $16, $17, $18)`,
+    [
+      input.id,
+      input.tenantId,
+      input.digitalStoreId,
+      input.locationId,
+      input.bookingId,
+      input.garmentId,
+      input.bagId,
+      input.eventType,
+      input.fromCustodyState,
+      input.toCustodyState,
+      input.storagePositionId,
+      input.actorId,
+      input.terminalDeviceId,
+      input.sessionId,
+      input.localSequence.toString(),
+      input.reasonCode,
+      input.payloadSha256,
+      input.eventId
+    ]
+  );
+}
+async function nextBookingLocalSequence(client, table, bookingId) {
+  const relation = table === "status_event" ? "edge_laundry.status_event" : "edge_laundry.custody_event";
+  const result = await client.query(
+    `select coalesce(max(local_sequence), 0) + 1 as next from ${relation} where booking_id = $1`,
+    [bookingId]
+  );
+  return result.rows[0]?.next ?? 1n;
+}
+async function insertException(client, input) {
+  await client.query(
+    `insert into edge_laundry.exception
+       (id, tenant_id, digital_store_id, location_id, booking_id, garment_id, bag_id,
+        exception_type, severity, blocking, status, note, evidence_asset_id,
+        created_by, created_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now())`,
+    [
+      input.id,
+      input.tenantId,
+      input.digitalStoreId,
+      input.locationId,
+      input.bookingId,
+      input.garmentId,
+      input.bagId,
+      input.exceptionType,
+      input.severity,
+      input.blocking,
+      input.status,
+      input.note,
+      input.evidenceAssetId,
+      input.createdBy
+    ]
+  );
+}
+async function countBlockingExceptions(client, bookingId) {
+  const result = await client.query(
+    `select count(*)::text as count from edge_laundry.exception
+      where booking_id = $1 and blocking and resolved_at is null`,
+    [bookingId]
+  );
+  return Number(result.rows[0]?.count ?? "0");
+}
+async function findStoragePosition(client, positionId) {
+  const result = await client.query(
+    `select id, location_id, position_code, capacity, status, record_version
+       from edge_laundry.storage_position where id = $1 for update`,
+    [positionId]
+  );
+  return result.rows[0];
+}
+async function insertStorageAssignment(client, input) {
+  await client.query(
+    `insert into edge_laundry.storage_assignment
+       (id, tenant_id, digital_store_id, location_id, booking_id, garment_id, bag_id,
+        storage_position_id, assigned_at, assigned_by, terminal_device_id,
+        assignment_event_id)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, now(), $9, $10, $11)`,
+    [
+      input.id,
+      input.tenantId,
+      input.digitalStoreId,
+      input.locationId,
+      input.bookingId,
+      input.garmentId,
+      input.bagId,
+      input.storagePositionId,
+      input.assignedBy,
+      input.terminalDeviceId,
+      input.assignmentEventId
+    ]
+  );
+}
+async function listActiveStorageAssignments(client, bookingId) {
+  const result = await client.query(
+    `select id, booking_id, garment_id, bag_id, storage_position_id, cleared_at
+       from edge_laundry.storage_assignment
+      where booking_id = $1 and cleared_at is null
+      order by assigned_at, id`,
+    [bookingId]
+  );
+  return result.rows;
+}
+async function clearStorageAssignments(client, bookingId, clearedBy, clearReason) {
+  const result = await client.query(
+    `update edge_laundry.storage_assignment
+        set cleared_at = now(), cleared_by = $2, clear_reason = $3
+      where booking_id = $1 and cleared_at is null`,
+    [bookingId, clearedBy, clearReason]
+  );
+  return result.rowCount ?? 0;
+}
+async function insertReadyScanSession(client, input) {
+  await client.query(
+    `insert into edge_laundry.ready_scan_session
+       (id, tenant_id, digital_store_id, location_id, booking_id, terminal_device_id,
+        actor_id, started_at, expected_count, scanned_count, qa_state, storage_state,
+        status, idempotency_key)
+     values ($1, $2, $3, $4, $5, $6, $7, now(), $8, 0, 'pending', 'unassigned',
+             'in_progress', $9)`,
+    [
+      input.id,
+      input.tenantId,
+      input.digitalStoreId,
+      input.locationId,
+      input.bookingId,
+      input.terminalDeviceId,
+      input.actorId,
+      input.expectedCount,
+      input.idempotencyKey
+    ]
+  );
+}
+async function loadReadyScanSessionForUpdate(client, sessionId) {
+  const result = await client.query(
+    `select id, tenant_id, digital_store_id, location_id, booking_id, terminal_device_id,
+            actor_id, expected_count, scanned_count, qa_state, storage_state, status,
+            idempotency_key, completed_at
+       from edge_laundry.ready_scan_session where id = $1 for update`,
+    [sessionId]
+  );
+  return result.rows[0];
+}
+async function updateReadyScanSession(client, input) {
+  await client.query(
+    `update edge_laundry.ready_scan_session
+        set scanned_count = coalesce($2::integer, scanned_count),
+            qa_state      = coalesce($3, qa_state),
+            storage_state = coalesce($4, storage_state),
+            status        = coalesce($5, status),
+            completed_at  = case when $6::boolean then now() else completed_at end
+      where id = $1`,
+    [
+      input.sessionId,
+      input.scannedCount ?? null,
+      input.qaState ?? null,
+      input.storageState ?? null,
+      input.status ?? null,
+      input.completed ?? false
+    ]
+  );
+}
+async function insertPickupSession(client, input) {
+  await client.query(
+    `insert into edge_laundry.pickup_session
+       (id, tenant_id, digital_store_id, location_id, booking_id, terminal_device_id,
+        actor_id, started_at, expected_count, scanned_count, payment_gate_state,
+        status, idempotency_key)
+     values ($1, $2, $3, $4, $5, $6, $7, now(), $8, 0, $9, 'in_progress', $10)`,
+    [
+      input.id,
+      input.tenantId,
+      input.digitalStoreId,
+      input.locationId,
+      input.bookingId,
+      input.terminalDeviceId,
+      input.actorId,
+      input.expectedCount,
+      input.paymentGateState,
+      input.idempotencyKey
+    ]
+  );
+}
+async function loadPickupSessionForUpdate(client, sessionId) {
+  const result = await client.query(
+    `select id, tenant_id, digital_store_id, location_id, booking_id, terminal_device_id,
+            actor_id, collector_verification_method, collector_verified_at,
+            expected_count, scanned_count, payment_gate_state, completed_at, status,
+            idempotency_key
+       from edge_laundry.pickup_session where id = $1 for update`,
+    [sessionId]
+  );
+  return result.rows[0];
+}
+async function updatePickupSession(client, input) {
+  await client.query(
+    `update edge_laundry.pickup_session
+        set collector_verification_method = coalesce($2, collector_verification_method),
+            collector_verified_at = case when $3::boolean then now()
+                                         else collector_verified_at end,
+            scanned_count = coalesce($4::integer, scanned_count),
+            payment_gate_state = coalesce($5, payment_gate_state),
+            status = coalesce($6, status),
+            completed_at = case when $7::boolean then now() else completed_at end
+      where id = $1`,
+    [
+      input.sessionId,
+      input.collectorVerificationMethod ?? null,
+      input.collectorVerified ?? false,
+      input.scannedCount ?? null,
+      input.paymentGateState ?? null,
+      input.status ?? null,
+      input.completed ?? false
+    ]
+  );
+}
+async function allocateBusinessNumber(client, locationId, sequenceCode, businessDate) {
+  const result = await client.query(
+    `select edge_core.allocate_business_number($1::uuid, $2::text, $3::date)`,
+    [locationId, sequenceCode, businessDate]
+  );
+  return result.rows[0]?.allocate_business_number ?? 1n;
+}
+async function formatDisplayNumber(client, prefix, locationCode, businessDate, sequence) {
+  const result = await client.query(
+    `select edge_core.format_display_number($1::text, $2::text, $3::date, $4::bigint)`,
+    [prefix, locationCode, businessDate, sequence.toString()]
+  );
+  const value = result.rows[0]?.format_display_number;
+  if (value === void 0) {
+    throw new Error("edge_core.format_display_number returned no row.");
+  }
+  return value;
+}
+
+// src/hub/repositories/payments.ts
+var payments_exports = {};
+__export(payments_exports, {
+  advancePaymentState: () => advancePaymentState,
+  findOpenShift: () => findOpenShift,
+  findPaymentAttemptByRequestHash: () => findPaymentAttemptByRequestHash,
+  insertCashMovement: () => insertCashMovement,
+  insertPayment: () => insertPayment,
+  insertPaymentAttempt: () => insertPaymentAttempt,
+  insertRefundAdjustment: () => insertRefundAdjustment,
+  insertTenderLeg: () => insertTenderLeg,
+  listPaymentAttempts: () => listPaymentAttempts,
+  listPayments: () => listPayments,
+  listRefundAdjustments: () => listRefundAdjustments,
+  loadPaymentForUpdate: () => loadPaymentForUpdate
+});
+var PAYMENT_COLUMNS = `id, tenant_id, digital_store_id, location_id, booking_id,
+  payment_number, payment_type, amount_minor, currency_code, currency_exponent, state,
+  provider_code, provider_reference, requested_at, confirmed_at, reversed_at, actor_id,
+  terminal_device_id, event_id, idempotency_key`;
+async function listPayments(client, bookingId) {
+  const result = await client.query(
+    `select ${PAYMENT_COLUMNS} from edge_payments.payment
+      where booking_id = $1 order by requested_at, id`,
+    [bookingId]
+  );
+  return result.rows;
+}
+async function loadPaymentForUpdate(client, paymentId) {
+  const result = await client.query(
+    `select ${PAYMENT_COLUMNS} from edge_payments.payment where id = $1 for update`,
+    [paymentId]
+  );
+  return result.rows[0];
+}
+async function insertPayment(client, input) {
+  await client.query(
+    `insert into edge_payments.payment
+       (id, tenant_id, digital_store_id, location_id, booking_id, payment_number,
+        payment_type, amount_minor, currency_code, currency_exponent, state,
+        provider_code, provider_reference, requested_at, confirmed_at, actor_id,
+        terminal_device_id, event_id, idempotency_key)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, now(),
+             case when $14::boolean then now() else null end, $15, $16, $17, $18)`,
+    [
+      input.id,
+      input.tenantId,
+      input.digitalStoreId,
+      input.locationId,
+      input.bookingId,
+      input.paymentNumber,
+      input.paymentType,
+      input.amountMinor.toString(),
+      input.currencyCode,
+      input.currencyExponent,
+      input.state,
+      input.providerCode,
+      input.providerReference,
+      input.confirmed,
+      input.actorId,
+      input.terminalDeviceId,
+      input.eventId,
+      input.idempotencyKey
+    ]
+  );
+}
+async function advancePaymentState(client, input) {
+  await client.query(
+    `update edge_payments.payment
+        set state = $2,
+            confirmed_at = case when $3::boolean then coalesce(confirmed_at, now())
+                                else confirmed_at end,
+            provider_reference = coalesce($4, provider_reference)
+      where id = $1`,
+    [input.paymentId, input.state, input.confirm ?? false, input.providerReference ?? null]
+  );
+}
+async function listPaymentAttempts(client, paymentId) {
+  const result = await client.query(
+    `select id, payment_id, attempt_number, request_sha256, provider_state,
+            provider_reference, error_code, response_metadata
+       from edge_payments.payment_attempt where payment_id = $1
+      order by attempt_number`,
+    [paymentId]
+  );
+  return result.rows;
+}
+async function findPaymentAttemptByRequestHash(client, paymentId, requestSha256) {
+  const result = await client.query(
+    `select id, payment_id, attempt_number, request_sha256, provider_state,
+            provider_reference, error_code, response_metadata
+       from edge_payments.payment_attempt
+      where payment_id = $1 and request_sha256 = $2`,
+    [paymentId, requestSha256]
+  );
+  return result.rows[0];
+}
+async function insertPaymentAttempt(client, input) {
+  await client.query(
+    `insert into edge_payments.payment_attempt
+       (id, tenant_id, digital_store_id, location_id, payment_id, attempt_number,
+        request_sha256, provider_state, provider_reference, requested_at,
+        responded_at, error_code, response_metadata)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, now(),
+             case when $10::boolean then now() else null end, $11, $12::jsonb)`,
+    [
+      input.id,
+      input.tenantId,
+      input.digitalStoreId,
+      input.locationId,
+      input.paymentId,
+      input.attemptNumber,
+      input.requestSha256,
+      input.providerState,
+      input.providerReference,
+      input.responded,
+      input.errorCode,
+      JSON.stringify(input.responseMetadata)
+    ]
+  );
+}
+async function insertTenderLeg(client, input) {
+  await client.query(
+    `insert into edge_payments.tender_leg
+       (id, tenant_id, digital_store_id, location_id, payment_id, tender_type,
+        amount_minor, currency_code, currency_exponent, state, provider_reference,
+        event_id)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+    [
+      input.id,
+      input.tenantId,
+      input.digitalStoreId,
+      input.locationId,
+      input.paymentId,
+      input.tenderType,
+      input.amountMinor.toString(),
+      input.currencyCode,
+      input.currencyExponent,
+      input.state,
+      input.providerReference,
+      input.eventId
+    ]
+  );
+}
+async function listRefundAdjustments(client, bookingId) {
+  const result = await client.query(
+    `select id, booking_id, original_payment_id, adjustment_type, amount_minor,
+            currency_code, currency_exponent, reason_code, approval_id, state, event_id
+       from edge_payments.refund_adjustment where booking_id = $1
+      order by created_at, id`,
+    [bookingId]
+  );
+  return result.rows;
+}
+async function insertRefundAdjustment(client, input) {
+  await client.query(
+    `insert into edge_payments.refund_adjustment
+       (id, tenant_id, digital_store_id, location_id, booking_id, original_payment_id,
+        adjustment_type, amount_minor, currency_code, currency_exponent, reason_code,
+        approval_id, state, created_at, event_id)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, now(), $14)`,
+    [
+      input.id,
+      input.tenantId,
+      input.digitalStoreId,
+      input.locationId,
+      input.bookingId,
+      input.originalPaymentId,
+      input.adjustmentType,
+      input.amountMinor.toString(),
+      input.currencyCode,
+      input.currencyExponent,
+      input.reasonCode,
+      input.approvalId,
+      input.state,
+      input.eventId
+    ]
+  );
+}
+async function findOpenShift(client, locationId, terminalDeviceId) {
+  const result = await client.query(
+    `select id, location_id, terminal_device_id, actor_id,
+            to_char(business_date, 'YYYY-MM-DD') as business_date,
+            currency_code, currency_exponent, status
+       from edge_core.shift
+      where location_id = $1 and terminal_device_id = $2 and closed_at is null
+      order by opened_at desc limit 1`,
+    [locationId, terminalDeviceId]
+  );
+  return result.rows[0];
+}
+async function insertCashMovement(client, input) {
+  await client.query(
+    `insert into edge_core.cash_movement
+       (id, tenant_id, digital_store_id, location_id, shift_id, movement_type,
+        amount_minor, currency_code, currency_exponent, reason_code,
+        related_payment_id, actor_id, terminal_device_id, occurred_at, event_id)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, now(), $14)`,
+    [
+      input.id,
+      input.tenantId,
+      input.digitalStoreId,
+      input.locationId,
+      input.shiftId,
+      input.movementType,
+      input.amountMinor.toString(),
+      input.currencyCode,
+      input.currencyExponent,
+      input.reasonCode,
+      input.relatedPaymentId,
+      input.actorId,
+      input.terminalDeviceId,
+      input.eventId
+    ]
+  );
+}
+
 // src/hub/repositories/index.ts
 init_sync();
+
+// src/hub/uuid.ts
+import { randomBytes } from "node:crypto";
+function uuidv7(now = Date.now()) {
+  const bytes = randomBytes(16);
+  const ms = BigInt(now);
+  bytes[0] = Number(ms >> 40n & 0xffn);
+  bytes[1] = Number(ms >> 32n & 0xffn);
+  bytes[2] = Number(ms >> 24n & 0xffn);
+  bytes[3] = Number(ms >> 16n & 0xffn);
+  bytes[4] = Number(ms >> 8n & 0xffn);
+  bytes[5] = Number(ms & 0xffn);
+  bytes[6] = (bytes[6] ?? 0) & 15 | 112;
+  bytes[8] = (bytes[8] ?? 0) & 63 | 128;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+var UUID_REGEX = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+function isUuid(value) {
+  return UUID_REGEX.test(value);
+}
 
 // src/hub/safety-mode.ts
 var HUB_OPERATION_KINDS = [
@@ -10797,7 +12372,7 @@ async function readReportedClockOffsetSeconds(client, hubDeviceId2) {
 }
 
 // src/hub-runtime.ts
-import { createHash } from "node:crypto";
+import { createHash as createHash2 } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 var HUB_LAN_PORT = 7443;
@@ -10873,7 +12448,7 @@ function loadTlsMaterial(paths, read = (p) => readFileSync(p, "utf8"), exists = 
 }
 function certificateFingerprint(certPem) {
   const body = certPem.replace(/-----BEGIN CERTIFICATE-----/g, "").replace(/-----END CERTIFICATE-----/g, "").replace(/\s+/g, "");
-  return createHash("sha256").update(Buffer.from(body, "base64")).digest("hex");
+  return createHash2("sha256").update(Buffer.from(body, "base64")).digest("hex");
 }
 function evaluateSchema(expected, applied) {
   const appliedByName = new Map(applied.map((m) => [m.filename, m.checksumSha256]));
@@ -10961,7 +12536,7 @@ function decideStartup(observations) {
 
 // src/hub/edge/development-listener.ts
 import { readFileSync as readFileSync2 } from "node:fs";
-import { createHash as createHash8, createPrivateKey as createPrivateKey2, createPublicKey as createPublicKey2, sign as cryptoSign } from "node:crypto";
+import { createHash as createHash9, createPrivateKey as createPrivateKey2, createPublicKey as createPublicKey2, sign as cryptoSign } from "node:crypto";
 import { hostname as osHostname } from "node:os";
 import { join } from "node:path";
 
@@ -10969,7 +12544,7 @@ import { join } from "node:path";
 init_dist();
 init_db();
 init_audit();
-import { randomUUID as randomUUID2, randomBytes } from "node:crypto";
+import { randomUUID as randomUUID2, randomBytes as randomBytes2 } from "node:crypto";
 
 // ../../packages/event-contracts/dist/index.js
 var EVENT_NAME_PATTERN = /^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/;
@@ -11060,24 +12635,218 @@ var asId = {
   correlationId: (v) => v,
   idempotencyKey: (v) => v
 };
+var KITLUY_ENVIRONMENTS = [
+  "local",
+  "development",
+  "staging",
+  "pilot",
+  "production",
+  "disaster_recovery"
+];
 
 // src/hub/pairing-replication.ts
 init_errors();
 
 // src/hub/outbox.ts
-import { createHash as createHash4 } from "node:crypto";
+import { createHash as createHash5 } from "node:crypto";
 init_hub_database();
 
 // src/hub/effect-contract.ts
 init_errors();
+var EFFECT_ORDINAL_STRIDE = 1e3;
+var ADDITIONAL_COMMAND_EFFECTS = {
+  // Confirm-intake takes custody of every registered unit and may settle a
+  // deposit in the same command (Hub spec §8; laundry T1).
+  "laundry.booking.confirm_intake": ["garment.custody_recorded", "payment.recorded"],
+  // Confirm FROM A DRAFT (slice 2): the Booking fact (audit event, slot 0),
+  // the cash payment, one fact per tender leg (KHR, USD), the drawer
+  // movement when a shift is open, the receipt record, and the draft's own
+  // conversion receipt for the cloud draft projection (T002 §8 census).
+  // `payment.tender_recorded` and `document.receipt_issued` are PROPOSED
+  // names (recorded in the slice-2 handoff for registration before release).
+  "laundry.booking.confirm_from_draft": [
+    "payment.recorded",
+    "payment.tender_recorded",
+    "cash.movement_recorded",
+    "document.receipt_issued",
+    "laundry.booking_draft_recorded"
+  ],
+  // T3: custody is taken at STORAGE ASSIGNMENT, not at the scan — the unit is
+  // in Hub custody once it has a storage position, which is where
+  // assignReadyStorage writes it.
+  "laundry.ready.assign_storage": ["garment.custody_scanned_in"],
+  // T4 scan-out releases custody per unit, written by completePickupSession.
+  "laundry.pickup.complete": ["garment.custody_scanned_out"],
+  // Pickup payment settles the balance and may move the cash drawer.
+  "laundry.pickup.record_payment": ["payment.recorded", "cash.movement_recorded"],
+  // Cash payment always writes the payment effect and the drawer movement.
+  "payments.record_cash_payment": ["payment.recorded", "cash.movement_recorded"],
+  "payments.create_pending_payment": ["payment.recorded"],
+  "payments.request_refund": ["payment.recorded", "cash.movement_recorded"],
+  "payments.request_void": ["payment.recorded"],
+  "payments.apply_provider_callback": ["payment.recorded"]
+};
+function declaredEffects(definition) {
+  const extra = ADDITIONAL_COMMAND_EFFECTS[definition.commandType] ?? [];
+  const seen = /* @__PURE__ */ new Set([definition.auditEvent]);
+  const effects = [definition.auditEvent];
+  for (const name of extra) {
+    if (seen.has(name)) continue;
+    seen.add(name);
+    effects.push(name);
+  }
+  return effects;
+}
+function assertDeclaredEffect(commandType, effects, eventName) {
+  const slot = effects.indexOf(eventName);
+  if (slot === -1) {
+    throw new HubCommandError(
+      "EDGE_COMMAND_UNKNOWN",
+      `Command '${commandType}' emitted the undeclared effect '${eventName}'. Declared effects: ${effects.join(", ")}. An unregistered effect fails rather than emits (KLREQ-026); declare it in ADDITIONAL_COMMAND_EFFECTS.`,
+      { commandType, eventName, declared: effects }
+    );
+  }
+  return slot;
+}
+function effectOrdinal(commandType, effects, eventName, occurrenceIndex) {
+  const slot = assertDeclaredEffect(commandType, effects, eventName);
+  if (occurrenceIndex < 0 || occurrenceIndex >= EFFECT_ORDINAL_STRIDE) {
+    throw new HubCommandError(
+      "EDGE_COMMAND_UNKNOWN",
+      `Effect '${eventName}' occurred ${occurrenceIndex + 1} times in one '${commandType}' command, past the ${EFFECT_ORDINAL_STRIDE} reserved per effect. Refusing rather than wrapping into the next effect's ordinal space.`,
+      { commandType, eventName, occurrenceIndex }
+    );
+  }
+  return slot * EFFECT_ORDINAL_STRIDE + occurrenceIndex;
+}
+function effectKey(input) {
+  const ordinal = effectOrdinal(
+    input.commandType,
+    input.effects,
+    input.eventName,
+    input.occurrenceIndex
+  );
+  const key = buildHubEffectKey(input.commandResultId, ordinal);
+  if (!isValidHubEffectKey(key)) {
+    throw new HubCommandError(
+      "EDGE_COMMAND_UNKNOWN",
+      `Derived effect key '${key}' is not the canonical kh1 shape (KLREQ-026).`,
+      { commandResultId: input.commandResultId, ordinal }
+    );
+  }
+  return key;
+}
 
 // src/hub/outbox.ts
 function sha256Hex2(input) {
-  return createHash4("sha256").update(input, "utf8").digest("hex");
+  return createHash5("sha256").update(input, "utf8").digest("hex");
 }
 function payloadChecksum(payload) {
   return sha256Hex2(canonicalJson(payload));
 }
+var HubEventRecorder = class {
+  constructor(client, context) {
+    this.client = client;
+    this.context = context;
+  }
+  recorded = [];
+  allocated = [];
+  /** How many times each declared effect has been emitted by THIS command. */
+  occurrences = /* @__PURE__ */ new Map();
+  /** Every `hub_sequence` this command has taken from the allocator (offline §5). */
+  get allocatedSequences() {
+    return [...this.allocated];
+  }
+  get events() {
+    return [...this.recorded];
+  }
+  get eventIds() {
+    return this.recorded.map((e) => e.eventId);
+  }
+  get hubSequenceFirst() {
+    return this.recorded[0]?.hubSequence ?? null;
+  }
+  get hubSequenceLast() {
+    return this.recorded.at(-1)?.hubSequence ?? null;
+  }
+  /**
+   * Allocate the sequence, build and VALIDATE the canonical envelope, then
+   * write `local_event` + `edge_sync.outbox` in this transaction.
+   */
+  async record(input) {
+    const hubSequence = await sync_exports.allocateHubSequence(this.client);
+    this.allocated.push(hubSequence);
+    const eventId = uuidv7();
+    const occurrenceIndex = this.occurrences.get(input.eventName) ?? 0;
+    this.occurrences.set(input.eventName, occurrenceIndex + 1);
+    const idempotencyKey = effectKey({
+      commandResultId: this.context.commandResultId,
+      commandType: this.context.commandType,
+      effects: this.context.declaredEffects,
+      eventName: input.eventName,
+      occurrenceIndex
+    });
+    const payloadSha256 = payloadChecksum(input.payload);
+    const occurredAt = (/* @__PURE__ */ new Date()).toISOString();
+    const envelope = {
+      event_id: eventId,
+      event_name: input.eventName,
+      schema_version: input.schemaVersion ?? 1,
+      occurred_at: occurredAt,
+      recorded_at: occurredAt,
+      tenant_id: this.context.tenantId,
+      digital_store_id: this.context.digitalStoreId,
+      location_id: this.context.locationId,
+      aggregate: {
+        type: input.aggregateType,
+        id: input.aggregateId,
+        version: Number(input.aggregateVersion)
+      },
+      producer: SERVICE_NAME,
+      source: {
+        source_type: "store_hub",
+        source_id: this.context.hubDeviceId,
+        device_id: this.context.originDeviceId,
+        software_version: SERVICE_VERSION
+      },
+      actor: this.context.actorId === null ? null : { actor_type: this.context.actorType ?? "user", actor_id: this.context.actorId },
+      correlation_id: asId.correlationId(this.context.correlationId),
+      causation_id: input.causationId ?? this.recorded.at(-1)?.eventId ?? null,
+      idempotency_key: asId.idempotencyKey(idempotencyKey),
+      payload: input.payload,
+      payload_sha256: payloadSha256,
+      replay: { is_replay: false }
+    };
+    assertValidEnvelope(envelope);
+    await sync_exports.insertLocalEventWithOutbox(this.client, {
+      id: eventId,
+      tenantId: this.context.tenantId,
+      digitalStoreId: this.context.digitalStoreId,
+      locationId: this.context.locationId,
+      hubDeviceId: this.context.hubDeviceId,
+      originDeviceId: this.context.originDeviceId,
+      actorId: this.context.actorId,
+      aggregateType: input.aggregateType,
+      aggregateId: input.aggregateId,
+      aggregateVersion: input.aggregateVersion,
+      eventType: input.eventName,
+      schemaVersion: envelope.schema_version,
+      businessDate: this.context.businessDate,
+      hubSequence,
+      originSequence: this.context.originSequence,
+      assignmentGeneration: this.context.assignmentGeneration,
+      idempotencyKey,
+      payloadSha256,
+      // The FULL canonical envelope is persisted so the outbox item is
+      // self-contained for WS-10 transmission: `local_event` has no
+      // correlation/causation/source/actor columns of its own.
+      payload: envelope
+    });
+    const recorded = { eventId, hubSequence, idempotencyKey, envelope };
+    this.recorded.push(recorded);
+    return recorded;
+  }
+};
 
 // src/hub/pairing-replication.ts
 var PAIRING_RECEIPT_EVENT_NAME = "terminal_pairing.receipt_issued";
@@ -11205,8 +12974,8 @@ async function recordPairingReceiptEvent(client, input) {
 }
 
 // src/hub/pairing.ts
-var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-var HEX64 = /^[0-9a-f]{64}$/;
+var UUID2 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+var HEX642 = /^[0-9a-f]{64}$/;
 var PROFILE = /^[a-z0-9_]+\.t[1-9][0-9]*\.[a-z0-9_]+$/;
 var MAX_SIGNATURE_BASE64 = 128;
 function mapSentinel(message) {
@@ -11369,12 +13138,12 @@ var TerminalPairingComposition = class {
    */
   async preparePairing(input) {
     const correlationId = randomUUID2();
-    if (!UUID.test(input.terminalDeviceId) || !PROFILE.test(input.requestedProfileCode) || !HEX64.test(input.terminalNonce)) {
+    if (!UUID2.test(input.terminalDeviceId) || !PROFILE.test(input.requestedProfileCode) || !HEX642.test(input.terminalNonce)) {
       this.logger.info({ operation: "preparePairing", correlationId, result: "REQUEST_INVALID" });
       return { result: "REQUEST_INVALID", correlationId };
     }
     const sessionId = randomUUID2();
-    const hubNonce = randomBytes(32).toString("hex");
+    const hubNonce = randomBytes2(32).toString("hex");
     try {
       const row = await withHubTransaction(
         this.pool,
@@ -11419,7 +13188,7 @@ var TerminalPairingComposition = class {
    */
   async verifyTerminalProofAndRecord(input) {
     const correlationId = randomUUID2();
-    if (!UUID.test(input.pairingSessionId) || input.signatureBase64.length === 0 || input.signatureBase64.length > MAX_SIGNATURE_BASE64 || !/^[A-Za-z0-9+/=]+$/.test(input.signatureBase64) || !input.terminalPublicKeyPem.includes("BEGIN PUBLIC KEY")) {
+    if (!UUID2.test(input.pairingSessionId) || input.signatureBase64.length === 0 || input.signatureBase64.length > MAX_SIGNATURE_BASE64 || !/^[A-Za-z0-9+/=]+$/.test(input.signatureBase64) || !input.terminalPublicKeyPem.includes("BEGIN PUBLIC KEY")) {
       this.logger.info({
         operation: "verifyTerminalProofAndRecord",
         correlationId,
@@ -11508,7 +13277,7 @@ var TerminalPairingComposition = class {
    */
   async produceHubProofAndComplete(input) {
     const correlationId = randomUUID2();
-    if (!UUID.test(input.pairingSessionId)) {
+    if (!UUID2.test(input.pairingSessionId)) {
       this.logger.info({
         operation: "produceHubProofAndComplete",
         correlationId,
@@ -11714,7 +13483,7 @@ var TerminalPairingComposition = class {
   /** Replay/reconciliation: the stored receipt answers, byte-for-byte. */
   async reconcilePairingReceipt(input) {
     const correlationId = randomUUID2();
-    if (!UUID.test(input.pairingSessionId)) {
+    if (!UUID2.test(input.pairingSessionId)) {
       return { result: "REQUEST_INVALID", correlationId };
     }
     try {
@@ -12220,7 +13989,7 @@ init_runtime_bootstrap();
 init_terminal_pin();
 
 // src/hub/t1-intake.ts
-import { createHash as createHash7, randomUUID as randomUUID7 } from "node:crypto";
+import { createHash as createHash8, randomUUID as randomUUID7 } from "node:crypto";
 init_db();
 init_sync();
 init_runtime_bootstrap();
@@ -12242,7 +14011,7 @@ var DRAFT_CANCEL_REASONS = [
   "customer_declined"
 ];
 function sha256Hex3(value) {
-  return createHash7("sha256").update(Buffer.from(value, "utf8")).digest("hex");
+  return createHash8("sha256").update(Buffer.from(value, "utf8")).digest("hex");
 }
 function maskPhone(e164) {
   return `${e164.slice(0, 4)}\u2022\u2022\u2022\u2022${e164.slice(-4)}`;
@@ -12870,8 +14639,2795 @@ function normalizeCambodianPhone(input) {
 }
 
 // src/hub/edge/routes.ts
-var UUID2 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-var HEX642 = /^[0-9a-f]{64}$/;
+init_errors();
+
+// src/hub/commands/confirm-from-draft.ts
+init_errors();
+
+// src/hub/command-pipeline.ts
+init_db();
+init_errors();
+
+// ../../packages/approvals/dist/index.js
+var ApprovalError = class extends Error {
+  code;
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+    this.name = "ApprovalError";
+  }
+};
+function assertFourEyes(request, decision) {
+  if (request.requestedBy === decision.approvedBy) {
+    throw new ApprovalError("SELF_APPROVAL_FORBIDDEN", "The requester cannot approve their own request (RB v4 \xA78.8).");
+  }
+  return decision;
+}
+
+// ../../packages/resource-scope/dist/index.js
+var HIERARCHICAL_SCOPE_LEVELS = [
+  "platform",
+  "region",
+  "tenant",
+  "chain",
+  "digital_store",
+  "store_location",
+  "device_group",
+  "device"
+];
+var NON_HIERARCHICAL_SCOPE_LEVELS = [
+  "connector",
+  "service",
+  "release_cohort",
+  "support_session",
+  "file_object"
+];
+var SCOPE_LEVELS = [
+  ...HIERARCHICAL_SCOPE_LEVELS,
+  ...NON_HIERARCHICAL_SCOPE_LEVELS
+];
+var SCOPE_LEVEL_SET = new Set(SCOPE_LEVELS);
+var HIERARCHICAL_SCOPE_LEVEL_SET = new Set(HIERARCHICAL_SCOPE_LEVELS);
+function isScopeLevel(value) {
+  return SCOPE_LEVEL_SET.has(value);
+}
+function sameScope(granted, requested) {
+  if (!isScopeLevel(granted.level) || !isScopeLevel(requested.level)) {
+    return false;
+  }
+  return granted.environment === requested.environment && granted.level === requested.level && granted.resourceId === requested.resourceId;
+}
+
+// ../../packages/rbac/dist/index.js
+var ENVIRONMENT_SEGMENTS = new Set(KITLUY_ENVIRONMENTS);
+var CANONICAL_PERMISSION_KEYS = [
+  "identity.admin_profiles.read",
+  "identity.admin_profiles.manage",
+  "identity.sessions.revoke",
+  "identity.mfa.policy_manage",
+  "identity.break_glass.activate",
+  "rbac.read",
+  "rbac.team_manage",
+  "rbac.role_manage",
+  "rbac.permission_registry_manage",
+  "rbac.assignment_manage",
+  "rbac.owner_access_manage",
+  "rbac.approval_policy_manage",
+  "rbac.separation_of_duties_manage",
+  "rbac.access_review",
+  "rbac.effective_access.explain",
+  "partners.read",
+  "partners.verify",
+  "partners.suspend",
+  "partners.close",
+  "digital_stores.read",
+  "digital_stores.create",
+  "digital_stores.vertical_lock",
+  "digital_stores.activate",
+  "digital_stores.suspend",
+  "locations.read",
+  "locations.create",
+  "locations.go_live_request",
+  "locations.go_live_approve",
+  "locations.maintenance_toggle",
+  "locations.decommission",
+  "onboarding.readiness.evaluate",
+  "onboarding.migration.validate",
+  "onboarding.migration.execute",
+  "onboarding.migration.rollback",
+  "devices.read",
+  "devices.register",
+  "devices.assign",
+  "devices.certificate.issue",
+  "devices.certificate.rotate",
+  "devices.revoke",
+  "devices.identity_replace",
+  "devices.remote_action.standard",
+  "devices.remote_action.high_risk",
+  // Amendment 001 (WS-11-T005-P02 owner package, 2026-08-06): governed device
+  // containment. Owner identifiers recorded VERBATIM — singular `device.`
+  // prefix noted in the amendment record, not harmonized silently.
+  "device.containment.apply",
+  "device.containment.clear",
+  "fleet.diagnostics.read",
+  "fleet.logs.request",
+  "fleet.sync.trigger",
+  "releases.read",
+  "releases.artifact_register",
+  "releases.rollout_create",
+  "releases.promote_internal",
+  "releases.promote_pilot",
+  "releases.promote_stable",
+  "releases.pause",
+  "releases.rollback",
+  "configuration.read",
+  "configuration.publish",
+  "configuration.rollback",
+  "platform.health.read",
+  "platform.jobs.retry",
+  "platform.jobs.dead_letter_manage",
+  "platform.incident.declare",
+  "platform.safety_switch.toggle",
+  "platform.backup.restore_test",
+  "platform.backup.restore_production",
+  "billing.read",
+  "billing.invoice_adjust",
+  "billing.invoice_mark_paid",
+  "billing.grace_change",
+  "billing.policy_manage",
+  // Amendment 002 (KLD-2026-08-06-WS12-T001-EDGE-BOOTSTRAP-001 §4, WS-12-
+  // T001-P02, 2026-08-06): Edge terminal staff sessions and the T1 shell
+  // permission. Owner identifiers recorded VERBATIM. Opening or restoring a
+  // session never authorizes T1 by itself — `pos.t1.use` is evaluated
+  // separately (the six-dimension rule above).
+  "staff.sessions.open",
+  "staff.sessions.read",
+  "staff.sessions.refresh",
+  "staff.sessions.close",
+  "pos.t1.use",
+  // Amendment 003 (KLD-2026-08-06-WS12-T002-001 §2/§3, WS-12-T002,
+  // 2026-08-06): T1 customer intake and consent. Owner identifiers recorded
+  // VERBATIM. Booking-DRAFT permissions are deliberately NOT new keys —
+  // draft read reuses `laundry.bookings.read`, draft mutations reuse
+  // `laundry.bookings.create` (the recorded command-registry precedent).
+  // No phone-verification key exists: no T1 path may mark a phone verified.
+  "customers.read",
+  "customers.create",
+  "customers.consent.record",
+  "support.ticket.manage",
+  "support.evidence.read",
+  "support.consent_session.start",
+  "support.impersonation.start",
+  "support.intervention.execute",
+  "support.session.revoke",
+  "integrations.read",
+  "integrations.test",
+  "integrations.credentials_rotate",
+  "integrations.production_enable",
+  "integrations.suspend",
+  "webhooks.replay",
+  "audit.read",
+  "audit.export",
+  "audit.security_review",
+  "files.read",
+  "files.security_export",
+  "reports.export",
+  "ai.policies.read",
+  "ai.policies.manage",
+  "ai.rag_sources.manage",
+  "ai.mcp_tools.enable_read",
+  "ai.mcp_tools.enable_write",
+  // Vertical-namespaced registry rows — canonical key strings only (see the
+  // neutral-Core boundary note above).
+  "laundry.bookings.read",
+  "laundry.bookings.create",
+  "laundry.bookings.price_override",
+  "laundry.ready_scan_in",
+  "laundry.pickup_scan_out",
+  "laundry.booking.complete",
+  // End of vertical-namespaced rows.
+  "payments.read",
+  "payments.capture.cash",
+  "payments.khqr.create",
+  "payments.refund.request",
+  "payments.refund.approve",
+  "payments.void.request",
+  "inventory.movements.read",
+  "inventory.adjustment.request",
+  "inventory.adjustment.approve"
+];
+var CANONICAL_PERMISSION_KEY_SET = new Set(CANONICAL_PERMISSION_KEYS);
+function isCanonicalPermissionKey(key) {
+  return CANONICAL_PERMISSION_KEY_SET.has(key);
+}
+function hasPermission(grants, permission, scope) {
+  if (!isCanonicalPermissionKey(permission)) {
+    return false;
+  }
+  return grants.some((g) => isCanonicalPermissionKey(g.permission) && g.permission === permission && sameScope(g.scope, scope));
+}
+
+// src/hub/authorization.ts
+init_errors();
+
+// src/hub/revocation-trust.ts
+init_dist();
+init_db();
+async function isDeviceRevokedOfflineWithin(client, hub, deviceRecordId) {
+  const { rows } = await client.query(
+    `select edge_config.is_device_revoked_offline_v1(
+       $1::uuid, $2::uuid, $3::uuid, $4, $5::uuid) as revoked`,
+    [hub.tenantId, hub.digitalStoreId, hub.storeLocationId, hub.environment, deviceRecordId]
+  );
+  return rows[0]?.revoked === true;
+}
+async function isCertificateRevokedOfflineWithin(client, hub, serialNumber) {
+  const { rows } = await client.query(
+    `select edge_config.is_certificate_revoked_offline_v1(
+       $1::uuid, $2::uuid, $3::uuid, $4, $5) as revoked`,
+    [hub.tenantId, hub.digitalStoreId, hub.storeLocationId, hub.environment, serialNumber]
+  );
+  return rows[0]?.revoked === true;
+}
+
+// src/hub/authorization.ts
+init_runtime_bootstrap();
+var PERMISSION_TERMINAL_ROLES = {
+  // "store_location, terminal_role:T1"
+  "laundry.bookings.create": ["laundry.t1.intake_cashier"],
+  "laundry.bookings.price_override": ["laundry.t1.intake_cashier"],
+  // "store_location, terminal_role:T3"
+  "laundry.ready_scan_in": ["laundry.t3.ready_scan_in"],
+  // "store_location, terminal_role:T4"
+  "laundry.pickup_scan_out": ["laundry.t4.pickup_scan_out"],
+  "laundry.booking.complete": ["laundry.t4.pickup_scan_out"],
+  // "store_location, terminal_role:T1|T4"
+  "payments.capture.cash": ["laundry.t1.intake_cashier", "laundry.t4.pickup_scan_out"],
+  // "store_location, terminal_role:T1|T4, storefront"
+  "payments.khqr.create": ["laundry.t1.intake_cashier", "laundry.t4.pickup_scan_out"],
+  // "tenant, digital_store, store_location, payment" — NO terminal_role.
+  "payments.refund.request": null,
+  // "store_location, transaction" — NO terminal_role.
+  "payments.void.request": null
+};
+var HUB_ALLOWED_ENVIRONMENTS = ["local", "development"];
+function deny(code, message, details = {}) {
+  throw new HubCommandError(code, message, details);
+}
+async function authorizeHubCommand(client, definition, device, options = {}) {
+  for (const [field, value] of Object.entries({
+    terminalDeviceId: device.terminalDeviceId,
+    sessionId: device.sessionId,
+    actorId: device.actorId,
+    tenantId: device.tenantId,
+    digitalStoreId: device.digitalStoreId,
+    locationId: device.locationId
+  })) {
+    if (typeof value !== "string" || !isUuid(value)) {
+      deny("EDGE_DEVICE_CONTEXT_INVALID", `device context field '${field}' is not a UUID.`, {
+        field
+      });
+    }
+  }
+  if (!Number.isInteger(device.assignmentGeneration) || device.assignmentGeneration < 1) {
+    deny(
+      "EDGE_DEVICE_CONTEXT_INVALID",
+      "assignment_generation must be an integer >= 1 (offline contract \xA75.1)."
+    );
+  }
+  if (!isLaundryTerminalProfile(device.profileCode)) {
+    deny(
+      "EDGE_DEVICE_CONTEXT_INVALID",
+      `'${device.profileCode}' is not a canonical logical terminal profile.`,
+      { profileCode: device.profileCode }
+    );
+  }
+  const profile = device.profileCode;
+  const assignment = await identity_exports.findActiveHubAssignment(client);
+  if (!assignment || assignment.status !== "active") {
+    deny("EDGE_DEVICE_NOT_ASSIGNED", "this Hub has no ACTIVE Location assignment.");
+  }
+  const terminal = await identity_exports.findTerminalDevice(client, device.terminalDeviceId);
+  if (!terminal) {
+    deny("EDGE_TERMINAL_UNKNOWN", `terminal device ${device.terminalDeviceId} is not registered.`, {
+      terminalDeviceId: device.terminalDeviceId
+    });
+  }
+  if (terminal.lifecycle_status !== "active") {
+    deny(
+      "EDGE_DEVICE_REVOKED",
+      `terminal device ${terminal.id} lifecycle_status is '${terminal.lifecycle_status}'.`,
+      { terminalDeviceId: terminal.id, lifecycleStatus: terminal.lifecycle_status }
+    );
+  }
+  const credentials = await identity_exports.findDeviceCredentials(client, terminal.id);
+  const revoked = credentials.find((c) => c.status === "revoked");
+  if (revoked) {
+    deny("EDGE_DEVICE_REVOKED", `terminal device ${terminal.id} holds a REVOKED credential.`, {
+      terminalDeviceId: terminal.id,
+      revocationReason: revoked.revocation_reason
+    });
+  }
+  const hubScope = {
+    tenantId: assignment.tenant_id,
+    digitalStoreId: assignment.digital_store_id,
+    storeLocationId: assignment.location_id,
+    environment: device.environment,
+    hubDeviceId: assignment.hub_device_id
+  };
+  for (const deviceRecordId of [assignment.hub_device_id, terminal.id]) {
+    if (await isDeviceRevokedOfflineWithin(client, hubScope, deviceRecordId)) {
+      deny(
+        "EDGE_DEVICE_REVOKED",
+        `device record ${deviceRecordId} is revoked by the Hub's held revocation snapshot.`,
+        {
+          terminalDeviceId: terminal.id,
+          deviceRecordId,
+          source: "OFFLINE_REVOCATION_SNAPSHOT"
+        }
+      );
+    }
+  }
+  for (const credential of credentials) {
+    const offlineRevoked = await isCertificateRevokedOfflineWithin(
+      client,
+      hubScope,
+      credential.certificate_serial
+    );
+    if (offlineRevoked) {
+      deny(
+        "EDGE_DEVICE_REVOKED",
+        `certificate ${credential.certificate_serial} is revoked by the Hub's held revocation snapshot.`,
+        {
+          terminalDeviceId: terminal.id,
+          certificateSerial: credential.certificate_serial,
+          // Named so an operator can tell this apart from the replicated-status
+          // denial above: this one fired with no cloud involved.
+          source: "OFFLINE_REVOCATION_SNAPSHOT"
+        }
+      );
+    }
+  }
+  if (device.assignmentGeneration !== terminal.assignment_generation) {
+    deny(
+      "EDGE_ASSIGNMENT_GENERATION_MISMATCH",
+      `assignment_generation ${device.assignmentGeneration} does not match the terminal's projected generation ${terminal.assignment_generation}.`,
+      {
+        presented: device.assignmentGeneration,
+        deviceGeneration: terminal.assignment_generation,
+        hubGeneration: assignment.assignment_generation
+      }
+    );
+  }
+  const session = await identity_exports.findTerminalSession(client, device.sessionId);
+  if (!session) {
+    deny("EDGE_SESSION_INVALID", `session ${device.sessionId} does not exist.`);
+  }
+  if (session.closed_at !== null || session.status !== "open") {
+    deny("EDGE_SESSION_INVALID", `session ${session.id} is not open.`, { status: session.status });
+  }
+  if (session.terminal_device_id !== terminal.id) {
+    deny("EDGE_SESSION_INVALID", `session ${session.id} belongs to a different terminal.`);
+  }
+  if (session.actor_id !== device.actorId) {
+    deny("EDGE_SESSION_INVALID", `session ${session.id} is bound to a different actor.`);
+  }
+  const pinSession = session.credential_kind === "terminal_pin";
+  if (pinSession && (session.actor_id !== terminal.id || device.actorId !== terminal.id)) {
+    deny(
+      "EDGE_SESSION_INVALID",
+      `Terminal PIN session ${session.id} must name its terminal as actor.`
+    );
+  }
+  const now = await currentDatabaseTime(client);
+  if (session.expires_at.getTime() <= now.getTime()) {
+    deny(
+      "EDGE_SESSION_EXPIRED",
+      `session ${session.id} expired at ${session.expires_at.toISOString()}.`,
+      {
+        expiresAt: session.expires_at.toISOString()
+      }
+    );
+  }
+  if (session.profile_code !== profile) {
+    deny(
+      "EDGE_PROFILE_NOT_AUTHORIZED",
+      `session ${session.id} is open on profile '${session.profile_code}', not '${profile}'.`,
+      { sessionProfile: session.profile_code, requestedProfile: profile }
+    );
+  }
+  const profileAssignment = await config_exports.findActiveProfileAssignment(
+    client,
+    terminal.id,
+    profile
+  );
+  if (!profileAssignment) {
+    deny(
+      "EDGE_PROFILE_NOT_AUTHORIZED",
+      `terminal ${terminal.id} holds no ACTIVE cloud grant for profile '${profile}'.`,
+      { terminalDeviceId: terminal.id, profileCode: profile }
+    );
+  }
+  if (!definition.allowedProfiles.includes(profile)) {
+    deny(
+      "EDGE_PROFILE_NOT_AUTHORIZED",
+      `command '${definition.commandType}' does not allow profile '${profile}'.`,
+      { commandType: definition.commandType, profileCode: profile }
+    );
+  }
+  const scope = {
+    level: "store_location",
+    resourceId: device.locationId,
+    environment: device.environment
+  };
+  const required = [definition.permission, ...options.requiredConditionalPermissions ?? []];
+  for (const permission of required) {
+    if (!isCanonicalPermissionKey(permission)) {
+      deny(
+        "EDGE_PERMISSION_KEY_UNREGISTERED",
+        `permission '${permission}' is not in the canonical RBAC registry; unknown keys fail closed.`,
+        { permission }
+      );
+    }
+  }
+  let source = "profile_derived";
+  let actorType = "staff";
+  let actorDisplayName = "";
+  let staff = void 0;
+  if (pinSession) {
+    if (await readBlockingContainment(client, terminal.id) !== null) {
+      deny(
+        "EDGE_DEVICE_REVOKED",
+        `terminal ${terminal.id} is under a blocking containment directive.`,
+        {
+          terminalDeviceId: terminal.id,
+          source: "CONTAINMENT_DIRECTIVE"
+        }
+      );
+    }
+    for (const permission of required) {
+      if (!T1_TERMINAL_PIN_PERMISSIONS.includes(permission)) {
+        deny(
+          "EDGE_PERMISSION_DENIED",
+          `'${permission}' is not part of the T1 terminal surface a Terminal PIN session may exercise.`,
+          { actorId: device.actorId, permission, credentialKind: "terminal_pin" }
+        );
+      }
+    }
+    source = "terminal_pin";
+    actorType = "terminal_device";
+    actorDisplayName = terminal.terminal_name;
+  } else {
+    staff = await identity_exports.findStaffCache(client, device.actorId);
+    if (!staff) {
+      deny(
+        "EDGE_PERMISSION_DENIED",
+        `actor ${device.actorId} has no cached permission projection.`,
+        {
+          actorId: device.actorId
+        }
+      );
+    }
+    if (staff.disabled) {
+      deny("EDGE_PERMISSION_DENIED", `actor ${device.actorId} is disabled.`, {
+        actorId: device.actorId
+      });
+    }
+    if (staff.offline_valid_until.getTime() <= now.getTime()) {
+      deny(
+        "EDGE_PERMISSION_DENIED",
+        `actor ${device.actorId} permission projection expired at ${staff.offline_valid_until.toISOString()}.`,
+        { actorId: device.actorId }
+      );
+    }
+    for (const permission of required) {
+      const outcome = evaluatePermission(permission, staff.profile_codes, device, scope);
+      if (outcome === "denied") {
+        deny("EDGE_PERMISSION_DENIED", `actor ${device.actorId} does not hold '${permission}'.`, {
+          actorId: device.actorId,
+          permission,
+          heldProfiles: staff.profile_codes
+        });
+      }
+      if (outcome === "session_presented") source = "session_presented";
+    }
+    actorDisplayName = staff.display_name;
+  }
+  const scopeTuple = {
+    tenant: device.tenantId,
+    store: device.digitalStoreId,
+    location: device.locationId
+  };
+  const mismatches = [];
+  if (assignment.tenant_id !== scopeTuple.tenant) mismatches.push("hub_assignment.tenant_id");
+  if (assignment.digital_store_id !== scopeTuple.store)
+    mismatches.push("hub_assignment.digital_store_id");
+  if (assignment.location_id !== scopeTuple.location) mismatches.push("hub_assignment.location_id");
+  if (terminal.tenant_id !== scopeTuple.tenant) mismatches.push("terminal_device.tenant_id");
+  if (terminal.digital_store_id !== scopeTuple.store)
+    mismatches.push("terminal_device.digital_store_id");
+  if (terminal.location_id !== scopeTuple.location) mismatches.push("terminal_device.location_id");
+  if (session.tenant_id !== scopeTuple.tenant) mismatches.push("terminal_session.tenant_id");
+  if (session.location_id !== scopeTuple.location) mismatches.push("terminal_session.location_id");
+  if (staff !== void 0) {
+    if (staff.tenant_id !== scopeTuple.tenant) mismatches.push("staff_cache.tenant_id");
+    if (staff.location_id !== scopeTuple.location) mismatches.push("staff_cache.location_id");
+  }
+  if (options.targetScope) {
+    if (options.targetScope.tenantId !== scopeTuple.tenant) mismatches.push("target.tenant_id");
+    if (options.targetScope.digitalStoreId !== scopeTuple.store)
+      mismatches.push("target.digital_store_id");
+    if (options.targetScope.locationId !== scopeTuple.location)
+      mismatches.push("target.location_id");
+  }
+  if (mismatches.length > 0) {
+    deny("EDGE_RESOURCE_SCOPE_DENIED", `scope mismatch on ${mismatches.join(", ")}.`, {
+      mismatches,
+      ...scopeTuple
+    });
+  }
+  if (!KITLUY_ENVIRONMENTS.includes(device.environment)) {
+    deny("EDGE_ENVIRONMENT_DENIED", `'${device.environment}' is not a canonical environment.`);
+  }
+  if (!HUB_ALLOWED_ENVIRONMENTS.includes(device.environment)) {
+    deny(
+      "EDGE_ENVIRONMENT_DENIED",
+      `the Hub command layer refuses environment '${device.environment}' (KL-INF-P1-037: development targets only).`,
+      { environment: device.environment }
+    );
+  }
+  if (definition.approvalRequired) {
+    if (!options.approval) {
+      deny(
+        "EDGE_APPROVAL_REQUIRED",
+        `command '${definition.commandType}' requires recorded four-eyes approval evidence.`,
+        { commandType: definition.commandType, riskClass: definition.riskClass }
+      );
+    }
+    try {
+      assertFourEyes(options.approval.request, options.approval.decision);
+    } catch (error) {
+      deny(
+        "EDGE_SELF_APPROVAL_FORBIDDEN",
+        error instanceof Error ? error.message : "self-approval is forbidden.",
+        { commandType: definition.commandType }
+      );
+    }
+    if (options.approval.decision.decision !== "approved") {
+      deny("EDGE_APPROVAL_REQUIRED", "the presented approval decision is not 'approved'.");
+    }
+  }
+  return {
+    device,
+    profile,
+    hubDeviceId: assignment.hub_device_id,
+    // The ordering namespace of everything this Hub emits (offline §5.1).
+    assignmentGeneration: assignment.assignment_generation,
+    actorDisplayName,
+    permission: definition.permission,
+    permissionSource: source,
+    actorType,
+    scope,
+    ...options.approval ? { approval: options.approval } : {}
+  };
+}
+function evaluatePermission(permission, heldProfiles, device, scope) {
+  const terminalRoles = PERMISSION_TERMINAL_ROLES[permission];
+  if (terminalRoles !== void 0 && terminalRoles !== null) {
+    return terminalRoles.some((role) => heldProfiles.includes(role)) ? "profile_derived" : "denied";
+  }
+  const presented = device.presentedGrants ?? [];
+  return hasPermission([...presented], permission, scope) ? "session_presented" : "denied";
+}
+async function currentDatabaseTime(client) {
+  const result = await client.query("select now() as now");
+  const value = result.rows[0]?.now;
+  return value ?? /* @__PURE__ */ new Date();
+}
+
+// ../../packages/edge-contracts/dist/permissions.js
+var PERMISSION_REQUIRED_MARKER_PREFIX = "[REQUIRED:";
+function isRequiredPermissionMarker(value) {
+  return value.startsWith(PERMISSION_REQUIRED_MARKER_PREFIX) && value.endsWith("]");
+}
+var PERMISSION_GAP_EDGE_DISPLAY_MANAGE = "[REQUIRED: RBAC permission key for opening, updating and closing a T2 customer-display session from T1 \u2014 absent from kitluy-suite-rbac-permission-registry-v1.0.0.csv]";
+var PERMISSION_GAP_EDGE_DISPLAY_READ = "[REQUIRED: RBAC permission key for an assigned T2 device to read its own customer-safe display state \u2014 absent from kitluy-suite-rbac-permission-registry-v1.0.0.csv]";
+var PERMISSION_GAP_EDGE_DISPLAY_CUSTOMER_ACTION = "[REQUIRED: RBAC permission key for recording a customer-originated T2 action (language, receipt choice, confirmation) as consent evidence \u2014 absent from kitluy-suite-rbac-permission-registry-v1.0.0.csv]";
+
+// ../../packages/edge-contracts/dist/route-paths.js
+var EDGE_ROUTE_SESSIONS_OPEN = "/edge/v1/sessions/open";
+var EDGE_ROUTE_SESSIONS_REFRESH = "/edge/v1/sessions/refresh";
+var EDGE_ROUTE_SESSIONS_SWITCH = "/edge/v1/sessions/switch";
+var EDGE_ROUTE_SESSIONS_CLOSE = "/edge/v1/sessions/close";
+var EDGE_ROUTE_DISPLAY_SESSIONS = "/edge/v1/display-sessions";
+var EDGE_ROUTE_DISPLAY_SESSION = "/edge/v1/display-sessions/{id}";
+var EDGE_ROUTE_DISPLAY_SESSION_CUSTOMER_ACTIONS = "/edge/v1/display-sessions/{id}/customer-actions";
+var EDGE_ROUTE_DISPLAY_SESSION_CLOSE = "/edge/v1/display-sessions/{id}/close";
+var EDGE_ROUTE_LAUNDRY_BOOKING_DRAFTS = "/edge/v1/laundry/bookings/drafts";
+var EDGE_ROUTE_LAUNDRY_BOOKING_CONFIRM_INTAKE = "/edge/v1/laundry/bookings/{id}/confirm-intake";
+var EDGE_ROUTE_LAUNDRY_READY_SESSIONS = "/edge/v1/laundry/ready-sessions";
+var EDGE_ROUTE_LAUNDRY_READY_SESSION_SCANS = "/edge/v1/laundry/ready-sessions/{id}/scans";
+var EDGE_ROUTE_LAUNDRY_READY_SESSION_QA = "/edge/v1/laundry/ready-sessions/{id}/qa";
+var EDGE_ROUTE_LAUNDRY_READY_SESSION_EXCEPTIONS = "/edge/v1/laundry/ready-sessions/{id}/exceptions";
+var EDGE_ROUTE_LAUNDRY_READY_SESSION_STORAGE = "/edge/v1/laundry/ready-sessions/{id}/storage";
+var EDGE_ROUTE_LAUNDRY_READY_SESSION_COMPLETE = "/edge/v1/laundry/ready-sessions/{id}/complete";
+var EDGE_ROUTE_LAUNDRY_PICKUP_SESSIONS = "/edge/v1/laundry/pickup-sessions";
+var EDGE_ROUTE_LAUNDRY_PICKUP_SESSION_COLLECTOR_VERIFICATION = "/edge/v1/laundry/pickup-sessions/{id}/collector-verification";
+var EDGE_ROUTE_LAUNDRY_PICKUP_SESSION_SCANS = "/edge/v1/laundry/pickup-sessions/{id}/scans";
+var EDGE_ROUTE_LAUNDRY_PICKUP_SESSION_PAYMENTS = "/edge/v1/laundry/pickup-sessions/{id}/payments";
+var EDGE_ROUTE_LAUNDRY_PICKUP_SESSION_COMPLETE = "/edge/v1/laundry/pickup-sessions/{id}/complete";
+
+// ../../packages/edge-contracts/dist/terminal-profiles.js
+var TERMINAL_PROFILE_T1_INTAKE_CASHIER = "laundry.t1.intake_cashier";
+var TERMINAL_PROFILE_T2_CUSTOMER_DISPLAY = "laundry.t2.customer_display";
+var TERMINAL_PROFILE_T3_READY_SCAN_IN = "laundry.t3.ready_scan_in";
+var TERMINAL_PROFILE_T4_PICKUP_SCAN_OUT = "laundry.t4.pickup_scan_out";
+
+// ../../packages/edge-contracts/dist/generic-routes.js
+var GROUP_1 = "KLD-2026-07-26-002 Group 1 (APPROVED)";
+var SESSION_ROUTES = [
+  {
+    id: "sessions-open",
+    method: "POST",
+    path: EDGE_ROUTE_SESSIONS_OPEN,
+    family: "generic",
+    kind: "mutation",
+    scope: "edge.session.open",
+    scopeStatus: "additive",
+    riskClass: "A1_STANDARD_MUTATION",
+    credentialClass: "device",
+    permission: "staff.sessions.open",
+    permissionStatus: "registered",
+    conditionalPermissions: [],
+    allowedTerminalProfiles: [
+      TERMINAL_PROFILE_T1_INTAKE_CASHIER,
+      TERMINAL_PROFILE_T2_CUSTOMER_DISPLAY,
+      TERMINAL_PROFILE_T3_READY_SCAN_IN,
+      TERMINAL_PROFILE_T4_PICKUP_SCAN_OUT
+    ],
+    idempotencyRequired: true,
+    mutatesExistingAggregate: false,
+    expectedVersionRequired: false,
+    approvalRequired: false,
+    auditEvent: "edge_session.opened",
+    auditEventStatus: "proposed",
+    authority: GROUP_1
+  },
+  {
+    id: "sessions-refresh",
+    method: "POST",
+    path: EDGE_ROUTE_SESSIONS_REFRESH,
+    family: "generic",
+    kind: "mutation",
+    scope: "edge.session.refresh",
+    scopeStatus: "additive",
+    riskClass: "A1_STANDARD_MUTATION",
+    credentialClass: "device",
+    permission: "staff.sessions.refresh",
+    permissionStatus: "registered",
+    conditionalPermissions: [],
+    allowedTerminalProfiles: [
+      TERMINAL_PROFILE_T1_INTAKE_CASHIER,
+      TERMINAL_PROFILE_T2_CUSTOMER_DISPLAY,
+      TERMINAL_PROFILE_T3_READY_SCAN_IN,
+      TERMINAL_PROFILE_T4_PICKUP_SCAN_OUT
+    ],
+    idempotencyRequired: true,
+    mutatesExistingAggregate: false,
+    expectedVersionRequired: false,
+    approvalRequired: false,
+    auditEvent: "edge_session.refreshed",
+    auditEventStatus: "proposed",
+    authority: GROUP_1
+  },
+  {
+    id: "sessions-switch",
+    method: "POST",
+    path: EDGE_ROUTE_SESSIONS_SWITCH,
+    family: "generic",
+    kind: "mutation",
+    scope: "edge.session.switch",
+    scopeStatus: "additive",
+    riskClass: "A1_STANDARD_MUTATION",
+    credentialClass: "device_and_staff",
+    // Recorded interpretation (Amendment 002 §2): a switch closes the
+    // incumbent actor's session and opens the successor's.
+    permission: "staff.sessions.open",
+    permissionStatus: "registered",
+    conditionalPermissions: ["staff.sessions.close"],
+    allowedTerminalProfiles: [
+      TERMINAL_PROFILE_T1_INTAKE_CASHIER,
+      TERMINAL_PROFILE_T3_READY_SCAN_IN,
+      TERMINAL_PROFILE_T4_PICKUP_SCAN_OUT
+    ],
+    idempotencyRequired: true,
+    mutatesExistingAggregate: false,
+    expectedVersionRequired: false,
+    approvalRequired: false,
+    auditEvent: "edge_session.actor_switched",
+    auditEventStatus: "proposed",
+    authority: GROUP_1
+  },
+  {
+    id: "sessions-close",
+    method: "POST",
+    path: EDGE_ROUTE_SESSIONS_CLOSE,
+    family: "generic",
+    kind: "mutation",
+    scope: "edge.session.close",
+    scopeStatus: "additive",
+    riskClass: "A1_STANDARD_MUTATION",
+    credentialClass: "device",
+    permission: "staff.sessions.close",
+    permissionStatus: "registered",
+    conditionalPermissions: [],
+    allowedTerminalProfiles: [
+      TERMINAL_PROFILE_T1_INTAKE_CASHIER,
+      TERMINAL_PROFILE_T2_CUSTOMER_DISPLAY,
+      TERMINAL_PROFILE_T3_READY_SCAN_IN,
+      TERMINAL_PROFILE_T4_PICKUP_SCAN_OUT
+    ],
+    idempotencyRequired: true,
+    mutatesExistingAggregate: false,
+    expectedVersionRequired: false,
+    approvalRequired: false,
+    auditEvent: "edge_session.closed",
+    auditEventStatus: "proposed",
+    authority: GROUP_1
+  }
+];
+var DISPLAY_SESSION_ROUTES = [
+  {
+    id: "display-sessions-open",
+    method: "POST",
+    path: EDGE_ROUTE_DISPLAY_SESSIONS,
+    family: "generic",
+    kind: "mutation",
+    scope: "edge.display.open",
+    scopeStatus: "registered",
+    riskClass: "A1_STANDARD_MUTATION",
+    credentialClass: "device",
+    permission: PERMISSION_GAP_EDGE_DISPLAY_MANAGE,
+    permissionStatus: "required",
+    conditionalPermissions: [],
+    allowedTerminalProfiles: [TERMINAL_PROFILE_T1_INTAKE_CASHIER],
+    idempotencyRequired: true,
+    mutatesExistingAggregate: false,
+    expectedVersionRequired: false,
+    approvalRequired: false,
+    auditEvent: "display_session.opened",
+    auditEventStatus: "proposed",
+    authority: GROUP_1
+  },
+  {
+    id: "display-sessions-update",
+    method: "PATCH",
+    path: EDGE_ROUTE_DISPLAY_SESSION,
+    family: "generic",
+    kind: "mutation",
+    scope: "edge.display.update",
+    scopeStatus: "registered",
+    riskClass: "A1_STANDARD_MUTATION",
+    credentialClass: "device",
+    permission: PERMISSION_GAP_EDGE_DISPLAY_MANAGE,
+    permissionStatus: "required",
+    conditionalPermissions: [],
+    allowedTerminalProfiles: [TERMINAL_PROFILE_T1_INTAKE_CASHIER],
+    idempotencyRequired: true,
+    mutatesExistingAggregate: true,
+    expectedVersionRequired: true,
+    approvalRequired: false,
+    auditEvent: "display_session.updated",
+    auditEventStatus: "proposed",
+    authority: GROUP_1
+  },
+  {
+    id: "display-sessions-read",
+    method: "GET",
+    path: EDGE_ROUTE_DISPLAY_SESSION,
+    family: "generic",
+    kind: "read",
+    scope: "edge.display.read",
+    scopeStatus: "registered",
+    riskClass: "A0_READ",
+    credentialClass: "device",
+    permission: PERMISSION_GAP_EDGE_DISPLAY_READ,
+    permissionStatus: "required",
+    conditionalPermissions: [],
+    allowedTerminalProfiles: [TERMINAL_PROFILE_T2_CUSTOMER_DISPLAY],
+    idempotencyRequired: false,
+    mutatesExistingAggregate: false,
+    expectedVersionRequired: false,
+    approvalRequired: false,
+    auditEvent: "display_session.read",
+    auditEventStatus: "proposed",
+    authority: GROUP_1
+  },
+  {
+    id: "display-sessions-customer-actions",
+    method: "POST",
+    path: EDGE_ROUTE_DISPLAY_SESSION_CUSTOMER_ACTIONS,
+    family: "generic",
+    kind: "mutation",
+    scope: "edge.display.customer_action",
+    scopeStatus: "additive",
+    riskClass: "A1_STANDARD_MUTATION",
+    credentialClass: "device",
+    permission: PERMISSION_GAP_EDGE_DISPLAY_CUSTOMER_ACTION,
+    permissionStatus: "required",
+    conditionalPermissions: [],
+    allowedTerminalProfiles: [TERMINAL_PROFILE_T2_CUSTOMER_DISPLAY],
+    idempotencyRequired: true,
+    mutatesExistingAggregate: true,
+    expectedVersionRequired: true,
+    approvalRequired: false,
+    auditEvent: "display_session.customer_action_recorded",
+    auditEventStatus: "proposed",
+    authority: GROUP_1
+  },
+  {
+    id: "display-sessions-close",
+    method: "POST",
+    path: EDGE_ROUTE_DISPLAY_SESSION_CLOSE,
+    family: "generic",
+    kind: "mutation",
+    scope: "edge.display.close",
+    scopeStatus: "registered",
+    riskClass: "A1_STANDARD_MUTATION",
+    credentialClass: "device",
+    permission: PERMISSION_GAP_EDGE_DISPLAY_MANAGE,
+    permissionStatus: "required",
+    conditionalPermissions: [],
+    allowedTerminalProfiles: [TERMINAL_PROFILE_T1_INTAKE_CASHIER],
+    idempotencyRequired: true,
+    mutatesExistingAggregate: true,
+    expectedVersionRequired: true,
+    approvalRequired: false,
+    auditEvent: "display_session.closed",
+    auditEventStatus: "proposed",
+    authority: GROUP_1
+  }
+];
+var GENERIC_EDGE_ROUTES = [
+  ...SESSION_ROUTES,
+  ...DISPLAY_SESSION_ROUTES
+];
+
+// ../../packages/edge-contracts/dist/laundry-routes.js
+var GROUP_12 = "KLD-2026-07-26-002 Group 1 (APPROVED)";
+var T1_BOOKING_ROUTES = [
+  {
+    id: "laundry-booking-draft-create",
+    method: "POST",
+    path: EDGE_ROUTE_LAUNDRY_BOOKING_DRAFTS,
+    family: "laundry",
+    kind: "mutation",
+    scope: "edge.bookings.create",
+    scopeStatus: "registered",
+    riskClass: "A1_STANDARD_MUTATION",
+    credentialClass: "device_and_staff",
+    permission: "laundry.bookings.create",
+    permissionStatus: "registered",
+    conditionalPermissions: ["laundry.bookings.price_override"],
+    allowedTerminalProfiles: [TERMINAL_PROFILE_T1_INTAKE_CASHIER],
+    idempotencyRequired: true,
+    mutatesExistingAggregate: false,
+    expectedVersionRequired: false,
+    approvalRequired: false,
+    auditEvent: "laundry_booking.draft_created",
+    auditEventStatus: "proposed",
+    authority: GROUP_12
+  },
+  {
+    id: "laundry-booking-confirm-intake",
+    method: "POST",
+    path: EDGE_ROUTE_LAUNDRY_BOOKING_CONFIRM_INTAKE,
+    family: "laundry",
+    kind: "mutation",
+    scope: "edge.bookings.finalize",
+    scopeStatus: "registered",
+    riskClass: "A1_STANDARD_MUTATION",
+    credentialClass: "device_and_staff",
+    permission: "laundry.bookings.create",
+    permissionStatus: "registered",
+    conditionalPermissions: [],
+    allowedTerminalProfiles: [TERMINAL_PROFILE_T1_INTAKE_CASHIER],
+    idempotencyRequired: true,
+    mutatesExistingAggregate: true,
+    expectedVersionRequired: true,
+    approvalRequired: false,
+    auditEvent: "laundry_booking.created",
+    auditEventStatus: "registered",
+    authority: GROUP_12
+  }
+];
+var T3_READY_ROUTES = [
+  {
+    id: "laundry-ready-session-open",
+    method: "POST",
+    path: EDGE_ROUTE_LAUNDRY_READY_SESSIONS,
+    family: "laundry",
+    kind: "mutation",
+    scope: "edge.ready.open",
+    scopeStatus: "registered",
+    riskClass: "A1_STANDARD_MUTATION",
+    credentialClass: "device_and_staff",
+    permission: "laundry.ready_scan_in",
+    permissionStatus: "registered",
+    conditionalPermissions: [],
+    allowedTerminalProfiles: [TERMINAL_PROFILE_T3_READY_SCAN_IN],
+    idempotencyRequired: true,
+    mutatesExistingAggregate: false,
+    expectedVersionRequired: false,
+    approvalRequired: false,
+    auditEvent: "laundry_ready_session.opened",
+    auditEventStatus: "proposed",
+    authority: GROUP_12
+  },
+  {
+    id: "laundry-ready-session-scan",
+    method: "POST",
+    path: EDGE_ROUTE_LAUNDRY_READY_SESSION_SCANS,
+    family: "laundry",
+    kind: "mutation",
+    scope: "edge.ready.scan",
+    scopeStatus: "registered",
+    riskClass: "A1_STANDARD_MUTATION",
+    credentialClass: "device_and_staff",
+    permission: "laundry.ready_scan_in",
+    permissionStatus: "registered",
+    conditionalPermissions: [],
+    allowedTerminalProfiles: [TERMINAL_PROFILE_T3_READY_SCAN_IN],
+    idempotencyRequired: true,
+    mutatesExistingAggregate: true,
+    expectedVersionRequired: true,
+    approvalRequired: false,
+    auditEvent: "garment.custody_scanned_in",
+    auditEventStatus: "registered",
+    authority: GROUP_12
+  },
+  {
+    id: "laundry-ready-session-qa",
+    method: "POST",
+    path: EDGE_ROUTE_LAUNDRY_READY_SESSION_QA,
+    family: "laundry",
+    kind: "mutation",
+    scope: "edge.ready.qa",
+    scopeStatus: "registered",
+    riskClass: "A1_STANDARD_MUTATION",
+    credentialClass: "device_and_staff",
+    permission: "laundry.ready_scan_in",
+    permissionStatus: "registered",
+    conditionalPermissions: [],
+    allowedTerminalProfiles: [TERMINAL_PROFILE_T3_READY_SCAN_IN],
+    idempotencyRequired: true,
+    mutatesExistingAggregate: true,
+    expectedVersionRequired: true,
+    approvalRequired: false,
+    auditEvent: "laundry_ready_session.qa_recorded",
+    auditEventStatus: "proposed",
+    authority: GROUP_12
+  },
+  {
+    id: "laundry-ready-session-exception",
+    method: "POST",
+    path: EDGE_ROUTE_LAUNDRY_READY_SESSION_EXCEPTIONS,
+    family: "laundry",
+    kind: "mutation",
+    scope: "edge.ready.exception",
+    scopeStatus: "additive",
+    riskClass: "A1_STANDARD_MUTATION",
+    credentialClass: "device_and_staff",
+    permission: "laundry.ready_scan_in",
+    permissionStatus: "registered",
+    conditionalPermissions: [],
+    allowedTerminalProfiles: [TERMINAL_PROFILE_T3_READY_SCAN_IN],
+    idempotencyRequired: true,
+    mutatesExistingAggregate: true,
+    expectedVersionRequired: true,
+    approvalRequired: false,
+    auditEvent: "laundry_ready_session.exception_recorded",
+    auditEventStatus: "proposed",
+    authority: GROUP_12
+  },
+  {
+    id: "laundry-ready-session-storage",
+    method: "POST",
+    path: EDGE_ROUTE_LAUNDRY_READY_SESSION_STORAGE,
+    family: "laundry",
+    kind: "mutation",
+    scope: "edge.ready.storage",
+    scopeStatus: "registered",
+    riskClass: "A1_STANDARD_MUTATION",
+    credentialClass: "device_and_staff",
+    permission: "laundry.ready_scan_in",
+    permissionStatus: "registered",
+    conditionalPermissions: [],
+    allowedTerminalProfiles: [TERMINAL_PROFILE_T3_READY_SCAN_IN],
+    idempotencyRequired: true,
+    mutatesExistingAggregate: true,
+    expectedVersionRequired: true,
+    approvalRequired: false,
+    auditEvent: "laundry_ready_session.storage_assigned",
+    auditEventStatus: "proposed",
+    authority: GROUP_12
+  },
+  {
+    id: "laundry-ready-session-complete",
+    method: "POST",
+    path: EDGE_ROUTE_LAUNDRY_READY_SESSION_COMPLETE,
+    family: "laundry",
+    kind: "mutation",
+    scope: "edge.ready.complete",
+    scopeStatus: "registered",
+    riskClass: "A1_STANDARD_MUTATION",
+    credentialClass: "device_and_staff",
+    permission: "laundry.ready_scan_in",
+    permissionStatus: "registered",
+    conditionalPermissions: [],
+    allowedTerminalProfiles: [TERMINAL_PROFILE_T3_READY_SCAN_IN],
+    idempotencyRequired: true,
+    mutatesExistingAggregate: true,
+    expectedVersionRequired: true,
+    approvalRequired: false,
+    auditEvent: "laundry_booking.ready",
+    auditEventStatus: "registered",
+    authority: GROUP_12
+  }
+];
+var T4_PICKUP_ROUTES = [
+  {
+    id: "laundry-pickup-session-open",
+    method: "POST",
+    path: EDGE_ROUTE_LAUNDRY_PICKUP_SESSIONS,
+    family: "laundry",
+    kind: "mutation",
+    scope: "edge.pickup.open",
+    scopeStatus: "registered",
+    riskClass: "A2_REAUTH_MUTATION",
+    credentialClass: "device_and_staff",
+    permission: "laundry.pickup_scan_out",
+    permissionStatus: "registered",
+    conditionalPermissions: [],
+    allowedTerminalProfiles: [TERMINAL_PROFILE_T4_PICKUP_SCAN_OUT],
+    idempotencyRequired: true,
+    mutatesExistingAggregate: false,
+    expectedVersionRequired: false,
+    approvalRequired: false,
+    auditEvent: "laundry_pickup_session.opened",
+    auditEventStatus: "proposed",
+    authority: GROUP_12
+  },
+  {
+    id: "laundry-pickup-session-verify-collector",
+    method: "POST",
+    path: EDGE_ROUTE_LAUNDRY_PICKUP_SESSION_COLLECTOR_VERIFICATION,
+    family: "laundry",
+    kind: "mutation",
+    scope: "edge.pickup.verify_collector",
+    scopeStatus: "registered",
+    riskClass: "A2_REAUTH_MUTATION",
+    credentialClass: "device_and_staff",
+    permission: "laundry.pickup_scan_out",
+    permissionStatus: "registered",
+    conditionalPermissions: [],
+    allowedTerminalProfiles: [TERMINAL_PROFILE_T4_PICKUP_SCAN_OUT],
+    idempotencyRequired: true,
+    mutatesExistingAggregate: true,
+    expectedVersionRequired: true,
+    approvalRequired: false,
+    auditEvent: "laundry_pickup_session.collector_verified",
+    auditEventStatus: "proposed",
+    authority: GROUP_12
+  },
+  {
+    id: "laundry-pickup-session-scan",
+    method: "POST",
+    path: EDGE_ROUTE_LAUNDRY_PICKUP_SESSION_SCANS,
+    family: "laundry",
+    kind: "mutation",
+    scope: "edge.pickup.scan",
+    scopeStatus: "registered",
+    riskClass: "A2_REAUTH_MUTATION",
+    credentialClass: "device_and_staff",
+    permission: "laundry.pickup_scan_out",
+    permissionStatus: "registered",
+    conditionalPermissions: [],
+    allowedTerminalProfiles: [TERMINAL_PROFILE_T4_PICKUP_SCAN_OUT],
+    idempotencyRequired: true,
+    mutatesExistingAggregate: true,
+    expectedVersionRequired: true,
+    approvalRequired: false,
+    auditEvent: "garment.custody_scanned_out",
+    auditEventStatus: "registered",
+    authority: GROUP_12
+  },
+  {
+    id: "laundry-pickup-session-payment",
+    method: "POST",
+    path: EDGE_ROUTE_LAUNDRY_PICKUP_SESSION_PAYMENTS,
+    family: "laundry",
+    kind: "mutation",
+    scope: "edge.pickup.payment",
+    scopeStatus: "registered",
+    riskClass: "A2_REAUTH_MUTATION",
+    credentialClass: "device_and_staff",
+    permission: "payments.capture.cash",
+    permissionStatus: "registered",
+    conditionalPermissions: ["payments.khqr.create"],
+    allowedTerminalProfiles: [TERMINAL_PROFILE_T4_PICKUP_SCAN_OUT],
+    idempotencyRequired: true,
+    mutatesExistingAggregate: true,
+    expectedVersionRequired: true,
+    approvalRequired: false,
+    auditEvent: "payment.recorded",
+    auditEventStatus: "registered",
+    authority: GROUP_12
+  },
+  {
+    id: "laundry-pickup-session-complete",
+    method: "POST",
+    path: EDGE_ROUTE_LAUNDRY_PICKUP_SESSION_COMPLETE,
+    family: "laundry",
+    kind: "mutation",
+    scope: "edge.pickup.release",
+    scopeStatus: "registered",
+    riskClass: "A2_REAUTH_MUTATION",
+    credentialClass: "device_and_staff",
+    permission: "laundry.booking.complete",
+    permissionStatus: "registered",
+    conditionalPermissions: ["laundry.pickup_scan_out"],
+    allowedTerminalProfiles: [TERMINAL_PROFILE_T4_PICKUP_SCAN_OUT],
+    idempotencyRequired: true,
+    mutatesExistingAggregate: true,
+    expectedVersionRequired: true,
+    approvalRequired: false,
+    auditEvent: "laundry_booking.completed",
+    auditEventStatus: "proposed",
+    authority: GROUP_12
+  }
+];
+var LAUNDRY_EDGE_ROUTES = [
+  ...T1_BOOKING_ROUTES,
+  ...T3_READY_ROUTES,
+  ...T4_PICKUP_ROUTES
+];
+
+// ../../packages/edge-contracts/dist/registry.js
+var EDGE_ROUTES = [
+  ...GENERIC_EDGE_ROUTES,
+  ...LAUNDRY_EDGE_ROUTES
+];
+function findEdgeRouteById(id) {
+  return EDGE_ROUTES.find((route) => route.id === id);
+}
+
+// ../../packages/edge-contracts/dist/scopes.js
+var REGISTERED_EDGE_SCOPES = [
+  "edge.bookings.create",
+  "edge.bookings.update_draft",
+  "edge.bookings.finalize",
+  "edge.payments.record",
+  "edge.display.open",
+  "edge.display.read",
+  "edge.display.update",
+  "edge.display.close",
+  "edge.ready.open",
+  "edge.ready.scan",
+  "edge.ready.qa",
+  "edge.ready.storage",
+  "edge.ready.complete",
+  "edge.pickup.open",
+  "edge.pickup.verify_collector",
+  "edge.pickup.scan",
+  "edge.pickup.payment",
+  "edge.pickup.release",
+  "edge.sync.read",
+  "edge.sync.push",
+  "edge.sync.pull"
+];
+var ADDITIVE_EDGE_SCOPES = [
+  /** Open a Hub-issued terminal session. Named in Edge Ops API §9.1 (`/sessions/login`), absent from registry §5. */
+  "edge.session.open",
+  /** Rotate a short-lived Hub session token (Store Hub LAN API §`POST /sessions/refresh`). New key. */
+  "edge.session.refresh",
+  /** Switch the staff actor bound to an open session. Named in Edge Ops API §9.1, absent from registry §5. */
+  "edge.session.switch",
+  /** Close a session and clear profile state (Store Hub LAN API §`POST /sessions/close`). New key. */
+  "edge.session.close",
+  /** Record a customer-originated T2 action (language, receipt choice, confirmation). */
+  "edge.display.customer_action",
+  /** Record a Ready-session exception. Edge Ops API §9.4 has no exception scope. */
+  "edge.ready.exception",
+  // KLD-2026-08-06-WS12-T001-EDGE-BOOTSTRAP-001: the three T1 bootstrap reads.
+  /** Read Hub-database authority time (§1 of the bootstrap decision). */
+  "edge.runtime.time_read",
+  /** Read this terminal's derived runtime eligibility (§2). */
+  "edge.runtime.eligibility_read",
+  /** Read the current signed configuration delivery for this terminal (§3). */
+  "edge.configuration.read",
+  // KLD-2026-08-06-WS12-T002-001: T1 customer intake. `edge.customers.search`
+  // and `edge.customers.create` are NAMED by Edge Ops API §9.2 and absent
+  // from registry §5; the read and consent scopes are new keys.
+  /** Scoped exact-match customer search (§2 of the T002 decision). */
+  "edge.customers.search",
+  /** Read one scoped customer record. */
+  "edge.customers.read",
+  /** Create a minimal unverified customer at T1 (§2.6). */
+  "edge.customers.create",
+  /** Record an explicit consent decision with immutable evidence (§3). */
+  "edge.customers.consent_record"
+];
+var EDGE_API_SCOPES = [...REGISTERED_EDGE_SCOPES, ...ADDITIVE_EDGE_SCOPES];
+
+// src/hub/command-registry.ts
+init_errors();
+var T1 = "laundry.t1.intake_cashier";
+var T4 = "laundry.t4.pickup_scan_out";
+function requireRoute(routeId) {
+  const route = findEdgeRouteById(routeId);
+  if (!route) {
+    throw new Error(`Edge route '${routeId}' is not in the canonical registry.`);
+  }
+  return route;
+}
+function fromRoute(commandType, routeId, aggregateType) {
+  const route = requireRoute(routeId);
+  const unregistered = isRequiredPermissionMarker(route.permission);
+  return {
+    commandType,
+    aggregateType,
+    routeId,
+    routeTemplate: route.path,
+    method: route.method === "PATCH" ? "PATCH" : "POST",
+    riskClass: route.riskClass,
+    permission: route.permission,
+    conditionalPermissions: route.conditionalPermissions,
+    allowedProfiles: route.allowedTerminalProfiles,
+    expectedVersionRequired: route.expectedVersionRequired,
+    approvalRequired: route.approvalRequired,
+    auditEvent: route.auditEvent,
+    active: !unregistered,
+    ...unregistered ? {
+      inactiveReason: `KLREQ-015: the approved route ${routeId} carries no canonical permission key \u2014 ${route.permission}`
+    } : {}
+  };
+}
+function hubInternal(commandType, aggregateType, input) {
+  const unregistered = isRequiredPermissionMarker(input.permission);
+  const active = (input.active ?? true) && !unregistered;
+  return {
+    commandType,
+    aggregateType,
+    routeId: null,
+    routeTemplate: input.routeTemplate,
+    method: "POST",
+    riskClass: input.riskClass,
+    permission: input.permission,
+    conditionalPermissions: input.conditionalPermissions ?? [],
+    allowedProfiles: input.allowedProfiles,
+    expectedVersionRequired: input.expectedVersionRequired,
+    approvalRequired: input.approvalRequired,
+    auditEvent: input.auditEvent,
+    active,
+    ...active ? {} : {
+      inactiveReason: input.inactiveReason ?? `KLREQ-015: no canonical permission key \u2014 ${input.permission}`
+    }
+  };
+}
+var PERMISSION_GAP_HUB_PROVIDER_CALLBACK = "[REQUIRED: RBAC permission key for applying an authoritative payment-provider callback on the Store Hub \u2014 absent from kitluy-suite-rbac-permission-registry-v1.0.0.csv; the Hub applies it as a service, not as an actor]";
+var DEFINITIONS = [
+  // ---------------------------------------------------------------- Booking
+  fromRoute("laundry.booking.create_draft", "laundry-booking-draft-create", "booking"),
+  hubInternal("laundry.booking.update_draft", "booking", {
+    routeTemplate: "/edge/v1/laundry/bookings/drafts/{id}",
+    permission: "laundry.bookings.create",
+    conditionalPermissions: ["laundry.bookings.price_override"],
+    allowedProfiles: [T1],
+    riskClass: "A1_STANDARD_MUTATION",
+    expectedVersionRequired: true,
+    approvalRequired: false,
+    auditEvent: "laundry_booking.draft_updated"
+  }),
+  hubInternal("laundry.booking.add_line", "booking", {
+    routeTemplate: "/edge/v1/laundry/bookings/drafts/{id}/lines",
+    permission: "laundry.bookings.create",
+    conditionalPermissions: ["laundry.bookings.price_override"],
+    allowedProfiles: [T1],
+    riskClass: "A1_STANDARD_MUTATION",
+    expectedVersionRequired: true,
+    approvalRequired: false,
+    auditEvent: "laundry_booking.draft_line_added"
+  }),
+  hubInternal("laundry.booking.register_garment", "booking", {
+    routeTemplate: "/edge/v1/laundry/bookings/drafts/{id}/garments",
+    permission: "laundry.bookings.create",
+    allowedProfiles: [T1],
+    riskClass: "A1_STANDARD_MUTATION",
+    expectedVersionRequired: true,
+    approvalRequired: false,
+    auditEvent: "laundry_booking.garment_registered"
+  }),
+  hubInternal("laundry.booking.assign_tag", "booking", {
+    routeTemplate: "/edge/v1/laundry/bookings/drafts/{id}/tags",
+    permission: "laundry.bookings.create",
+    allowedProfiles: [T1],
+    riskClass: "A1_STANDARD_MUTATION",
+    expectedVersionRequired: true,
+    approvalRequired: false,
+    auditEvent: "laundry_booking.tag_assigned"
+  }),
+  hubInternal("laundry.booking.assign_container", "booking", {
+    routeTemplate: "/edge/v1/laundry/bookings/drafts/{id}/containers",
+    permission: "laundry.bookings.create",
+    allowedProfiles: [T1],
+    riskClass: "A1_STANDARD_MUTATION",
+    expectedVersionRequired: true,
+    approvalRequired: false,
+    auditEvent: "laundry_booking.container_assigned"
+  }),
+  fromRoute("laundry.booking.confirm_intake", "laundry-booking-confirm-intake", "booking"),
+  // T1-REAL-OPERATIONS-001 slice 2 (KLD-2026-09-19-T1-REAL-OPERATIONS-001
+  // decision 1): the SAME approved route, served with `{id}` = the WS-12-T002
+  // Booking Draft. One command converts the draft, prices and writes the
+  // lines, records the cash tender, issues the receipt record and queues its
+  // print. Route metadata (permission, profiles, risk class, audit event) is
+  // read from the registry exactly as for confirm_intake — nothing restated.
+  fromRoute("laundry.booking.confirm_from_draft", "laundry-booking-confirm-intake", "booking"),
+  // ------------------------------------------------------------ Ready (T3)
+  fromRoute("laundry.ready.open_session", "laundry-ready-session-open", "ready_session"),
+  fromRoute("laundry.ready.record_scan", "laundry-ready-session-scan", "ready_session"),
+  fromRoute("laundry.ready.record_qa", "laundry-ready-session-qa", "ready_session"),
+  fromRoute("laundry.ready.record_exception", "laundry-ready-session-exception", "ready_session"),
+  fromRoute("laundry.ready.assign_storage", "laundry-ready-session-storage", "ready_session"),
+  fromRoute("laundry.ready.complete", "laundry-ready-session-complete", "ready_session"),
+  // ----------------------------------------------------------- Pickup (T4)
+  fromRoute("laundry.pickup.open_session", "laundry-pickup-session-open", "pickup_session"),
+  fromRoute(
+    "laundry.pickup.verify_collector",
+    "laundry-pickup-session-verify-collector",
+    "pickup_session"
+  ),
+  fromRoute("laundry.pickup.record_scan", "laundry-pickup-session-scan", "pickup_session"),
+  fromRoute("laundry.pickup.record_payment", "laundry-pickup-session-payment", "pickup_session"),
+  fromRoute("laundry.pickup.complete", "laundry-pickup-session-complete", "pickup_session"),
+  // ------------------------------------------------------------- Payments
+  // Cash is authoritative at the drawer: the drawer movement IS the evidence,
+  // so a cash payment is recorded CONFIRMED (KBR-PAY-002).
+  hubInternal("payments.record_cash_payment", "payment", {
+    routeTemplate: "/edge/v1/laundry/bookings/{id}/payments",
+    permission: "payments.capture.cash",
+    allowedProfiles: [T1, T4],
+    riskClass: "A1_STANDARD_MUTATION",
+    expectedVersionRequired: true,
+    approvalRequired: false,
+    auditEvent: "payment.recorded"
+  }),
+  // KLD-2026-07-26-002 Group 5: PAYMENT_PENDING is NON-TERMINAL (HTTP 202).
+  // Pending is NOT paid, and no KHQR confirmation is ever fabricated.
+  hubInternal("payments.create_pending_payment", "payment", {
+    routeTemplate: "/edge/v1/laundry/bookings/{id}/payments",
+    permission: "payments.khqr.create",
+    allowedProfiles: [T1, T4],
+    riskClass: "A1_STANDARD_MUTATION",
+    expectedVersionRequired: true,
+    approvalRequired: false,
+    auditEvent: "payment.recorded"
+  }),
+  // KBR-PAY-005: refund authorisation is separated and recorded. Thresholds are
+  // an OPEN owner decision (PAY-OD-002) and are NOT invented, so the Hub takes
+  // the strictest reading and requires four-eyes evidence for EVERY refund.
+  hubInternal("payments.request_refund", "payment", {
+    routeTemplate: "/edge/v1/laundry/bookings/{id}/refunds",
+    permission: "payments.refund.request",
+    allowedProfiles: [T1, T4],
+    riskClass: "A3_FOUR_EYES",
+    expectedVersionRequired: true,
+    approvalRequired: true,
+    auditEvent: "payment.refund_requested"
+  }),
+  hubInternal("payments.request_void", "payment", {
+    routeTemplate: "/edge/v1/laundry/bookings/{id}/voids",
+    permission: "payments.void.request",
+    allowedProfiles: [T1, T4],
+    riskClass: "A3_FOUR_EYES",
+    expectedVersionRequired: true,
+    approvalRequired: true,
+    auditEvent: "payment.void_requested"
+  }),
+  // Registered so the gap is VISIBLE. Always fails closed as a terminal command.
+  hubInternal("payments.apply_provider_callback", "payment", {
+    routeTemplate: "/edge/v1/payments/{id}/provider-callbacks",
+    permission: PERMISSION_GAP_HUB_PROVIDER_CALLBACK,
+    allowedProfiles: [T1, T4],
+    riskClass: "A1_STANDARD_MUTATION",
+    expectedVersionRequired: false,
+    approvalRequired: false,
+    auditEvent: "payment.recorded"
+  })
+];
+var BY_TYPE = new Map(DEFINITIONS.map((d) => [d.commandType, d]));
+var INACTIVE_ROUTE_COMMANDS = EDGE_ROUTES.filter(
+  (route) => isRequiredPermissionMarker(route.permission)
+).map((route) => fromRoute(`edge.${route.id.replace(/-/g, "_")}`, route.id, "booking"));
+for (const definition of INACTIVE_ROUTE_COMMANDS) {
+  BY_TYPE.set(definition.commandType, definition);
+}
+var HUB_COMMANDS = [
+  ...DEFINITIONS,
+  ...INACTIVE_ROUTE_COMMANDS
+];
+function requireActiveHubCommand(commandType) {
+  const definition = BY_TYPE.get(commandType);
+  if (!definition) {
+    throw new HubCommandError("EDGE_COMMAND_UNKNOWN", `unknown command type '${commandType}'.`, {
+      commandType
+    });
+  }
+  if (!definition.active) {
+    throw new HubCommandError(
+      "EDGE_PERMISSION_KEY_UNREGISTERED",
+      definition.inactiveReason ?? `command '${commandType}' is INACTIVE and fails closed until an owner decision registers its permission key.`,
+      { commandType, permission: definition.permission }
+    );
+  }
+  if (!isCanonicalPermissionKey(definition.permission)) {
+    throw new HubCommandError(
+      "EDGE_PERMISSION_KEY_UNREGISTERED",
+      `command '${commandType}' declares permission '${definition.permission}', which is not in the canonical RBAC registry.`,
+      { commandType, permission: definition.permission }
+    );
+  }
+  return definition;
+}
+
+// src/hub/idempotency.ts
+init_errors();
+init_hub_database();
+var WS09_WRITABLE_SYNC_STATES = [
+  "committed_locally",
+  "pending_cloud_sync",
+  "reconciliation_required"
+];
+async function reserveOrLoadCommand(client, input) {
+  if (!isCanonicalIdempotencyKey(input.idempotencyKey)) {
+    throw new HubCommandError(
+      "EDGE_IDEMPOTENCY_KEY_MALFORMED",
+      `'${input.idempotencyKey}' is not kl1.{terminal_device_uuid}.{client_sequence} (offline contract \xA72).`,
+      { idempotencyKey: input.idempotencyKey }
+    );
+  }
+  const parsed = parseIdempotencyKey(input.idempotencyKey);
+  if (parsed.terminalDeviceId.toLowerCase() !== input.terminalDeviceId.toLowerCase()) {
+    throw new HubCommandError(
+      "EDGE_IDEMPOTENCY_KEY_MALFORMED",
+      `idempotency key names terminal ${parsed.terminalDeviceId} but the command was presented by ${input.terminalDeviceId}.`,
+      { idempotencyKey: input.idempotencyKey }
+    );
+  }
+  try {
+    const result = await client.query(
+      `select * from edge_sync.accept_terminal_command(
+         $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6::text, $7::char(64),
+         $8::text, $9::text, $10::uuid, $11::bigint, $12::integer, $13::uuid)`,
+      [
+        input.commandResultId,
+        input.tenantId,
+        input.digitalStoreId,
+        input.locationId,
+        input.terminalDeviceId,
+        input.idempotencyKey,
+        input.requestHash,
+        input.commandType,
+        input.aggregateType,
+        input.actorId,
+        input.originSequence === null ? null : input.originSequence.toString(),
+        input.assignmentGeneration,
+        input.requestId
+      ]
+    );
+    const row = result.rows[0];
+    if (!row) {
+      throw new HubCommandError(
+        "EDGE_TERMINAL_UNKNOWN",
+        "edge_sync.accept_terminal_command returned no outcome row."
+      );
+    }
+    return row;
+  } catch (error) {
+    const mapped = fromDatabaseError(error);
+    if (mapped) {
+      if (mapped.code === "EDGE_IDEMPOTENCY_PAYLOAD_MISMATCH") {
+        throw new HubCommandError(
+          "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST",
+          `${mapped.message} (offline contract \xA73 EDGE_IDEMPOTENCY_PAYLOAD_MISMATCH).`,
+          { idempotencyKey: input.idempotencyKey, commandType: input.commandType }
+        );
+      }
+      throw mapped;
+    }
+    throw error;
+  }
+}
+async function completeCommand(client, input) {
+  if (!WS09_WRITABLE_SYNC_STATES.includes(input.syncState)) {
+    throw new HubCommandError(
+      "EDGE_COMMAND_INACTIVE",
+      `WS-09 may not persist sync_state '${input.syncState}'; cloud acknowledgement belongs to WS-10.`,
+      { syncState: input.syncState }
+    );
+  }
+  try {
+    const result = await client.query(
+      `select * from edge_sync.complete_command(
+         $1::text, $2::text, $3::text, $4::uuid, $5::bigint, $6::uuid[],
+         $7::bigint, $8::bigint, $9::text, $10::jsonb)`,
+      [
+        input.idempotencyKey,
+        input.commitStatus,
+        input.syncState,
+        input.aggregateId,
+        input.aggregateVersion === null ? null : input.aggregateVersion.toString(),
+        [...input.eventIds],
+        input.hubSequenceFirst === null ? null : input.hubSequenceFirst.toString(),
+        input.hubSequenceLast === null ? null : input.hubSequenceLast.toString(),
+        input.errorCode,
+        JSON.stringify(input.resultJson)
+      ]
+    );
+    const row = result.rows[0];
+    if (!row) {
+      throw new HubCommandError(
+        "EDGE_COMMAND_UNKNOWN",
+        `no in-progress command result for key ${input.idempotencyKey}.`
+      );
+    }
+    return row;
+  } catch (error) {
+    const mapped = fromDatabaseError(error);
+    if (mapped) throw mapped;
+    throw error;
+  }
+}
+
+// src/hub/command-pipeline.ts
+var MAX_CONCURRENCY_RETRIES = 12;
+var RETRY_BASE_DELAY_MS = 12;
+function isDuplicateKeyRace(error) {
+  const err = error;
+  return err?.code === "23505" && (err.constraint ?? "").includes("command_result");
+}
+async function backoff(attempt2) {
+  const ceiling = RETRY_BASE_DELAY_MS * 2 ** Math.min(attempt2, 6);
+  const delay = Math.floor(Math.random() * ceiling) + 1;
+  await new Promise((resolve) => setTimeout(resolve, delay));
+}
+async function executeHubCommand(pool, request, handler2) {
+  const definition = requireActiveHubCommand(request.commandType);
+  const requestId = request.requestId ?? uuidv7();
+  const correlationId = request.correlationId ?? requestId;
+  const requestHash = canonicalRequestHash({
+    method: definition.method,
+    routeTemplate: definition.routeTemplate,
+    body: request.body,
+    terminalDeviceId: request.device.terminalDeviceId,
+    sessionId: request.device.sessionId,
+    profileCode: request.device.profileCode
+  });
+  let attempt2 = 0;
+  for (; ; ) {
+    attempt2 += 1;
+    const burntSequences = [];
+    let recorderRef;
+    try {
+      return await withSerializableHubTransaction(pool, async (client) => {
+        const auth = await authorizeHubCommand(client, definition, request.device, {
+          ...request.targetScope ? { targetScope: request.targetScope } : {},
+          ...request.approval ? { approval: request.approval } : {},
+          ...request.requiredConditionalPermissions ? { requiredConditionalPermissions: request.requiredConditionalPermissions } : {}
+        });
+        const commandResultId = uuidv7();
+        const reservation = await reserveOrLoadCommand(client, {
+          commandResultId,
+          tenantId: request.device.tenantId,
+          digitalStoreId: request.device.digitalStoreId,
+          locationId: request.device.locationId,
+          terminalDeviceId: request.device.terminalDeviceId,
+          idempotencyKey: request.idempotencyKey,
+          requestHash,
+          commandType: definition.commandType,
+          aggregateType: definition.aggregateType,
+          actorId: request.device.actorId,
+          originSequence: request.clientSequence,
+          assignmentGeneration: auth.assignmentGeneration,
+          requestId
+        });
+        if (reservation.outcome !== "accepted") {
+          const stored = await loadStoredResultJson(client, request.idempotencyKey);
+          return storedResult(definition, request, reservation, requestId, stored);
+        }
+        const recorder = new HubEventRecorder(client, {
+          tenantId: request.device.tenantId,
+          digitalStoreId: request.device.digitalStoreId,
+          locationId: request.device.locationId,
+          hubDeviceId: auth.hubDeviceId,
+          originDeviceId: request.device.terminalDeviceId,
+          actorId: request.device.actorId,
+          actorType: auth.actorType === "terminal_device" ? "device" : "user",
+          assignmentGeneration: auth.assignmentGeneration,
+          businessDate: request.businessDate,
+          correlationId,
+          originSequence: request.clientSequence,
+          commandIdempotencyKey: request.idempotencyKey,
+          commandResultId,
+          commandType: definition.commandType,
+          declaredEffects: declaredEffects(definition)
+        });
+        recorderRef = recorder;
+        const handled = await handler2({
+          client,
+          definition,
+          auth,
+          recorder,
+          correlationId,
+          requestId,
+          idempotencyKey: request.idempotencyKey,
+          body: request.body,
+          businessDate: request.businessDate
+        });
+        const auditSequence = await sync_exports.allocateHubSequence(client);
+        const auditDetails = {
+          command_type: definition.commandType,
+          permission: definition.permission,
+          permission_source: auth.permissionSource,
+          risk_class: definition.riskClass,
+          request_id: requestId,
+          ...handled.auditDetails ?? {}
+        };
+        await audit_exports.appendAuditEvent(client, {
+          id: uuidv7(),
+          tenantId: request.device.tenantId,
+          digitalStoreId: request.device.digitalStoreId,
+          locationId: request.device.locationId,
+          eventCode: definition.auditEvent,
+          actorType: auth.actorType,
+          actorId: request.device.actorId,
+          requesterId: request.approval?.request.requestedBy ?? null,
+          approverId: request.approval?.decision.approvedBy ?? null,
+          terminalDeviceId: request.device.terminalDeviceId,
+          hubDeviceId: auth.hubDeviceId,
+          profileCode: auth.profile,
+          resourceType: handled.auditResourceType,
+          resourceId: handled.auditResourceId,
+          reasonCode: handled.auditReasonCode ?? null,
+          correlationId,
+          payloadSha256: payloadChecksum(auditDetails),
+          details: auditDetails,
+          localSequence: auditSequence
+        });
+        const completion = await completeCommand(client, {
+          idempotencyKey: request.idempotencyKey,
+          commitStatus: "committed",
+          syncState: "committed_locally",
+          aggregateId: handled.aggregateId,
+          aggregateVersion: handled.aggregateVersion,
+          eventIds: recorder.eventIds,
+          hubSequenceFirst: recorder.hubSequenceFirst,
+          hubSequenceLast: recorder.hubSequenceLast,
+          errorCode: null,
+          resultJson: handled.resultJson
+        });
+        return {
+          outcome: "accepted",
+          commandType: definition.commandType,
+          idempotencyKey: request.idempotencyKey,
+          requestId,
+          aggregateId: completion.aggregate_id,
+          aggregateVersion: completion.aggregate_version,
+          eventIds: recorder.eventIds,
+          hubSequenceFirst: recorder.hubSequenceFirst,
+          hubSequenceLast: recorder.hubSequenceLast,
+          syncState: "committed_locally",
+          wireSyncState: sync_exports.WS09_WIRE_SYNC_STATE,
+          result: handled.resultJson
+        };
+      });
+    } catch (error) {
+      burntSequences.push(...recorderRef?.allocatedSequences ?? []);
+      await journalBurntSequences(pool, request, burntSequences);
+      if (attempt2 < MAX_CONCURRENCY_RETRIES && (isSerializationFailure(error) || isDuplicateKeyRace(error))) {
+        await backoff(attempt2);
+        continue;
+      }
+      const mapped = error instanceof HubCommandError ? error : fromDatabaseError(error);
+      if (mapped) {
+        await recordDenialEvidence(pool, request, mapped);
+        throw mapped;
+      }
+      throw error;
+    }
+  }
+}
+async function loadStoredResultJson(client, idempotencyKey) {
+  const found = await client.query(
+    `select result_json, commit_status from edge_sync.command_result where idempotency_key = $1`,
+    [idempotencyKey]
+  );
+  const row = found.rows[0];
+  return row !== void 0 && row.commit_status === "committed" ? row.result_json : null;
+}
+function storedResult(definition, request, reservation, requestId, stored = null) {
+  return {
+    outcome: reservation.outcome === "in_progress" ? "in_progress" : "duplicate",
+    commandType: definition.commandType,
+    idempotencyKey: request.idempotencyKey,
+    requestId,
+    aggregateId: reservation.aggregate_id,
+    aggregateVersion: reservation.aggregate_version,
+    eventIds: reservation.event_ids ?? [],
+    hubSequenceFirst: reservation.hub_sequence_first,
+    hubSequenceLast: reservation.hub_sequence_last,
+    syncState: "committed_locally",
+    wireSyncState: sync_exports.WS09_WIRE_SYNC_STATE,
+    result: { ...stored ?? {}, replayed: true }
+  };
+}
+async function journalBurntSequences(pool, request, sequences) {
+  if (sequences.length === 0) return;
+  try {
+    await withHubTransaction(pool, async (client) => {
+      for (const hubSequence of sequences) {
+        await sync_exports.recordSequenceGap(client, {
+          id: uuidv7(),
+          tenantId: request.device.tenantId,
+          digitalStoreId: request.device.digitalStoreId,
+          locationId: request.device.locationId,
+          assignmentGeneration: request.device.assignmentGeneration,
+          hubSequence,
+          gapReason: "transaction_rollback",
+          recordedBy: "kitluy-hub-agent",
+          note: `command ${request.commandType} rolled back`
+        });
+      }
+    });
+  } catch {
+  }
+}
+var EVIDENCE_CODES = /* @__PURE__ */ new Set([
+  "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST",
+  "EDGE_IDEMPOTENCY_PAYLOAD_MISMATCH",
+  "EDGE_IDEMPOTENCY_KEY_MALFORMED",
+  "EDGE_SEQUENCE_REPLAY_REJECTED",
+  "EDGE_SEQUENCE_GAP",
+  "EDGE_SCOPE_MISMATCH",
+  "EDGE_TERMINAL_UNKNOWN",
+  "EDGE_DEVICE_CONTEXT_INVALID",
+  "EDGE_DEVICE_NOT_ASSIGNED",
+  "EDGE_DEVICE_REVOKED",
+  "EDGE_ASSIGNMENT_GENERATION_MISMATCH",
+  "EDGE_SESSION_INVALID",
+  "EDGE_SESSION_EXPIRED",
+  "EDGE_PROFILE_NOT_AUTHORIZED",
+  "EDGE_PERMISSION_DENIED",
+  "EDGE_PERMISSION_KEY_UNREGISTERED",
+  "EDGE_RESOURCE_SCOPE_DENIED",
+  "EDGE_ENVIRONMENT_DENIED",
+  "EDGE_APPROVAL_REQUIRED",
+  "EDGE_SELF_APPROVAL_FORBIDDEN"
+]);
+async function recordDenialEvidence(pool, request, error) {
+  if (!EVIDENCE_CODES.has(error.code)) return;
+  const severity = error.code === "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST" || error.code === "EDGE_IDEMPOTENCY_PAYLOAD_MISMATCH" || error.code === "EDGE_DEVICE_REVOKED" || error.code === "EDGE_SELF_APPROVAL_FORBIDDEN" ? "high" : "medium";
+  try {
+    await withHubTransaction(pool, async (client) => {
+      await audit_exports.recordSecurityEvent(client, {
+        id: uuidv7(),
+        tenantId: request.device.tenantId,
+        digitalStoreId: request.device.digitalStoreId,
+        locationId: request.device.locationId,
+        eventCode: error.code === "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST" ? "EDGE_IDEMPOTENCY_PAYLOAD_MISMATCH" : error.code,
+        severity,
+        deviceId: request.device.terminalDeviceId,
+        certificateSerial: null,
+        // Redacted evidence only — never a payload, credential or contact value.
+        details: {
+          command_type: request.commandType,
+          idempotency_key: request.idempotencyKey,
+          profile_code: request.device.profileCode,
+          ...error.details
+        }
+      });
+    });
+  } catch {
+  }
+}
+
+// src/hub/booking-status.ts
+init_errors();
+var PRODUCTION_TO_STATUS = {
+  RECEIVED: "intake_confirmed",
+  WASHING: "washing",
+  DRYING: "drying",
+  PRESSING: "pressing",
+  QA_PACKAGING: "qa_packaging",
+  READY: "ready",
+  PICKED_UP: "picked_up"
+};
+var STATUS_TO_PRODUCTION = Object.fromEntries(
+  PRODUCTION_STATES.map((state) => [PRODUCTION_TO_STATUS[state], state])
+);
+var LIFECYCLE_TO_STATUS = {
+  DRAFT: "draft",
+  "CONFIRMED/FINALIZED": "intake_confirmed",
+  EXPIRED: "expired",
+  CANCELLED: "cancelled",
+  VOIDED: "voided",
+  ISSUE_HOLD: "issue_hold",
+  "RETURN/REFUND": "return_refund"
+};
+function statusForProductionState(state) {
+  return PRODUCTION_TO_STATUS[state];
+}
+function statusForLifecycleState(state) {
+  const status = LIFECYCLE_TO_STATUS[state];
+  if (status === void 0) {
+    throw new HubCommandError(
+      "EDGE_INVALID_TRANSITION",
+      `Booking lifecycle state ${state} has no Hub-local projection value.`,
+      { lifecycleState: state }
+    );
+  }
+  return status;
+}
+
+// src/hub/commands/confirm-from-draft.ts
+init_hub_database();
+
+// src/hub/commands/print-commands.ts
+init_db();
+init_errors();
+async function enqueueReceiptPrint(client, input) {
+  const binding = await config_exports.findPeripheralBinding(
+    client,
+    input.locationId,
+    input.logicalRole ?? "receipt_printer"
+  );
+  if (!binding) {
+    throw new HubCommandError(
+      "EDGE_CONFIGURATION_MISSING",
+      `Location ${input.locationId} has no enabled '${input.logicalRole ?? "receipt_printer"}' peripheral binding.`,
+      { locationId: input.locationId }
+    );
+  }
+  return documents_exports.enqueuePrintJob(client, {
+    id: uuidv7(),
+    tenantId: input.tenantId,
+    digitalStoreId: input.digitalStoreId,
+    locationId: input.locationId,
+    documentType: input.documentType,
+    documentId: input.documentId,
+    printerBindingId: binding.id,
+    templateVersion: input.templateVersion,
+    payloadSha256: input.payloadSha256,
+    copies: input.copies ?? 1,
+    copyIndex: input.copyIndex ?? 1,
+    priority: 0,
+    createdBy: input.createdBy,
+    terminalDeviceId: input.terminalDeviceId
+  });
+}
+
+// src/hub/commands/payment-commands.ts
+init_db();
+init_errors();
+
+// src/hub/commands/shared.ts
+init_errors();
+var REQUIRED_LOCATION_CODE = "[REQUIRED: cloud-assigned immutable LOCATION_CODE (3-8 chars, Appendix B display profile) \u2014 the Hub-local schema carries no location_code column and the active configuration snapshot's fixture sections do not publish one]";
+function requireLocationCode(value) {
+  if (typeof value !== "string" || !/^[A-Za-z0-9](?:[A-Za-z0-9-]{1,14})?[A-Za-z0-9]$/.test(value) || value.length < 3) {
+    throw new HubCommandError("EDGE_REQUIRED_VALUE_MISSING", REQUIRED_LOCATION_CODE, {
+      field: "location_code"
+    });
+  }
+  return value;
+}
+
+// src/hub/commands/booking-commands.ts
+init_errors();
+
+// src/hub/commands/payment-commands.ts
+init_hub_database();
+function postingDeduplicationKey(sourceType, sourceId) {
+  return sha256Hex2(canonicalJson({ source_type: sourceType, source_id: sourceId }));
+}
+
+// src/hub/commands/confirm-from-draft.ts
+var CONFIRM_FROM_DRAFT_COMMAND = "laundry.booking.confirm_from_draft";
+var TENDER_RECORDED_EVENT_NAME = "payment.tender_recorded";
+var RECEIPT_ISSUED_EVENT_NAME = "document.receipt_issued";
+var BOOKING_RECEIPT_DOCUMENT_TYPE = "booking_receipt";
+var BOOKING_RECEIPT_TEMPLATE_VERSION = 1n;
+var MAX_INTAKE_LINES = 200;
+async function loadIntakePricingSections(client, locationId) {
+  const active = await config_exports.findActiveConfiguration(client, locationId);
+  if (!active) {
+    throw new HubCommandError(
+      "EDGE_CONFIGURATION_MISSING",
+      `Location ${locationId} has no ACTIVE configuration snapshot; the Hub refuses to price without one.`,
+      { locationId, result: "CONFIGURATION_MISSING" }
+    );
+  }
+  const pricing = await config_exports.findConfigurationSection(client, active.snapshot_id, "pricing");
+  const money2 = pricing === void 0 ? null : parseLaundryMoneySection(pricing.content_json);
+  if (money2 === null) {
+    throw new HubCommandError(
+      "EDGE_CONFIGURATION_MISSING",
+      `configuration snapshot ${active.snapshot_id} carries no kitluy.config.money.v1 'pricing' section.`,
+      {
+        snapshotId: active.snapshot_id,
+        result: "MONEY_CONTRACT_MISSING"
+      }
+    );
+  }
+  const catalogSection = await config_exports.findConfigurationSection(
+    client,
+    active.snapshot_id,
+    "catalog"
+  );
+  const catalog = catalogSection === void 0 ? null : parseLaundryCatalogSection(catalogSection.content_json);
+  if (catalog === null) {
+    throw new HubCommandError(
+      "EDGE_CONFIGURATION_MISSING",
+      `configuration snapshot ${active.snapshot_id} carries no kitluy.config.catalog.v1 'catalog' section.`,
+      {
+        snapshotId: active.snapshot_id,
+        result: "CATALOG_NOT_DELIVERED"
+      }
+    );
+  }
+  return {
+    snapshotId: active.snapshot_id,
+    snapshotVersion: active.snapshot_version,
+    catalog,
+    money: money2
+  };
+}
+function priceIntakeOrRefuse(sections, lines, express) {
+  const priced = quoteIntakeLines(sections.catalog, sections.money, lines, { express });
+  if (!priced.ok) {
+    const { code, ...rest } = priced.refusal;
+    throw new HubCommandError(
+      code === "NO_LINES" || code === "QUANTITY_INVALID" ? "EDGE_INVALID_TRANSITION" : code === "WEIGHT_RULE_MISSING" || code === "MONEY_ROUNDING_UNKNOWN" || code === "EXPRESS_NOT_CONFIGURED" ? "EDGE_CONFIGURATION_MISSING" : "EDGE_REQUIRED_VALUE_MISSING",
+      `the Hub cannot price this intake: ${code}.`,
+      { result: code, ...rest }
+    );
+  }
+  return priced.quote;
+}
+function settleOrRefuse(totalMinor, money2, tender) {
+  const settled = settleCashTender(totalMinor, money2, tender);
+  if (!settled.ok) {
+    const { code, ...rest } = settled.refusal;
+    throw new HubCommandError(
+      code === "FX_RATE_UNAVAILABLE" ? "EDGE_CONFIGURATION_MISSING" : "EDGE_INVALID_TRANSITION",
+      `the tender does not settle this Booking: ${code}.`,
+      {
+        result: code,
+        ...Object.fromEntries(
+          Object.entries(rest).map(([k, v]) => [k, typeof v === "bigint" ? v.toString() : v])
+        )
+      }
+    );
+  }
+  return settled.settlement;
+}
+async function loadScopedDraftForUpdate(execution, draftId) {
+  const device = execution.auth.device;
+  const found = await execution.client.query(
+    `select * from edge_laundry.booking_draft
+      where id = $1::uuid and tenant_id = $2::uuid and digital_store_id = $3::uuid
+        and location_id = $4::uuid
+      for update`,
+    [draftId, device.tenantId, device.digitalStoreId, device.locationId]
+  );
+  const draft = found.rows[0];
+  if (draft === void 0) {
+    throw new HubCommandError(
+      "EDGE_AGGREGATE_NOT_FOUND",
+      `draft ${draftId} is not in this scope.`,
+      {
+        draftId,
+        result: "DRAFT_UNKNOWN"
+      }
+    );
+  }
+  return draft;
+}
+var s = (value) => value.toString();
+async function confirmBookingFromDraft(pool, input) {
+  const body = {
+    draft_id: input.draftId,
+    expected_version: input.expectedVersion,
+    express: input.express,
+    displayed_total_minor: s(input.displayedTotalMinor),
+    tender: {
+      type: "cash",
+      local_minor: s(input.tender.localMinor),
+      usd_cents: s(input.tender.usdCents)
+    },
+    lines: input.lines.map((line) => ({
+      service_id: line.serviceId.toLowerCase(),
+      ...line.pieceCount === void 0 ? {} : { piece_count: line.pieceCount },
+      ...line.weighedGrams === void 0 ? {} : { weighed_grams: line.weighedGrams }
+    }))
+  };
+  return executeHubCommand(
+    pool,
+    {
+      commandType: CONFIRM_FROM_DRAFT_COMMAND,
+      device: input.device,
+      idempotencyKey: input.idempotencyKey,
+      clientSequence: input.clientSequence,
+      businessDate: input.businessDate,
+      body,
+      ...input.requestId ? { requestId: input.requestId } : {},
+      ...input.correlationId ? { correlationId: input.correlationId } : {}
+    },
+    async (execution) => handler(execution, input, body)
+  );
+}
+async function handler(execution, input, body) {
+  const { client, auth } = execution;
+  const device = auth.device;
+  const draft = await loadScopedDraftForUpdate(execution, input.draftId);
+  if (draft.lifecycle !== "open") {
+    throw new HubCommandError(
+      "EDGE_INVALID_TRANSITION",
+      `draft ${draft.id} is ${draft.lifecycle}; only an open draft can be confirmed.`,
+      {
+        draftId: draft.id,
+        lifecycle: draft.lifecycle,
+        convertedBookingId: draft.converted_booking_id,
+        result: "DRAFT_NOT_OPEN"
+      }
+    );
+  }
+  const draftVersion = Number(draft.version);
+  if (draftVersion !== input.expectedVersion) {
+    throw new HubCommandError(
+      "EDGE_AGGREGATE_VERSION_CONFLICT",
+      `draft ${draft.id} is at version ${String(draftVersion)}, expected ${String(input.expectedVersion)}.`,
+      {
+        draftId: draft.id,
+        actual: draftVersion,
+        expected: input.expectedVersion,
+        result: "DRAFT_VERSION_STALE"
+      }
+    );
+  }
+  const sections = await loadIntakePricingSections(client, device.locationId);
+  const quote = priceIntakeOrRefuse(sections, input.lines, input.express);
+  if (quote.totalMinor !== input.displayedTotalMinor) {
+    throw new HubCommandError(
+      "EDGE_INVALID_TRANSITION",
+      `the terminal displayed ${s(input.displayedTotalMinor)} but the Hub prices ${s(quote.totalMinor)} ${quote.currencyCode}.`,
+      {
+        result: "PRICE_MISMATCH",
+        hubTotalMinor: s(quote.totalMinor),
+        displayedTotalMinor: s(input.displayedTotalMinor),
+        currencyCode: quote.currencyCode
+      }
+    );
+  }
+  const settlement = settleOrRefuse(quote.totalMinor, sections.money, input.tender);
+  const locationCode = requireLocationCode(sections.money.locationCode);
+  transitionBooking("DRAFT", "CONFIRMED/FINALIZED");
+  const fromStatus = statusForLifecycleState("DRAFT");
+  const status = statusForProductionState("RECEIVED");
+  const bookingNumber = await laundry_exports.formatDisplayNumber(
+    client,
+    "KLB",
+    locationCode,
+    execution.businessDate,
+    await laundry_exports.allocateBusinessNumber(
+      client,
+      device.locationId,
+      "booking",
+      execution.businessDate
+    )
+  );
+  const bookingId = uuidv7();
+  await laundry_exports.insertBooking(client, {
+    id: bookingId,
+    tenantId: device.tenantId,
+    digitalStoreId: device.digitalStoreId,
+    locationId: device.locationId,
+    bookingNumber,
+    customerId: draft.customer_id,
+    status,
+    businessDate: execution.businessDate,
+    currencyCode: quote.currencyCode,
+    currencyExponent: quote.currencyExponent,
+    subtotalMinor: quote.subtotalMinor,
+    discountMinor: 0n,
+    // The express surcharge is a priced addition, carried as the tax slot's
+    // sibling would be if there were one: totals = subtotal + surcharge.
+    taxMinor: quote.expressSurchargeMinor,
+    totalMinor: quote.totalMinor,
+    dueAt: null,
+    pickupMethod: "store_pickup",
+    configSnapshotId: sections.snapshotId
+  });
+  const lineIds = [];
+  for (const line of quote.lines) {
+    const lineId = uuidv7();
+    lineIds.push(lineId);
+    await laundry_exports.insertBookingLine(client, {
+      id: lineId,
+      tenantId: device.tenantId,
+      digitalStoreId: device.digitalStoreId,
+      locationId: device.locationId,
+      bookingId,
+      serviceId: line.serviceId,
+      serviceVersion: BigInt(line.serviceVersion),
+      displayName: line.displayName,
+      pricingMethod: line.pricingMethod,
+      unitPriceMinor: line.unitPriceMinor,
+      currencyCode: quote.currencyCode,
+      currencyExponent: quote.currencyExponent,
+      quantity: line.quantity,
+      unitCode: line.unitCode,
+      lineSubtotalMinor: line.lineSubtotalMinor,
+      discountMinor: 0n,
+      taxMinor: 0n,
+      lineTotalMinor: line.lineSubtotalMinor,
+      addonSnapshot: {
+        service_code: line.serviceCode,
+        family_code: line.familyCode,
+        ...line.weighedGrams === null ? {} : { weighed_grams: line.weighedGrams, billable_grams: line.billableGrams }
+      },
+      sourceConfigVersion: sections.snapshotVersion
+    });
+  }
+  let version = 1n;
+  const bookingPayload = {
+    booking_id: bookingId,
+    booking_number: bookingNumber,
+    hub_draft_id: draft.id,
+    from_status: fromStatus,
+    to_status: status,
+    walk_in: draft.walk_in,
+    local_customer_id: draft.customer_id,
+    customer_snapshot: draft.customer_snapshot,
+    preferred_language: draft.preferred_language,
+    intake_source: draft.intake_source,
+    customer_notes: draft.customer_notes,
+    staff_notes: draft.staff_notes,
+    currency_code: quote.currencyCode,
+    currency_exponent: quote.currencyExponent,
+    subtotal_minor: s(quote.subtotalMinor),
+    express: quote.express,
+    express_surcharge_bps: quote.expressSurchargeBps,
+    express_surcharge_minor: s(quote.expressSurchargeMinor),
+    total_minor: s(quote.totalMinor),
+    line_count: quote.lines.length,
+    lines: quote.lines.map((line, index) => ({
+      booking_line_id: lineIds[index],
+      service_id: line.serviceId,
+      service_code: line.serviceCode,
+      service_version: line.serviceVersion,
+      display_name: line.displayName,
+      family_code: line.familyCode,
+      pricing_method: line.pricingMethod,
+      unit_code: line.unitCode,
+      unit_price_minor: s(line.unitPriceMinor),
+      quantity: line.quantity,
+      piece_count: line.pieceCount,
+      weighed_grams: line.weighedGrams,
+      billable_grams: line.billableGrams,
+      line_subtotal_minor: s(line.lineSubtotalMinor)
+    })),
+    config_snapshot_id: sections.snapshotId,
+    config_snapshot_version: s(sections.snapshotVersion)
+  };
+  const bookingEvent = await execution.recorder.record({
+    aggregateType: "booking",
+    aggregateId: bookingId,
+    aggregateVersion: version,
+    eventName: execution.definition.auditEvent,
+    payload: bookingPayload
+  });
+  await laundry_exports.appendStatusEvent(client, {
+    id: uuidv7(),
+    tenantId: device.tenantId,
+    digitalStoreId: device.digitalStoreId,
+    locationId: device.locationId,
+    bookingId,
+    fromStatus,
+    toStatus: status,
+    reasonCode: null,
+    actorId: device.actorId,
+    terminalDeviceId: device.terminalDeviceId,
+    localSequence: await laundry_exports.nextBookingLocalSequence(client, "status_event", bookingId),
+    eventId: bookingEvent.eventId
+  });
+  let paymentId = null;
+  let paymentNumber = null;
+  let cashMovementId = null;
+  if (settlement.appliedMinor > 0n) {
+    paymentId = uuidv7();
+    paymentNumber = await laundry_exports.formatDisplayNumber(
+      client,
+      "KLP",
+      locationCode,
+      execution.businessDate,
+      await laundry_exports.allocateBusinessNumber(
+        client,
+        device.locationId,
+        "payment",
+        execution.businessDate
+      )
+    );
+    const paymentPayload = {
+      booking_id: bookingId,
+      booking_number: bookingNumber,
+      payment_id: paymentId,
+      payment_number: paymentNumber,
+      payment_type: "cash",
+      amount_minor: s(settlement.appliedMinor),
+      tendered_minor: s(settlement.tenderedMinor),
+      change_due_minor: s(settlement.changeDueMinor),
+      currency_code: settlement.currencyCode,
+      currency_exponent: settlement.currencyExponent,
+      payment_state: "confirmed",
+      is_paid: true,
+      // KBR-PAY-004: cash in full at intake settles the Booking; it is not a deposit.
+      allocation: "settlement",
+      legs: settlement.legs.map((leg) => ({
+        tender_type: leg.tenderType,
+        currency_code: leg.currencyCode,
+        currency_exponent: leg.currencyExponent,
+        amount_minor: s(leg.amountMinor),
+        local_equivalent_minor: s(leg.localEquivalentMinor),
+        khr_per_usd: leg.khrPerUsd
+      })),
+      posting_dedup_key: postingDeduplicationKey("payment", paymentId),
+      settlement_reference: null,
+      // The Hub genuinely does not know the cloud posting outcome (WS-10 owns it).
+      cloud_posting_status: "unknown"
+    };
+    const paymentEvent = await execution.recorder.record({
+      aggregateType: "payment",
+      aggregateId: paymentId,
+      aggregateVersion: 1n,
+      eventName: "payment.recorded",
+      payload: paymentPayload,
+      causationId: bookingEvent.eventId
+    });
+    await payments_exports.insertPayment(client, {
+      id: paymentId,
+      tenantId: device.tenantId,
+      digitalStoreId: device.digitalStoreId,
+      locationId: device.locationId,
+      bookingId,
+      paymentNumber,
+      paymentType: "cash",
+      amountMinor: settlement.appliedMinor,
+      currencyCode: settlement.currencyCode,
+      currencyExponent: settlement.currencyExponent,
+      state: "confirmed",
+      providerCode: null,
+      providerReference: null,
+      confirmed: true,
+      actorId: device.actorId,
+      terminalDeviceId: device.terminalDeviceId,
+      eventId: paymentEvent.eventId,
+      // KLREQ-026: the payment ROW carries the TERMINAL COMMAND key.
+      idempotencyKey: execution.idempotencyKey
+    });
+    for (const leg of settlement.legs) {
+      const legEvent = await execution.recorder.record({
+        aggregateType: "payment",
+        aggregateId: paymentId,
+        aggregateVersion: 1n,
+        eventName: TENDER_RECORDED_EVENT_NAME,
+        payload: {
+          booking_id: bookingId,
+          payment_id: paymentId,
+          tender_type: leg.tenderType,
+          currency_code: leg.currencyCode,
+          currency_exponent: leg.currencyExponent,
+          amount_minor: s(leg.amountMinor),
+          local_currency_code: settlement.currencyCode,
+          local_equivalent_minor: s(leg.localEquivalentMinor),
+          khr_per_usd: leg.khrPerUsd
+        },
+        causationId: paymentEvent.eventId
+      });
+      await payments_exports.insertTenderLeg(client, {
+        id: uuidv7(),
+        tenantId: device.tenantId,
+        digitalStoreId: device.digitalStoreId,
+        locationId: device.locationId,
+        paymentId,
+        tenderType: leg.tenderType,
+        amountMinor: leg.amountMinor,
+        currencyCode: leg.currencyCode,
+        currencyExponent: leg.currencyExponent,
+        state: "settled",
+        providerReference: null,
+        eventId: legEvent.eventId
+      });
+    }
+    const paid = await laundry_exports.updateBookingProjection(client, {
+      bookingId,
+      expectedVersion: version,
+      paidMinor: settlement.appliedMinor
+    });
+    if (paid === void 0) {
+      throw new HubCommandError(
+        "EDGE_AGGREGATE_VERSION_CONFLICT",
+        `Booking ${bookingId} changed concurrently while recording the payment.`
+      );
+    }
+    version = paid;
+    const shift = await payments_exports.findOpenShift(
+      client,
+      device.locationId,
+      device.terminalDeviceId
+    );
+    if (shift) {
+      const movementEvent = await execution.recorder.record({
+        aggregateType: "payment",
+        aggregateId: paymentId,
+        aggregateVersion: 1n,
+        eventName: "cash.movement_recorded",
+        payload: {
+          booking_id: bookingId,
+          payment_id: paymentId,
+          shift_id: shift.id,
+          movement_type: "payment_received",
+          amount_minor: s(settlement.appliedMinor),
+          currency_code: settlement.currencyCode,
+          currency_exponent: settlement.currencyExponent,
+          posting_dedup_key: postingDeduplicationKey("cash_movement", paymentId),
+          cloud_posting_status: "unknown"
+        },
+        causationId: paymentEvent.eventId
+      });
+      cashMovementId = uuidv7();
+      await payments_exports.insertCashMovement(client, {
+        id: cashMovementId,
+        tenantId: device.tenantId,
+        digitalStoreId: device.digitalStoreId,
+        locationId: device.locationId,
+        shiftId: shift.id,
+        movementType: "payment_received",
+        amountMinor: settlement.appliedMinor,
+        currencyCode: settlement.currencyCode,
+        currencyExponent: settlement.currencyExponent,
+        reasonCode: null,
+        relatedPaymentId: paymentId,
+        actorId: device.actorId,
+        terminalDeviceId: device.terminalDeviceId,
+        eventId: movementEvent.eventId
+      });
+    }
+  }
+  const receiptId = uuidv7();
+  const receiptNumber = await laundry_exports.formatDisplayNumber(
+    client,
+    "KLR",
+    locationCode,
+    execution.businessDate,
+    await laundry_exports.allocateBusinessNumber(
+      client,
+      device.locationId,
+      "receipt",
+      execution.businessDate
+    )
+  );
+  const issuedAt = (await client.query(`select now() as now`)).rows[0]?.now ?? /* @__PURE__ */ new Date();
+  const receiptPayload = {
+    document_type: BOOKING_RECEIPT_DOCUMENT_TYPE,
+    template_version: s(BOOKING_RECEIPT_TEMPLATE_VERSION),
+    receipt_id: receiptId,
+    receipt_number: receiptNumber,
+    /** The Hub's transaction clock — the same instant the receipt row carries. */
+    issued_at: issuedAt.toISOString(),
+    booking_id: bookingId,
+    booking_number: bookingNumber,
+    business_date: execution.businessDate,
+    location_code: locationCode,
+    customer: draft.walk_in ? { walk_in: true } : draft.customer_snapshot,
+    preferred_language: draft.preferred_language,
+    currency_code: quote.currencyCode,
+    currency_exponent: quote.currencyExponent,
+    lines: bookingPayload.lines,
+    subtotal_minor: s(quote.subtotalMinor),
+    express: quote.express,
+    express_surcharge_minor: s(quote.expressSurchargeMinor),
+    total_minor: s(quote.totalMinor),
+    payment: paymentId === null ? null : {
+      payment_id: paymentId,
+      payment_number: paymentNumber,
+      payment_type: "cash",
+      amount_minor: s(settlement.appliedMinor),
+      tendered_minor: s(settlement.tenderedMinor),
+      change_due_minor: s(settlement.changeDueMinor),
+      legs: settlement.legs.map((leg) => ({
+        currency_code: leg.currencyCode,
+        currency_exponent: leg.currencyExponent,
+        amount_minor: s(leg.amountMinor),
+        local_equivalent_minor: s(leg.localEquivalentMinor),
+        khr_per_usd: leg.khrPerUsd
+      }))
+    },
+    paid_minor: s(settlement.appliedMinor),
+    balance_minor: s(quote.totalMinor - settlement.appliedMinor)
+  };
+  const receiptSha256 = sha256Hex2(canonicalJson(receiptPayload));
+  const receiptEvent = await execution.recorder.record({
+    aggregateType: "booking",
+    aggregateId: bookingId,
+    aggregateVersion: version,
+    eventName: RECEIPT_ISSUED_EVENT_NAME,
+    payload: {
+      receipt_id: receiptId,
+      receipt_number: receiptNumber,
+      booking_id: bookingId,
+      booking_number: bookingNumber,
+      payment_id: paymentId,
+      document_type: BOOKING_RECEIPT_DOCUMENT_TYPE,
+      template_version: s(BOOKING_RECEIPT_TEMPLATE_VERSION),
+      content_sha256: receiptSha256
+    },
+    causationId: bookingEvent.eventId
+  });
+  await documents_exports.insertReceipt(client, {
+    id: receiptId,
+    tenantId: device.tenantId,
+    digitalStoreId: device.digitalStoreId,
+    locationId: device.locationId,
+    bookingId,
+    paymentId,
+    receiptNumber,
+    documentType: BOOKING_RECEIPT_DOCUMENT_TYPE,
+    templateVersion: BOOKING_RECEIPT_TEMPLATE_VERSION,
+    contentSha256: receiptSha256,
+    issuedBy: device.actorId,
+    eventId: receiptEvent.eventId
+  });
+  let printJobId = null;
+  let printState = "no_printer_binding";
+  const binding = await config_exports.findPeripheralBinding(
+    client,
+    device.locationId,
+    "receipt_printer"
+  );
+  if (binding) {
+    printJobId = await enqueueReceiptPrint(client, {
+      tenantId: device.tenantId,
+      digitalStoreId: device.digitalStoreId,
+      locationId: device.locationId,
+      documentType: BOOKING_RECEIPT_DOCUMENT_TYPE,
+      documentId: receiptId,
+      templateVersion: BOOKING_RECEIPT_TEMPLATE_VERSION,
+      payloadSha256: receiptSha256,
+      createdBy: device.actorId,
+      terminalDeviceId: device.terminalDeviceId
+    });
+    printState = "queued";
+  }
+  const draftVersionAfter = draftVersion + 1;
+  const converted = await client.query(
+    `update edge_laundry.booking_draft
+        set lifecycle = 'converted', converted_booking_id = $2::uuid, version = $3
+      where id = $1::uuid
+      returning updated_at, created_at, sync_state`,
+    [draft.id, bookingId, draftVersionAfter]
+  );
+  const draftAfter = converted.rows[0];
+  if (draftAfter === void 0) {
+    throw new HubCommandError(
+      "EDGE_AGGREGATE_VERSION_CONFLICT",
+      `draft ${draft.id} changed concurrently; nothing was written.`
+    );
+  }
+  const draftReceiptId = uuidv7();
+  const draftChanges = { lifecycle: "converted", converted_booking_id: bookingId };
+  await client.query(
+    `insert into edge_laundry.booking_draft_event
+       (id, draft_id, event_type, request_key, request_hash, changes,
+        version_after, actor_id, terminal_device_id, session_id, correlation_id)
+     values ($1::uuid, $2::uuid, 'updated', $3, $4, $5::jsonb, $6, $7::uuid, $8::uuid,
+             $9::uuid, $10::uuid)`,
+    [
+      draftReceiptId,
+      draft.id,
+      execution.idempotencyKey,
+      sha256Hex2(canonicalJson(body)),
+      JSON.stringify(draftChanges),
+      draftVersionAfter,
+      device.actorId,
+      device.terminalDeviceId,
+      device.sessionId,
+      execution.correlationId
+    ]
+  );
+  await execution.recorder.record({
+    aggregateType: "booking_draft",
+    aggregateId: draft.id,
+    aggregateVersion: BigInt(draftVersionAfter),
+    eventName: BOOKING_DRAFT_EVENT_NAME,
+    payload: {
+      booking_draft_event_id: draftReceiptId,
+      hub_draft_id: draft.id,
+      event_type: "updated",
+      tenant_id: device.tenantId,
+      digital_store_id: device.digitalStoreId,
+      location_id: device.locationId,
+      walk_in: draft.walk_in,
+      local_customer_id: draft.customer_id,
+      customer_snapshot: draft.customer_snapshot,
+      lifecycle: "converted",
+      converted_booking_id: bookingId,
+      version: draftVersionAfter,
+      preferred_language: draft.preferred_language,
+      intake_source: draft.intake_source,
+      cancel_reason_code: null,
+      hub_created_at: draftAfter.created_at.toISOString(),
+      hub_updated_at: draftAfter.updated_at.toISOString(),
+      correlation_id: execution.correlationId
+    },
+    causationId: bookingEvent.eventId
+  });
+  const finalBooking = await laundry_exports.findBooking(client, bookingId);
+  const resultJson = {
+    booking: {
+      booking_id: bookingId,
+      booking_number: bookingNumber,
+      status,
+      currency_code: quote.currencyCode,
+      currency_exponent: quote.currencyExponent,
+      subtotal_minor: s(quote.subtotalMinor),
+      express: quote.express,
+      express_surcharge_minor: s(quote.expressSurchargeMinor),
+      total_minor: s(quote.totalMinor),
+      paid_minor: s(settlement.appliedMinor),
+      balance_minor: s(finalBooking?.balance_minor ?? quote.totalMinor - settlement.appliedMinor),
+      line_count: quote.lines.length,
+      aggregate_version: s(finalBooking?.aggregate_version ?? version)
+    },
+    lines: bookingPayload.lines,
+    payment: paymentId === null ? null : {
+      payment_id: paymentId,
+      payment_number: paymentNumber,
+      amount_minor: s(settlement.appliedMinor),
+      tendered_minor: s(settlement.tenderedMinor),
+      change_due_minor: s(settlement.changeDueMinor),
+      currency_code: settlement.currencyCode,
+      currency_exponent: settlement.currencyExponent,
+      legs: receiptPayload.payment?.legs ?? [],
+      cash_movement_id: cashMovementId
+    },
+    receipt: {
+      receipt_id: receiptId,
+      receipt_number: receiptNumber,
+      content_sha256: receiptSha256,
+      payload: receiptPayload,
+      print_job_id: printJobId,
+      print_state: printState
+    },
+    draft: {
+      draft_id: draft.id,
+      lifecycle: "converted",
+      version: draftVersionAfter,
+      converted_booking_id: bookingId
+    }
+  };
+  return {
+    aggregateId: bookingId,
+    aggregateVersion: finalBooking?.aggregate_version ?? version,
+    resultJson,
+    auditResourceType: "booking",
+    auditResourceId: bookingId,
+    auditDetails: {
+      hub_draft_id: draft.id,
+      booking_number: bookingNumber,
+      total_minor: s(quote.totalMinor),
+      payment_id: paymentId,
+      receipt_id: receiptId,
+      payload_sha256: payloadChecksum(bookingPayload)
+    }
+  };
+}
+
+// src/hub/edge/t1-operations.ts
+init_db();
+init_errors();
+var s2 = (value) => value.toString();
+async function quoteDraftIntake(pool, authority, input) {
+  return withHubTransaction(
+    pool,
+    async (client) => {
+      const draft = await client.query(
+        `select lifecycle, converted_booking_id from edge_laundry.booking_draft
+          where id = $1::uuid and tenant_id = $2::uuid and digital_store_id = $3::uuid
+            and location_id = $4::uuid`,
+        [input.draftId, authority.tenantId, authority.digitalStoreId, authority.locationId]
+      );
+      const row = draft.rows[0];
+      if (row === void 0) {
+        throw new HubCommandError("EDGE_AGGREGATE_NOT_FOUND", "no such draft in this scope", {
+          result: "DRAFT_UNKNOWN"
+        });
+      }
+      if (row.lifecycle !== "open") {
+        throw new HubCommandError("EDGE_INVALID_TRANSITION", `draft is ${row.lifecycle}`, {
+          result: "DRAFT_NOT_OPEN",
+          lifecycle: row.lifecycle,
+          convertedBookingId: row.converted_booking_id
+        });
+      }
+      const sections = await loadIntakePricingSections(client, authority.locationId);
+      const quote = priceIntakeOrRefuse(sections, input.lines, input.express);
+      return {
+        currencyCode: quote.currencyCode,
+        currencyExponent: quote.currencyExponent,
+        lines: quote.lines.map((line) => ({
+          serviceId: line.serviceId,
+          serviceCode: line.serviceCode,
+          displayName: line.displayName,
+          familyCode: line.familyCode,
+          pricingMethod: line.pricingMethod,
+          unitCode: line.unitCode,
+          unitPriceMinor: s2(line.unitPriceMinor),
+          quantity: line.quantity,
+          pieceCount: line.pieceCount,
+          weighedGrams: line.weighedGrams,
+          billableGrams: line.billableGrams,
+          lineSubtotalMinor: s2(line.lineSubtotalMinor)
+        })),
+        subtotalMinor: s2(quote.subtotalMinor),
+        express: quote.express,
+        expressSurchargeBps: quote.expressSurchargeBps,
+        expressSurchargeMinor: s2(quote.expressSurchargeMinor),
+        totalMinor: s2(quote.totalMinor),
+        khrPerUsd: sections.money.khrPerUsd,
+        locationCode: sections.money.locationCode,
+        configurationVersion: s2(sections.snapshotVersion)
+      };
+    },
+    HUB_RUNTIME_ROLE
+  );
+}
+async function deviceContextFromAuthority(client, input) {
+  if (!isCanonicalIdempotencyKey(input.idempotencyKey)) {
+    throw new HubCommandError(
+      "EDGE_IDEMPOTENCY_KEY_MALFORMED",
+      "the command key is not kl1.{terminal_device_uuid}.{client_sequence} (offline contract \xA72).",
+      { result: "EDGE_IDEMPOTENCY_KEY_MALFORMED" }
+    );
+  }
+  const parsed = parseIdempotencyKey(input.idempotencyKey);
+  if (parsed.terminalDeviceId.toLowerCase() !== input.terminalDeviceId.toLowerCase()) {
+    throw new HubCommandError(
+      "EDGE_IDEMPOTENCY_KEY_MALFORMED",
+      "the command key names a different terminal than the authenticated one.",
+      { result: "EDGE_IDEMPOTENCY_KEY_MALFORMED" }
+    );
+  }
+  const terminal = await client.query(
+    `select assignment_generation from edge_identity.terminal_device where id = $1::uuid`,
+    [input.terminalDeviceId]
+  );
+  const row = terminal.rows[0];
+  if (row === void 0) {
+    throw new HubCommandError("EDGE_TERMINAL_UNKNOWN", "the terminal projection is missing");
+  }
+  return {
+    device: {
+      terminalDeviceId: input.terminalDeviceId,
+      sessionId: input.authority.sessionId,
+      actorId: input.authority.actorId,
+      profileCode: input.authority.profileCode,
+      assignmentGeneration: row.assignment_generation,
+      tenantId: input.authority.tenantId,
+      digitalStoreId: input.authority.digitalStoreId,
+      locationId: input.authority.locationId,
+      environment: input.environment
+    },
+    clientSequence: parsed.clientSequence
+  };
+}
+async function hubBusinessDate(pool) {
+  return withHubTransaction(
+    pool,
+    async (client) => {
+      const result = await client.query(
+        `select to_char(current_date, 'YYYY-MM-DD') as d`
+      );
+      return result.rows[0]?.d ?? (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    },
+    HUB_RUNTIME_ROLE
+  );
+}
+async function confirmDraftIntakeForTerminal(pool, input) {
+  const context = await withHubTransaction(
+    pool,
+    (client) => deviceContextFromAuthority(client, {
+      terminalDeviceId: input.terminalDeviceId,
+      authority: input.authority,
+      environment: input.environment,
+      idempotencyKey: input.idempotencyKey
+    }),
+    HUB_RUNTIME_ROLE
+  );
+  return confirmBookingFromDraft(pool, {
+    device: context.device,
+    idempotencyKey: input.idempotencyKey,
+    clientSequence: context.clientSequence,
+    businessDate: await hubBusinessDate(pool),
+    correlationId: input.correlationId,
+    draftId: input.draftId,
+    expectedVersion: input.expectedVersion,
+    lines: input.lines,
+    express: input.express,
+    displayedTotalMinor: input.displayedTotalMinor,
+    tender: input.tender
+  });
+}
+var RECENT_BOOKINGS_LIMIT = 50;
+async function listRecentBookings(pool, authority) {
+  return withHubTransaction(
+    pool,
+    async (client) => {
+      const rows = await client.query(
+        `select b.id, b.booking_number, b.status, to_char(b.business_date, 'YYYY-MM-DD') as business_date,
+                b.currency_code, b.currency_exponent,
+                b.total_minor::text as total_minor, b.paid_minor::text as paid_minor,
+                b.balance_minor::text as balance_minor,
+                (select count(*)::text from edge_laundry.booking_line l where l.booking_id = b.id) as line_count,
+                coalesce(d.customer_snapshot ->> 'displayName', c.display_name) as customer_display_name,
+                coalesce(d.walk_in, b.customer_id is null) as walk_in,
+                (select r.receipt_number from edge_documents.receipt r
+                  where r.booking_id = b.id order by r.issued_at desc limit 1) as receipt_number,
+                b.created_at
+           from edge_laundry.booking b
+           left join edge_laundry.booking_draft d on d.converted_booking_id = b.id
+           left join edge_core.customer c on c.id = b.customer_id
+          where b.tenant_id = $1::uuid and b.digital_store_id = $2::uuid
+            and b.location_id = $3::uuid and b.business_date = current_date
+          order by b.created_at desc
+          limit $4`,
+        [authority.tenantId, authority.digitalStoreId, authority.locationId, RECENT_BOOKINGS_LIMIT]
+      );
+      return rows.rows.map((row) => ({
+        bookingId: row.id,
+        bookingNumber: row.booking_number,
+        status: row.status,
+        businessDate: row.business_date,
+        currencyCode: row.currency_code,
+        currencyExponent: row.currency_exponent,
+        totalMinor: row.total_minor,
+        paidMinor: row.paid_minor,
+        balanceMinor: row.balance_minor,
+        lineCount: Number(row.line_count),
+        customerDisplayName: row.customer_display_name,
+        walkIn: row.walk_in,
+        receiptNumber: row.receipt_number,
+        createdAt: row.created_at.toISOString()
+      }));
+    },
+    HUB_RUNTIME_ROLE
+  );
+}
+
+// src/hub/edge/routes.ts
+var UUID3 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+var HEX643 = /^[0-9a-f]{64}$/;
 var SIGNATURE_B64URL = /^[A-Za-z0-9_-]{1,120}$/;
 var IDEMPOTENCY_KEY = /^[A-Za-z0-9_.:-]{1,96}$/;
 var PROFILE2 = /^[a-z0-9_]+\.t[1-9][0-9]*\.[a-z0-9_]+$/;
@@ -12897,6 +17453,8 @@ var EDGE_CUSTOMERS_SEARCH_PATH = "/edge/v1/customers/search";
 var EDGE_CUSTOMERS_PATH = "/edge/v1/customers";
 var EDGE_BOOKING_DRAFTS_PATH = "/edge/v1/laundry/bookings/drafts";
 var MAX_INTAKE_BODY_BYTES = 8 * 1024;
+var EDGE_BOOKINGS_RECENT_PATH = "/edge/v1/laundry/bookings/recent";
+var MAX_OPERATION_BODY_BYTES = 32 * 1024;
 var INTAKE_SESSION_HEADER = "x-kitluy-session-id";
 var CloudActivationUnavailableError = class extends Error {
   constructor() {
@@ -13000,7 +17558,52 @@ var CANONICAL_ERROR = {
   PIN_SETUP_REQUIRED: "RESOURCE_VERSION_CONFLICT",
   PIN_INCORRECT: "AUTHENTICATION_REQUIRED",
   PIN_LOCKED: "RATE_LIMITED",
-  TERMINAL_UNKNOWN: "DEVICE_NOT_ASSIGNED"
+  TERMINAL_UNKNOWN: "DEVICE_NOT_ASSIGNED",
+  // T1 Store operations (slice 2): what the Hub could not price or settle,
+  // and the canonical command pipeline's own refusals (hub/errors.ts).
+  CATALOG_NOT_DELIVERED: "DEPENDENCY_UNAVAILABLE",
+  MONEY_CONTRACT_MISSING: "DEPENDENCY_UNAVAILABLE",
+  NO_LINES: "VALIDATION_FAILED",
+  SERVICE_UNKNOWN: "VALIDATION_FAILED",
+  PRICING_MODE_MISMATCH: "VALIDATION_FAILED",
+  QUANTITY_INVALID: "VALIDATION_FAILED",
+  CURRENCY_MISMATCH: "DEPENDENCY_UNAVAILABLE",
+  WEIGHT_RULE_MISSING: "DEPENDENCY_UNAVAILABLE",
+  MONEY_ROUNDING_UNKNOWN: "DEPENDENCY_UNAVAILABLE",
+  EXPRESS_NOT_CONFIGURED: "VALIDATION_FAILED",
+  PRICE_MISMATCH: "RESOURCE_VERSION_CONFLICT",
+  TENDER_INVALID: "VALIDATION_FAILED",
+  FX_RATE_UNAVAILABLE: "DEPENDENCY_UNAVAILABLE",
+  TENDER_INSUFFICIENT: "VALIDATION_FAILED",
+  EDGE_IDEMPOTENCY_KEY_MALFORMED: "VALIDATION_FAILED",
+  EDGE_IDEMPOTENCY_PAYLOAD_MISMATCH: "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST",
+  IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST: "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST",
+  EDGE_SEQUENCE_REPLAY_REJECTED: "RESOURCE_VERSION_CONFLICT",
+  EDGE_SEQUENCE_GAP: "RESOURCE_VERSION_CONFLICT",
+  EDGE_AGGREGATE_VERSION_CONFLICT: "RESOURCE_VERSION_CONFLICT",
+  EDGE_SCOPE_MISMATCH: "SCOPE_PERMISSION_DENIED",
+  EDGE_TERMINAL_UNKNOWN: "DEVICE_NOT_ASSIGNED",
+  EDGE_DEVICE_CONTEXT_INVALID: "VALIDATION_FAILED",
+  EDGE_DEVICE_NOT_ASSIGNED: "DEVICE_NOT_ASSIGNED",
+  EDGE_DEVICE_REVOKED: "DEVICE_NOT_ASSIGNED",
+  EDGE_ASSIGNMENT_GENERATION_MISMATCH: "RESOURCE_VERSION_CONFLICT",
+  EDGE_SESSION_INVALID: "AUTHENTICATION_REQUIRED",
+  EDGE_SESSION_EXPIRED: "AUTHENTICATION_REQUIRED",
+  EDGE_PROFILE_NOT_AUTHORIZED: "PROFILE_NOT_ALLOWED",
+  EDGE_PERMISSION_DENIED: "SCOPE_PERMISSION_DENIED",
+  EDGE_PERMISSION_KEY_UNREGISTERED: "SCOPE_PERMISSION_DENIED",
+  EDGE_RESOURCE_SCOPE_DENIED: "SCOPE_PERMISSION_DENIED",
+  EDGE_ENVIRONMENT_DENIED: "SCOPE_PERMISSION_DENIED",
+  EDGE_APPROVAL_REQUIRED: "SCOPE_PERMISSION_DENIED",
+  EDGE_SELF_APPROVAL_FORBIDDEN: "SCOPE_PERMISSION_DENIED",
+  EDGE_AGGREGATE_NOT_FOUND: "RESOURCE_NOT_FOUND",
+  EDGE_INVALID_TRANSITION: "RESOURCE_VERSION_CONFLICT",
+  EDGE_PAYMENT_GATE_BLOCKED: "RESOURCE_VERSION_CONFLICT",
+  EDGE_CUSTODY_GATE_BLOCKED: "RESOURCE_VERSION_CONFLICT",
+  EDGE_CONFIGURATION_MISSING: "DEPENDENCY_UNAVAILABLE",
+  EDGE_REQUIRED_VALUE_MISSING: "VALIDATION_FAILED",
+  EDGE_COMMAND_UNKNOWN: "INTERNAL_ERROR",
+  EDGE_COMMAND_INACTIVE: "SCOPE_PERMISSION_DENIED"
 };
 var CANONICAL_MESSAGE = {
   VALIDATION_FAILED: "the request is invalid",
@@ -13205,7 +17808,7 @@ function matchRoute(method, path) {
   const customer = /^\/edge\/v1\/customers\/([^/]+)(?:\/(consent-decisions))?$/.exec(clean);
   if (customer !== null) {
     const customerId = customer[1] ?? "";
-    if (!UUID2.test(customerId)) return null;
+    if (!UUID3.test(customerId)) return null;
     if (customer[2] === "consent-decisions") {
       return method === "POST" ? { route: "customers-consent", customerId } : "METHOD_NOT_ALLOWED";
     }
@@ -13214,23 +17817,35 @@ function matchRoute(method, path) {
   if (clean === EDGE_BOOKING_DRAFTS_PATH) {
     return method === "POST" ? { route: "drafts-create" } : "METHOD_NOT_ALLOWED";
   }
-  const draft = /^\/edge\/v1\/laundry\/bookings\/drafts\/([^/]+)(?:\/(cancel))?$/.exec(clean);
+  if (clean === EDGE_BOOKINGS_RECENT_PATH) {
+    return method === "GET" ? { route: "bookings-recent" } : "METHOD_NOT_ALLOWED";
+  }
+  const draft = /^\/edge\/v1\/laundry\/bookings\/drafts\/([^/]+)(?:\/(cancel|quote))?$/.exec(clean);
   if (draft !== null) {
     const draftId = draft[1] ?? "";
-    if (!UUID2.test(draftId)) return null;
+    if (!UUID3.test(draftId)) return null;
     if (draft[2] === "cancel") {
       return method === "POST" ? { route: "drafts-cancel", draftId } : "METHOD_NOT_ALLOWED";
+    }
+    if (draft[2] === "quote") {
+      return method === "POST" ? { route: "drafts-quote", draftId } : "METHOD_NOT_ALLOWED";
     }
     if (method === "GET") return { route: "drafts-read", draftId };
     if (method === "PATCH") return { route: "drafts-update", draftId };
     return "METHOD_NOT_ALLOWED";
+  }
+  const confirm = /^\/edge\/v1\/laundry\/bookings\/([^/]+)\/confirm-intake$/.exec(clean);
+  if (confirm !== null) {
+    const draftId = confirm[1] ?? "";
+    if (!UUID3.test(draftId)) return null;
+    return method === "POST" ? { route: "bookings-confirm", draftId } : "METHOD_NOT_ALLOWED";
   }
   const sub = /^\/edge\/v1\/terminal-pairing\/sessions\/([^/]+)\/(terminal-proof|complete|receipt)$/.exec(
     clean
   );
   if (sub !== null) {
     const sessionId = sub[1] ?? "";
-    if (!UUID2.test(sessionId)) return null;
+    if (!UUID3.test(sessionId)) return null;
     const tail = sub[2];
     if (tail === "terminal-proof") {
       return method === "POST" ? { route: "pairing-proof", sessionId } : "METHOD_NOT_ALLOWED";
@@ -13325,7 +17940,10 @@ function createEdgeTerminalRouter(deps) {
         "drafts-create",
         "drafts-read",
         "drafts-update",
-        "drafts-cancel"
+        "drafts-cancel",
+        "drafts-quote",
+        "bookings-confirm",
+        "bookings-recent"
       ];
       if (QUERYLESS_ROUTES.includes(matched.route) && queryString !== "") {
         return finish(
@@ -13433,7 +18051,7 @@ function createEdgeTerminalRouter(deps) {
                 "REQUEST_INVALID"
               );
             }
-            const actorId = requireShaped(body, "actorId", UUID2);
+            const actorId = requireShaped(body, "actorId", UUID3);
             const profileCode = requireShaped(body, "profileCode", PROFILE2);
             const passcode = typeof body["passcode"] === "string" ? body["passcode"] : null;
             if (actorId === null || profileCode === null || passcode === null || passcode.length < 4 || passcode.length > 128) {
@@ -13502,7 +18120,7 @@ function createEdgeTerminalRouter(deps) {
                 "REQUEST_INVALID"
               );
             }
-            const sessionId = requireShaped(body, "sessionId", UUID2);
+            const sessionId = requireShaped(body, "sessionId", UUID3);
             if (sessionId === null) {
               return finish(
                 operation,
@@ -13556,6 +18174,14 @@ function createEdgeTerminalRouter(deps) {
                 queryString,
                 correlationId
               ),
+              "HANDLED"
+            );
+          case "drafts-quote":
+          case "bookings-confirm":
+          case "bookings-recent":
+            return finish(
+              operation,
+              await handleT1Operations(deps, terminal, matched, request, body, correlationId),
               "HANDLED"
             );
           case "activation-challenges":
@@ -13659,7 +18285,7 @@ async function handleActivationChallenges(deps, body, correlationId) {
   if (unknown.length > 0) {
     return invalid(correlationId, "unknown fields are refused, not ignored", unknown);
   }
-  const terminalAssignmentId = requireShaped(body, "terminalAssignmentId", UUID2);
+  const terminalAssignmentId = requireShaped(body, "terminalAssignmentId", UUID3);
   const redemptionIdempotencyKey = requireShaped(body, "redemptionIdempotencyKey", IDEMPOTENCY_KEY);
   const missing = [
     ...terminalAssignmentId === null ? ["terminalAssignmentId"] : [],
@@ -13715,7 +18341,7 @@ async function handleActivationComplete(deps, request, body, correlationId) {
   if (body["protocolVersion"] !== ACTIVATION_PROTOCOL_VERSION) {
     return invalid(correlationId, "unsupported activation protocol version", ["protocolVersion"]);
   }
-  const activationChallengeId = requireShaped(body, "activationChallengeId", UUID2);
+  const activationChallengeId = requireShaped(body, "activationChallengeId", UUID3);
   const signature = requireShaped(body, "signature", SIGNATURE_B64URL);
   const pemRaw = body["terminalPublicKeyPem"];
   const terminalPublicKeyPem = typeof pemRaw === "string" && pemRaw.length <= MAX_PEM_CHARS && pemRaw.includes("BEGIN PUBLIC KEY") && pemRaw.includes("END PUBLIC KEY") ? pemRaw : null;
@@ -13788,7 +18414,7 @@ async function handlePairingSessions(deps, terminal, body, correlationId) {
     return invalid(correlationId, "unknown fields are refused, not ignored", unknown);
   }
   const requestedProfileCode = requireShaped(body, "requestedProfileCode", PROFILE2);
-  const terminalNonce = requireShaped(body, "terminalNonce", HEX642);
+  const terminalNonce = requireShaped(body, "terminalNonce", HEX643);
   const protocolVersion = requireShaped(body, "protocolVersion", /^[0-9.]{1,16}$/);
   const environment = requireShaped(body, "environment", /^(development|pilot|production)$/);
   const missing = [
@@ -14065,7 +18691,7 @@ async function handleTerminalPin(deps, terminal, route, request, body, correlati
     if (request.rawBody !== "") return invalid(correlationId, "a GET carries no body");
     const header = request.headers[INTAKE_SESSION_HEADER];
     const sessionId = typeof header === "string" && header !== "" ? header : null;
-    if (sessionId !== null && !UUID2.test(sessionId)) {
+    if (sessionId !== null && !UUID3.test(sessionId)) {
       return invalid(correlationId, `${INTAKE_SESSION_HEADER} must be a session id`);
     }
     const status = await readTerminalPinStatus(deps.pool, {
@@ -14085,7 +18711,7 @@ async function handleTerminalPin(deps, terminal, route, request, body, correlati
   if (missing.length > 0) return invalid(correlationId, "required fields are missing", missing);
   if (route === "terminal-pin-lock") {
     const sessionId = text("sessionId") ?? "";
-    if (!UUID2.test(sessionId)) return invalid(correlationId, "sessionId must be a session id");
+    if (!UUID3.test(sessionId)) return invalid(correlationId, "sessionId must be a session id");
     const locked = await lockTerminalSession(deps.pool, {
       terminalDeviceId: terminal.terminalDeviceId,
       sessionId
@@ -14156,7 +18782,7 @@ async function handleT1Intake(deps, terminal, matched, request, body, queryStrin
   }
   const sessionHeader = request.headers[INTAKE_SESSION_HEADER];
   const sessionId = typeof sessionHeader === "string" ? sessionHeader : "";
-  if (!UUID2.test(sessionId)) {
+  if (!UUID3.test(sessionId)) {
     return invalid(correlationId, `a ${INTAKE_SESSION_HEADER} header is required`);
   }
   const routePermission = INTAKE_ROUTE_PERMISSION[matched.route];
@@ -14323,7 +18949,7 @@ async function handleT1Intake(deps, terminal, matched, request, body, queryStrin
         ]);
         if (unknown.length > 0) return invalid(correlationId, "unknown fields", unknown);
         const walkIn = body?.["walkIn"] === true;
-        const customerId = walkIn ? null : requireShaped(intakeBody, "customerId", UUID2);
+        const customerId = walkIn ? null : requireShaped(intakeBody, "customerId", UUID3);
         if (!walkIn && customerId === null) {
           return invalid(correlationId, "customerId or walkIn is required");
         }
@@ -14415,6 +19041,189 @@ async function handleT1Intake(deps, terminal, matched, request, body, queryStrin
     throw error;
   }
 }
+var OPERATION_ROUTE_PERMISSION = {
+  // Pricing the draft's lines is shaping the draft toward a Booking — the
+  // draft-workspace permission the T002 draft routes already reuse.
+  "drafts-quote": PERMISSION_BOOKINGS_CREATE,
+  // The approved route's registered permission (edge-contracts registry).
+  "bookings-confirm": PERMISSION_BOOKINGS_CREATE,
+  "bookings-recent": PERMISSION_BOOKINGS_READ
+};
+var MONEY_STRING = /^[0-9]{1,18}$/;
+function parseIntakeLines(value) {
+  if (!Array.isArray(value) || value.length > MAX_INTAKE_LINES) return null;
+  const lines = [];
+  for (const raw of value) {
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+    const line = raw;
+    if (unknownFields(line, ["serviceId", "pieceCount", "weighedGrams"]).length > 0) return null;
+    const serviceId = line["serviceId"];
+    if (typeof serviceId !== "string" || !UUID3.test(serviceId)) return null;
+    const pieceCount = line["pieceCount"];
+    const weighedGrams = line["weighedGrams"];
+    const hasPieces = pieceCount !== void 0;
+    const hasWeight = weighedGrams !== void 0;
+    if (hasPieces === hasWeight) return null;
+    if (hasPieces) {
+      if (typeof pieceCount !== "number" || !Number.isInteger(pieceCount) || pieceCount < 1)
+        return null;
+      lines.push({ serviceId: serviceId.toLowerCase(), pieceCount });
+    } else {
+      if (typeof weighedGrams !== "number" || !Number.isInteger(weighedGrams) || weighedGrams < 1)
+        return null;
+      lines.push({ serviceId: serviceId.toLowerCase(), weighedGrams });
+    }
+  }
+  return lines;
+}
+function commandRefusal(error, correlationId) {
+  const named = error.details["result"];
+  const result = typeof named === "string" && named !== "" ? named : error.code;
+  const code = CANONICAL_ERROR[result] ?? CANONICAL_ERROR[error.code] ?? "INTERNAL_ERROR";
+  const { result: _omitted, ...rest } = error.details;
+  void _omitted;
+  return {
+    status: httpStatusFor(code),
+    body: errorEnvelope(code, CANONICAL_MESSAGE[code] ?? "the request was refused", {
+      correlationId,
+      details: { result, retryable: isRetryable(code), ...redactDetails(rest) }
+    })
+  };
+}
+function redactDetails(details) {
+  const out = {};
+  for (const [key, value] of Object.entries(details)) {
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      out[key] = value;
+    } else if (value === null) {
+      out[key] = null;
+    }
+  }
+  return out;
+}
+async function handleT1Operations(deps, terminal, matched, request, body, correlationId) {
+  if (!terminal.activated) return refusal("ACTIVATION_REQUIRED", correlationId);
+  if (Buffer.byteLength(request.rawBody ?? "", "utf8") > MAX_OPERATION_BODY_BYTES) {
+    return invalid(correlationId, "the request body exceeds the operation bound");
+  }
+  const sessionHeader = request.headers[INTAKE_SESSION_HEADER];
+  const sessionId = typeof sessionHeader === "string" ? sessionHeader : "";
+  if (!UUID3.test(sessionId)) {
+    return invalid(correlationId, `a ${INTAKE_SESSION_HEADER} header is required`);
+  }
+  const routePermission = OPERATION_ROUTE_PERMISSION[matched.route];
+  if (routePermission === void 0) return refusal("INTERNAL_ERROR", correlationId);
+  const authorization = await withHubTransaction(
+    deps.pool,
+    (client) => authorizeT1IntakeSession(client, {
+      terminalDeviceId: terminal.terminalDeviceId,
+      sessionId,
+      routePermission
+    }),
+    HUB_RUNTIME_ROLE
+  );
+  if (!authorization.ok) return refusal(authorization.refusal, correlationId);
+  const authority = authorization.authority;
+  const operationBody = body ?? {};
+  const environment = deps.environment ?? "development";
+  try {
+    switch (matched.route) {
+      case "bookings-recent": {
+        if (request.rawBody !== "") return invalid(correlationId, "a GET carries no body");
+        const bookings = await listRecentBookings(deps.pool, authority);
+        return { status: 200, body: { result: "RECENT_BOOKINGS", correlationId, bookings } };
+      }
+      case "drafts-quote": {
+        const unknown = unknownFields(operationBody, ["lines", "express"]);
+        if (unknown.length > 0) return invalid(correlationId, "unknown fields", unknown);
+        const lines = parseIntakeLines(operationBody["lines"]);
+        if (lines === null)
+          return invalid(correlationId, "lines must be a bounded list of priced lines");
+        const express = operationBody["express"] === true;
+        const quote = await quoteDraftIntake(deps.pool, authority, {
+          draftId: matched.draftId,
+          lines,
+          express
+        });
+        return { status: 200, body: { result: "QUOTE", correlationId, quote } };
+      }
+      case "bookings-confirm": {
+        const key = idempotencyKeyFrom(request.headers);
+        if (key === null) return invalid(correlationId, "an Idempotency-Key header is required");
+        const unknown = unknownFields(operationBody, [
+          "expectedVersion",
+          "lines",
+          "express",
+          "displayedTotalMinor",
+          "tender"
+        ]);
+        if (unknown.length > 0) return invalid(correlationId, "unknown fields", unknown);
+        const expectedVersion = operationBody["expectedVersion"];
+        if (typeof expectedVersion !== "number" || !Number.isInteger(expectedVersion) || expectedVersion < 1) {
+          return invalid(correlationId, "expectedVersion must be a positive integer");
+        }
+        const lines = parseIntakeLines(operationBody["lines"]);
+        if (lines === null || lines.length === 0) {
+          return invalid(correlationId, "lines must be a non-empty bounded list of priced lines");
+        }
+        const express = operationBody["express"] === true;
+        const displayed = operationBody["displayedTotalMinor"];
+        if (typeof displayed !== "string" || !MONEY_STRING.test(displayed)) {
+          return invalid(correlationId, "displayedTotalMinor must be a decimal minor-unit string");
+        }
+        const tender = operationBody["tender"];
+        if (typeof tender !== "object" || tender === null || Array.isArray(tender)) {
+          return invalid(correlationId, "tender is required");
+        }
+        const tenderBody = tender;
+        const unknownTender = unknownFields(tenderBody, ["type", "localMinor", "usdCents"]);
+        if (unknownTender.length > 0)
+          return invalid(correlationId, "unknown fields", unknownTender);
+        if (tenderBody["type"] !== "cash") {
+          return invalid(correlationId, "tender.type must be cash (owner decision 2026-09-19)");
+        }
+        const localMinor = tenderBody["localMinor"] ?? "0";
+        const usdCents = tenderBody["usdCents"] ?? "0";
+        if (typeof localMinor !== "string" || !MONEY_STRING.test(localMinor) || typeof usdCents !== "string" || !MONEY_STRING.test(usdCents)) {
+          return invalid(correlationId, "tender amounts must be decimal minor-unit strings");
+        }
+        const outcome = await confirmDraftIntakeForTerminal(deps.pool, {
+          terminalDeviceId: terminal.terminalDeviceId,
+          authority,
+          environment,
+          idempotencyKey: key,
+          correlationId,
+          draftId: matched.draftId,
+          expectedVersion,
+          lines,
+          express,
+          displayedTotalMinor: BigInt(displayed),
+          tender: { localMinor: BigInt(localMinor), usdCents: BigInt(usdCents) }
+        });
+        if (outcome.outcome === "in_progress") {
+          return {
+            status: 202,
+            body: { result: "BOOKING_CONFIRM_IN_PROGRESS", correlationId, ...outcome.result }
+          };
+        }
+        return {
+          status: 200,
+          body: {
+            result: outcome.outcome === "duplicate" ? "BOOKING_CONFIRMED_REPLAYED" : "BOOKING_CONFIRMED",
+            correlationId,
+            commandOutcome: outcome.outcome,
+            aggregateId: outcome.aggregateId,
+            syncState: outcome.wireSyncState,
+            ...outcome.result
+          }
+        };
+      }
+    }
+  } catch (error) {
+    if (error instanceof HubCommandError) return commandRefusal(error, correlationId);
+    throw error;
+  }
+}
 
 // src/hub/edge/transport.ts
 import { createServer } from "node:https";
@@ -14466,7 +19275,7 @@ function createEdgeTlsServer(options) {
     }
   };
 }
-async function serve(req, res, handler, logger) {
+async function serve(req, res, handler2, logger) {
   try {
     const socket = req.socket;
     const peerCertificate = socket.getPeerCertificate(false);
@@ -14489,7 +19298,7 @@ async function serve(req, res, handler, logger) {
       );
       return;
     }
-    const response = await handler.handle({
+    const response = await handler2.handle({
       method: req.method ?? "GET",
       path: req.url ?? "/",
       headers: req.headers,
@@ -14587,7 +19396,7 @@ function composeDevelopmentListener(inputs) {
   try {
     const privateKey = createPrivateKey2(read(inputs.identityKeyPath ?? DEVICE_IDENTITY_KEY_PATH));
     const publicKeyPem = createPublicKey2(privateKey).export({ type: "spki", format: "pem" }).toString();
-    const signingCredentialSerial = createHash8("sha256").update(createPublicKey2(publicKeyPem).export({ type: "spki", format: "der" })).digest("hex");
+    const signingCredentialSerial = createHash9("sha256").update(createPublicKey2(publicKeyPem).export({ type: "spki", format: "der" })).digest("hex");
     signer = {
       certificateSerial: signingCredentialSerial,
       publicKeyPem,
@@ -14621,7 +19430,7 @@ async function startDevelopmentListener(options) {
     options.composition.signer,
     options.logger
   );
-  const handler = createEdgeTerminalRouter({
+  const handler2 = createEdgeTerminalRouter({
     pool: options.pool,
     environment: options.environment,
     pairing: new TerminalPairingComposition(
@@ -14655,7 +19464,7 @@ async function startDevelopmentListener(options) {
     clientCa: options.tls.clientCa,
     bindHost: options.bindHost,
     port: EDGE_TLS_PORT,
-    handler,
+    handler: handler2,
     ...options.logger === void 0 ? {} : { logger: options.logger }
   });
   const { port } = await server.listen();
@@ -14663,18 +19472,18 @@ async function startDevelopmentListener(options) {
 }
 
 // src/hub/terminal-sync/index.ts
-import { createPrivateKey as createPrivateKey3, createPublicKey as createPublicKey5, randomBytes as randomBytes4 } from "node:crypto";
+import { createPrivateKey as createPrivateKey3, createPublicKey as createPublicKey5, randomBytes as randomBytes5 } from "node:crypto";
 import { existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync as readFileSync4, writeFileSync as writeFileSync2 } from "node:fs";
 import { dirname as dirname2 } from "node:path";
 
 // src/hub/terminal-sync/apply.ts
 init_db();
 init_dev_configuration();
-import { X509Certificate, createHash as createHash11, createPublicKey as createPublicKey4 } from "node:crypto";
+import { X509Certificate, createHash as createHash12, createPublicKey as createPublicKey4 } from "node:crypto";
 
 // src/hub/terminal-sync/contract.ts
 import {
-  createHash as createHash10,
+  createHash as createHash11,
   createPublicKey as createPublicKey3,
   sign as edSign,
   verify as edVerify
@@ -14685,8 +19494,8 @@ var TERMINAL_PROJECTION_KIND = "kitluy.hub.development-terminal-projection.v1";
 var HUB_SYNC_TRUST_RECORD_KIND = "kitluy.hub-sync-trust-key.v1";
 var HUB_SYNC_SIGNING_PURPOSE = "transport_signing";
 var REQUEST_MAX_SKEW_SECONDS = 300;
-var UUID3 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
-var HEX643 = /^[0-9a-f]{64}$/u;
+var UUID4 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+var HEX644 = /^[0-9a-f]{64}$/u;
 var SIGNATURE = /^[A-Za-z0-9_-]{86}$/u;
 var NONCE = /^[0-9a-f]{32}$/u;
 function hasControlCharacter(value) {
@@ -14704,15 +19513,15 @@ function canonicalJson2(value) {
 }
 function publicKeyFingerprint2(publicKeyPem) {
   const der = createPublicKey3(publicKeyPem).export({ type: "spki", format: "der" });
-  return createHash10("sha256").update(der).digest("hex");
+  return createHash11("sha256").update(der).digest("hex");
 }
 function hubSyncRequestBytes(input) {
-  if (!HEX643.test(input.identityPublicKeyFingerprint)) {
+  if (!HEX644.test(input.identityPublicKeyFingerprint)) {
     throw new Error(
       "KLUY-HUB-SYNC-MALFORMED: the identity key fingerprint must be lowercase sha-256 hex"
     );
   }
-  if (!UUID3.test(input.hubDeviceId)) {
+  if (!UUID4.test(input.hubDeviceId)) {
     throw new Error("KLUY-HUB-SYNC-MALFORMED: hubDeviceId is not a uuid");
   }
   if (!NONCE.test(input.nonce)) {
@@ -14736,7 +19545,7 @@ function hubSyncEnvelopeBytes(envelope) {
   if (envelope.kind !== HUB_SYNC_ENVELOPE_KIND) {
     throw new Error("KLUY-HUB-SYNC-MALFORMED: the envelope declares the wrong kind");
   }
-  const digest = createHash10("sha256").update(canonicalJson2(envelope), "utf8").digest("hex");
+  const digest = createHash11("sha256").update(canonicalJson2(envelope), "utf8").digest("hex");
   return Buffer.from([HUB_SYNC_ENVELOPE_KIND, digest].join("\n"), "utf8");
 }
 function signBytes(privateKey, bytes) {
@@ -14759,7 +19568,7 @@ function parseCatalogSection(value) {
   if (r["schema"] !== "kitluy.config.catalog.v1") return null;
   if (typeof r["currency_code"] !== "string" || !/^[A-Z]{3}$/u.test(r["currency_code"]))
     return null;
-  if (typeof r["content_hash"] !== "string" || !HEX643.test(r["content_hash"])) return null;
+  if (typeof r["content_hash"] !== "string" || !HEX644.test(r["content_hash"])) return null;
   if (!Array.isArray(r["services"])) return null;
   return r;
 }
@@ -14779,7 +19588,7 @@ var NAME = /^[A-Za-z0-9 ._:-]{1,80}$/u;
 var HARDWARE_PROFILE = /^[a-z0-9_.]{1,80}$/u;
 var SERIAL = /^[0-9a-f]{2,80}$/u;
 var LABEL = /^[A-Za-z0-9._:-]{1,120}$/u;
-function str(record, key, pattern) {
+function str2(record, key, pattern) {
   const value = record[key];
   if (typeof value !== "string" || value === "") return void 0;
   if (pattern !== void 0 && !pattern.test(value)) return void 0;
@@ -14796,18 +19605,18 @@ function parseTerminalDelivery(value) {
   }
   const d = value;
   if (d["kind"] !== TERMINAL_PROJECTION_KIND) return { ok: false, reason: "wrong delivery kind" };
-  const terminalDeviceId = str(d, "terminalDeviceId", UUID3);
-  const credentialId = str(d, "credentialId", UUID3);
-  const tenantId = str(d, "tenantId", UUID3);
-  const digitalStoreId = str(d, "digitalStoreId", UUID3);
-  const storeLocationId = str(d, "storeLocationId", UUID3);
-  const installationId = str(d, "installationId", UUID3);
-  const terminalName = str(d, "terminalName", NAME);
-  const hardwareProfileCode = str(d, "hardwareProfileCode", HARDWARE_PROFILE);
-  const x509CertificateSerial = str(d, "x509CertificateSerial", SERIAL);
-  const credentialSerialLabel = str(d, "credentialSerialLabel", LABEL);
-  const publicKeyFingerprint3 = str(d, "publicKeyFingerprint", HEX643);
-  const issuer = str(d, "issuer");
+  const terminalDeviceId = str2(d, "terminalDeviceId", UUID4);
+  const credentialId = str2(d, "credentialId", UUID4);
+  const tenantId = str2(d, "tenantId", UUID4);
+  const digitalStoreId = str2(d, "digitalStoreId", UUID4);
+  const storeLocationId = str2(d, "storeLocationId", UUID4);
+  const installationId = str2(d, "installationId", UUID4);
+  const terminalName = str2(d, "terminalName", NAME);
+  const hardwareProfileCode = str2(d, "hardwareProfileCode", HARDWARE_PROFILE);
+  const x509CertificateSerial = str2(d, "x509CertificateSerial", SERIAL);
+  const credentialSerialLabel = str2(d, "credentialSerialLabel", LABEL);
+  const publicKeyFingerprint3 = str2(d, "publicKeyFingerprint", HEX644);
+  const issuer = str2(d, "issuer");
   const issuedAt = instant(d, "issuedAt");
   const expiresAt = instant(d, "expiresAt");
   const generation = d["assignmentGeneration"];
@@ -14845,7 +19654,7 @@ function parseTerminalDelivery(value) {
   if (!Array.isArray(profiles) || profiles.some((p) => typeof p !== "string" || !PROFILE3.test(p))) {
     return { ok: false, reason: "profileCodes must be canonical dotted profiles" };
   }
-  if (identity !== null && identity !== void 0 && (typeof identity !== "string" || !HEX643.test(identity))) {
+  if (identity !== null && identity !== void 0 && (typeof identity !== "string" || !HEX644.test(identity))) {
     return { ok: false, reason: "identityKeyFingerprint is not a sha256 hex digest" };
   }
   if (seat !== null && seat !== void 0 && (typeof seat !== "string" || seat.length > 120)) {
@@ -14881,10 +19690,10 @@ function parseTerminalDelivery(value) {
   };
 }
 function sha256Hex4(input) {
-  return createHash11("sha256").update(input).digest("hex");
+  return createHash12("sha256").update(input).digest("hex");
 }
 function md5Uuid(label) {
-  const hex = createHash11("md5").update(label).digest("hex");
+  const hex = createHash12("md5").update(label).digest("hex");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 function certificateFacts(pem) {
@@ -14930,8 +19739,8 @@ async function projectHubSelf(client, facts) {
   await client.query(
     `update edge_identity.hub_assignment
         set status = 'ended', ended_at = now()
-      where hub_device_id = $1::uuid and id <> $2::uuid and status = 'active'`,
-    [facts.hubDeviceId, facts.assignmentId]
+      where status = 'active' and id <> $1::uuid`,
+    [facts.assignmentId]
   );
   await client.query(
     `insert into edge_identity.hub_assignment
@@ -15228,11 +20037,11 @@ async function applyEnvelope(pool, input) {
     HUB_RUNTIME_ROLE
   );
   const catalog = input.catalog ?? null;
-  const money = input.money ?? null;
+  const money2 = input.money ?? null;
   const because = [];
   if (!grantSetsEqual(desired, current)) because.push("grants");
   if (catalog !== null && held.catalogHash !== catalog.content_hash) because.push("catalog");
-  if (money !== null && canonicalJson2(held.pricing) !== canonicalJson2(money)) because.push("money");
+  if (money2 !== null && canonicalJson2(held.pricing) !== canonicalJson2(money2)) because.push("money");
   let configuration;
   if (because.length === 0) {
     configuration = { published: false, reason: "unchanged" };
@@ -15253,10 +20062,10 @@ async function applyEnvelope(pool, input) {
     configuration = { published: false, reason: "no_grants", grantsWithdrawn: withdrawn };
   } else {
     const extraSections = [
-      ...money === null ? [] : [
+      ...money2 === null ? [] : [
         {
           sectionCode: "pricing",
-          content: money,
+          content: money2,
           required: true
         }
       ],
@@ -15425,7 +20234,7 @@ function readBoardFacts(config) {
     return { ok: false, reason: `this Hub is ${String(pairing["phase"])}, not PAIRED` };
   const field = (key) => {
     const v = pairing[key];
-    return typeof v === "string" && UUID3.test(v) ? v.toLowerCase() : void 0;
+    return typeof v === "string" && UUID4.test(v) ? v.toLowerCase() : void 0;
   };
   const hubDeviceId2 = field("deviceRecordId");
   const assignmentId = field("assignmentId");
@@ -15475,7 +20284,7 @@ function readBoardFacts(config) {
     }
   };
 }
-function buildSyncRequest(facts, now = /* @__PURE__ */ new Date(), nonce = randomBytes4(16).toString("hex")) {
+function buildSyncRequest(facts, now = /* @__PURE__ */ new Date(), nonce = randomBytes5(16).toString("hex")) {
   const requestedAt = now.toISOString();
   const bytes = hubSyncRequestBytes({
     identityPublicKeyFingerprint: publicKeyFingerprint2(facts.identityPublicKeyPem),
@@ -15556,8 +20365,8 @@ function verifySyncEnvelope(body, trust, expect, now = /* @__PURE__ */ new Date(
   if (env["catalog"] !== void 0 && env["catalog"] !== null && catalog === null) {
     return { ok: false, refusal: "ENVELOPE_MALFORMED", detail: "catalog" };
   }
-  const money = parseMoneySection(env["money"]);
-  if (env["money"] !== void 0 && env["money"] !== null && money === null) {
+  const money2 = parseMoneySection(env["money"]);
+  if (env["money"] !== void 0 && env["money"] !== null && money2 === null) {
     return { ok: false, refusal: "ENVELOPE_MALFORMED", detail: "money" };
   }
   return {
@@ -15568,7 +20377,7 @@ function verifySyncEnvelope(body, trust, expect, now = /* @__PURE__ */ new Date(
       deliveries,
       malformed,
       catalog,
-      money
+      money: money2
     }
   };
 }

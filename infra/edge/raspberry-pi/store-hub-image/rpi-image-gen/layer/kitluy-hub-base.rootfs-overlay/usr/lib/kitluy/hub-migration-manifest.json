@@ -174,5 +174,13 @@
   {
     "filename": "0043_terminal_pin.sql",
     "checksumSha256": "86875d325e374fd17dee260986803823f48a5e7fa048fe037e82b674e6242958"
+  },
+  {
+    "filename": "0044_hub_assignment_primary_vertical.sql",
+    "checksumSha256": "1c32b7208da2d95842bd9aaba2a6fe2e8cdb151a7254a66c9d762f16b97f9f93"
+  },
+  {
+    "filename": "0045_booking_draft_conversion.sql",
+    "checksumSha256": "e920f5c8b249b1e92aa5725fc98db641090588729a55f027dbf9d3d635e88db5"
   }
 ]
