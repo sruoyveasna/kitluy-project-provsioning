@@ -94,8 +94,19 @@ set -eu
 NVME_DEVICE=""
 find_nvme() {
   NVME_DEVICE=""
-  for candidate in /dev/nvme*n1; do
-    [ -b "$candidate" ] || continue
+  for candidate in "$DEV_ROOT"/nvme*n1; do
+    # PRODUCTION IS UNCHANGED: on a real board this still demands a BLOCK device,
+    # so a stray regular file called /dev/nvme0n1 can never be mistaken for a
+    # drive. `--dev-root` exists only so the suite can exercise the refusals
+    # below — two drives, and a drive carrying the root filesystem — which
+    # protect the Store's data and were untestable while this glob was pinned to
+    # /dev (a test cannot mknod without root). The relaxation applies ONLY when
+    # a test root was given.
+    if [ "$DEV_ROOT" = "/dev" ]; then
+      [ -b "$candidate" ] || continue
+    else
+      [ -e "$candidate" ] || continue
+    fi
     if [ -n "$NVME_DEVICE" ]; then
       die "more than one NVMe drive is present ($NVME_DEVICE, $candidate); this Hub will not guess which one holds the Store's data"
     fi
@@ -131,10 +142,15 @@ USAGE
 log()  { printf '[kitluy-hub-storage] %s\n' "$*"; }
 die()  { printf '[kitluy-hub-storage] REFUSED: %s\n' "$*" >&2; exit 1; }
 
+# Where drives are looked for. `/dev` on every board; the suite overrides it.
+DEV_ROOT="/dev"
 MAPPER_NAME="kitluy-hub-data"
-MOUNT_POINT="/var/lib/kitluy/hub"
-STATE_DIR="/var/lib/kitluy/hub"
-PROVISIONED_MARKER="/var/lib/kitluy/hub/.luks-provisioned"
+# The encrypted volume's mount point. `--hub-root` overrides it for the suite,
+# which cannot create /var/lib on a workstation; a board never passes it.
+HUB_ROOT="/var/lib/kitluy/hub"
+MOUNT_POINT="$HUB_ROOT"
+STATE_DIR="$HUB_ROOT"
+PROVISIONED_MARKER="${HUB_ROOT}/.luks-provisioned"
 
 # The persistent-slot directory. NOT the encrypted volume — everything below
 # must be readable BEFORE that volume is unlocked.
@@ -173,6 +189,10 @@ while [ $# -gt 0 ]; do
     --state-root) STATE_ROOT="${2:?--state-root needs a directory}"; shift 2 ;;
     --etc-root)   ETC_ROOT="${2:?--etc-root needs a directory}"; shift 2 ;;
     --serial-file) BOARD_SERIAL_FILE="${2:?--serial-file needs a path}"; shift 2 ;;
+    --dev-root)   DEV_ROOT="${2:?--dev-root needs a directory}"; shift 2 ;;
+    --hub-root)   HUB_ROOT="${2:?--hub-root needs a directory}"
+                  MOUNT_POINT="$HUB_ROOT"; STATE_DIR="$HUB_ROOT"
+                  PROVISIONED_MARKER="${HUB_ROOT}/.luks-provisioned"; shift 2 ;;
     *) die "unknown argument '$1'" ;;
   esac
 done
@@ -504,13 +524,77 @@ if [ ! -e "/dev/mapper/$MAPPER_NAME" ]; then
   #
   # This never fired before BRINGUP-003 because the OTP gate refused first: no
   # board ever reached this line.
-  derive_passphrase | cryptsetup open --type luks2 --key-file=- "$NVME_DEVICE" "$MAPPER_NAME"
+  # A KEY THAT DOES NOT FIT IS A RECOVERY STATE, NOT A STACK TRACE.
+  #
+  # Under `set -e` this line used to end the unit with cryptsetup's own words
+  # ("No key available with this passphrase") and nothing else — the same
+  # sentence a correctly-keyed volume produced when the key was passed wrongly
+  # (see the note above), so the one message could not be trusted to mean what
+  # it said. The owner's continuity rule (KLD-2026-09-23-DEVICE-CONTINUITY-RULE-001)
+  # requires the opposite: STOP, say which case this is, and destroy nothing.
+  #
+  # The two cases a Store Hub actually meets:
+  #   STORAGE_KEY_MISMATCH        this volume was made by another board, or by
+  #                               an OTP-bound key, and this board cannot open it
+  #   STORAGE_LEGACY_KEY_MISSING  this volume was made with the retired random
+  #                               key file, which lived on the SD card that is
+  #                               now gone. It is not recoverable by derivation.
+  # The board cannot tell them apart from the header alone, so it names both and
+  # leaves the data untouched either way.
+  if ! derive_passphrase | cryptsetup open --type luks2 --key-file=- "$NVME_DEVICE" "$MAPPER_NAME"; then
+    if [ "$STORAGE_POSTURE" = "DEVELOPMENT-UNBOUND" ] && [ ! -s "$DEV_UNBOUND_KEY" ]; then
+      die "STORAGE_KEY_MISMATCH / STORAGE_LEGACY_KEY_MISSING: ${NVME_DEVICE} carries a LUKS volume this board's key does not open.
+  NOTHING HAS BEEN CHANGED ON THAT DRIVE, and nothing will be.
+  Either the volume belongs to another board, or it was created with the retired
+  ${DEV_UNBOUND_KEY##*/} file that lived on a previous SD card. A key that was
+  destroyed with that card cannot be re-derived; the board serial derives only
+  the CURRENT development key.
+  If the data is expendable, an operator may destroy the drive DELIBERATELY with:
+      $0 --reset-data-volume
+  That command refuses while this board can still open the volume."
+    fi
+    die "STORAGE_KEY_MISMATCH: ${NVME_DEVICE} carries a LUKS volume this board's ${STORAGE_POSTURE} key does not open. Nothing has been changed on that drive."
+  fi
   log "unlocked $NVME_DEVICE as $MAPPER_NAME"
 fi
 
+# THE ONE AUTOMATIC PATH THAT COULD DESTROY A LIVE STORE, AND ITS GUARD.
+#
+# By this line the volume is OPEN: the shop's database is plaintext on the other
+# side of the mapper. The only condition here used to be "blkid cannot identify
+# a filesystem", which a corrupted ext4 superblock satisfies — so a boot after a
+# bad power cut could silently mkfs the till and come up looking healthy. That is
+# precisely the failure the owner's rule forbids: never destroy data to make
+# recovery appear successful.
+#
+# `PROVISIONED_MARKER` has been declared since this script was written and never
+# read. It is the right guard and it lives INSIDE the encrypted volume, so its
+# presence is proof this board formatted this volume before.
 if ! blkid "/dev/mapper/$MAPPER_NAME" >/dev/null 2>&1; then
-  log "creating the data filesystem"
+  # Mount the volume read-only for a moment to ask the only question that
+  # matters: has this volume ever been provisioned? A volume with no filesystem
+  # cannot be mounted at all, which is the blank case and is safe to format.
+  PROBE_DIR="$(mktemp -d)"
+  if mount -o ro "/dev/mapper/$MAPPER_NAME" "$PROBE_DIR" 2>/dev/null; then
+    HAD_MARKER=no
+    [ -e "${PROBE_DIR}${PROVISIONED_MARKER#/var/lib/kitluy/hub}" ] && HAD_MARKER=yes
+    umount "$PROBE_DIR" 2>/dev/null || :
+    rmdir "$PROBE_DIR" 2>/dev/null || :
+    die "STORAGE_FILESYSTEM_UNREADABLE: the volume opened, but its filesystem could not be identified while it still mounts (provisioned marker: ${HAD_MARKER}).
+  REFUSING TO FORMAT IT. This is a Store's database, and a filesystem that
+  mounts but does not identify is a repair job, not a blank disk.
+  Nothing has been changed on that drive."
+  fi
+  rmdir "$PROBE_DIR" 2>/dev/null || :
+  log "creating the data filesystem (the volume is blank: it carries no mountable filesystem)"
   mkfs.ext4 -q -L kitluy-hub "/dev/mapper/$MAPPER_NAME"
+  # Written on the volume itself, so a later boot can tell "blank" from "broken".
+  PROBE_DIR="$(mktemp -d)"
+  if mount "/dev/mapper/$MAPPER_NAME" "$PROBE_DIR" 2>/dev/null; then
+    : > "${PROBE_DIR}/.luks-provisioned"
+    umount "$PROBE_DIR" 2>/dev/null || :
+  fi
+  rmdir "$PROBE_DIR" 2>/dev/null || :
 fi
 
 # The mount point must exist for the .mount unit that follows.

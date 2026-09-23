@@ -214,6 +214,125 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 6c. THE DRIVE-SAFETY REFUSALS, AND THE TWO PATHS THAT COULD DESTROY A STORE
+# ---------------------------------------------------------------------------
+# These protect the Store's database and were untestable until `--dev-root`:
+# a test cannot mknod, so the glob could never see a fake drive. Each case fakes
+# only the tools the script shells out to, and asserts on the REFUSAL and on the
+# fact that no destructive tool was ever invoked.
+tools() {
+  local dir="$1" mode="$2"
+  cat > "${dir}/bin/findmnt" <<SH
+#!/bin/sh
+# The root filesystem lives on the SD card unless a case says otherwise. The
+# answer must name the SAME device path the script discovered, or the guard it
+# is testing cannot match.
+[ -f "${dir}/root-on-nvme" ] && { echo "${dir}/dev/nvme0n1p2"; exit 0; }
+echo "/dev/mmcblk0p2"
+SH
+  cat > "${dir}/bin/cryptsetup" <<SH
+#!/bin/sh
+case "\$1" in
+  isLuks)  case "$mode" in blank|foreign) exit 1 ;; *) exit 0 ;; esac ;;
+  open)    cat >/dev/null; [ "$mode" = openable ] && { touch "${dir}/opened"; exit 0; }; exit 1 ;;
+  luksFormat) cat >/dev/null; touch "${dir}/DESTROYED-luksFormat"; exit 0 ;;
+  *) exit 0 ;;
+esac
+SH
+  cat > "${dir}/bin/blkid" <<SH
+#!/bin/sh
+# The mapper never identifies: that is what used to trigger a silent mkfs.
+case "\$*" in
+  *mapper*) exit 1 ;;
+  *) [ "$mode" = foreign ] && exit 0; exit 1 ;;
+esac
+SH
+  cat > "${dir}/bin/mkfs.ext4" <<SH
+#!/bin/sh
+touch "${dir}/DESTROYED-mkfs"
+SH
+  cat > "${dir}/bin/wipefs" <<SH
+#!/bin/sh
+touch "${dir}/DESTROYED-wipefs"
+SH
+  cat > "${dir}/bin/mount" <<SH
+#!/bin/sh
+# The volume mounts: a filesystem that mounts but does not identify is the
+# "corrupted, not blank" case the guard exists for.
+exit 0
+SH
+  printf '#!/bin/sh\nexit 0\n' > "${dir}/bin/umount"
+  chmod 0755 "${dir}"/bin/*
+}
+
+boot() {
+  local dir="$1"
+  OUT="$(PATH="${dir}/bin:$PATH" "$SCRIPT" \
+          --state-root "${dir}/state" --etc-root "${dir}/etc" \
+          --serial-file "${dir}/serial-number" --dev-root "${dir}/dev" \
+          --hub-root "${dir}/hub" 2>&1)"
+  RC=$?
+}
+
+# Two drives: the Hub must not guess which one holds the Store.
+DIR="$(make_board two-nvme absent development authorized)"
+mkdir -p "${DIR}/dev"; : > "${DIR}/dev/nvme0n1"; : > "${DIR}/dev/nvme1n1"
+tools "$DIR" openable
+boot "$DIR"
+if [[ $RC -ne 0 && "$OUT" == *"more than one NVMe drive"* ]]; then
+  ok "two NVMe drives: refuses rather than guessing which holds the Store"
+else
+  bad "two NVMe drives: refuses rather than guessing which holds the Store" "rc=$RC out=$OUT"
+fi
+
+# The drive the Hub booted from is never reformatted.
+DIR="$(make_board nvme-root absent development authorized)"
+mkdir -p "${DIR}/dev"; : > "${DIR}/dev/nvme0n1"; : > "${DIR}/root-on-nvme"
+tools "$DIR" blank
+boot "$DIR"
+if [[ $RC -ne 0 && "$OUT" == *"root filesystem"* && ! -e "${DIR}/DESTROYED-luksFormat" ]]; then
+  ok "an NVMe carrying the root filesystem is refused, not reformatted"
+else
+  bad "an NVMe carrying the root filesystem is refused, not reformatted" "rc=$RC out=$OUT"
+fi
+
+# Somebody else's filesystem is data, not a spare drive.
+DIR="$(make_board foreign-fs absent development authorized)"
+mkdir -p "${DIR}/dev"; : > "${DIR}/dev/nvme0n1"
+tools "$DIR" foreign
+boot "$DIR"
+if [[ $RC -ne 0 && "$OUT" == *"refusing to destroy data this Hub cannot identify"* && ! -e "${DIR}/DESTROYED-luksFormat" ]]; then
+  ok "a drive holding an unidentified filesystem is refused, never formatted"
+else
+  bad "a drive holding an unidentified filesystem is refused, never formatted" "rc=$RC out=$OUT"
+fi
+
+# A LUKS volume this board cannot open: the reflash case the owner cares about.
+# It must NAME the case and leave every byte alone.
+DIR="$(make_board key-mismatch absent development authorized)"
+mkdir -p "${DIR}/dev"; : > "${DIR}/dev/nvme0n1"
+tools "$DIR" locked
+boot "$DIR"
+if [[ $RC -ne 0 && "$OUT" == *"STORAGE_KEY_MISMATCH"* && "$OUT" == *"STORAGE_LEGACY_KEY_MISSING"* \
+      && ! -e "${DIR}/DESTROYED-luksFormat" && ! -e "${DIR}/DESTROYED-mkfs" && ! -e "${DIR}/DESTROYED-wipefs" ]]; then
+  ok "a LUKS volume this board cannot open names the case and destroys nothing"
+else
+  bad "a LUKS volume this board cannot open names the case and destroys nothing" "rc=$RC out=$OUT"
+fi
+
+# The dangerous one: the volume OPENS, but its filesystem does not identify.
+# A corrupted superblock on a live Store used to mean a silent mkfs.
+DIR="$(make_board unreadable-fs absent development authorized)"
+mkdir -p "${DIR}/dev"; : > "${DIR}/dev/nvme0n1"
+tools "$DIR" openable
+boot "$DIR"
+if [[ $RC -ne 0 && "$OUT" == *"STORAGE_FILESYSTEM_UNREADABLE"* && ! -e "${DIR}/DESTROYED-mkfs" ]]; then
+  ok "an unlocked volume whose filesystem will not identify is REFUSED, never re-formatted"
+else
+  bad "an unlocked volume whose filesystem will not identify is REFUSED, never re-formatted" "rc=$RC out=$OUT"
+fi
+
+# ---------------------------------------------------------------------------
 # 7. --explain commits nothing
 # ---------------------------------------------------------------------------
 # The decision must be askable without generating key material or writing a
@@ -339,7 +458,12 @@ fi
 # ---------------------------------------------------------------------------
 # Reproducible must not mean identical everywhere: a drive pulled from one Hub
 # must still be ciphertext in another.
-SERIAL_OVERRIDE=ffffffffffffffff dir2="$(SERIAL_OVERRIDE=ffffffffffffffff make_board other-board absent development authorized)"
+# `VAR=value name="$(...)"` is NOT a command prefix — with no command word it is
+# a plain assignment, so SERIAL_OVERRIDE stayed set for the REST OF THIS FILE and
+# every later make_board built a board with the wrong serial. §14's leak check
+# computed its expected key for the default serial and so asserted nothing at
+# all, while still reporting PASS (found by audit, 2026-09-23). Scoped now.
+dir2="$(SERIAL_OVERRIDE=ffffffffffffffff make_board other-board absent development authorized)"
 OTHER="$(fingerprint "$dir2")"
 if [[ -n "$OTHER" && "$OTHER" != "$AFTER" ]]; then
   ok "a different board serial derives a different key"
