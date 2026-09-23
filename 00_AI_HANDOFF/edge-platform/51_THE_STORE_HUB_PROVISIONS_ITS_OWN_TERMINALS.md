@@ -35,6 +35,16 @@ Two operational notes worth keeping:
 - **`postgres` is not enough.** The first execute refused with `permission denied for table device_credentials` and rolled the whole transaction back (nothing deleted) — in a Supabase stack `postgres` is not a superuser and is not a member of `kitluy_credential_issuer`, which owns `device_credentials` and `device_credential_heads`. Re-run as `supabase_admin` inside the database container (its own `POSTGRES_PASSWORD`, never printed) and it commits. The refusal is the ownership model working, not a broken script.
 - **The Hub retired the terminal by itself in under 60 s**: `terminal-sync.json` went `v7 → v8` and the terminal left the list without anyone touching the Hub. Both running terminals stayed `SERVING` with their PIN state `set` across the configuration bump. This is HUB-TERMINAL-SYNC-001 proven a second time, now on removal rather than addition.
 
+### The Store cleared for a whole-fleet reflash (2026-09-23)
+
+Owner decision before reflashing the Store Hub: clear the development cloud of the WHOLE fleet — the Hub, all three terminals and their seats — so every board comes back as a new device and the new images are tested from nothing.
+
+Purged with `scratchpad/purge-devices.sql` as `supabase_admin` (`mode=plan` first, `keep_seats=''`): **325 rows across 32 tables**, then **9 more** (below). After it: 0 devices, 0 seats, 0 hardware signals, 0 credentials, 0 assignments, 0 release installations.
+
+**A live board re-registers itself into a purge.** `KL-54A3320E1201` was still powered on, and its `kitluy-cloud-registration` service re-created the device record **11 seconds** after the delete committed — a fresh row, `manufactured`, awaiting approval, with a new device id. The registration loop runs every 60 s, so the cloud cannot be cleared underneath a running board. Stopping `kitluy-cloud-registration` and `kitluy-health-reporter` on that board (reversible; a reboot or the reflash restores both) and purging again left the database empty. **Power the boards down, or stop those two services, before purging a fleet.**
+
+What deliberately SURVIVES a device purge, because it is Store configuration and not device state: hardware profiles `KL-PI5-TERMINAL-DEV` / `KL-PI5-STORE-HUB-DEV`, the three store locations, the 36 priced Laundry services, the PUBLISHED `laundry.money.v1` contract, and the 8 promoted terminal releases — so a reflashed terminal is auto-assigned the newest release on its first poll.
+
 ### Why the Hub could not simply be updated, and what changed (2026-09-22)
 
 Auditing the live Hub for reboot safety found the hot-deploy exactly as expected — `/var/lib/kitluy/hotfix-4b9c069/main.mjs` and its trust record are on the persistent partition and survive, but the systemd drop-in that points the unit at them is under `/run` and does not. **A Store Hub reboot therefore reverts to the baked agent, which carries no terminal-sync at all** (`grep -c` for its markers in `/usr/lib/kitluy/lib/hub-agent/main.mjs`: **0**), and terminal auto-provisioning stops with no error anywhere. The Hub had been up 5 days, so nothing had exposed it.
