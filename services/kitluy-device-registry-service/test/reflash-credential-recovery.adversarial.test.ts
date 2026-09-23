@@ -51,7 +51,6 @@ const seatDerivation = (() => {
   return { applications: applications.value, surfaces: SurfaceRegistry.empty() };
 })();
 
-
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 
@@ -614,7 +613,49 @@ describe("THE RE-FLASH: a known board recovers its operational credential", () =
       expect(after.device.asset_tag).toBe(hub.assetTag);
       expect(after.boardDevices).toBe(1);
       // The credential head ADVANCED — never replaced.
-      expect(after.head).toEqual({ current_generation: 2, previous_generation: 1 });
+      // 0236: A RECOVERY GRANTS NO OVERLAP. The incumbent's private key went
+      // with the SD card that was replaced — it is gone, or it is in the hand
+      // holding that card — so the head points at the new generation and at
+      // nothing else, and the old certificate stops verifying at this instant
+      // (`certificate-validity` accepts a previous generation only while the
+      // head grants one). Ordinary renewal keeps its 3-day overlap; this is the
+      // re-flash branch. Owner §2.5 forbids a machine REVOKING, so the old
+      // credential is invalidated rather than revoked, and the four-eyes door
+      // stays available to a person. Handoff 39 §9, handoff 54 §8.
+      expect(after.head).toEqual({ current_generation: 2, previous_generation: null });
+
+      // AND WHAT THAT MEANS, read the way the VERIFIER reads it. The state door
+      // the online verifier calls is the one that decides whether the previous
+      // certificate may still be presented; after a recovery it offers no
+      // previous generation, no overlap end, and no previous key — so there is
+      // nothing for `certificate-validity` to accept the old card with.
+      const verification = (
+        await pool.query<{
+          current_generation: number;
+          previous_generation: number | null;
+          overlap_ends_at: string | null;
+          previous_key_fingerprint: string | null;
+          revoked: boolean;
+        }>(
+          `select (r.result->>'current_generation')::int as current_generation,
+                  (r.result->>'previous_generation')::int as previous_generation,
+                  r.result->>'overlap_ends_at' as overlap_ends_at,
+                  r.result->>'previous_key_fingerprint' as previous_key_fingerprint,
+                  (r.result->>'revoked')::boolean as revoked
+             from kitluy_devices.device_certificates c
+             cross join lateral kitluy_devices.credential_verification_state_v1(
+               c.certificate_serial, $2::text) as r(result)
+            where c.device_id = $1::uuid and c.certificate_generation = 1`,
+          [hub.deviceId, ENVIRONMENT],
+        )
+      ).rows[0];
+      expect(verification?.current_generation).toBe(2);
+      expect(verification?.previous_generation).toBeNull();
+      expect(verification?.overlap_ends_at).toBeNull();
+      expect(verification?.previous_key_fingerprint).toBeNull();
+      // Invalidated, NOT revoked: §2.5 reserves revocation for people, and the
+      // audit row for generation 1 is untouched.
+      expect(verification?.revoked).toBe(false);
       // The lost key is superseded; the recovered key is active and rotated.
       expect(after.keys.map((k) => [k.generation, k.state, k.rotation])).toEqual([
         [1, "superseded", false],
@@ -743,7 +784,8 @@ describe("THE RE-FLASH: a known board recovers its operational credential", () =
       });
       expect(activated.kind, JSON.stringify(activated)).toBe("advanced");
       const once = await snapshot(hub.deviceId);
-      expect(once.head).toEqual({ current_generation: 2, previous_generation: 1 });
+      // 0236: no overlap after a recovery — see the note above.
+      expect(once.head).toEqual({ current_generation: 2, previous_generation: null });
 
       await reflash(hub);
       await rePair(hub);
@@ -764,7 +806,9 @@ describe("THE RE-FLASH: a known board recovers its operational credential", () =
       expect(twice.device.id).toBe(hub.deviceId);
       expect(twice.device.asset_tag).toBe(hub.assetTag);
       expect(twice.boardDevices).toBe(1);
-      expect(twice.head).toEqual({ current_generation: 3, previous_generation: 2 });
+      // A SECOND re-flash recovers the same way: generation 3 is current, and
+      // generation 2 — whose card is also gone now — is granted nothing either.
+      expect(twice.head).toEqual({ current_generation: 3, previous_generation: null });
       expect(twice.keys.map((k) => [k.generation, k.state])).toEqual([
         [1, "superseded"],
         [2, "superseded"],
@@ -1491,7 +1535,16 @@ describe("A PI TERMINAL: re-flashed, re-seated, recovers", () => {
       const after = await snapshot(terminal.deviceId);
       expect(after.device.id).toBe(terminal.deviceId);
       expect(after.device.asset_tag).toBe(assetTag);
-      expect(after.head).toEqual({ current_generation: 2, previous_generation: 1 });
+      // 0236: A RECOVERY GRANTS NO OVERLAP. The incumbent's private key went
+      // with the SD card that was replaced — it is gone, or it is in the hand
+      // holding that card — so the head points at the new generation and at
+      // nothing else, and the old certificate stops verifying at this instant
+      // (`certificate-validity` accepts a previous generation only while the
+      // head grants one). Ordinary renewal keeps its 3-day overlap; this is the
+      // re-flash branch. Owner §2.5 forbids a machine REVOKING, so the old
+      // credential is invalidated rather than revoked, and the four-eyes door
+      // stays available to a person. Handoff 39 §9, handoff 54 §8.
+      expect(after.head).toEqual({ current_generation: 2, previous_generation: null });
     },
     FLOW_TIMEOUT_MS,
   );
