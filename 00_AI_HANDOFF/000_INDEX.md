@@ -13,6 +13,19 @@ Record: [`edge-platform/54_SAME_PI_REFLASH_CONTINUITY.md`](edge-platform/54_SAME
 
 **Not done:** Cycle B hardware proof; wiring 0234 into the registration flow; revoking the incumbent credential on recovery (handoff 39 §9 — mission requirement B-6 unmet).
 
+## T1-REAL-OPERATIONS-001 — the governed release and the Terminal image for the first real Booking (2026-09-23)
+
+Record: [`edge-platform/55_THE_FIRST_REAL_BOOKING_RELEASE_AND_IMAGE.md`](edge-platform/55_THE_FIRST_REAL_BOOKING_RELEASE_AND_IMAGE.md)
+· **RELEASED (`kitluy-terminal 0.1.0-booking-202609231531`, signed, assigned, served) · IMAGE VERIFIED (`0db42539…`, overlay read-back 113/113, image-contents 117/0/0, secret scan PASS; NOT boot-tested) · HARDWARE NOT VERIFIED · END-TO-END BLOCKED**
+
+**Blocker (CONFLICT / OWNER DECISION REQUIRED).** Hub migration `0044` made `deriveEligibility` fail closed `VERTICAL_UNAVAILABLE` when `hub_assignment.primary_vertical_code` is NULL, but **nothing writes it**: the cloud door (0232) does not project a vertical, the hub-sync contract has no such field, and `apply.ts` never sets it. Proof: 33 hub assignments locally, exactly 1 has a vertical (set by hand); all 32 written by hub-sync are NULL. A Store Hub on the current agent refuses every terminal, so no board reaches SERVING. Trap for the fix: the cloud holds `LAUNDRY`, the Hub CHECK demands `^[a-z][a-z0-9_]*$` — a straight copy violates the constraint.
+
+**Also found and fixed.** `c95bfe1` shipped runtime-report **v3** without repackaging the image overlay (an image would have carried v2), and the seat work never packaged `seat-validation.js` at all — both corrected in `5917b10`.
+
+**Money:** `OWNER INPUT REQUIRED: khr_per_usd`. No rate published; none invented. KHR-only booking is supported and governed.
+
+**Next:** resolve the vertical feeder (durable fix, or the recorded one-line Hub stopgap), bring both devices online, then the 17-point hardware acceptance.
+
 ## T1-REAL-OPERATIONS-001 — slice 2: a real Booking on the Store Hub, paid in cash, with a receipt record (2026-09-21)
 
 Record: [`edge-platform/53_A_REAL_BOOKING_ON_THE_STORE_HUB.md`](edge-platform/53_A_REAL_BOOKING_ON_THE_STORE_HUB.md) · plan [`docs/decisions/kitluy-t1-real-operations-plan-owner-decision-v1.0.0.md`](../docs/decisions/kitluy-t1-real-operations-plan-owner-decision-v1.0.0.md) §4 slice 2
