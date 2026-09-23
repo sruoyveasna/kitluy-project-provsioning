@@ -5252,6 +5252,22 @@ Owner, 2026-09-19: "make this app working and service real data … based on kit
 
 **Guard.** `test/systemd-runtime.test.sh` now builds the `After=`/`Before=` graph across both overlays and fails on any cycle among the image's own units, naming the path. 246 passed, 0 failed.
 
+## KLD-2026-09-23-HUB-STORAGE-DEVELOPMENT-UNBOUND-IN-IMAGE-001 — a DEVELOPMENT Hub image may authorize the unbound data-volume key; production is unchanged (OWNER-DECIDED)
+
+Owner, 2026-09-23, after a freshly flashed Store Hub refused to start: "this is the reason I don't want to encrypt my nvme anymore".
+
+**What happened.** `hub-storage-provision` refuses the DEVELOPMENT-UNBOUND key unless an operator creates `/var/lib/kitluy/DEVELOPMENT-UNBOUND-STORAGE-AUTHORIZED` by hand. That path is on the persistent partition, which a reflash rewrites, so EVERY fresh Hub card stops there — and because `kitluy-hub-database`, `kitluy-hub-agent` and `kitluy-operational-tls` all sit behind the volume, the whole Hub stays down: nothing listens on 7443 and every terminal reports `NO_HUB_FOUND`. The owner lost a fleet bring-up to it.
+
+**The ruling.** A **development** image may carry the authorization, so a development Hub boots through. Implemented as `--development-unbound-storage` on the Hub builder → `KITLUY_HUB_STORAGE_DEVELOPMENT_UNBOUND=authorized` in `hub.env`, which `hub-storage-provision` accepts in place of the marker file.
+
+**What is NOT weakened.** The gate that protects a real Store is the ENVIRONMENT, and it is now enforced three times: the builder refuses the flag unless the build is `development`; the layer re-checks against the `image.env` it actually wrote, so a build command and an image cannot disagree; and the provisioner still refuses the posture outside `development` whatever any file says. OTP still wins whenever fuses are programmed — an image's opinion cannot talk a bound board into the weaker key. A development image that does not carry the flag still demands the operator's marker.
+
+**What was always true, and is worth stating plainly.** The DEVELOPMENT-UNBOUND key is derived from the board serial, which `/proc/cpuinfo` prints to any local user. The volume it protects is readable by anyone holding the board. The script's own words: "it buys REPRODUCIBILITY, not secrecy, and it is not a step toward production." Shipping the authorization in a development image therefore removes an obstacle, not a protection.
+
+**Still open (owner's stated direction).** The owner wants the LUKS layer gone from the Hub data volume entirely. That is a larger change — a new posture through the provisioner, the posture label, `evaluateStoragePosture`, the agent's refusal logic, the suite and the docs — and is deliberately NOT done here. Recorded so the direction is not lost.
+
+**Evidence.** `storage-posture.test.sh` 41 passed / 0 failed, including: development + image authorization with no marker resolves to DEVELOPMENT-UNBOUND; the same image refused in pilot, production, staging, local and disaster_recovery; a development image that does not authorize still requires the marker; OTP still wins over an authorizing image. build-gates 34/0, environment-gating 19/0, rpi-image-gen 22/0/1, systemd-runtime 183/0.
+
 ## KLD-2026-09-19-PIN-AFTER-PAIRING-001 — the Terminal PIN is created RIGHT AFTER pairing and activation, on the Store Hub; nothing at first boot (OWNER-DECIDED; amends KLD-2026-09-18-FIRST-BOOT-PIN-001)
 
 Owner, 2026-09-19, on being shown the first-boot flow the image implemented: "no bro. creating PIN is after we connect our Pi terminals to our store hub because PIN is stored on the server, not in first boot" → on the restated order: "similar but the PIN set up should happen right after we paired and successfully activated our Pi Terminals".

@@ -50,6 +50,11 @@ make_board() {
     printf 'KITLUY_ENVIRONMENT=%s\n' "$environment" > "${dir}/etc/kitluy/image.env"
   fi
   [[ "$marker" == "authorized" ]] && touch "${dir}/state/DEVELOPMENT-UNBOUND-STORAGE-AUTHORIZED"
+  # `image-authorized` is the owner's 2026-09-23 path: no marker file on the
+  # board, the authorization carried by a DEVELOPMENT image's own hub.env.
+  if [[ "$marker" == "image-authorized" ]]; then
+    printf 'KITLUY_HUB_STORAGE_DEVELOPMENT_UNBOUND=authorized\n' > "${dir}/etc/kitluy/hub.env"
+  fi
 
   if [[ "$otp" == "present" ]]; then
     printf '#!/bin/sh\n[ "${1:-}" = "-c" ] && exit 0\necho deadbeefdeadbeef\n' > "${dir}/bin/rpi-otp-private-key"
@@ -158,6 +163,54 @@ if [[ $RC -ne 0 && "$OUT" == *"group- or world-writable"* ]]; then
   ok "a group/world-writable state directory refuses to hold an unbound key"
 else
   bad "a group/world-writable state directory refuses to hold an unbound key" "rc=$RC out=$OUT"
+fi
+
+# ---------------------------------------------------------------------------
+# 6b. A DEVELOPMENT IMAGE MAY CARRY THE AUTHORIZATION — and only a development one
+# ---------------------------------------------------------------------------
+# The marker file lives on the persistent partition, which a reflash rewrites, so
+# every fresh Hub card stopped here with the data volume locked and the whole Hub
+# with it (hardware, 2026-09-23: storage failed, so hub-database, hub-agent and
+# operational-tls never started, and the terminal reported NO_HUB_FOUND). The
+# owner ruled the gate off the development path. What protects production is the
+# ENVIRONMENT, and these cases hold that line.
+DIR="$(make_board image-auth-dev absent development image-authorized)"
+explain "$DIR"
+if [[ $RC -eq 0 && "$OUT" == "DEVELOPMENT-UNBOUND" ]]; then
+  ok "no OTP + development + image authorization (no marker file) resolves to DEVELOPMENT-UNBOUND"
+else
+  bad "no OTP + development + image authorization (no marker file) resolves to DEVELOPMENT-UNBOUND" "rc=$RC out=$OUT"
+fi
+
+for environment in pilot production staging local disaster_recovery; do
+  DIR="$(make_board "image-auth-${environment}" absent "$environment" image-authorized)"
+  explain "$DIR"
+  # The refusal text itself names the posture, so the assertion is on the
+  # OUTCOME, not on the words: a non-zero exit and no resolved label.
+  if [[ $RC -ne 0 && "$OUT" == *"refused outside development"* ]]; then
+    ok "image authorization does NOT open the door in '${environment}'"
+  else
+    bad "image authorization does NOT open the door in '${environment}'" "rc=$RC out=$OUT"
+  fi
+done
+
+# An image that says nothing still demands the operator's marker: the change adds
+# a door for development images, it does not remove the original one.
+DIR="$(make_board image-auth-silent absent development none)"
+explain "$DIR"
+if [[ $RC -ne 0 ]]; then
+  ok "a development image that does NOT authorize still requires the marker file"
+else
+  bad "a development image that does NOT authorize still requires the marker file" "rc=$RC out=$OUT"
+fi
+
+# OTP always wins: a board with fuses programmed ignores the image's opinion.
+DIR="$(make_board image-auth-otp present development image-authorized)"
+explain "$DIR"
+if [[ $RC -eq 0 && "$OUT" == "OTP-BOUND" ]]; then
+  ok "OTP still wins over an image that authorizes the unbound key"
+else
+  bad "OTP still wins over an image that authorizes the unbound key" "rc=$RC out=$OUT"
 fi
 
 # ---------------------------------------------------------------------------

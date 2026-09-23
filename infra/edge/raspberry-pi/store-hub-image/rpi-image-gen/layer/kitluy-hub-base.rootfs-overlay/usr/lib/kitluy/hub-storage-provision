@@ -185,6 +185,12 @@ POSTURE_FILE="${STATE_ROOT}/storage-posture"
 # `unknown` default is what makes an unreadable image.env fail closed.
 [ -f "${ETC_ROOT}/kitluy/image.env" ] && . "${ETC_ROOT}/kitluy/image.env"
 ENVIRONMENT="${KITLUY_ENVIRONMENT:-unknown}"
+# hub.env carries KITLUY_HUB_STORAGE_DEVELOPMENT_UNBOUND, which a DEVELOPMENT
+# image may set to `authorized` (owner ruling 2026-09-23). Read AFTER image.env
+# so it can never redefine the environment that gates it: the value below is
+# pinned from image.env before this file is sourced.
+[ -f "${ETC_ROOT}/kitluy/hub.env" ] && . "${ETC_ROOT}/kitluy/hub.env"
+KITLUY_ENVIRONMENT="$ENVIRONMENT"
 
 # -----------------------------------------------------------------------------
 # 0. May this board provision at all, and with which key?
@@ -214,9 +220,35 @@ resolve_storage_posture() {
   (environment is '${ENVIRONMENT}'; DEVELOPMENT-UNBOUND storage is refused outside development)"
   fi
 
-  # Condition 3: an operator authorized THIS board, by hand, after boot. The
-  # marker is never shipped, so no golden image can boot into this path.
-  if [ ! -e "$DEV_UNBOUND_MARKER" ]; then
+  # Condition 3: this board is authorized for the unbound key — either by an
+  # operator's marker file, or by a DEVELOPMENT image built to say so.
+  #
+  # WHY THE IMAGE MAY NOW SAY IT (owner ruling 2026-09-23). The marker lives on
+  # the persistent partition, which a reflash rewrites, so every fresh Hub card
+  # stopped dead here: storage refused, and with it the database, the agent and
+  # the operational TLS — the whole Hub, with terminals reporting NO_HUB_FOUND
+  # and nothing on the LAN to pair with. The owner met that wall on 2026-09-23
+  # and ruled the gate out of the development path: "this is the reason I don't
+  # want to encrypt my nvme anymore".
+  #
+  # What protects production is CONDITION 2 above, not this one: a production
+  # image is built with KITLUY_ENVIRONMENT=production and dies before reaching
+  # this line, whatever any file or variable says. The marker's own stated job
+  # was that "no golden image can boot into this path" — which remains true of
+  # every image that is not a development image, and a development image is
+  # exactly the one that should not ask.
+  #
+  # It is still not silent: the posture label records DEVELOPMENT-UNBOUND either
+  # way, the Hub agent reads that label, and the reason is logged at provision
+  # time so an operator reading the journal sees which door was opened and why.
+  if [ "${KITLUY_HUB_STORAGE_DEVELOPMENT_UNBOUND:-}" = "authorized" ] \
+     && [ ! -e "$DEV_UNBOUND_MARKER" ]; then
+    # NOT in --explain: that mode prints the label and nothing else, and the
+    # suite asserts it (§8, "--explain leaks nothing but the label"). The
+    # operator sees this line when the volume is actually provisioned.
+    [ "$EXPLAIN_ONLY" = "yes" ] || \
+      log "DEVELOPMENT-UNBOUND storage authorized by this development image (KITLUY_HUB_STORAGE_DEVELOPMENT_UNBOUND=authorized); the key is derived from the board serial and is NOT secret"
+  elif [ ! -e "$DEV_UNBOUND_MARKER" ]; then
     die "this board has no device-unique OTP key programmed, and DEVELOPMENT-UNBOUND storage is not authorized.
   The Store Hub data volume is normally encrypted with a key bound to the board.
   Programming OTP is IRREVERSIBLE and is an owner decision.

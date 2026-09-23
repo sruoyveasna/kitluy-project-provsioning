@@ -65,6 +65,14 @@ Usage: build-rpi-image.sh --profile <store-hub> [options]
                           instead of a reflash (a DEFAULT; the device may
                           override it at /persistent/shared/kitluy/
                           release-source.env)
+  --development-unbound-storage
+                          authorize the DEVELOPMENT-UNBOUND data-volume key in
+                          the image, so a fresh development Hub card boots
+                          without a hand-made marker file. DEVELOPMENT IMAGES
+                          ONLY — the layer refuses it for any other environment,
+                          and the provisioner refuses the posture regardless.
+                          The key is derived from the board serial, which is not
+                          secret: this buys reproducibility, never secrecy.
   --hub-sync-url <url>    bake the development hub-sync producer the Hub pulls
                           its terminal projections from, e.g.
                           http://172.16.21.17:8792 (HUB-TERMINAL-SYNC-001).
@@ -108,6 +116,7 @@ while [[ $# -gt 0 ]]; do
     # up talking to whatever answers.
     --hub-sync-url)    HUB_SYNC_URL="${2:-}"; shift 2 ;;
     --release-source)  RELEASE_SOURCE="${2:-}"; shift 2 ;;
+    --development-unbound-storage) DEV_UNBOUND_STORAGE="authorized"; shift ;;
     --allow-unconfigured-image) ALLOW_UNCONFIGURED="yes"; shift ;;
     # A stable hardware profile KEY (never a UUID) so the image stays generic.
     --hardware-profile-key) HARDWARE_PROFILE_KEY="${2:-}"; shift 2 ;;
@@ -225,6 +234,7 @@ RIG_OVERRIDES=()
 ENROLLMENT_URL="${ENROLLMENT_URL:-${KITLUY_ENROLLMENT_BASE_URL:-}}"
 HUB_SYNC_URL="${HUB_SYNC_URL:-${KITLUY_HUB_SYNC_URL:-}}"
 RELEASE_SOURCE="${RELEASE_SOURCE:-${KITLUY_RELEASE_SOURCE:-}}"
+DEV_UNBOUND_STORAGE="${DEV_UNBOUND_STORAGE:-}"
 REGISTRATION_URL="${REGISTRATION_URL:-${KITLUY_REGISTRATION_URL:-}}"
 ALLOW_UNCONFIGURED="${ALLOW_UNCONFIGURED:-no}"
 HARDWARE_PROFILE_KEY="${HARDWARE_PROFILE_KEY:-${KITLUY_HARDWARE_PROFILE_KEY:-}}"
@@ -442,6 +452,25 @@ fi
 # The record is compacted to one line because rpi-image-gen refuses an override
 # containing a newline; the JSON is identical. ABSENT IS SAFE: with either one
 # missing the sync says so once at start and does nothing.
+# ---------------------------------------------------------------------------
+# THE DEVELOPMENT-UNBOUND STORAGE AUTHORIZATION (development images only).
+# ---------------------------------------------------------------------------
+# The marker file the provisioner otherwise demands lives on the persistent
+# partition, which a reflash rewrites — so every fresh Hub card stopped with the
+# data volume locked, and with it the database, the agent and the LAN API. The
+# owner met that on 2026-09-23 and ruled it off the development path. The
+# environment gate is what protects production, and it is enforced twice: here,
+# and again in the layer against the image.env this build actually wrote.
+if [[ -n "$DEV_UNBOUND_STORAGE" ]]; then
+  if [[ "$BUILD_ENVIRONMENT" != "development" ]]; then
+    die "--development-unbound-storage is development-only; this build is '${BUILD_ENVIRONMENT}'.
+  The DEVELOPMENT-UNBOUND key is derived from the board serial, which is not
+  secret, so the volume is reproducible by anyone who can read it."
+  fi
+  RIG_OVERRIDES+=("IGconf_kitluy_hub_storage_development_unbound=authorized")
+  log "DEVELOPMENT-UNBOUND storage authorized in this image (development only; key derived from the board serial, NOT secret)"
+fi
+
 # ---------------------------------------------------------------------------
 # THE RELEASE TRUST ANCHOR — why a Store Hub needs one as much as a Terminal.
 # ---------------------------------------------------------------------------
