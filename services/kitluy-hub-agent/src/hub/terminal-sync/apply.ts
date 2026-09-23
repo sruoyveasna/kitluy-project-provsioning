@@ -319,11 +319,30 @@ export async function projectHubSelf(
     ],
   );
 
+  // ONE HUB IDENTITY AT A TIME, and that includes the board this volume used to
+  // belong to.
+  //
+  // This used to end only the stale assignments of the SAME hub_device_id, which
+  // left a reflashed Hub with two active rows: the old board's and its own. The
+  // data volume is on the NVMe and the DEVELOPMENT-UNBOUND key is derived from
+  // the board serial, so reflashing the SD card gives the Hub a NEW identity in
+  // the cloud while the same database unlocks underneath it, carrying the old
+  // identity's active assignment with it.
+  //
+  // What that cost (hardware, 2026-09-23): the Hub answered its own terminal
+  // `403 PAIRING_REQUIRED`, and the pairing session it opened was bound to the
+  // OLD identity at the OLD generation, so the terminal sat at "Connected to the
+  // Store Hub" and could never get past it. Nothing self-heals it — the stale
+  // row is active, belongs to a device that will never report again, and no
+  // other statement looks at it. The Store's database had to be wiped by hand.
+  //
+  // A Hub database serves exactly one board: the identity in `facts` is that
+  // board, so every other active assignment is by definition finished.
   await client.query(
     `update edge_identity.hub_assignment
         set status = 'ended', ended_at = now()
-      where hub_device_id = $1::uuid and id <> $2::uuid and status = 'active'`,
-    [facts.hubDeviceId, facts.assignmentId],
+      where status = 'active' and id <> $1::uuid`,
+    [facts.assignmentId],
   );
   await client.query(
     `insert into edge_identity.hub_assignment

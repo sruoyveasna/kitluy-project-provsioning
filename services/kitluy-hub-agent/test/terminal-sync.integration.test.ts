@@ -517,6 +517,65 @@ describe.skipIf(!live)("applying a terminal-projection envelope to a real Hub da
     expect([...grants]).toEqual([[live.terminalDeviceId, [T1]]]);
   });
 
+  // 2026-09-23, on hardware: reflashing the Store Hub's SD card gives the board a
+  // NEW identity in the cloud, while the SAME database unlocks underneath it —
+  // the volume is on the NVMe and the development key is derived from the board
+  // serial. The old identity's assignment stayed ACTIVE beside the new one, the
+  // Hub answered its own terminal 403 PAIRING_REQUIRED, and the terminal sat at
+  // "Connected to the Store Hub" until the Store's database was wiped by hand.
+  it("ends the assignment of a Hub identity this database used to serve (a reflashed board)", async () => {
+    const previousHub = randomUUID();
+    const previousAssignment = randomUUID();
+    await withHubTransaction(pool, async (client) => {
+      await client.query(
+        `insert into edge_identity.hub_device
+           (id, asset_number, device_kind, lifecycle_status, trust_status,
+            board_serial_hash, factory_duid_hash, root_key_fingerprint,
+            manufacturing_cert_serial, created_at, updated_at)
+         values ($1::uuid, 'KITLUY-DEV-HUB-PREV-' || left(replace($1::text, '-', ''), 8),
+                 'store_hub', 'deployed', 'trusted',
+                 repeat('a', 64), repeat('b', 64), repeat('c', 64), 'PREVIOUS-BOARD', now(), now())
+         on conflict (id) do nothing`,
+        [previousHub],
+      );
+      await client.query(
+        `insert into edge_identity.hub_assignment
+           (id, hub_device_id, tenant_id, digital_store_id, location_id,
+            assignment_generation, assigned_at, ended_at, status, operational_cert_serial)
+         values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 5, now(), null, 'active', 'PREV-CERT')`,
+        [
+          previousAssignment,
+          previousHub,
+          scope.tenantId,
+          scope.digitalStoreId,
+          scope.storeLocationId,
+        ],
+      );
+    });
+
+    await applyEnvelope(pool, {
+      self,
+      deliveries: [delivery()],
+      environment: "development",
+      signer,
+    });
+
+    // Asserted on the two rows this case owns, not on "one row in the database":
+    // the local Hub database is shared by every suite here, and a neighbour's
+    // fixture may be live at the same instant. On a real Hub there is one board
+    // and one database, which is exactly why the previous identity must end.
+    const rows = await withHubTransaction(pool, (client) =>
+      client.query(
+        `select id::text as id, status, ended_at is not null as ended
+           from edge_identity.hub_assignment where id = any($1::uuid[])`,
+        [[previousAssignment, self.assignmentId]],
+      ),
+    );
+    const byId = new Map(rows.rows.map((r: Record<string, unknown>) => [r["id"], r]));
+    expect(byId.get(previousAssignment)).toMatchObject({ status: "ended", ended: true });
+    expect(byId.get(self.assignmentId)).toMatchObject({ status: "active", ended: false });
+  });
+
   it("refuses to publish outside development (the projections' door refused there too)", async () => {
     await expect(
       applyEnvelope(pool, {
