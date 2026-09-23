@@ -260,6 +260,49 @@ Deno.serve(async (request: Request): Promise<Response> => {
         } catch (error) {
           console.error("record_device_sighting_v1 failed; registration stands", error);
         }
+
+        // A SAME-BOARD RE-FLASH RELEASES ITSELF, IN DEVELOPMENT (0234/0235).
+        //
+        // A re-flashed board comes back holding its live assignment, and the Hub
+        // pairing door admits `enrolled` only — so until now a development
+        // reflash needed `dev:device:unassign` before the Partner could pair it,
+        // and a Hub that typed its code first burned one of five attempts.
+        //
+        // WHY IT IS SAFE TO CALL HERE, on an unauthenticated route:
+        //   * `installation_created` gates it, so this fires on the ONE boot that
+        //     opened a new installation — not on the 60-second poll this route
+        //     serves while a board waits for approval, and not on a normal boot;
+        //   * the KNOWN-device status excludes a first installation and a
+        //     different physical board (those answer PENDING_APPROVAL or
+        //     TRUST_REVIEW_REQUIRED and never reach this line);
+        //   * the door resolves the ENVIRONMENT from the device's own governed
+        //     records, not from anything this function knows, and fails closed;
+        //   * 0234 still requires reflash evidence — the current enrollment must
+        //     supersede an earlier one — and still refuses a contained board, an
+        //     open trust incident, and a second call.
+        //
+        // It releases; it never re-assigns. The Partner pairing code remains the
+        // trust transition. Like the sighting above it must never fail a
+        // registration: a board that cannot be released is a board an operator
+        // releases by hand, which is exactly where we were.
+        if (
+          registered.installation_created &&
+          registered.status === "KNOWN_DEVICE_INSTALLATION_REGISTERED" &&
+          !registered.credential_reuse_detected
+        ) {
+          try {
+            const [released] = await tx<{ r: { released: boolean; reason: string } }[]>`
+              select kitluy_devices.release_reflashed_device_for_repair_auto_v1(
+                ${registered.device_id}::uuid, 'device/self-registration'::text) as r`;
+            if (released?.r?.released === true) {
+              console.log(
+                `same-board reflash: released ${registered.device_id} for re-pairing (${released.r.reason})`,
+              );
+            }
+          } catch (error) {
+            console.error("reflash release failed; registration stands", error);
+          }
+        }
       }
       return { unknownProfile: false as const, result: registered };
     });
