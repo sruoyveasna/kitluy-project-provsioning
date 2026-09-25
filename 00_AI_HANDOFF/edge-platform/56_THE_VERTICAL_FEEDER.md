@@ -2,15 +2,15 @@
 
 **Date** 2026-09-25 · **Area** edge-platform / cloud control plane · **Source** `dev` `fcd87963c932` · **Owner task** "PRIMARY-VERTICAL-CLOUD-TO-HUB-FEEDER-001"
 
-| Gate                | State                                                                                                               |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| IMPLEMENTED         | **YES** — the whole path, no manual SQL (§2)                                                                        |
-| TESTED              | **YES** — hub-agent 523 passed / 1 pre-existing failure; 17 new feeder tests (§3)                                   |
-| INTEGRATED          | **YES** — proven on the live development stack: `null` → `laundry` written by the sync itself (§4)                  |
-| IMAGE VERIFIED      | **YES** — `f3810ab6…`, overlay read-back 140/140, image-contents 62/0/0, secret scan PASS. **NOT boot-tested** (§5) |
-| TERMINAL IMAGE      | **`0db42539…` remains valid** — no Terminal-image-owned source changed (§6)                                         |
-| HARDWARE VERIFIED   | **NO — not attempted.** No board was used                                                                           |
-| END-TO-END VERIFIED | **NO** — awaiting the owner's hardware acceptance (§7)                                                              |
+| Gate                | State                                                                                                                    |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| IMPLEMENTED         | **YES** — the whole path, no manual SQL (§2)                                                                             |
+| TESTED              | **YES** — hub-agent 523 passed / 1 pre-existing failure; 24 new tests — 18 in hub-agent, 6 in digital-store-context (§3) |
+| INTEGRATED          | **YES** — proven on the live development stack: `null` → `laundry` written by the sync itself (§4)                       |
+| IMAGE VERIFIED      | **YES** — `f3810ab6…`, overlay read-back 140/140, image-contents 62/0/0, secret scan PASS. **NOT boot-tested** (§5)      |
+| TERMINAL IMAGE      | **`0db42539…` remains valid** — no Terminal-image-owned source changed (§6)                                              |
+| HARDWARE VERIFIED   | **NO — not attempted.** No board was used                                                                                |
+| END-TO-END VERIFIED | **NO** — awaiting the owner's hardware acceptance (§7)                                                                   |
 
 ---
 
@@ -153,7 +153,7 @@ failure (`still fails closed: a stale identity alone is HUB_NOT_OPERATIONAL`)
 **fails identically at `d1748da` without this change** — a measured baseline,
 not a claim.
 
-17 new tests. The contract half needs no database:
+24 new tests (10 + 8 in hub-agent, 6 in `digital-store-context`). The contract half needs no database:
 
 | #   | Proof                                                                                                                                                                                        |
 | --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
