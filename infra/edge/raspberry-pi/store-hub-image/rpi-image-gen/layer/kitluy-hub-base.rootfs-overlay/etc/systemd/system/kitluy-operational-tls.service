@@ -19,6 +19,17 @@ After=kitluy-firstboot.service kitluy-cloud-registration.service kitluy-hub-pair
 Wants=network-online.target
 Requires=kitluy-firstboot.service
 ConditionPathExists=/usr/lib/kitluy/operational-tls
+# ADOPTION STARTS THE AGENT.
+#
+# On a fresh card the Hub agent starts before this unit has a certificate,
+# refuses KLUY-HUB-TLS-MISSING and exits 0 -- deliberately, a resting state, so
+# its Restart=on-failure never fires. This unit then adopts the certificate
+# and exits 0, and until this line nothing started the agent again: the Hub
+# paired, held a valid certificate and served nobody until a power cycle
+# (hardware, Cycle B, 2026-09-25). A clean exit here means ADOPTED (a waiting
+# Hub keeps looping and never exits), so it starts the agent; on a later boot
+# the agent is usually running already and the start is a no-op.
+OnSuccess=kitluy-hub-agent.service
 
 [Service]
 Type=simple

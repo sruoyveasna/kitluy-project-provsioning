@@ -390,8 +390,42 @@ export async function projectHubSelf(
     ],
   );
 
+  // ONE CURRENT CREDENTIAL OF EACH KIND for this Hub, for the same reason as the
+  // assignment above.
+  //
+  // A same-board reflash keeps the hub_device_id and the NVMe database, and
+  // brings a NEW identity key and a NEW operational certificate. Both land as
+  // new rows (their ids derive from the serial and the key fingerprint), and
+  // until this statement the previous board installation's rows stayed
+  // 'active' beside them -- at the same rotation_generation 1, because the
+  // generation was hard-coded.
+  //
+  // What that cost (hardware, Cycle B, 2026-09-25): `begin_terminal_pairing_v1`
+  // (Hub migration 0042) picks the Hub's signing identity with
+  // `order by rotation_generation desc limit 1`. With two active generation-1
+  // rows it picked the Cycle-A identity, whose key exists only on the old SD
+  // card; the agent signed with its current key; `complete_terminal_pairing_v1`
+  // refused KLUY-EDGE-PAIRING-CERT-INVALID ("the receipt signer is not this
+  // session's Hub credential") and the terminal could never pair.
+  //
+  // The board facts are authoritative for the Hub's own credentials, so every
+  // other active row of the same kind is by definition a previous installation.
+  // Mirrors `projectTerminal`. It runs on every sync, so a database that
+  // already carries the stale rows heals on the first sync after an upgrade --
+  // no manual SQL. The identity is only superseded when the board presented
+  // one: with no identity key there is no current row to prefer.
+  const operationalId = md5Uuid(`kitluy.hub-operational-credential:${cert.serial}`);
+  const identityId =
+    identityFingerprint === null
+      ? null
+      : md5Uuid(`kitluy.hub-identity-credential:${identityFingerprint}`);
+  await supersedeHubCredentials(client, facts.hubDeviceId, "operational_tls", operationalId);
+  if (identityId !== null) {
+    await supersedeHubCredentials(client, facts.hubDeviceId, "device_identity", identityId);
+  }
+
   await upsertCredential(client, {
-    id: md5Uuid(`kitluy.hub-operational-credential:${cert.serial}`),
+    id: operationalId,
     deviceId: facts.hubDeviceId,
     type: "operational_tls",
     fingerprint: cert.publicKeyFingerprint,
@@ -399,11 +433,13 @@ export async function projectHubSelf(
     issuer: cert.issuer,
     issuedAt: cert.notBefore,
     expiresAt: cert.notAfter,
-    generation: 1,
+    // The pairing generation, as projectTerminal does -- not a hard-coded 1,
+    // which made every installation of this Hub look equally current.
+    generation: facts.assignmentGeneration,
   });
-  if (identityFingerprint !== null) {
+  if (identityId !== null && identityFingerprint !== null) {
     await upsertCredential(client, {
-      id: md5Uuid(`kitluy.hub-identity-credential:${identityFingerprint}`),
+      id: identityId,
       deviceId: facts.hubDeviceId,
       type: "device_identity",
       fingerprint: identityFingerprint,
@@ -411,10 +447,25 @@ export async function projectHubSelf(
       issuer: cert.issuer,
       issuedAt: cert.notBefore,
       expiresAt: cert.notAfter,
-      generation: 1,
+      generation: facts.assignmentGeneration,
     });
   }
   return { identityCredential: identityFingerprint !== null };
+}
+
+async function supersedeHubCredentials(
+  client: HubClient,
+  hubDeviceId: string,
+  type: "operational_tls" | "device_identity",
+  currentId: string,
+): Promise<void> {
+  await client.query(
+    `update edge_identity.device_credential
+        set status = 'superseded'
+      where device_id = $1::uuid and credential_type = $2 and id <> $3::uuid
+        and status = 'active'`,
+    [hubDeviceId, type, currentId],
+  );
 }
 
 async function upsertCredential(

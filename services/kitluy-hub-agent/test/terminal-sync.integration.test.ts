@@ -621,6 +621,84 @@ describe.skipIf(!live)("applying a terminal-projection envelope to a real Hub da
     expect(byId.get(self.assignmentId)).toMatchObject({ status: "active", ended: false });
   });
 
+  // 2026-09-25, on hardware (Cycle B): the SAME board, a new SD card. The Hub
+  // keeps its device id, the NVMe database keeps the previous installation's
+  // identity and operational credential -- and until this fix both stayed
+  // 'active' at rotation_generation 1 beside the new ones. The pairing door's
+  // `order by rotation_generation desc limit 1` then bound the session to the
+  // OLD identity, and completion refused KLUY-EDGE-PAIRING-CERT-INVALID.
+  it("supersedes the Hub's own credentials from a previous installation of the same board", async () => {
+    const staleOperational = randomUUID();
+    const staleIdentity = randomUUID();
+    const staleFingerprint = publicKeyFingerprint(edPublicPem());
+    await withHubTransaction(pool, async (client) => {
+      for (const [id, type, serial] of [
+        [staleOperational, "operational_tls", hexSerial()],
+        [staleIdentity, "device_identity", staleFingerprint],
+      ] as const) {
+        await client.query(
+          `insert into edge_identity.device_credential
+             (id, device_id, credential_type, public_key_fingerprint, certificate_serial,
+              issuer, issued_at, expires_at, status, rotation_generation)
+           values ($1::uuid, $2::uuid, $3, $4, $5, 'CN=cycle-a', now() - interval '2 days',
+                   now() + interval '28 days', 'active', 1)`,
+          [id, self.hubDeviceId, type, staleFingerprint, serial],
+        );
+      }
+    });
+
+    await applyEnvelope(pool, {
+      self,
+      primaryVertical: "laundry",
+      deliveries: [delivery()],
+      environment: "development",
+      signer,
+    });
+
+    const rows = await withHubTransaction(pool, (client) =>
+      client.query<{
+        id: string;
+        credential_type: string;
+        certificate_serial: string;
+        status: string;
+        rotation_generation: number;
+      }>(
+        `select id::text as id, credential_type, certificate_serial, status, rotation_generation
+           from edge_identity.device_credential where device_id = $1::uuid`,
+        [self.hubDeviceId],
+      ),
+    );
+    const byId = new Map(rows.rows.map((r) => [r.id, r]));
+    expect(byId.get(staleOperational)?.status).toBe("superseded");
+    expect(byId.get(staleIdentity)?.status).toBe("superseded");
+
+    // Exactly one current credential of each kind: the board's own.
+    const active = rows.rows.filter((r) => r.status === "active");
+    expect(active.map((r) => r.credential_type).sort()).toEqual([
+      "device_identity",
+      "operational_tls",
+    ]);
+    const currentIdentity = publicKeyFingerprint(self.identityPublicKeyPem ?? "");
+    expect(active.find((r) => r.credential_type === "device_identity")?.certificate_serial).toBe(
+      currentIdentity,
+    );
+    expect(active.find((r) => r.credential_type === "operational_tls")?.certificate_serial).toBe(
+      hubCert.serial,
+    );
+
+    // The pairing door's own selection (Hub migration 0042) now has one answer.
+    const signing = await withHubTransaction(pool, (client) =>
+      client.query<{ certificate_serial: string }>(
+        `select c.certificate_serial from edge_identity.device_credential c
+          where c.device_id = $1::uuid and c.credential_type = 'device_identity'
+            and c.status = 'active' and c.revoked_at is null and c.expires_at > now()
+          order by c.rotation_generation desc limit 1`,
+        [self.hubDeviceId],
+      ),
+    );
+    expect(signing.rows.map((r) => r.certificate_serial)).toEqual([currentIdentity]);
+  });
+
   it("refuses to publish outside development (the projections' door refused there too)", async () => {
     await expect(
       applyEnvelope(pool, {

@@ -506,6 +506,15 @@ else
   ok "operational-tls: every packaged import is a node: builtin"
 fi
 
+# Cycle B (2026-09-25): a paired Hub served nobody until a power cycle, because
+# the agent's TLS-missing exit is clean and nothing restarted it after adoption.
+if grep -qx 'OnSuccess=kitluy-hub-agent.service' "$OPTLS_UNIT"; then
+  ok "operational-tls: a successful adoption starts the Hub agent (OnSuccess=)"
+else
+  bad "operational-tls: a successful adoption starts the Hub agent (OnSuccess=)" \
+    "the agent stays down after pairing until the next boot"
+fi
+
 # THE LIFECYCLE ORDER IS NOT COLLAPSED. A certificate is a statement about a
 # device that belongs to a Store, so this stage runs After= pairing — and is
 # NOT Requires= pairing, because the pairing console is an interactive screen
