@@ -118,7 +118,28 @@ first (`CORE-COMMERCIAL-TRANSACTION` / `LAUNDRY-BOOKING-COMPATIBILITY` /
 `apps/kitluy-pos-desktop-app` is the base; standalone apps are donors) and
 BLOCKER-1 (WS-12 lock — consolidation proceeds as `MIGRATED-NOT-YET-ACCEPTED`).
 
-### New open item — KLREQ-VERTICAL-ENVELOPE-001
+### CLOSED — KLREQ-VERTICAL-ENVELOPE-001 (2026-09-25, PRIMARY-VERTICAL-CLOUD-TO-HUB-FEEDER-001)
+
+**Both halves are now done.** TERMINAL-APPLICATION-ASSIGNMENT-001 put an
+explicit `primaryVertical` in the signed terminal configuration delivery (v2)
+and retired the profile-prefix derivation, keeping the prefix as a cross-check
+only. What remained was that **nothing fed the Hub** the Store's vertical, so
+the new field was always NULL and `deriveEligibility` refused every terminal
+(`VERTICAL_UNAVAILABLE`) — handoff 55 §6.
+
+Closed by migration **0237** plus the hub-sync contract and consumer: the
+projection door reads `kitluy_core.digital_stores.primary_vertical_code`, the
+signed envelope carries it, and the Hub converts it once through the single
+governed table in `@kitluy/shared-types` before writing
+`edge_identity.hub_assignment.primary_vertical_code`. Record:
+[`edge-platform/56_THE_VERTICAL_FEEDER.md`](edge-platform/56_THE_VERTICAL_FEEDER.md).
+
+Fail-closed behaviour was **strengthened, never weakened**: a missing, unknown,
+pre-lowered or tampered vertical refuses, a cross-Tenant or foreign Store cannot
+inject one, nothing defaults to Laundry, and eligibility now also refuses a
+value that satisfies `0044`'s shape CHECK but is outside the locked registry.
+
+> Historical statement of the item, kept for lineage:
 
 The Hub configuration/assignment envelope carries **no explicit vertical
 field**, so the vertical is derived from the Hub-signed `terminalProfileCode`

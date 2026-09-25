@@ -4,6 +4,63 @@ Read the newest relevant handoff before starting work. Naming:
 `YYYY-MM-DD__<AREA>__<TASK-ID>__<SLUG>__AI-HANDOFF.md` under the matching
 subfolder (repository/ shared/ apps/ services/ data/ infrastructure/ reviews/).
 
+## PRIMARY-VERTICAL-CLOUD-TO-HUB-FEEDER-001 — the Digital Store's primary vertical reaches the Store Hub (2026-09-25)
+
+Record: [`edge-platform/56_THE_VERTICAL_FEEDER.md`](edge-platform/56_THE_VERTICAL_FEEDER.md) · migration `0237`
+· **IMPLEMENTED · TESTED · INTEGRATED (live: `null` → `laundry` written by the sync itself) · STORE HUB IMAGE NOT YET VERIFIED (rebuilding — overlay read-back 140/140 and all suites pass; the flashable artifact is not finished) · HARDWARE NOT VERIFIED · END-TO-END NOT VERIFIED**
+
+**Handoff 55 §6's blocker is closed, durably and without manual SQL.** `0044`
+made `deriveEligibility` fail closed `VERTICAL_UNAVAILABLE` on a NULL
+`hub_assignment.primary_vertical_code` and nothing wrote it; of 33 rows, the one
+that had a vertical had been set by hand. The feeder now runs
+`digital_stores.primary_vertical_code` → group **0237** projection door →
+**inside the signed** hub-sync envelope → the Hub converts once → the assignment
+column → eligibility → the signed terminal configuration.
+
+**ONE canonical mapping, not `.toLowerCase()`.** `VERTICAL_CLOUD_CODES` in
+`@kitluy/shared-types` is an explicit eight-row table beside the
+`VERTICAL_PHASES` registry, with a coverage assertion that fails the suite if a
+ninth vertical is added without a decision. `laundry`, `Laundry`, `LAUNDRY_V2`,
+padded and unknown values all refuse; nothing defaults to Laundry. Café is one
+table row — **no Café behaviour was implemented**. The door projects the cloud
+value **verbatim** and the single conversion happens at the Hub after the
+signature is verified. Written on INSERT **and** on CONFLICT, so Hubs already in
+the field heal. `0044` was **not** weakened; eligibility now also refuses a value
+that satisfies its CHECK but is outside the registry (`bakery`).
+
+**Live proof** on `kitluy-fresh`: the real door returns `LAUNDRY` for
+`KL-9830994458E0` from "KitLuy Demo Laundry"; the Hub resolved `laundry`, wrote
+it (`null` → `laundry`), repeated idempotently, and eligibility moved on to
+`PAIRING_REQUIRED`. The `:8792` producer was **restarted** at `fcd8796` — the old
+process would serve envelopes with no vertical.
+
+**Also fixed: 40 failures that were never this change's.** `terminal-sync`'s
+`afterAll` now restores the shared `kitluy_hub_local` fixture it displaces
+(`applyEnvelope` ends every other active assignment by design), the cause
+diagnosed in handoff 55 §1. hub-agent **41 failed → 1**, the survivor failing
+identically at `d1748da`.
+
+**Recorded, not fixed:** three pre-existing ad-hoc `.toLowerCase()` vertical
+conversions outside the feeder path; a leftover `kitluy_credential_issuer` grant
+on `kitluy-repo17` blocking two concurrency suites (its own guard forbids
+revoking by hand); `khr_per_usd` still unset, as instructed.
+
+**Store Hub image.** The feeder is in the bundled agent, which is image-owned, so
+the Hub overlay was repackaged and a new image is required. **Do not flash the
+Cycle-B Hub image `7f887229…` after this change** — its agent never writes the
+vertical, so that board would sync, look healthy and refuse every terminal. Two
+things to know before rebuilding: the Store Hub build takes its endpoints as
+flags with **no defaults**, and the invocation in handoff 40 §7a predates both
+`--release-source` and `--development-unbound-storage` — a build missing the
+latter drops handoff 54's GAP 1 fix and silently reintroduces the hand-made
+storage marker. A build was then interrupted by a mains power cut; nothing was
+lost (both commits were already pushed, `git fsck` clean, tree exactly
+`fcd8796`), and the partial trees are parked under `build/work/preserved-*`.
+
+**Next:** finish and read back the Store Hub image, then the owner's hardware
+acceptance — same Pi + same NVMe, fresh SD, no purge, one pairing code, then the
+existing Pi Terminal image `0db42539…` and a KHR-only real Booking.
+
 ## SAME-PI REFLASH CONTINUITY — a KitLuy device is the physical Pi, not its SD card (2026-09-23)
 
 Record: [`edge-platform/54_SAME_PI_REFLASH_CONTINUITY.md`](edge-platform/54_SAME_PI_REFLASH_CONTINUITY.md) · owner decision `KLD-2026-09-23-DEVICE-CONTINUITY-RULE-001`
