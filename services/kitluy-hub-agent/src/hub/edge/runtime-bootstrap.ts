@@ -36,6 +36,7 @@ import {
   type TerminalConfigurationDelivery,
   type TrustEnvironment,
 } from "@kitluy/device-identity";
+import { isVerticalKey } from "@kitluy/shared-types";
 
 import { withHubTransaction, HUB_RUNTIME_ROLE, type HubClient, type HubPool } from "../db.js";
 import { canonicalJson } from "../../hub-database.js";
@@ -408,6 +409,17 @@ export async function deriveEligibility(
     return refuse(
       "VERTICAL_UNAVAILABLE",
       "this Store Hub's assignment carries no primary vertical; nothing can be signed for the terminal",
+    );
+  }
+  // Shape alone is not enough. Migration 0044's CHECK constrains the column to
+  // `^[a-z][a-z0-9_]*$`, which `laundry_v2` or `bakery` satisfy just as well as
+  // `laundry`. A value outside the locked registry is refused here rather than
+  // signed into a delivery the terminal would then fail to resolve -- the
+  // refusal belongs where the Hub still has a code to name.
+  if (!isVerticalKey(primaryVertical)) {
+    return refuse(
+      "VERTICAL_UNAVAILABLE",
+      `this Store Hub's assignment names '${primaryVertical}', which is not a registered vertical`,
     );
   }
 

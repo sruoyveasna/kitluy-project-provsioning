@@ -275,6 +275,24 @@ export function buildSignedEnvelope(answer, nonce, signer, now = new Date()) {
     if (delivery === null) skipped.push(row.asset_tag);
     else terminals.push(delivery);
   }
+  // Group 0237 / PRIMARY-VERTICAL-CLOUD-TO-HUB-FEEDER-001: the assigned Digital
+  // Store's primary vertical, as the cloud reference registry holds it. The
+  // door refuses rather than answering without one, so an answer that reaches
+  // here and still carries none is a producer/door version mismatch -- and a
+  // Hub would then write a NULL vertical and refuse every terminal with
+  // VERTICAL_UNAVAILABLE. Refuse to SIGN instead: an unsigned gap is easier to
+  // diagnose than a signed Hub that silently serves nobody. No value is
+  // substituted, and the producer performs no vocabulary conversion -- the
+  // cloud value travels verbatim and the Hub converts it through the one
+  // canonical table.
+  const primaryVerticalCode =
+    typeof scope.primaryVerticalCode === "string" ? scope.primaryVerticalCode.trim() : "";
+  if (primaryVerticalCode === "") {
+    throw new Error(
+      "KLUY-HUB-SYNC-VERTICAL-ABSENT: the projection door returned no primaryVerticalCode; " +
+        "apply migration 0237 to the target project before serving hub-sync",
+    );
+  }
   const envelope = {
     kind: HUB_SYNC_ENVELOPE_KIND,
     producedAt,
@@ -286,6 +304,7 @@ export function buildSignedEnvelope(answer, nonce, signer, now = new Date()) {
       digitalStoreId: scope.digitalStoreId,
       storeLocationId: scope.storeLocationId,
       assignmentGeneration: scope.assignmentGeneration,
+      primaryVerticalCode,
     },
     terminals,
     // Group 0233: the Laundry catalog with effective Location prices (and its

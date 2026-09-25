@@ -30,6 +30,8 @@
 import { X509Certificate, createHash, createPublicKey } from "node:crypto";
 import type pg from "pg";
 
+import type { VerticalKey } from "@kitluy/shared-types";
+
 import { HUB_RUNTIME_ROLE, withHubTransaction, type HubClient } from "../db.js";
 import { publishDevelopmentConfiguration } from "../dev-configuration.js";
 import type { DevelopmentHmacBatchSigner } from "../sync/signing.js";
@@ -284,6 +286,14 @@ function certificateFacts(pem: string): CertificateFacts {
 export async function projectHubSelf(
   client: HubClient,
   facts: HubSelfFacts,
+  /**
+   * The Digital Store's primary vertical, as a registry key, taken from the
+   * VERIFIED cloud envelope (group 0237). A separate argument rather than a
+   * field of `HubSelfFacts` on purpose: `HubSelfFacts` is what the BOARD holds
+   * -- its pairing state, its certificate, its serial -- and the vertical is
+   * precisely the thing the board must NOT be the authority on.
+   */
+  primaryVertical: VerticalKey,
 ): Promise<{ readonly identityCredential: boolean }> {
   const cert = certificateFacts(facts.operationalCertificatePem);
   const identityFingerprint =
@@ -344,16 +354,30 @@ export async function projectHubSelf(
       where status = 'active' and id <> $1::uuid`,
     [facts.assignmentId],
   );
+  // `primary_vertical_code` (migration 0044) is written on BOTH paths. Before
+  // group 0237 it was written on neither, so every assignment this sync wrote
+  // was NULL and `deriveEligibility` refused every terminal with
+  // VERTICAL_UNAVAILABLE -- the Hub looked healthy and served nobody. Setting
+  // it only on insert would have left exactly that: the 33 rows already on the
+  // development Hub are UPDATE paths, and would never have healed.
+  //
+  // The update is unconditional, so a legitimate authoritative change (the
+  // cloud is the sole author) lands on the next sync; it is idempotent, so a
+  // repeated identical envelope writes the same value. Only the row the
+  // envelope names is touched -- ended assignments keep the vertical they were
+  // serving under, which is what a history is for.
   await client.query(
     `insert into edge_identity.hub_assignment
        (id, hub_device_id, tenant_id, digital_store_id, location_id,
-        assignment_generation, assigned_at, ended_at, status, operational_cert_serial)
-     values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6, now(), null, 'active', $7)
+        assignment_generation, assigned_at, ended_at, status, operational_cert_serial,
+        primary_vertical_code)
+     values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6, now(), null, 'active', $7, $8)
      on conflict (id) do update
         set ended_at = null,
             status = 'active',
             assignment_generation = excluded.assignment_generation,
-            operational_cert_serial = excluded.operational_cert_serial`,
+            operational_cert_serial = excluded.operational_cert_serial,
+            primary_vertical_code = excluded.primary_vertical_code`,
     [
       facts.assignmentId,
       facts.hubDeviceId,
@@ -362,6 +386,7 @@ export async function projectHubSelf(
       facts.scope.storeLocationId,
       facts.assignmentGeneration,
       cert.serial,
+      primaryVertical,
     ],
   );
 
@@ -686,6 +711,12 @@ export async function readActiveSections(
 
 export interface ApplyInput {
   readonly self: HubSelfFacts;
+  /**
+   * The assigned Digital Store's primary vertical (registry key), from the
+   * verified envelope. Required: an envelope without one is refused before it
+   * reaches this function, so there is no "apply without a vertical" path.
+   */
+  readonly primaryVertical: VerticalKey;
   readonly deliveries: readonly TerminalDelivery[];
   readonly environment: string;
   readonly now?: Date;
@@ -753,7 +784,7 @@ export async function applyEnvelope(pool: pg.Pool, input: ApplyInput): Promise<A
   const projected = await withHubTransaction(
     pool,
     async (client) => {
-      const self = await projectHubSelf(client, input.self);
+      const self = await projectHubSelf(client, input.self, input.primaryVertical);
       const results: TerminalProjectionResult[] = [];
       for (const d of inScope) results.push(await projectTerminal(client, d, now));
       const retiredAbsent = await retireAbsentTerminals(

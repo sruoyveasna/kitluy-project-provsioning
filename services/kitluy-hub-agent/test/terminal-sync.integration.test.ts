@@ -21,7 +21,12 @@ import { join } from "node:path";
 import forge from "node-forge";
 import { afterAll, describe, expect, it } from "vitest";
 
-import { createHubPool, isHubDatabaseReachable, withHubTransaction } from "../src/hub/db.js";
+import {
+  HUB_RUNTIME_ROLE,
+  createHubPool,
+  isHubDatabaseReachable,
+  withHubTransaction,
+} from "../src/hub/db.js";
 import { loadOrCreateDevelopmentSigner } from "../src/hub/dev-configuration.js";
 import {
   applyEnvelope,
@@ -30,6 +35,7 @@ import {
   type TerminalDelivery,
 } from "../src/hub/terminal-sync/apply.js";
 import { publicKeyFingerprint } from "../src/hub/terminal-sync/contract.js";
+import { deriveEligibility } from "../src/hub/edge/runtime-bootstrap.js";
 
 const live = await isHubDatabaseReachable();
 if (!live) {
@@ -37,6 +43,12 @@ if (!live) {
     "[terminal-sync.integration] kitluy_hub_local is unreachable — SKIPPED, not evidence",
   );
 }
+
+/**
+ * The shared development fixture's Hub assignment (`hub/seed/dev-fixtures.sql`).
+ * This suite displaces it and must restore it — see `afterAll`.
+ */
+const HUB_FIXTURE_ASSIGNMENT_ID = "e0000000-0000-4000-8000-000000000012";
 
 const T1 = "laundry.t1.intake_cashier";
 const T2 = "laundry.t2.customer_display";
@@ -130,12 +142,33 @@ describe.skipIf(!live)("applying a terminal-projection envelope to a real Hub da
         [self.hubDeviceId],
       ),
     );
+    // ... and PUT THE FIXTURE BACK. Ending this suite's own assignment is only
+    // half of it: `applyEnvelope` ends EVERY other active assignment when it
+    // projects itself (production design — "a Hub database serves exactly one
+    // board"), and the shared `kitluy_hub_local` fixture is one of them. So
+    // after this suite ran, the database held ZERO live assignments and nothing
+    // restored it: every command suite scheduled afterwards refused with
+    // `EDGE_DEVICE_NOT_ASSIGNED` / "holds no active assignment" against a Hub
+    // that was perfectly healthy. That is the true cause of the "pre-existing"
+    // failures carried since handoff 53, diagnosed in handoff 55 §1 and fixed
+    // here rather than re-diagnosed again: a suite that displaces shared state
+    // restores it. Scoped to the fixture row by id, and a no-op in a database
+    // that has none (a fresh Hub, or the board's own).
+    await withHubTransaction(pool, (c) =>
+      c.query(
+        `update edge_identity.hub_assignment
+            set status = 'active', ended_at = null
+          where id = $1::uuid`,
+        [HUB_FIXTURE_ASSIGNMENT_ID],
+      ),
+    );
     await pool.end();
   });
 
   it("projects the Hub itself and the delivered terminal, and publishes the grants", async () => {
     const outcome = await applyEnvelope(pool, {
       self,
+      primaryVertical: "laundry",
       deliveries: [first],
       environment: "development",
       signer,
@@ -211,6 +244,7 @@ describe.skipIf(!live)("applying a terminal-projection envelope to a real Hub da
     const before = await snapshotCount();
     const outcome = await applyEnvelope(pool, {
       self,
+      primaryVertical: "laundry",
       deliveries: [first],
       environment: "development",
       signer,
@@ -224,6 +258,7 @@ describe.skipIf(!live)("applying a terminal-projection envelope to a real Hub da
     const changed: TerminalDelivery = { ...first, profileCodes: [T1, T3] };
     const outcome = await applyEnvelope(pool, {
       self,
+      primaryVertical: "laundry",
       deliveries: [changed],
       environment: "development",
       signer,
@@ -258,6 +293,7 @@ describe.skipIf(!live)("applying a terminal-projection envelope to a real Hub da
     });
     const outcome = await applyEnvelope(pool, {
       self,
+      primaryVertical: "laundry",
       deliveries: [{ ...first, profileCodes: [T1, T3] }, foreign],
       environment: "development",
       signer,
@@ -285,6 +321,7 @@ describe.skipIf(!live)("applying a terminal-projection envelope to a real Hub da
     });
     const outcome = await applyEnvelope(pool, {
       self,
+      primaryVertical: "laundry",
       deliveries: [reflashed],
       environment: "development",
       signer,
@@ -326,6 +363,7 @@ describe.skipIf(!live)("applying a terminal-projection envelope to a real Hub da
     const before = await snapshotCount();
     const outcome = await applyEnvelope(pool, {
       self,
+      primaryVertical: "laundry",
       deliveries: [],
       environment: "development",
       signer,
@@ -368,6 +406,7 @@ describe.skipIf(!live)("applying a terminal-projection envelope to a real Hub da
     });
     const outcome = await applyEnvelope(pool, {
       self,
+      primaryVertical: "laundry",
       deliveries: [expired, unknownHardware],
       environment: "development",
       signer,
@@ -399,6 +438,7 @@ describe.skipIf(!live)("applying a terminal-projection envelope to a real Hub da
     // previous row is renamed and this one takes the name.
     const outcome = await applyEnvelope(pool, {
       self,
+      primaryVertical: "laundry",
       deliveries: [back],
       environment: "development",
       signer,
@@ -446,6 +486,7 @@ describe.skipIf(!live)("applying a terminal-projection envelope to a real Hub da
     // named again with T1; this is a NEW terminal, so grants change too.
     const first = await applyEnvelope(pool, {
       self,
+      primaryVertical: "laundry",
       deliveries: [live],
       environment: "development",
       signer,
@@ -482,6 +523,7 @@ describe.skipIf(!live)("applying a terminal-projection envelope to a real Hub da
     // Same everything → nothing published.
     const same = await applyEnvelope(pool, {
       self,
+      primaryVertical: "laundry",
       deliveries: [live],
       environment: "development",
       signer,
@@ -493,6 +535,7 @@ describe.skipIf(!live)("applying a terminal-projection envelope to a real Hub da
     // A new catalog hash alone → republished, because catalog only.
     const priced = await applyEnvelope(pool, {
       self,
+      primaryVertical: "laundry",
       deliveries: [live],
       environment: "development",
       signer,
@@ -504,6 +547,7 @@ describe.skipIf(!live)("applying a terminal-projection envelope to a real Hub da
     // A new FX rate alone → republished, because money only.
     const fx = await applyEnvelope(pool, {
       self,
+      primaryVertical: "laundry",
       deliveries: [live],
       environment: "development",
       signer,
@@ -555,6 +599,7 @@ describe.skipIf(!live)("applying a terminal-projection envelope to a real Hub da
 
     await applyEnvelope(pool, {
       self,
+      primaryVertical: "laundry",
       deliveries: [delivery()],
       environment: "development",
       signer,
@@ -580,6 +625,7 @@ describe.skipIf(!live)("applying a terminal-projection envelope to a real Hub da
     await expect(
       applyEnvelope(pool, {
         self,
+        primaryVertical: "laundry",
         deliveries: [
           delivery({
             terminalDeviceId: randomUUID(),
@@ -592,6 +638,202 @@ describe.skipIf(!live)("applying a terminal-projection envelope to a real Hub da
         signer,
       }),
     ).rejects.toThrow(/KLUY-HUB-DEV-CONFIG-ENVIRONMENT/);
+  });
+
+  // -------------------------------------------------------------------------
+  // PRIMARY-VERTICAL-CLOUD-TO-HUB-FEEDER-001 — the column the whole hardware
+  // path was waiting on, written by the sync itself.
+  // -------------------------------------------------------------------------
+
+  async function assignmentVertical(assignmentId: string): Promise<string | null> {
+    return withHubTransaction(pool, async (c) => {
+      const r = await c.query<{ primary_vertical_code: string | null }>(
+        `select primary_vertical_code from edge_identity.hub_assignment where id = $1::uuid`,
+        [assignmentId],
+      );
+      return r.rows[0]?.primary_vertical_code ?? null;
+    });
+  }
+
+  it("writes primary_vertical_code on the Hub assignment — the first projection fills it", async () => {
+    // The suite's first `it` already applied an envelope for this assignment,
+    // so the value is here because the SYNC wrote it. Nothing was hand-edited.
+    expect(await assignmentVertical(self.assignmentId)).toBe("laundry");
+  });
+
+  it("turns an existing NULL assignment into laundry on the next valid sync", async () => {
+    // Exactly the state of all 32 rows the sync wrote before this change, and
+    // of any Hub already in the field: the row EXISTS and its vertical is NULL,
+    // so the fix has to land on the `on conflict do update` path, not only on
+    // insert. Blank it and re-sync.
+    await withHubTransaction(pool, (c) =>
+      c.query(
+        `update edge_identity.hub_assignment set primary_vertical_code = null where id = $1::uuid`,
+        [self.assignmentId],
+      ),
+    );
+    expect(await assignmentVertical(self.assignmentId)).toBeNull();
+
+    await applyEnvelope(pool, {
+      self,
+      primaryVertical: "laundry",
+      deliveries: [first],
+      environment: "development",
+      signer,
+    });
+    expect(await assignmentVertical(self.assignmentId)).toBe("laundry");
+  });
+
+  it("is idempotent: the same envelope again leaves the same value", async () => {
+    const before = await assignmentVertical(self.assignmentId);
+    await applyEnvelope(pool, {
+      self,
+      primaryVertical: "laundry",
+      deliveries: [first],
+      environment: "development",
+      signer,
+    });
+    expect(await assignmentVertical(self.assignmentId)).toBe(before);
+    expect(await assignmentVertical(self.assignmentId)).toBe("laundry");
+  });
+
+  it("applies a legitimate authoritative change, and refuses a value outside the registry", async () => {
+    // The cloud is the sole author: if the Store's vertical genuinely changes,
+    // the governed projection carries it and the Hub follows.
+    await applyEnvelope(pool, {
+      self,
+      primaryVertical: "cafe_restaurant",
+      deliveries: [first],
+      environment: "development",
+      signer,
+    });
+    expect(await assignmentVertical(self.assignmentId)).toBe("cafe_restaurant");
+
+    // Migration 0044's CHECK is the last line: an unregistered SHAPE cannot be
+    // written at all, whatever the caller believes.
+    await expect(
+      withHubTransaction(pool, (c) =>
+        c.query(
+          `update edge_identity.hub_assignment set primary_vertical_code = $2 where id = $1::uuid`,
+          [self.assignmentId, "LAUNDRY"],
+        ),
+      ),
+    ).rejects.toThrow(/hub_assignment_primary_vertical_shape_ck/u);
+
+    // Put the Laundry Store back for the eligibility tests below.
+    await applyEnvelope(pool, {
+      self,
+      primaryVertical: "laundry",
+      deliveries: [first],
+      environment: "development",
+      signer,
+    });
+    expect(await assignmentVertical(self.assignmentId)).toBe("laundry");
+  });
+
+  it("does not disturb assignments this envelope does not name", async () => {
+    // A second, ENDED assignment of a previous pairing keeps the vertical it
+    // served under; the sync rewrites only the row the envelope is about.
+    const historic = randomUUID();
+    await withHubTransaction(pool, (c) =>
+      c.query(
+        `insert into edge_identity.hub_assignment
+           (id, hub_device_id, tenant_id, digital_store_id, location_id,
+            assignment_generation, assigned_at, ended_at, status, operational_cert_serial,
+            primary_vertical_code)
+         values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 1,
+                 now() - interval '10 days', now() - interval '5 days', 'ended', $6, 'laundry')`,
+        [
+          historic,
+          self.hubDeviceId,
+          scope.tenantId,
+          scope.digitalStoreId,
+          scope.storeLocationId,
+          hexSerial(),
+        ],
+      ),
+    );
+    await applyEnvelope(pool, {
+      self,
+      primaryVertical: "cafe_restaurant",
+      deliveries: [first],
+      environment: "development",
+      signer,
+    });
+    expect(await assignmentVertical(historic)).toBe("laundry");
+
+    await applyEnvelope(pool, {
+      self,
+      primaryVertical: "laundry",
+      deliveries: [first],
+      environment: "development",
+      signer,
+    });
+  });
+
+  /**
+   * Eligibility, in an isolated transaction that is ALWAYS rolled back.
+   *
+   * `deriveEligibility` asks `selectOperationalHubIdentity` which Hub this is,
+   * and that picks the OLDEST trusted, deployed `store_hub` in the database —
+   * in the shared `kitluy_hub_local` that is the fixture's board, not this
+   * suite's. So the transaction demotes every other Hub first, making this
+   * suite's the operational one, runs the check, and rolls the whole thing
+   * back. Nothing here reaches the shared fixture, and no test below sees it.
+   */
+  async function eligibilityInIsolation(
+    vertical: string | null,
+  ): Promise<{ outcome: string; refusal?: string; detail?: string }> {
+    const client = await pool.connect();
+    try {
+      await client.query("begin");
+      await client.query(
+        `update edge_identity.hub_device set lifecycle_status = 'provisioned'
+          where device_kind = 'store_hub' and id <> $1::uuid`,
+        [self.hubDeviceId],
+      );
+      await client.query(
+        `update edge_identity.hub_assignment set primary_vertical_code = $2
+          where id = $1::uuid`,
+        [self.assignmentId, vertical],
+      );
+      await client.query(`set local role ${HUB_RUNTIME_ROLE}`);
+      return (await deriveEligibility(
+        client,
+        terminalA,
+        first.x509CertificateSerial,
+        "development",
+      )) as { outcome: string; refusal?: string; detail?: string };
+    } finally {
+      await client.query("rollback").catch(() => undefined);
+      client.release();
+    }
+  }
+
+  it("stops VERTICAL_UNAVAILABLE once the sync has written the vertical", async () => {
+    // The sync wrote `laundry` in the tests above; this is the state a real
+    // Store Hub is in after one pass.
+    expect(await assignmentVertical(self.assignmentId)).toBe("laundry");
+    const eligible = await eligibilityInIsolation("laundry");
+    // The terminal may still be refused for an unrelated reason — it never
+    // paired in this suite, and pairing is a different gate. What must not
+    // happen any more is the vertical refusal that blocked every board.
+    expect(eligible.refusal).not.toBe("VERTICAL_UNAVAILABLE");
+  });
+
+  it("still refuses a NULL vertical — migration 0044 was not weakened", async () => {
+    expect(await eligibilityInIsolation(null)).toMatchObject({
+      outcome: "refused",
+      refusal: "VERTICAL_UNAVAILABLE",
+    });
+  });
+
+  it("refuses a vertical the registry does not name, though the CHECK allows its shape", async () => {
+    // `bakery` satisfies 0044's `^[a-z][a-z0-9_]*$` and is still not a locked
+    // vertical. Shape is not membership.
+    const unknown = await eligibilityInIsolation("bakery");
+    expect(unknown).toMatchObject({ outcome: "refused", refusal: "VERTICAL_UNAVAILABLE" });
+    expect(unknown.detail).toMatch(/not a registered vertical/u);
   });
 
   async function snapshotCount(): Promise<number> {

@@ -21,6 +21,13 @@ import {
   x509SerialOf,
 } from "../../../scripts/development/hub-sync-service.mjs";
 import {
+  VERTICAL_CLOUD_CODE_COVERS_REGISTRY,
+  VERTICAL_PHASES,
+  cloudCodeForVerticalKey,
+  verticalKeyFromCloudCode,
+} from "@kitluy/shared-types";
+
+import {
   HUB_SYNC_ENVELOPE_KIND,
   HUB_SYNC_REQUEST_KIND,
   TERMINAL_PROJECTION_KIND,
@@ -134,6 +141,9 @@ function doorAnswer(rows: unknown[] = [doorRow()]) {
       assetTag: "KL-CFADA8C75001",
       assignmentId: "7fd8b688-fb7e-4d92-a906-89d9e25ad513",
       assignmentGeneration: 5,
+      // Group 0237: the assigned Digital Store's primary vertical, in the
+      // CLOUD reference-registry vocabulary, exactly as the door projects it.
+      primaryVerticalCode: "LAUNDRY",
       ...SCOPE,
     },
     terminals: rows,
@@ -693,5 +703,184 @@ describe("one sync pass turns every failure into a coded outcome", () => {
     expect(out).toMatchObject({ kind: "refused", code: "ENVELOPE_UNKNOWN_KEY" });
     expect(posted).toMatchObject({ kind: HUB_SYNC_REQUEST_KIND, hubDeviceId: HUB });
     expect(JSON.stringify(posted)).not.toContain("PRIVATE KEY");
+  });
+});
+
+/**
+ * PRIMARY-VERTICAL-CLOUD-TO-HUB-FEEDER-001 — the feeder that carries the
+ * Digital Store's primary vertical from the cloud to the Hub assignment.
+ *
+ * The database halves (the door reads the Store; the apply writes the column;
+ * eligibility stops refusing) are in `terminal-sync.integration.test.ts`,
+ * against a real Hub database. What is provable without one is the contract
+ * itself: the value is signed, the conversion is the governed table and not a
+ * case transform, and every gap refuses.
+ */
+describe("the Digital Store's primary vertical reaches the Hub", () => {
+  const { signer, record } = producerSigner();
+  const trust = loadHubSyncTrust(writeTrust(record), "development");
+  if (!trust.ok) throw new Error("fixture trust did not load");
+  const nonce = randomBytes(16).toString("hex");
+  const expect_ = { nonce, hubDeviceId: HUB, scope: SCOPE };
+
+  it("projects the Laundry Store's vertical into the SIGNED envelope", () => {
+    const { body } = buildSignedEnvelope(doorAnswer(), nonce, signer);
+    // It is inside `envelope`, which is what the signature covers — not a
+    // sibling of it, and not a header.
+    expect(body.envelope.hub.primaryVerticalCode).toBe("LAUNDRY");
+    expect(Object.keys(body)).toEqual(expect.arrayContaining(["envelope", "signature"]));
+    expect((body as Record<string, unknown>)["primaryVerticalCode"]).toBeUndefined();
+  });
+
+  it("maps cloud LAUNDRY explicitly onto the registry key laundry", () => {
+    const { body } = buildSignedEnvelope(doorAnswer(), nonce, signer);
+    const verified = verifySyncEnvelope(body, trust.trust, expect_);
+    expect(verified.ok).toBe(true);
+    if (!verified.ok) return;
+    expect(verified.envelope.primaryVertical).toBe("laundry");
+  });
+
+  it("is the governed table, not toLowerCase: every locked vertical, and nothing else", () => {
+    expect(VERTICAL_CLOUD_CODE_COVERS_REGISTRY).toBe(true);
+    expect(verticalKeyFromCloudCode("LAUNDRY")).toBe("laundry");
+    expect(verticalKeyFromCloudCode("CAFE_RESTAURANT")).toBe("cafe_restaurant");
+    // Every registry key round-trips through its cloud code.
+    for (const phase of VERTICAL_PHASES) {
+      expect(verticalKeyFromCloudCode(cloudCodeForVerticalKey(phase.key))).toBe(phase.key);
+    }
+    // A case transform would accept all of these. The table does not.
+    for (const rejected of ["laundry", "Laundry", "LAUNDRY ", " LAUNDRY", "LAUNDRY_V2", "BAKERY"]) {
+      expect(verticalKeyFromCloudCode(rejected)).toBeNull();
+    }
+  });
+
+  it("refuses an envelope whose vertical the registry does not name", () => {
+    const unknown = doorAnswer();
+    unknown.hub.primaryVerticalCode = "BAKERY";
+    expect(
+      verifySyncEnvelope(buildSignedEnvelope(unknown, nonce, signer).body, trust.trust, expect_),
+    ).toMatchObject({ ok: false, refusal: "ENVELOPE_VERTICAL_UNKNOWN" });
+
+    // Correctly signed, but lower-cased by a well-meaning producer: still
+    // refused. The cloud vocabulary is the cloud's, and the Hub will not
+    // accept a value that has already been transformed on the way.
+    const preLowered = doorAnswer();
+    preLowered.hub.primaryVerticalCode = "laundry";
+    expect(
+      verifySyncEnvelope(buildSignedEnvelope(preLowered, nonce, signer).body, trust.trust, expect_),
+    ).toMatchObject({ ok: false, refusal: "ENVELOPE_VERTICAL_UNKNOWN" });
+  });
+
+  it("refuses an envelope carrying no vertical at all — it never guesses Laundry", () => {
+    const { body } = buildSignedEnvelope(doorAnswer(), nonce, signer);
+    const stripped = JSON.parse(JSON.stringify(body));
+    delete stripped.envelope.hub.primaryVerticalCode;
+    // Re-sign, so this tests the MISSING field and not a broken signature.
+    stripped.signature.value = producer.signBytes(
+      signer.privateKey,
+      producer.hubSyncEnvelopeBytes(stripped.envelope),
+    );
+    expect(verifySyncEnvelope(stripped, trust.trust, expect_)).toMatchObject({
+      ok: false,
+      refusal: "ENVELOPE_VERTICAL_MISSING",
+    });
+
+    const blank = doorAnswer();
+    blank.hub.primaryVerticalCode = "   ";
+    expect(() => buildSignedEnvelope(blank, nonce, signer)).toThrow(
+      /KLUY-HUB-SYNC-VERTICAL-ABSENT/u,
+    );
+  });
+
+  it("will not sign an envelope the door answered without a vertical", () => {
+    const absent = doorAnswer();
+    delete (absent.hub as { primaryVerticalCode?: string }).primaryVerticalCode;
+    expect(() => buildSignedEnvelope(absent, nonce, signer)).toThrow(
+      /KLUY-HUB-SYNC-VERTICAL-ABSENT/u,
+    );
+  });
+
+  it("refuses a TAMPERED vertical — the value is inside the signature", () => {
+    const { body } = buildSignedEnvelope(doorAnswer(), nonce, signer);
+    const tampered = JSON.parse(JSON.stringify(body));
+    tampered.envelope.hub.primaryVerticalCode = "CAFE_RESTAURANT";
+    expect(verifySyncEnvelope(tampered, trust.trust, expect_)).toMatchObject({
+      ok: false,
+      refusal: "ENVELOPE_SIGNATURE_INVALID",
+    });
+    // And swapping it for a value that WOULD have resolved is refused just the
+    // same: a man in the middle cannot re-vertical a Hub.
+    const swapped = JSON.parse(JSON.stringify(body));
+    swapped.envelope.hub.primaryVerticalCode = "LAUNDRY ";
+    expect(verifySyncEnvelope(swapped, trust.trust, expect_)).toMatchObject({
+      ok: false,
+      refusal: "ENVELOPE_SIGNATURE_INVALID",
+    });
+  });
+
+  it("cannot take its vertical from a foreign Store or another Tenant", () => {
+    // A producer answering for ANOTHER Store, carrying its own (valid) vertical:
+    // the scope binding refuses it before the vertical is ever read.
+    const foreign = doorAnswer();
+    foreign.hub.digitalStoreId = "00000000-0000-4000-8000-000000000099";
+    foreign.hub.primaryVerticalCode = "CAFE_RESTAURANT";
+    expect(
+      verifySyncEnvelope(buildSignedEnvelope(foreign, nonce, signer).body, trust.trust, expect_),
+    ).toMatchObject({ ok: false, refusal: "ENVELOPE_WRONG_SCOPE" });
+
+    const foreignTenant = doorAnswer();
+    foreignTenant.hub.tenantId = "00000000-0000-4000-8000-000000000098";
+    foreignTenant.hub.primaryVerticalCode = "CAFE_RESTAURANT";
+    expect(
+      verifySyncEnvelope(
+        buildSignedEnvelope(foreignTenant, nonce, signer).body,
+        trust.trust,
+        expect_,
+      ),
+    ).toMatchObject({ ok: false, refusal: "ENVELOPE_WRONG_SCOPE" });
+  });
+
+  it("never infers the vertical from a terminal profile prefix", () => {
+    // Every delivered profile says `laundry.*`, and the Store says CAFE_RESTAURANT.
+    // The Store wins: the prefix is not an authority, here or anywhere.
+    const contradicting = doorAnswer();
+    contradicting.hub.primaryVerticalCode = "CAFE_RESTAURANT";
+    const verified = verifySyncEnvelope(
+      buildSignedEnvelope(contradicting, nonce, signer).body,
+      trust.trust,
+      expect_,
+    );
+    expect(verified.ok).toBe(true);
+    if (!verified.ok) return;
+    expect(verified.envelope.deliveries[0]!.profileCodes[0]).toMatch(/^laundry\./u);
+    expect(verified.envelope.primaryVertical).toBe("cafe_restaurant");
+
+    // And with the profiles stripped entirely, a Laundry Store is still Laundry.
+    const noProfiles = doorAnswer([doorRow({ profile_keys: [] })]);
+    const stillLaundry = verifySyncEnvelope(
+      buildSignedEnvelope(noProfiles, nonce, signer).body,
+      trust.trust,
+      expect_,
+    );
+    expect(stillLaundry.ok).toBe(true);
+    if (!stillLaundry.ok) return;
+    expect(stillLaundry.envelope.primaryVertical).toBe("laundry");
+  });
+
+  it("leaves the rest of the projection untouched", () => {
+    const { body } = buildSignedEnvelope(doorAnswer(), nonce, signer);
+    const verified = verifySyncEnvelope(body, trust.trust, expect_);
+    expect(verified.ok).toBe(true);
+    if (!verified.ok) return;
+    const d = verified.envelope.deliveries[0]!;
+    expect(d.terminalName).toBe("KL-54A3320E1201");
+    expect(d.x509CertificateSerial).toBe("1bacc7bf573feb35");
+    expect(d.profileCodes).toEqual(["laundry.t2.customer_display", "laundry.t1.intake_cashier"]);
+    expect(d.seatLabel).toBe("T1T2");
+    expect(verified.envelope.hubAssetTag).toBe("KL-CFADA8C75001");
+    // The delivery shape gained nothing: the vertical is a Store fact, carried
+    // once on the Hub, not copied onto every terminal.
+    expect((d as Record<string, unknown>)["primaryVertical"]).toBeUndefined();
+    expect((d as Record<string, unknown>)["primaryVerticalCode"]).toBeUndefined();
   });
 });

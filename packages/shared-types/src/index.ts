@@ -79,6 +79,95 @@ export const VERTICAL_PHASES = [
 ] as const;
 export type VerticalKey = (typeof VERTICAL_PHASES)[number]["key"];
 
+/**
+ * ===========================================================================
+ * THE ONE CANONICAL CLOUD-VERTICAL MAPPING
+ * ===========================================================================
+ * PRIMARY-VERTICAL-CLOUD-TO-HUB-FEEDER-001 requirement 2.
+ *
+ * Two governed vocabularies name the same business vertical, and neither is
+ * wrong:
+ *
+ *   - the CLOUD control plane stores the reference-registry value
+ *     `kitluy_core.digital_stores.primary_vertical_code`, governed by
+ *     `kitluy_core.reference_values` (`registry_key = 'vertical_code'`,
+ *     Phase 1 active value `LAUNDRY`) -- group 0020, KLD-VERTICAL-001;
+ *   - the EDGE/runtime registry keys the vertical by `VerticalKey` above
+ *     (RB v4 §2.1), and hub migration 0044 constrains
+ *     `edge_identity.hub_assignment.primary_vertical_code` to that shape
+ *     (`^[a-z][a-z0-9_]*$`).
+ *
+ * This table is the ONLY sanctioned conversion between them. It is written out
+ * explicitly, value by value, rather than computed with `toLowerCase()`: a
+ * case transform is a free-form string conversion that silently accepts
+ * `LAUNDRY_V2`, `Laundry` or any future cloud code whose registry key is NOT
+ * simply its lower case, and quietly invents a vertical the registry never
+ * locked. `VERTICAL_CLOUD_CODE_COVERS_REGISTRY` below fails the build's test
+ * suite if a ninth vertical is ever added to `VERTICAL_PHASES` without a
+ * decision about the cloud code it answers to.
+ *
+ * FAIL CLOSED. An unknown, blank or mis-cased value maps to `null`, and every
+ * caller refuses rather than guessing. Nothing here defaults to Laundry.
+ */
+export const VERTICAL_CLOUD_CODES = {
+  laundry: "LAUNDRY",
+  cafe_restaurant: "CAFE_RESTAURANT",
+  ecommerce: "ECOMMERCE",
+  convenience: "CONVENIENCE",
+  pharmacy: "PHARMACY",
+  department_store: "DEPARTMENT_STORE",
+  grocery: "GROCERY",
+  supermarket: "SUPERMARKET",
+} as const satisfies Record<VerticalKey, string>;
+
+/** The cloud reference-registry value for a registry key (e.g. `laundry` -> `LAUNDRY`). */
+export type CloudVerticalCode = (typeof VERTICAL_CLOUD_CODES)[VerticalKey];
+
+/**
+ * True when the explicit table names every locked vertical exactly once.
+ * Asserted by test, so the table cannot drift from `VERTICAL_PHASES`.
+ */
+export const VERTICAL_CLOUD_CODE_COVERS_REGISTRY: boolean =
+  VERTICAL_PHASES.every((phase) => phase.key in VERTICAL_CLOUD_CODES) &&
+  Object.keys(VERTICAL_CLOUD_CODES).length === VERTICAL_PHASES.length;
+
+const VERTICAL_KEY_BY_CLOUD_CODE: ReadonlyMap<string, VerticalKey> = new Map(
+  (Object.entries(VERTICAL_CLOUD_CODES) as readonly (readonly [VerticalKey, string])[]).map(
+    ([key, code]) => [code, key] as const,
+  ),
+);
+
+/**
+ * The cloud's authoritative Digital Store vertical code -> the edge registry key.
+ *
+ * `null` for anything the table does not name -- including a lower-case value,
+ * a padded value or a case variant. The caller REFUSES on `null`; it never
+ * substitutes a default. This is the only conversion the feeder performs, and
+ * it happens once, at the Hub, against the registry.
+ */
+export function verticalKeyFromCloudCode(value: string): VerticalKey | null {
+  return VERTICAL_KEY_BY_CLOUD_CODE.get(value) ?? null;
+}
+
+/** The cloud reference-registry code a registry key answers to. Total by construction. */
+export function cloudCodeForVerticalKey(key: VerticalKey): CloudVerticalCode {
+  return VERTICAL_CLOUD_CODES[key];
+}
+
+const VERTICAL_KEY_SET: ReadonlySet<string> = new Set(VERTICAL_PHASES.map((v) => v.key));
+
+/**
+ * Narrow an untrusted string to a locked registry `VerticalKey`.
+ *
+ * The registry lives here, so the check does too. `@kitluy/digital-store-context`
+ * and `@kitluy/terminal-seat-contracts` each derive the same set from the same
+ * `VERTICAL_PHASES` for their own refusal vocabularies -- one registry, not a
+ * second vocabulary.
+ */
+export function isVerticalKey(value: string): value is VerticalKey {
+  return VERTICAL_KEY_SET.has(value);
+}
+
 /** Simple discriminated result type used across contracts. */
 export type Result<T, E = KitluyErrorLike> =
   { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: E };

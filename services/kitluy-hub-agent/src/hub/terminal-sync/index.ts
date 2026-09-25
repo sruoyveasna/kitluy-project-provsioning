@@ -37,6 +37,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type pg from "pg";
 
+import { verticalKeyFromCloudCode, type VerticalKey } from "@kitluy/shared-types";
+
 import {
   applyEnvelope,
   parseCatalogSection,
@@ -347,6 +349,14 @@ export function buildSyncRequest(
 export interface VerifiedEnvelope {
   readonly producedAt: string;
   readonly hubAssetTag: string;
+  /**
+   * The assigned Digital Store's primary vertical as the EDGE REGISTRY keys it
+   * (`laundry`), resolved from the cloud code the envelope carries (`LAUNDRY`)
+   * through the one canonical table in `@kitluy/shared-types`. Present only on
+   * a verified envelope: the conversion runs AFTER the signature check, so a
+   * vertical is never read out of unverified bytes.
+   */
+  readonly primaryVertical: VerticalKey;
   readonly deliveries: readonly TerminalDelivery[];
   /** Deliveries that did not parse, by name where one was readable. */
   readonly malformed: readonly string[];
@@ -363,6 +373,10 @@ export type EnvelopeRefusal =
   | "ENVELOPE_NONCE_MISMATCH"
   | "ENVELOPE_NOT_FOR_THIS_HUB"
   | "ENVELOPE_WRONG_SCOPE"
+  /** The envelope named no Digital Store vertical; nothing may be written. */
+  | "ENVELOPE_VERTICAL_MISSING"
+  /** It named one the locked registry does not contain; never coerced. */
+  | "ENVELOPE_VERTICAL_UNKNOWN"
   | "ENVELOPE_STALE";
 
 /**
@@ -431,6 +445,31 @@ export function verifySyncEnvelope(
   ) {
     return { ok: false, refusal: "ENVELOPE_WRONG_SCOPE" };
   }
+
+  // The Digital Store's primary vertical (group 0237). Read only now: the
+  // signature is verified, the envelope is about THIS Hub, and its scope is
+  // THIS Store -- so the vertical below is the one the cloud holds for the
+  // Store this Hub is assigned to, and a foreign Store's value cannot arrive
+  // here at all.
+  //
+  // ONE conversion, from the one table. `verticalKeyFromCloudCode` is an
+  // explicit eight-row mapping of the cloud reference registry onto the locked
+  // `VERTICAL_PHASES` keys; it is not a case transform, and it answers null
+  // for anything it does not name -- including `laundry`, `Laundry` or a
+  // padded value. Both outcomes refuse. The Hub never lower-cases a vertical
+  // into existence and never defaults to Laundry.
+  const cloudVertical = h["primaryVerticalCode"];
+  if (typeof cloudVertical !== "string" || cloudVertical.trim().length === 0) {
+    return { ok: false, refusal: "ENVELOPE_VERTICAL_MISSING" };
+  }
+  const primaryVertical = verticalKeyFromCloudCode(cloudVertical.trim());
+  if (primaryVertical === null) {
+    return {
+      ok: false,
+      refusal: "ENVELOPE_VERTICAL_UNKNOWN",
+      detail: `primaryVerticalCode=${cloudVertical.trim()}`,
+    };
+  }
   const producedAt = env["producedAt"];
   if (typeof producedAt !== "string" || Number.isNaN(Date.parse(producedAt)))
     return { ok: false, refusal: "ENVELOPE_MALFORMED" };
@@ -467,6 +506,7 @@ export function verifySyncEnvelope(
     envelope: {
       producedAt,
       hubAssetTag: typeof h["assetTag"] === "string" ? h["assetTag"] : "",
+      primaryVertical,
       deliveries,
       malformed,
       catalog,
@@ -633,6 +673,9 @@ export async function runTerminalSyncOnce(deps: SyncDeps): Promise<SyncOutcome> 
   try {
     outcome = await applyEnvelope(deps.pool, {
       self: board.facts.self,
+      // From the VERIFIED envelope, never from the board: the Hub's own local
+      // state is not an authority on which vertical its Store trades in.
+      primaryVertical: verified.envelope.primaryVertical,
       deliveries: verified.envelope.deliveries,
       environment: config.environment,
       now: now(),
