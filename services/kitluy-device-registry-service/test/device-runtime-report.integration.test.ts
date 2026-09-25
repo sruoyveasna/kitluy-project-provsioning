@@ -206,6 +206,38 @@ describe("a Terminal's signed report is recorded, once, under its enrolled key",
     );
   });
 
+  // Hardware, 2026-09-25: the device's CURRENT kind is v3 (`c95bfe1`), and the
+  // door refused it REPORT_INVALID until group 0238 -- a Terminal SERVING on its
+  // Store Hub showed "No recent report" on every rung of the Partner ladder.
+  it("accepts the device's current v3 report, with the Hub endpoint and detail", async () => {
+    const board = await enrolled("terminal");
+    const v3 = await send(
+      signRuntimeReport({
+        deviceId: board.deviceId,
+        reportSequence: 700,
+        observedAt: "2026-09-25T09:00:00.000Z",
+        report: {
+          ...REPORT,
+          schema: "kitluy.device-runtime-report.v3",
+          hubLink: {
+            ...REPORT.hubLink,
+            endpoint: { host: "172.16.13.204", port: 7443 },
+            detail: null,
+          },
+        },
+        keyPath: board.keyPath,
+      }),
+    );
+    expect(v3.status, JSON.stringify(v3.body)).toBe(200);
+    expect(v3.body["outcome"]).toBe("ACCEPTED");
+    const row = await stored(board.deviceId);
+    expect(row?.report["schema"]).toBe("kitluy.device-runtime-report.v3");
+    expect(row?.report["hubLink"]).toMatchObject({
+      phase: "SERVING",
+      endpoint: { host: "172.16.13.204", port: 7443 },
+    });
+  });
+
   it("a replay, and an older sequence, are STALE and change nothing", async () => {
     const board = await enrolled("terminal");
     const first = signRuntimeReport({
