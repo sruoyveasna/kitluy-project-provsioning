@@ -2,15 +2,15 @@
 
 **Date** 2026-09-25 · **Area** edge-platform / cloud control plane · **Source** `dev` `fcd87963c932` · **Owner task** "PRIMARY-VERTICAL-CLOUD-TO-HUB-FEEDER-001"
 
-| Gate                | State                                                                                              |
-| ------------------- | -------------------------------------------------------------------------------------------------- |
-| IMPLEMENTED         | **YES** — the whole path, no manual SQL (§2)                                                       |
-| TESTED              | **YES** — hub-agent 523 passed / 1 pre-existing failure; 17 new feeder tests (§3)                  |
-| INTEGRATED          | **YES** — proven on the live development stack: `null` → `laundry` written by the sync itself (§4) |
-| IMAGE VERIFIED      | see §5                                                                                             |
-| TERMINAL IMAGE      | **`0db42539…` remains valid** — no Terminal-image-owned source changed (§6)                        |
-| HARDWARE VERIFIED   | **NO — not attempted.** No board was used                                                          |
-| END-TO-END VERIFIED | **NO** — awaiting the owner's hardware acceptance (§7)                                             |
+| Gate                | State                                                                                                               |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| IMPLEMENTED         | **YES** — the whole path, no manual SQL (§2)                                                                        |
+| TESTED              | **YES** — hub-agent 523 passed / 1 pre-existing failure; 17 new feeder tests (§3)                                   |
+| INTEGRATED          | **YES** — proven on the live development stack: `null` → `laundry` written by the sync itself (§4)                  |
+| IMAGE VERIFIED      | **YES** — `f3810ab6…`, overlay read-back 140/140, image-contents 62/0/0, secret scan PASS. **NOT boot-tested** (§5) |
+| TERMINAL IMAGE      | **`0db42539…` remains valid** — no Terminal-image-owned source changed (§6)                                         |
+| HARDWARE VERIFIED   | **NO — not attempted.** No board was used                                                                           |
+| END-TO-END VERIFIED | **NO** — awaiting the owner's hardware acceptance (§7)                                                              |
 
 ---
 
@@ -264,7 +264,7 @@ old code, and a Hub syncing against it would refuse `ENVELOPE_VERTICAL_MISSING`
 
 ---
 
-## 5. The Store Hub image — IN PROGRESS, and a regression caught on the way
+## 5. The Store Hub image — IMAGE VERIFIED
 
 The feeder lives in the bundled hub-agent, which is image-owned, so the Hub
 overlay was repackaged (`fcd8796`) and a new image must supersede the Cycle-B
@@ -332,10 +332,139 @@ The partial trees are parked, not deleted, under
 `build/work/preserved-20260925-incomplete-flags/` — safe to reclaim for disk
 space at any time.
 
-A third build is running from the same commit with the full flag set. **Its
-identity, read-back and suites are recorded in §5.4 when it completes; until
-then this task's IMAGE VERIFIED gate is NOT met and no Store Hub image should be
-flashed.**
+### 5.4 The image — IMAGE VERIFIED
+
+Built from the isolated worktree `wt-vertical-feeder` on branch
+`feat/primary-vertical-feeder`, with **no dirty image input** — the only
+uncommitted file during the build was this handoff.
+
+|                          |                                                                                                                     |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| source commit            | **`e491fd1ee62d`** (overlay content unchanged since `fcd8796`)                                                      |
+| compressed (flash this)  | `infra/edge/raspberry-pi/store-hub-image/build/work/deploy-v2.7.0/kitluy-storehub-os-arm64.img.zst`                 |
+| compressed size          | **660 431 102 bytes**                                                                                               |
+| **compressed sha256**    | **`f3810ab69d3fdf2c004d75f7662290339afa17df4206e1ca8df9ae9858aa3715`**                                              |
+| raw `.img` size / sha256 | 17 490 268 160 · **`3d32bdab3ff73006cc036355d1e945619719ab80d8949f9e8ee6d17c4cb7915e`**                             |
+| `.img.sparse.zst`        | 660 288 508 · `68391ba40f90068d5faacd34b59098c1688e52ad1eb0e261f7c3a5fc68965931`                                    |
+| `.img.sparse`            | 837 783 944 · `bdcb1d53ac77b60ba9c2209de40726f1bc8c339323529918ea7ed3ce63984b95`                                    |
+| IDP archive              | 997 325 928 · `640704779e31dea49f1d67201b1c06064647527874eaf17f835dd9f9b01c6229`                                    |
+| manifest                 | `build/work/kitluy-store-hub-dev-manifest.json` — `rpi-image-gen v2.7.0` / `a7b6d4806183…`, DEVELOPMENT-CROSS-BUILD |
+| classification           | **DEVELOPMENT / UNSIGNED / NOT RELEASE-ELIGIBLE / NOT BOOT-TESTED**                                                 |
+
+**All five digests AND sizes were recomputed independently** with `sha256sum`
+and equal the manifest; the manifest lists exactly its own five artifacts. Zero
+build refusals.
+
+**Supersedes** the Cycle-B Hub image
+`7f887229c1e3dda8a46f6751257b6cc4ff152fad68300816761115fd2d6ac17c`.
+
+#### Read-back
+
+| Check                                                                                | Result                                                                                                               |
+| ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| Overlay read-back                                                                    | **140 entries (126 files + 14 links) · 140 identical · 0 DIFFERS · 0 MISSING**                                       |
+| `image-contents.test.sh` (absolute path)                                             | **62 passed, 0 failed, 0 skipped** — Cycle B's exact score; the earlier SKIP is gone now the release source is baked |
+| `scan-image-secrets.sh`                                                              | **17 passed, 0 failed — RESULT: PASS**                                                                               |
+| build-gates / environment-gating / systemd-runtime / rpi-image-gen / storage-posture | 34/0 · 19/0 · 183/0 · 22/0/1 · 46/0                                                                                  |
+
+#### The feeder, read out of the IMAGE's own agent bundle
+
+Not inferred from a build log — grepped from
+`usr/lib/kitluy/lib/hub-agent/main.mjs` inside the built rootfs:
+`primaryVerticalCode`, `verticalKeyFromCloudCode`, `VERTICAL_CLOUD_CODES`,
+`ENVELOPE_VERTICAL_UNKNOWN` and `ENVELOPE_VERTICAL_MISSING` are all present, and
+hub migration `0044` is in `usr/lib/kitluy/hub-migrations/` — so a Store Hub
+taking this image gets the column and the writer for it together.
+
+#### The baked configuration is byte-identical to Cycle B
+
+Every file under `/etc/kitluy` was diffed against the Cycle-B rootfs:
+`image.env`, `hub.env`, `release.env`, `development-root.sha256`,
+`hub-sync-trust.json` and `trust/release-signing.json` are **identical**,
+including the two settings §5.2's build had dropped —
+`KITLUY_RELEASE_SOURCE=http://172.16.21.17:8791` and
+`KITLUY_HUB_STORAGE_DEVELOPMENT_UNBOUND=authorized`.
+
+So this image differs from Cycle B in exactly one intended way: **its agent
+writes the Store's primary vertical.**
+
+**NOT boot-tested.** No board has run it.
+
+## 5.5 Bringing the development stack back after a power cut — the exact recipe
+
+The mains cut took down every host service and one container. Docker's own
+containers came back by restart policy; nothing else did. Recorded as a recipe
+because the next outage will look identical.
+
+### What dies, and what brings it back
+
+| Piece                                | After a power cut          | Command                                                                                                            |
+| ------------------------------------ | -------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `kitluy-hub-local` (Hub DB)          | container `Exited`         | `docker start kitluy-hub-local`                                                                                    |
+| `supabase_edge_runtime_kitluy-fresh` | `Exited (255)` → see below | `docker start …` **plus the fix below**                                                                            |
+| `:8787` fleet/registry               | gone (plain `node`)        | `KITLUY_DEV_FLEET_DSN=…:54372 KITLUY_DEV_PKI_DIR=<dev-pki> node scripts/development/fleet-service.mjs --port 8787` |
+| `:8791` release source               | gone                       | same env, `scripts/development/release-service.mjs --port 8791`                                                    |
+| `:8792` hub-sync producer            | gone                       | same env, `scripts/development/hub-sync-service.mjs --port 8792`                                                   |
+| `:8790` management API               | gone                       | see §5.5.2                                                                                                         |
+
+Start them with `setsid nohup … < /dev/null &` so they outlive the shell that
+launched them. Health: `:8787` 200, `:8790` 200, `:8791` 404 (it serves
+`/release/v1/…`), `:8792` 403 (an unsigned request is refused), `:54371` 400
+(`KLUY-REG-MALFORMED` — the function's own validation). **Those 404/403/400 are
+healthy answers, not faults.**
+
+### 5.5.1 The trap: the edge function lives in an ephemeral `/tmp` path
+
+`:54371` came back answering **500**, then `BOOT_ERROR` / "failed to determine
+entrypoint". The cause is structural, not transient:
+
+`supabase_edge_runtime_kitluy-fresh` bind-mounts its function source from
+**a previous Claude session's scratchpad** —
+`/tmp/claude-1000/…/87481d20-…/scratchpad/fresh-stack/supabase/functions` — and
+its `WORKDIR` and `SUPABASE_INTERNAL_FUNCTIONS_CONFIG` both point at that same
+dead path. The reboot cleared `/tmp`, Docker recreated the mount source **empty
+and root-owned**, and the runtime had nothing to boot. The stack's own project
+directory (`fresh-stack`) is gone too, so `supabase stop/start` cannot be run
+for it at all.
+
+**The fix needs no `sudo`**, though it looks like it does: the mount is
+read-only (so `docker cp` is refused) and the path is root-owned (so a plain
+`cp` is refused) — but the Docker daemon already runs as root, so a throwaway
+container can write there:
+
+```bash
+docker run --rm \
+  -v /tmp/claude-1000/…/87481d20-…/scratchpad/fresh-stack/supabase/functions:/target \
+  -v <repo>/supabase/functions:/src:ro \
+  alpine:3 sh -c 'cp -a /src/device-registration /src/_shared /target/'
+docker restart supabase_edge_runtime_kitluy-fresh
+```
+
+The repository is the canonical source (`supabase/functions/device-registration`,
+committed at `00b3dd2`), so this restores the real function, not a copy of a
+copy.
+
+> **This recurs on every reboot.** `/tmp` is cleared, the mount empties, and
+> `:54371` — the registration endpoint baked into BOTH device images — stops
+> booting. The durable fix is to relocate the stack's function source out of
+> `/tmp` (it means recreating the container with a mount under the workspace),
+> which is an owner decision and was **not** taken here.
+
+### 5.5.2 The management API's two non-obvious requirements
+
+`:8790` refuses to start without `MANAGEMENT_API_AUTH_PUBLISHABLE_KEY`, and
+then refuses again with _"must be an https base URL with no path"_. Both have
+answers in the code rather than in a credential store:
+
+- the key is the **local stack's** publishable key, not the hosted project's —
+  read it from the running stack, `grep -oE "sb_publishable_[A-Za-z0-9_-]+"
+/home/kong/kong.yml` inside `supabase_kong_kitluy-fresh`;
+- the loopback exemption (`composition.ts`, `isLoopbackDevelopmentAuthUrl`)
+  needs **`KITLUY_ENV=local`**, not `development`, and the URL must be the bare
+  origin `http://127.0.0.1:54371` with **no `/auth/v1` path**.
+
+Started correctly it logs `environment: local, authHost 127.0.0.1:54371`, which
+matches handoff 48's record.
 
 ## 6. TERMINAL IMAGE — `0db42539…` remains valid
 

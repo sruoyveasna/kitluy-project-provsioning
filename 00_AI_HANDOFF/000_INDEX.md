@@ -7,7 +7,7 @@ subfolder (repository/ shared/ apps/ services/ data/ infrastructure/ reviews/).
 ## PRIMARY-VERTICAL-CLOUD-TO-HUB-FEEDER-001 — the Digital Store's primary vertical reaches the Store Hub (2026-09-25)
 
 Record: [`edge-platform/56_THE_VERTICAL_FEEDER.md`](edge-platform/56_THE_VERTICAL_FEEDER.md) · migration `0237`
-· **IMPLEMENTED · TESTED · INTEGRATED (live: `null` → `laundry` written by the sync itself) · STORE HUB IMAGE NOT YET VERIFIED (rebuilding — overlay read-back 140/140 and all suites pass; the flashable artifact is not finished) · HARDWARE NOT VERIFIED · END-TO-END NOT VERIFIED**
+· **IMPLEMENTED · TESTED · INTEGRATED (live: `null` → `laundry` written by the sync itself) · IMAGE VERIFIED (`f3810ab6…`, overlay read-back 140/140, image-contents 62/0/0, secret scan PASS; NOT boot-tested) · HARDWARE NOT VERIFIED · END-TO-END NOT VERIFIED**
 
 **Handoff 55 §6's blocker is closed, durably and without manual SQL.** `0044`
 made `deriveEligibility` fail closed `VERTICAL_UNAVAILABLE` on a NULL
@@ -57,9 +57,23 @@ storage marker. A build was then interrupted by a mains power cut; nothing was
 lost (both commits were already pushed, `git fsck` clean, tree exactly
 `fcd8796`), and the partial trees are parked under `build/work/preserved-*`.
 
-**Next:** finish and read back the Store Hub image, then the owner's hardware
-acceptance — same Pi + same NVMe, fresh SD, no purge, one pairing code, then the
-existing Pi Terminal image `0db42539…` and a KHR-only real Booking.
+**The image is built and read back:**
+`kitluy-storehub-os-arm64.img.zst` · 660 431 102 bytes ·
+**`f3810ab69d3fdf2c004d75f7662290339afa17df4206e1ca8df9ae9858aa3715`** · from
+`e491fd1`. Overlay 140/140 identical, `image-contents` 62/0/0, secret scan PASS,
+all five digests recomputed and equal to the manifest. Its `/etc/kitluy` is
+byte-identical to Cycle B, so it differs in exactly one intended way: the agent
+writes the Store's vertical. NOT boot-tested.
+
+**Also recorded (§5.5): the exact recipe for bringing the development stack back
+after a power cut.** The `kitluy-fresh` edge function is bind-mounted from a dead
+`/tmp` scratchpad, so `:54371` registration stops booting on every reboot; it is
+fixable **without `sudo`** with a throwaway root container, and `:8790` needs
+`KITLUY_ENV=local` plus the LOCAL stack's publishable key.
+
+**Next:** the owner's hardware acceptance — same Pi + same NVMe, fresh SD, no
+purge, one pairing code, then the existing Pi Terminal image `0db42539…` and a
+KHR-only real Booking.
 
 ## SAME-PI REFLASH CONTINUITY — a KitLuy device is the physical Pi, not its SD card (2026-09-23)
 
