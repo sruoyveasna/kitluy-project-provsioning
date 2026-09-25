@@ -303,12 +303,17 @@ export async function runOnce(options = {}) {
         const result = await runInstallPass(composed.deps);
         emit("kitluy.update.pass", { product, outcome: result.outcome, ...describeOutcome(result) });
     }
-    return { heldForPin };
+    // BEFORE the return. `800ecb2` added the return above this block, which made it
+    // unreachable: an installed POS was started by its first install and never
+    // again, so every reboot left the Device Shell on "Assigned to a Store" with
+    // `kitluy-terminal-client.service` inactive (hardware, 2026-09-25). The
+    // package now builds with `allowUnreachableCode: false`, so tsc refuses that.
     if (productsOnThisImage(options.unitDirectories).includes(TERMINAL_CLIENT_PRODUCT)) {
         const started = startInstalledTerminalClientOnce({ storeRoot: options.storeRoot });
         if (started.action !== "NOT_NEEDED")
             emit("kitluy.update.terminal-client", { ...started });
     }
+    return { heldForPin };
 }
 const runSystemctl = (args) => {
     try {
