@@ -4,6 +4,22 @@ Read the newest relevant handoff before starting work. Naming:
 `YYYY-MM-DD__<AREA>__<TASK-ID>__<SLUG>__AI-HANDOFF.md` under the matching
 subfolder (repository/ shared/ apps/ services/ data/ infrastructure/ reviews/).
 
+## KITLUY-HARDWARE-ACCEPTANCE-001 — SAME-PI Cycle B on hardware, two Hub defects fixed, new Hub image (2026-09-25)
+
+Record: [`edge-platform/58_SAME_PI_CYCLE_B_AND_THE_HUB_REFLASH_FIX.md`](edge-platform/58_SAME_PI_CYCLE_B_AND_THE_HUB_REFLASH_FIX.md)
+· **Store Hub HARDWARE VERIFIED with two defects · Terminal↔Hub pairing BLOCKED → fixed in source · new Hub image `317ca56a…` IMAGE VERIFIED, NOT boot-tested · END-TO-END NOT VERIFIED**
+
+Same board, new SD, same NVMe: same device id, new installation/enrollment/credential,
+LUKS unlocked automatically, Cycle-A probe survived, one pairing code, `laundry`
+written by sync. Defect 1: the agent never started after certificate adoption
+(clean exit + `Restart=on-failure`) — fixed with `OnSuccess=` on
+`kitluy-operational-tls`. Defect 2: the Hub kept its previous installation's
+identity `active` at the same generation, so terminal pairing bound to the
+Cycle-A key and refused `PAIR_CERT_INVALID` — `projectHubSelf` now supersedes
+it and heals the NVMe on first sync. Terminal image `0db42539…` unaffected.
+Cloud `0231` applied to `kitluy-fresh` with owner approval. Next: Cycle C with
+the new Hub image; the Terminal is not reflashed.
+
 ## KITLUY-DEV-STACK-REGISTRATION-DURABILITY-001 — the development registration endpoint survives a reboot (2026-09-25)
 
 Record: [`edge-platform/57_DEV_STACK_DURABILITY.md`](edge-platform/57_DEV_STACK_DURABILITY.md)
