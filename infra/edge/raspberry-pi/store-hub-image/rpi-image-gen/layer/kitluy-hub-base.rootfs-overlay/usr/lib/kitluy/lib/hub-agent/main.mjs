@@ -19816,8 +19816,14 @@ async function projectHubSelf(client, facts, primaryVertical) {
       primaryVertical
     ]
   );
+  const operationalId = md5Uuid(`kitluy.hub-operational-credential:${cert.serial}`);
+  const identityId = identityFingerprint === null ? null : md5Uuid(`kitluy.hub-identity-credential:${identityFingerprint}`);
+  await supersedeHubCredentials(client, facts.hubDeviceId, "operational_tls", operationalId);
+  if (identityId !== null) {
+    await supersedeHubCredentials(client, facts.hubDeviceId, "device_identity", identityId);
+  }
   await upsertCredential(client, {
-    id: md5Uuid(`kitluy.hub-operational-credential:${cert.serial}`),
+    id: operationalId,
     deviceId: facts.hubDeviceId,
     type: "operational_tls",
     fingerprint: cert.publicKeyFingerprint,
@@ -19825,11 +19831,13 @@ async function projectHubSelf(client, facts, primaryVertical) {
     issuer: cert.issuer,
     issuedAt: cert.notBefore,
     expiresAt: cert.notAfter,
-    generation: 1
+    // The pairing generation, as projectTerminal does -- not a hard-coded 1,
+    // which made every installation of this Hub look equally current.
+    generation: facts.assignmentGeneration
   });
-  if (identityFingerprint !== null) {
+  if (identityId !== null && identityFingerprint !== null) {
     await upsertCredential(client, {
-      id: md5Uuid(`kitluy.hub-identity-credential:${identityFingerprint}`),
+      id: identityId,
       deviceId: facts.hubDeviceId,
       type: "device_identity",
       fingerprint: identityFingerprint,
@@ -19837,10 +19845,19 @@ async function projectHubSelf(client, facts, primaryVertical) {
       issuer: cert.issuer,
       issuedAt: cert.notBefore,
       expiresAt: cert.notAfter,
-      generation: 1
+      generation: facts.assignmentGeneration
     });
   }
   return { identityCredential: identityFingerprint !== null };
+}
+async function supersedeHubCredentials(client, hubDeviceId2, type, currentId) {
+  await client.query(
+    `update edge_identity.device_credential
+        set status = 'superseded'
+      where device_id = $1::uuid and credential_type = $2 and id <> $3::uuid
+        and status = 'active'`,
+    [hubDeviceId2, type, currentId]
+  );
 }
 async function upsertCredential(client, c) {
   await client.query(
