@@ -6387,6 +6387,64 @@ var init_dist = __esm({
   }
 });
 
+// ../../packages/shared-types/dist/index.js
+function verticalKeyFromCloudCode(value) {
+  return VERTICAL_KEY_BY_CLOUD_CODE.get(value) ?? null;
+}
+function isVerticalKey(value) {
+  return VERTICAL_KEY_SET.has(value);
+}
+var asId, KITLUY_ENVIRONMENTS, VERTICAL_PHASES, VERTICAL_CLOUD_CODES, VERTICAL_CLOUD_CODE_COVERS_REGISTRY, VERTICAL_KEY_BY_CLOUD_CODE, VERTICAL_KEY_SET;
+var init_dist2 = __esm({
+  "../../packages/shared-types/dist/index.js"() {
+    "use strict";
+    asId = {
+      tenantId: (v) => v,
+      partnerAccountId: (v) => v,
+      digitalStoreId: (v) => v,
+      storeLocationId: (v) => v,
+      chainId: (v) => v,
+      userId: (v) => v,
+      deviceId: (v) => v,
+      hubId: (v) => v,
+      transactionId: (v) => v,
+      correlationId: (v) => v,
+      idempotencyKey: (v) => v
+    };
+    KITLUY_ENVIRONMENTS = [
+      "local",
+      "development",
+      "staging",
+      "pilot",
+      "production",
+      "disaster_recovery"
+    ];
+    VERTICAL_PHASES = [
+      { phase: 1, key: "laundry", name: "Laundry Stores and Shops" },
+      { phase: 2, key: "cafe_restaurant", name: "Caf\xE9 and Restaurant Stores" },
+      { phase: 3, key: "ecommerce", name: "Online Retailers and eCommerce Businesses" },
+      { phase: 4, key: "convenience", name: "Convenience Stores" },
+      { phase: 5, key: "pharmacy", name: "Drugstores and Pharmacies" },
+      { phase: 6, key: "department_store", name: "Department Stores" },
+      { phase: 7, key: "grocery", name: "Grocery Stores" },
+      { phase: 8, key: "supermarket", name: "Supermarkets" }
+    ];
+    VERTICAL_CLOUD_CODES = {
+      laundry: "LAUNDRY",
+      cafe_restaurant: "CAFE_RESTAURANT",
+      ecommerce: "ECOMMERCE",
+      convenience: "CONVENIENCE",
+      pharmacy: "PHARMACY",
+      department_store: "DEPARTMENT_STORE",
+      grocery: "GROCERY",
+      supermarket: "SUPERMARKET"
+    };
+    VERTICAL_CLOUD_CODE_COVERS_REGISTRY = VERTICAL_PHASES.every((phase) => phase.key in VERTICAL_CLOUD_CODES) && Object.keys(VERTICAL_CLOUD_CODES).length === VERTICAL_PHASES.length;
+    VERTICAL_KEY_BY_CLOUD_CODE = new Map(Object.entries(VERTICAL_CLOUD_CODES).map(([key, code]) => [code, key]));
+    VERTICAL_KEY_SET = new Set(VERTICAL_PHASES.map((v) => v.key));
+  }
+});
+
 // src/hub/edge/runtime-bootstrap.ts
 import { createHash as createHash6, randomUUID as randomUUID5, scryptSync, timingSafeEqual } from "node:crypto";
 async function readAuthorityTime(pool) {
@@ -6533,6 +6591,12 @@ async function deriveEligibility(client, terminalDeviceId, certificateSerial, en
     return refuse(
       "VERTICAL_UNAVAILABLE",
       "this Store Hub's assignment carries no primary vertical; nothing can be signed for the terminal"
+    );
+  }
+  if (!isVerticalKey(primaryVertical)) {
+    return refuse(
+      "VERTICAL_UNAVAILABLE",
+      `this Store Hub's assignment names '${primaryVertical}', which is not a registered vertical`
     );
   }
   const terminal = await client.query(
@@ -7168,6 +7232,7 @@ var init_runtime_bootstrap = __esm({
   "src/hub/edge/runtime-bootstrap.ts"() {
     "use strict";
     init_dist();
+    init_dist2();
     init_db();
     init_hub_database();
     RUNTIME_PROTOCOL_VERSION = "1.0";
@@ -12621,34 +12686,13 @@ function isValidHubEffectKey(key) {
   return HUB_EFFECT_KEY_PATTERN.test(key);
 }
 
-// ../../packages/shared-types/dist/index.js
-var asId = {
-  tenantId: (v) => v,
-  partnerAccountId: (v) => v,
-  digitalStoreId: (v) => v,
-  storeLocationId: (v) => v,
-  chainId: (v) => v,
-  userId: (v) => v,
-  deviceId: (v) => v,
-  hubId: (v) => v,
-  transactionId: (v) => v,
-  correlationId: (v) => v,
-  idempotencyKey: (v) => v
-};
-var KITLUY_ENVIRONMENTS = [
-  "local",
-  "development",
-  "staging",
-  "pilot",
-  "production",
-  "disaster_recovery"
-];
-
 // src/hub/pairing-replication.ts
+init_dist2();
 init_errors();
 
 // src/hub/outbox.ts
 import { createHash as createHash5 } from "node:crypto";
+init_dist2();
 init_hub_database();
 
 // src/hub/effect-contract.ts
@@ -13624,6 +13668,7 @@ init_db();
 
 // src/hub/terminal-health.ts
 import { randomUUID as randomUUID4 } from "node:crypto";
+init_dist2();
 init_db();
 init_errors();
 init_sync();
@@ -13990,6 +14035,7 @@ init_terminal_pin();
 
 // src/hub/t1-intake.ts
 import { createHash as createHash8, randomUUID as randomUUID7 } from "node:crypto";
+init_dist2();
 init_db();
 init_sync();
 init_runtime_bootstrap();
@@ -14664,6 +14710,9 @@ function assertFourEyes(request, decision) {
   return decision;
 }
 
+// ../../packages/rbac/dist/index.js
+init_dist2();
+
 // ../../packages/resource-scope/dist/index.js
 var HIERARCHICAL_SCOPE_LEVELS = [
   "platform",
@@ -14848,6 +14897,7 @@ function hasPermission(grants, permission, scope) {
 }
 
 // src/hub/authorization.ts
+init_dist2();
 init_errors();
 
 // src/hub/revocation-trust.ts
@@ -19472,6 +19522,7 @@ async function startDevelopmentListener(options) {
 }
 
 // src/hub/terminal-sync/index.ts
+init_dist2();
 import { createPrivateKey as createPrivateKey3, createPublicKey as createPublicKey5, randomBytes as randomBytes5 } from "node:crypto";
 import { existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync as readFileSync4, writeFileSync as writeFileSync2 } from "node:fs";
 import { dirname as dirname2 } from "node:path";
@@ -19706,7 +19757,7 @@ function certificateFacts(pem) {
     notAfter: new Date(cert.validTo).toISOString()
   };
 }
-async function projectHubSelf(client, facts) {
+async function projectHubSelf(client, facts, primaryVertical) {
   const cert = certificateFacts(facts.operationalCertificatePem);
   const identityFingerprint = facts.identityPublicKeyPem === null ? null : sha256Hex4(
     createPublicKey4(facts.identityPublicKeyPem).export({ type: "spki", format: "der" })
@@ -19745,13 +19796,15 @@ async function projectHubSelf(client, facts) {
   await client.query(
     `insert into edge_identity.hub_assignment
        (id, hub_device_id, tenant_id, digital_store_id, location_id,
-        assignment_generation, assigned_at, ended_at, status, operational_cert_serial)
-     values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6, now(), null, 'active', $7)
+        assignment_generation, assigned_at, ended_at, status, operational_cert_serial,
+        primary_vertical_code)
+     values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6, now(), null, 'active', $7, $8)
      on conflict (id) do update
         set ended_at = null,
             status = 'active',
             assignment_generation = excluded.assignment_generation,
-            operational_cert_serial = excluded.operational_cert_serial`,
+            operational_cert_serial = excluded.operational_cert_serial,
+            primary_vertical_code = excluded.primary_vertical_code`,
     [
       facts.assignmentId,
       facts.hubDeviceId,
@@ -19759,7 +19812,8 @@ async function projectHubSelf(client, facts) {
       facts.scope.digitalStoreId,
       facts.scope.storeLocationId,
       facts.assignmentGeneration,
-      cert.serial
+      cert.serial,
+      primaryVertical
     ]
   );
   await upsertCredential(client, {
@@ -20009,7 +20063,7 @@ async function applyEnvelope(pool, input) {
   const projected = await withHubTransaction(
     pool,
     async (client) => {
-      const self2 = await projectHubSelf(client, input.self);
+      const self2 = await projectHubSelf(client, input.self, input.primaryVertical);
       const results = [];
       for (const d of inScope) results.push(await projectTerminal(client, d, now));
       const retiredAbsent = await retireAbsentTerminals(
@@ -20343,6 +20397,18 @@ function verifySyncEnvelope(body, trust, expect, now = /* @__PURE__ */ new Date(
   if (scopeOf("tenantId") !== expect.scope.tenantId || scopeOf("digitalStoreId") !== expect.scope.digitalStoreId || scopeOf("storeLocationId") !== expect.scope.storeLocationId) {
     return { ok: false, refusal: "ENVELOPE_WRONG_SCOPE" };
   }
+  const cloudVertical = h["primaryVerticalCode"];
+  if (typeof cloudVertical !== "string" || cloudVertical.trim().length === 0) {
+    return { ok: false, refusal: "ENVELOPE_VERTICAL_MISSING" };
+  }
+  const primaryVertical = verticalKeyFromCloudCode(cloudVertical.trim());
+  if (primaryVertical === null) {
+    return {
+      ok: false,
+      refusal: "ENVELOPE_VERTICAL_UNKNOWN",
+      detail: `primaryVerticalCode=${cloudVertical.trim()}`
+    };
+  }
   const producedAt = env["producedAt"];
   if (typeof producedAt !== "string" || Number.isNaN(Date.parse(producedAt)))
     return { ok: false, refusal: "ENVELOPE_MALFORMED" };
@@ -20374,6 +20440,7 @@ function verifySyncEnvelope(body, trust, expect, now = /* @__PURE__ */ new Date(
     envelope: {
       producedAt,
       hubAssetTag: typeof h["assetTag"] === "string" ? h["assetTag"] : "",
+      primaryVertical,
       deliveries,
       malformed,
       catalog,
@@ -20474,6 +20541,9 @@ async function runTerminalSyncOnce(deps) {
   try {
     outcome = await applyEnvelope(deps.pool, {
       self: board.facts.self,
+      // From the VERIFIED envelope, never from the board: the Hub's own local
+      // state is not an authority on which vertical its Store trades in.
+      primaryVertical: verified.envelope.primaryVertical,
       deliveries: verified.envelope.deliveries,
       environment: config.environment,
       now: now(),
