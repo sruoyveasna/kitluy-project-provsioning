@@ -4,6 +4,21 @@ Read the newest relevant handoff before starting work. Naming:
 `YYYY-MM-DD__<AREA>__<TASK-ID>__<SLUG>__AI-HANDOFF.md` under the matching
 subfolder (repository/ shared/ apps/ services/ data/ infrastructure/ reviews/).
 
+## KITLUY-DEV-STACK-REGISTRATION-DURABILITY-001 — the development registration endpoint survives a reboot (2026-09-25)
+
+Record: [`edge-platform/57_DEV_STACK_DURABILITY.md`](edge-platform/57_DEV_STACK_DURABILITY.md)
+· **IMPLEMENTED · TESTED · DEV STACK VERIFIED · DATA PRESERVED · real reboot NOT performed · images unchanged (`f3810ab6…`, `0db42539…`)**
+
+`supabase_edge_runtime_kitluy-fresh` (behind `:54371`, the address baked into
+both images) now mounts the repository's own `supabase/functions` read-only
+instead of a dead Claude scratch path under `/tmp`, and restarts
+`unless-stopped`. Same name, network, alias, command and environment; no copy
+of the functions exists. After a reboot: **`pnpm dev:stack:up`** — starts the
+containers and the four plain-`node` services (`:8787 :8791 :8792 :8790`) and
+prints the health table. `pnpm dev:stack:edge-runtime` recreates the runtime
+(from a 0600 snapshot in `local-config/` if it was removed). Handoff 56 §5.5's
+`/tmp` recipe is superseded.
+
 ## PRIMARY-VERTICAL-CLOUD-TO-HUB-FEEDER-001 — the Digital Store's primary vertical reaches the Store Hub (2026-09-25)
 
 Record: [`edge-platform/56_THE_VERTICAL_FEEDER.md`](edge-platform/56_THE_VERTICAL_FEEDER.md) · migration `0237`

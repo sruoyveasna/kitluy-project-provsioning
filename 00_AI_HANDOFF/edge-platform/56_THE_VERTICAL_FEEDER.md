@@ -392,6 +392,11 @@ writes the Store's primary vertical.**
 
 ## 5.5 Bringing the development stack back after a power cut — the exact recipe
 
+> **Superseded 2026-09-25 by [handoff 57](57_DEV_STACK_DURABILITY.md).** The
+> edge runtime now mounts the repository's `supabase/functions` and restarts by
+> itself; the whole stack comes back with `pnpm dev:stack:up`. The `/tmp`
+> repopulation below is kept as history and is no longer the procedure.
+
 The mains cut took down every host service and one container. Docker's own
 containers came back by restart policy; nothing else did. Recorded as a recipe
 because the next outage will look identical.
