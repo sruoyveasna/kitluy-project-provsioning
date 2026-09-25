@@ -119,3 +119,46 @@ Verification: hashes match the manifest; overlay read back from the final erofs 
 - The Terminal's system partition hash was not read on the board (sudo password).
 - `dev-stack.mjs` origin allowlist, local-stack naming and migration-drift check (§5).
 - `t1-bootstrap-routes` PIN lockout test is timing-sensitive at 5 s.
+
+---
+
+## 10. Cycle C on hardware (Hub image `317ca56a…`) — both Hub fixes PROVEN
+
+Same Hub, a fresh card, same NVMe, ONE Hub pairing code. Hub now at `172.16.13.204`.
+
+| Fact                               | Result                                                                                                                                                           |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| device / installation / enrollment | same `4cfc40b4…`; gen 3 `d090cf76…`; seq 3 `37ababb7…`                                                                                                           |
+| credential                         | gen 3 `cceb0bda…`, cert `bf88aa9d` active; gens 1 and 2 superseded (cloud)                                                                                       |
+| **Fix 1**                          | `ADOPTED … generation 3` 15:56:16 → `Started kitluy-hub-agent.service` the SAME second → `Store Hub is serving terminals`. **No power cycle.**                   |
+| **Fix 2**                          | Hub DB: identities `9830…` and `c8bf…`, certs `6c92…` and `e149…` all `superseded`; only gen-3 `e5d113cd…` / `cceb0bda…` active (rotation_generation 3). No SQL. |
+| Hub assignment                     | `a6c9d79b` gen 3 active, `laundry`; gen 2 ended by reconciliation                                                                                                |
+| probe / migrations                 | cycle A present / 46                                                                                                                                             |
+| Terminal                           | NOT reflashed; `terminal-edge SERVING: connected to Store Hub … 172.16.13.204:7443` 10 s after the Hub came up                                                   |
+| Hub edge traffic                   | `runtime-eligibility 200 ELIGIBLE`, `configuration-current 200 CONFIGURATION_DELIVERY`, `terminal-pin-status 200`                                                |
+
+Also recorded: under the Cycle-B card, a Terminal pairing session DID complete at 07:28Z after two expired attempts — consistent with defect 2 being an arbitrary tie, not a deterministic refusal.
+
+## 11. Defect 3 — CLOUD: runtime report v3 refused (fixed, `f598089`, group 0238)
+
+`c95bfe1` made v3 the device's current report kind without widening the cloud door, which admitted v1/v2 only: `REPORT_INVALID` every minute; the Partner ladder froze at "No recent report" while the Terminal was SERVING. Group **0238** widens the table CHECK and the door's kind test to v1/v2/v3 (0230's door restated; live door verified identical to 0230 first). Registry integration test red before, 10/10 after. Applied to `kitluy-repo17` (test DB) and `kitluy-fresh` (owner-authorized), psql exit 0, ledger after; the real Terminal's next report was **ACCEPTED 18 s later** (v3, SERVING at `172.16.13.204:7443`, PIN set, release `0.1.0-booking-202609231531`).
+
+## 12. Defect 4 — TERMINAL IMAGE: the POS never starts after a reboot (fixed, `6e950ed` + `f2803bc`)
+
+After the Terminal rebooted (16:09 +07) the Device Shell stayed on "Assigned to a Store — it will finish setting up on its own"; `kitluy-terminal-client.service` was `inactive` while the update agent reported the release "already running". Root cause: `800ecb2` (2026-09-21) put `return { heldForPin }` ABOVE the block in `runOnce` that starts an installed POS at boot, making it unreachable; the POS only ever started on its first install. The block runs before the return again. Guard: `services/kitluy-device-firstboot-agent` now builds with `allowUnreachableCode: false` — tsc fails TS7027 at exactly that line on the unfixed source and passes with the fix. firstboot-agent 927 passed; `hub-provisioning-e2e.db` and the intermittent MAC-reclaim case fail without the change too. The Hub image carries an inert copy (no POS product on a Hub) and was deliberately not repackaged, so `317ca56a…` still matches its commit.
+
+### The fixed Pi Terminal image — flash this
+
+Built from `worktrees/kitluy-ecosystem/wt-terminal-pos-start` at **`f2803bc`**, same flags as `0db42539…` (baked `/etc/kitluy` **identical**), builder `v2.7.0`/`a7b6d480…` not dirty, 09:23→09:44Z.
+
+|                         |                                                                                                                                                                                                               |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| compressed (flash this) | `/home/veasna/Development/HET_VEASNA_WORKSPACE/worktrees/kitluy-ecosystem/wt-terminal-pos-start/infra/edge/raspberry-pi/pi-terminal-image/build/work/deploy-v2.7.0/kitluy-pos-terminal-wayland-arm64.img.zst` |
+| compressed size         | **998 772 201 bytes**                                                                                                                                                                                         |
+| **compressed sha256**   | **`4c9a46663c6e4540d3370d7f5f79b3a00dfa7f6c8eb0cd41a5b9ddbf69dd49ef`**                                                                                                                                        |
+| raw `.img` sha256       | `f432e838ad4cfe870753596e62272f8acf03cb56abaad8a80f8a72363440291d`                                                                                                                                            |
+| classification          | DEVELOPMENT / UNSIGNED / NOT RELEASE-ELIGIBLE / NOT BOOT-TESTED                                                                                                                                               |
+
+Verification: hashes match the manifest; overlay read-back **101/101** identical from the final erofs (the POS start precedes the final return in the image's `update-bootstrap.js`); image-contents 117/0/0; secret scan 17/0 PASS; build-gates 67/0, environment-gating 20/0, rpi-image-gen 23/0/1, systemd-runtime 246/0 — all equal to `0db42539…`. **`0db42539…` is superseded.**
+
+Next: reflash the Terminal (a new identity → ONE seat pairing code), let it install the release, **reboot it once** to prove the POS comes back, then Terminal PIN → first KHR Booking → replay.
