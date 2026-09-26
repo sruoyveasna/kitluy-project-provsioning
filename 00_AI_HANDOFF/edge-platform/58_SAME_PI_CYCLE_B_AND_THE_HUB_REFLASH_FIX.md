@@ -162,3 +162,26 @@ Built from `worktrees/kitluy-ecosystem/wt-terminal-pos-start` at **`f2803bc`**, 
 Verification: hashes match the manifest; overlay read-back **101/101** identical from the final erofs (the POS start precedes the final return in the image's `update-bootstrap.js`); image-contents 117/0/0; secret scan 17/0 PASS; build-gates 67/0, environment-gating 20/0, rpi-image-gen 23/0/1, systemd-runtime 246/0 — all equal to `0db42539…`. **`0db42539…` is superseded.**
 
 Next: reflash the Terminal (a new identity → ONE seat pairing code), let it install the release, **reboot it once** to prove the POS comes back, then Terminal PIN → first KHR Booking → replay.
+
+## 13. Terminal image `4c9a4666…` on hardware — POS after reboot, PIN and the first real KHR Booking
+
+Terminal `KL-C33197FAE9EA` (`d5ad30c5-…`), `172.16.29.73`, hostname `pi5-vvyuzb`: installation gen 3 (10:14:05Z), assignment gen 2 revoked automatically (`SD_CARD_REFLASH`), ONE seat pairing code, credential gen 3 `f11d4e91-…` adopted 17:16:36 +07, release `0.1.0-booking-202609231531` (`1cac5454-…`) **INSTALLED** 17:16:58 +07. Terminal↔Hub pairing completed on the **first** attempt (`pairing-sessions 201`, `pairing-proof 200`, `pairing-complete 200`) — Hub fix 2 seen from the Terminal side.
+
+**Defect 4 fix proven:** after the owner's reboot, `event=kitluy.update.terminal-client action="STARTED" releaseId="1cac5454-…"` and `kitluy-terminal-client` active, Device Shell inactive (handed over). Cloud runtime report (v3, accepted): `SERVING … 172.16.13.204:7443`, `pos.state staff_authentication_required` before the PIN.
+
+**Terminal PIN:** `edge:terminal-pin-unlock 200` on the Hub — the actor on every T1 record below is the terminal device `d5ad30c5-…` (the terminal_pin path; no email/password).
+
+**First real Booking (KHR only), read from the Hub database:**
+
+| Record        | Value                                                                                                                             |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| draft         | `1966cadd-4a94-4e29-b2f2-5ac53f97af9e`, walk-in, `t1_walkup`, lifecycle `converted` → the booking below                           |
+| booking       | `01a0d815-d055-7b60-822d-b2f17aba69b9` · **`KLB-DEMO-PP-01-260925-000001`** · `intake_confirmed` · business date 2026-09-25       |
+| line          | Wash & Fold (per kg) `WF-KG`, 9 kg (9000 g weighed = billable) × 4 000 KHR, service version 3, config version 3                   |
+| Hub total     | **36 000 KHR** (subtotal 36 000, tax 0, discount 0), paid 36 000, balance 0 — `config_snapshot_id 119fbfa0-…` (priced on the Hub) |
+| payment       | `01a0d815-d05f-…` · `KLP-DEMO-PP-01-260925-000001` · cash · confirmed · idempotency key `kl1.d5ad30c5-….1`                        |
+| tender leg    | `01a0d815-d068-…` · cash · **888 800 KHR tendered** · settled → change 852 800 KHR                                                |
+| receipt       | `01a0d815-d06d-…` · **`KLR-DEMO-PP-01-260925-000001`** · `booking_receipt` · content sha256 `1c6dd318…`                           |
+| recent Orders | `edge:bookings-recent 200`                                                                                                        |
+
+Hub row counts at the time: booking 1, line 1, payment 1, tender 1, receipt 1, draft 1 — **no duplicates**. The governed request-replay test (Phase 10) was **not run**; these counts are not a substitute for it. Not yet recorded: the change amount and receipt as displayed on the Pi screen (owner's observation: "the app is working").
